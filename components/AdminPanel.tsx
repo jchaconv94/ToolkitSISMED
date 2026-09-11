@@ -3,9 +3,10 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { RoleConfig, HealthFacility, AVAILABLE_MODULES, LaborRegime, Profession } from '../types';
-import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar } from 'lucide-react';
+import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
 
 import { AdminMigrationModule } from './AdminMigrationModule';
 import { AdminOrganizationModule } from './AdminOrganizationModule';
@@ -516,6 +517,157 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       setIsRefreshingUsers(false);
   };
 
+  const handleExportPersonnelExcel = useCallback(() => {
+      const listToExport = filteredUsers.length > 0 ? filteredUsers : users;
+
+      if (!listToExport || listToExport.length === 0) {
+          toast.error('No hay registros de personal disponibles para exportar');
+          return;
+      }
+
+      const toastId = toast.loading(`Generando archivo Excel con ${listToExport.length} registros...`);
+
+      try {
+          // Ordenar alfabéticamente por apellidos y nombres (o nombre de usuario)
+          const sorted = [...listToExport].sort((a: any, b: any) => {
+              const nameA = a.personnel ? `${a.personnel.lastName || ''} ${a.personnel.firstName || ''}`.trim() : (a.username || '');
+              const nameB = b.personnel ? `${b.personnel.lastName || ''} ${b.personnel.firstName || ''}`.trim() : (b.username || '');
+              return nameA.localeCompare(nameB, 'es', { sensitivity: 'base', numeric: true });
+          });
+
+          const rows = sorted.map((u: any, index: number) => {
+              const isUserActive = u.isActive === true || String(u.isActive).toLowerCase() === 'true';
+              const rObj = roles.find(r => r.role === u.role);
+              const level = rObj?.jurisdictionLevel || '';
+              const h = getExpandedHierarchy(u);
+
+              let jurisdictionName = '-';
+              if (level === 'GLOBAL') {
+                  jurisdictionName = 'Nacional';
+              } else if (level === 'DIRESA' || u.role === 'DIRESA') {
+                  jurisdictionName = diresaMapLookup.get(h.diresaId)?.name || '-';
+              } else if (level === 'OGESS' || u.role === 'OGESS') {
+                  jurisdictionName = ogessMapLookup.get(h.ogessId)?.name || '-';
+              } else if (level === 'UNGET' || u.role === 'UNGET') {
+                  jurisdictionName = ungetMapLookup.get(h.ungetId)?.name || '-';
+              } else if (level === 'MICRORED' || u.role === 'MICRORED') {
+                  jurisdictionName = microredMapLookup.get(h.microredId)?.name || '-';
+              } else if (level === 'IPRESS' || u.role === 'IPRESS') {
+                  jurisdictionName = facilityMapLookup.get(h.facilityCode)?.name || '-';
+              } else {
+                  if (h.ungetId) {
+                      jurisdictionName = ungetMapLookup.get(h.ungetId)?.name || '-';
+                  } else if (h.ogessId) {
+                      jurisdictionName = ogessMapLookup.get(h.ogessId)?.name || '-';
+                  } else if (h.diresaId) {
+                      jurisdictionName = diresaMapLookup.get(h.diresaId)?.name || '-';
+                  } else if (h.facilityCode) {
+                      jurisdictionName = facilityMapLookup.get(h.facilityCode)?.name || '-';
+                  }
+              }
+
+              const p = u.personnel;
+              const firstName = p?.firstName || '';
+              const lastName = p?.lastName || '';
+              const fullName = p ? `${firstName} ${lastName}`.trim() : (u.username || '-');
+              const professionName = p?.professionData?.name || professionMapLookup.get(p?.professionId)?.name || '-';
+              const laborRegimeName = p?.laborRegimeData?.name || laborRegimeMapLookup.get(p?.laborRegimeId)?.name || p?.laborRegime || '-';
+
+              const diresaName = diresaMapLookup.get(h.diresaId)?.name || '-';
+              const ogessName = ogessMapLookup.get(h.ogessId)?.name || '-';
+              const ungetName = ungetMapLookup.get(h.ungetId)?.name || '-';
+              const microredName = microredMapLookup.get(h.microredId)?.name || '-';
+              const facilityName = h.facilityCode ? (facilityMapLookup.get(h.facilityCode)?.name || '-') : '-';
+
+              let formattedBirthDate = '-';
+              if (p?.birthDate) {
+                  try {
+                      formattedBirthDate = String(p.birthDate).split('T')[0];
+                  } catch {
+                      formattedBirthDate = String(p.birthDate);
+                  }
+              }
+
+              let formattedCreatedAt = '-';
+              if (u.created_at) {
+                  try {
+                      formattedCreatedAt = new Date(u.created_at).toLocaleString('es-PE');
+                  } catch {
+                      formattedCreatedAt = String(u.created_at);
+                  }
+              }
+
+              return {
+                  'N°': index + 1,
+                  'DNI': p?.dni || u.dni || '-',
+                  'APELLIDOS': lastName || '-',
+                  'NOMBRES': firstName || '-',
+                  'NOMBRE COMPLETO': fullName,
+                  'PROFESIÓN': professionName,
+                  'RÉGIMEN LABORAL': laborRegimeName,
+                  'TELÉFONO / CELULAR': p?.phone || u.phone || '-',
+                  'CORREO ELECTRÓNICO': p?.email || u.email || '-',
+                  'FECHA DE NACIMIENTO': formattedBirthDate,
+                  'USUARIO (LOGIN)': u.username || '-',
+                  'ROL': u.role || '-',
+                  'DESCRIPCIÓN DE ROL': rObj?.label || u.role || '-',
+                  'NIVEL DE JURISDICCIÓN': level || '-',
+                  'JURISDICCIÓN ASIGNADA': jurisdictionName,
+                  'DIRESA': diresaName,
+                  'OGESS / RED DE SALUD': ogessName,
+                  'UNGET / PROVINCIA': ungetName,
+                  'MICRORED': microredName,
+                  'CÓDIGO IPRESS': h.facilityCode || '-',
+                  'ESTABLECIMIENTO (IPRESS)': facilityName,
+                  'ESTADO DE CUENTA': isUserActive ? 'ACTIVO' : 'INACTIVO',
+                  'FECHA DE REGISTRO': formattedCreatedAt
+              };
+          });
+
+          const ws = XLSX.utils.json_to_sheet(rows);
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "Personal SISMED");
+
+          ws['!cols'] = [
+              { wch: 6 },  // N°
+              { wch: 13 }, // DNI
+              { wch: 22 }, // APELLIDOS
+              { wch: 22 }, // NOMBRES
+              { wch: 32 }, // NOMBRE COMPLETO
+              { wch: 24 }, // PROFESIÓN
+              { wch: 20 }, // RÉGIMEN LABORAL
+              { wch: 16 }, // TELÉFONO / CELULAR
+              { wch: 28 }, // CORREO ELECTRÓNICO
+              { wch: 16 }, // FECHA DE NACIMIENTO
+              { wch: 18 }, // USUARIO (LOGIN)
+              { wch: 14 }, // ROL
+              { wch: 24 }, // DESCRIPCIÓN DE ROL
+              { wch: 18 }, // NIVEL DE JURISDICCIÓN
+              { wch: 26 }, // JURISDICCIÓN ASIGNADA
+              { wch: 22 }, // DIRESA
+              { wch: 26 }, // OGESS / RED DE SALUD
+              { wch: 22 }, // UNGET / PROVINCIA
+              { wch: 24 }, // MICRORED
+              { wch: 14 }, // CÓDIGO IPRESS
+              { wch: 32 }, // ESTABLECIMIENTO (IPRESS)
+              { wch: 14 }, // ESTADO DE CUENTA
+              { wch: 20 }, // FECHA DE REGISTRO
+          ];
+
+          const isFiltered = filteredUsers.length !== users.length || searchTerm.trim() !== '';
+          const todayStr = new Date().toISOString().split('T')[0];
+          const fileName = isFiltered 
+              ? `Registro_Personal_SISMED_Filtrado_${todayStr}.xlsx` 
+              : `Registro_Personal_SISMED_${todayStr}.xlsx`;
+
+          XLSX.writeFile(wb, fileName);
+          toast.success(`Excel descargado con éxito (${rows.length} registros)`, { id: toastId });
+      } catch (err: any) {
+          console.error("Error al exportar personal a Excel:", err);
+          toast.error(`Error al generar el Excel: ${err?.message || 'Error desconocido'}`, { id: toastId });
+      }
+  }, [filteredUsers, users, roles, getExpandedHierarchy, diresaMapLookup, ogessMapLookup, ungetMapLookup, microredMapLookup, facilityMapLookup, professionMapLookup, laborRegimeMapLookup, searchTerm]);
+
   const handleSaveConfig = async () => {
       setIsSavingConfig(true);
       const toastId = toast.loading('Guardando parámetros...');
@@ -975,6 +1127,16 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                 {activeFiltersCount}
                                             </span>
                                         )}
+                                    </button>
+
+                                    {/* Botón Descargar Registro en Excel */}
+                                    <button 
+                                        onClick={handleExportPersonnelExcel}
+                                        className="flex items-center gap-2 text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-4 py-2.5 rounded-xl transition-all shadow-sm cursor-pointer"
+                                        title="Descargar registro de personal en Excel (.xlsx)"
+                                    >
+                                        <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                                        <span>Descargar Excel</span>
                                     </button>
 
                                     <button 
