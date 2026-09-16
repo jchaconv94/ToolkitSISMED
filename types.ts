@@ -749,3 +749,44 @@ export interface RedistributionItem {
   microred?: string;
   cpaMode?: 'ADJUSTED' | 'SIMPLE';
 }
+
+export interface UngetConfig {
+  url: string;
+  name: string;
+  id?: string;
+  ungetId?: string;
+  username?: string;
+}
+
+export interface SheetSource {
+  id: string;
+  name: string;
+  urlIndex: number;
+  lastUpdate?: string;
+  lastUpdateTime?: number;
+  equipmentDate?: string;
+  equipmentDateTime?: number;
+}
+
+export interface SIGData {
+  ALMCOD?: string;
+  DESC_ALM?: string;
+  ID_Producto?: string;
+  CODIGO_SIG?: string;
+  Nombre?: string;
+  Lote?: string;
+  Fec_Vencim?: string;
+  Reg_Sanitario?: string;
+  TIPSUM?: string;
+  DESC_TIPSUM?: string;
+  FFINAN?: string;
+  DESC_FFINAN?: string;
+  Saldo?: string;
+  Precio_Det?: string;
+  Precio_Cab?: string;
+  ULTIMA_ACTUALIZACION?: string;
+  Ultima_Actualizacion?: string;
+  FECHA_DEL_EQUIPO?: string;
+  sourceId?: string;
+  [key: string]: any;
+}

@@ -51,8 +51,11 @@ import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { useAuth } from "../contexts/AuthContext";
+import { UngetConfig, SheetSource, SIGData } from "../types";
 import { api } from "../services/api";
 import { supabaseService, supabase } from "../services/supabaseClient";
+import { fetchGasWithResilience } from "../services/gasConnectionService";
+import { stockStorageService } from "../services/stockStorageService";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -99,39 +102,6 @@ const alignConfigsWithOfficialUngets = (configs: any[], ungs: any[]): any[] => {
     return config;
   });
 };
-
-interface SIGData {
-  ALMCOD: string;
-  DESC_ALM: string;
-  ID_Producto: string;
-  CODIGO_SIG: string;
-  Nombre: string;
-  Lote: string;
-  Fec_Vencim: string;
-  Reg_Sanitario: string;
-  TIPSUM: string;
-  DESC_TIPSUM: string;
-  FFINAN: string;
-  DESC_FFINAN: string;
-  Saldo: string;
-  Precio_Det: string;
-  Precio_Cab: string;
-  FECHA_DEL_EQUIPO?: string;
-  Ultima_Actualizacion: string;
-  sourceId?: string;
-  [key: string]: any;
-}
-
-interface SheetSource {
-  id: string;
-  name: string;
-  urlIndex: number;
-  lastUpdate?: string;
-  lastUpdateTime?: number;
-  equipmentDate?: string;
-  equipmentDateTime?: number;
-  isSupabaseDirect?: boolean;
-}
 
 const parseDataDate = (str?: string): number => {
   if (!str) return 0;
@@ -437,14 +407,6 @@ const formatDate = (dateValue: any): string => {
   return str;
 };
 
-interface UngetConfig {
-  id?: string;
-  ungetId?: string;
-  url: string;
-  name: string;
-  username?: string;
-}
-
 const formatAlmCode = (code: string | undefined): string => {
   if (!code) return "-";
   const c = String(code).trim();
@@ -621,6 +583,15 @@ export const SheetSearchModule: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [connectionErrors, setConnectionErrors] = useState<Record<string, string>>({});
   const [retryingUrls, setRetryingUrls] = useState<Record<string, boolean>>({});
+  const [quickFixConfig, setQuickFixConfig] = useState<UngetConfig | null>(null);
+  const [quickFixUrlInput, setQuickFixUrlInput] = useState("");
+  const [isTestingGasUrl, setIsTestingGasUrl] = useState(false);
+  const [gasTestResult, setGasTestResult] = useState<{
+    success: boolean;
+    message: string;
+    count?: number;
+  } | null>(null);
+  const [isSavingGasUrl, setIsSavingGasUrl] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [sheetSearchTerm, setSheetSearchTerm] = useState("");
   const [ungetSearchTerm, setUngetSearchTerm] = useState("");
@@ -1021,23 +992,28 @@ export const SheetSearchModule: React.FC = () => {
       return true;
     }
 
-    // 3. Nivel DIRESA u OGESS con rol administrativo
+    // 3. Nivel DIRESA u OGESS con rol administrativo o coordinador
     if (
       (level === "DIRESA" || level === "OGESS" || role.includes("DIRESA") || role.includes("OGESS")) &&
-      (role.includes("ADMIN") || role.includes("COORDINADOR REGIONAL") || role.includes("DIRECTOR") || role.includes("JEFE"))
+      (role.includes("ADMIN") || role.includes("COORDINADOR") || role.includes("DIRECTOR") || role.includes("JEFE"))
     ) {
       return true;
     }
 
-    // 4. Administrador o Informático de UNGET / Red
+    // 4. Administrador, Coordinador o Informático de UNGET / Red
     if (
-      (level === "UNGET" || role.includes("UNGET") || role.includes("RED")) &&
-      (role.includes("ADMIN") || role.includes("RESPONSABLE SISMED") || role.includes("INFORMATIC"))
+      (level === "UNGET" || role.includes("UNGET") || role.includes("RED") || role.includes("COORDINADOR") || role === "COORDINADOR") &&
+      (role.includes("ADMIN") || role.includes("RESPONSABLE SISMED") || role.includes("INFORMATIC") || role.includes("COORDINADOR") || role === "COORDINADOR")
     ) {
       return true;
     }
 
-    // Personal operativo, coordinadores asistenciales, farmacia e IPRESS NO gestionan URLs
+    // 5. Cualquier rol de Coordinador
+    if (role.includes("COORDINADOR")) {
+      return true;
+    }
+
+    // Personal operativo, farmacia e IPRESS NO gestionan URLs
     return false;
   }, [user]);
 
@@ -1109,60 +1085,84 @@ export const SheetSearchModule: React.FC = () => {
     const loadConfigs = async () => {
       setIsConfigLoading(true);
 
-      // 1. CARGA RÁPIDA DESDE CACHÉ (Optimistic UI)
-      const savedUrls = localStorage.getItem(`aura_sig_urls_${user.username}`);
-      if (savedUrls) {
-        try {
-          const parsed = JSON.parse(savedUrls);
-          if (Array.isArray(parsed) && parsed.length > 0) setScriptUrls(parsed);
-        } catch (e) {}
+      // 1. CARGA RÁPIDA DESDE CACHÉ INDEXEDDB (Optimistic UI ultra-rápido)
+      try {
+        const [cachedUrls, cachedStock] = await Promise.all([
+          stockStorageService.loadUrls(user.username),
+          stockStorageService.loadStockData(user.username),
+        ]);
+
+        if (cachedUrls && cachedUrls.length > 0) {
+          setScriptUrls(cachedUrls);
+        } else {
+          const savedUrls = localStorage.getItem(`aura_sig_urls_${user.username}`);
+          if (savedUrls) {
+            try {
+              const parsed = JSON.parse(savedUrls);
+              if (Array.isArray(parsed) && parsed.length > 0) setScriptUrls(parsed);
+            } catch (e) {}
+          }
+        }
+
+        if (cachedStock) {
+          if (Array.isArray(cachedStock.sources) && cachedStock.sources.length > 0) {
+            setSources(cachedStock.sources);
+          }
+          if (Array.isArray(cachedStock.data) && cachedStock.data.length > 0) {
+            setData(cachedStock.data);
+          }
+          if (cachedStock.lastSync) {
+            setLastGlobalSync(new Date(cachedStock.lastSync));
+          }
+        } else {
+          // Fallback legacy localStorage
+          const savedSources = localStorage.getItem(`aura_sig_sources_${user.username}`);
+          if (savedSources) {
+            try {
+              const parsed = JSON.parse(savedSources);
+              if (Array.isArray(parsed)) setSources(parsed);
+            } catch (e) {}
+          }
+
+          const savedData = localStorage.getItem(`aura_sig_data_${user.username}`);
+          if (savedData) {
+            try {
+              const parsed = JSON.parse(savedData);
+              if (Array.isArray(parsed)) setData(parsed);
+            } catch (e) {}
+          }
+
+          const savedSync = localStorage.getItem(`aura_sig_lastsync_${user.username}`);
+          if (savedSync) {
+            try {
+              setLastGlobalSync(new Date(savedSync));
+            } catch (e) {}
+          }
+        }
+      } catch (cacheErr) {
+        console.warn("Error leyendo caché local:", cacheErr);
       }
 
-      const savedSources = localStorage.getItem(
-        `aura_sig_sources_${user.username}`,
-      );
-      if (savedSources) {
-        try {
-          const parsed = JSON.parse(savedSources);
-          if (Array.isArray(parsed)) setSources(parsed);
-        } catch (e) {}
-      }
-
-      const savedData = localStorage.getItem(`aura_sig_data_${user.username}`);
-      if (savedData) {
-        try {
-          const parsed = JSON.parse(savedData);
-          if (Array.isArray(parsed)) setData(parsed);
-        } catch (e) {}
-      }
-
-      const savedSync = localStorage.getItem(`aura_sig_lastsync_${user.username}`);
-      if (savedSync) {
-        try {
-          setLastGlobalSync(new Date(savedSync));
-        } catch (e) {}
-      }
-
-      // 2. CARGA EN SEGUNDO PLANO DESDE EL SERVIDOR
+      // 2. CARGA EN PARALELO DE METADATOS DESDE EL SERVIDOR
       let ungs: any[] = [];
       try {
         try {
-          const facs = await api.getFacilities();
-          setAllFacilities(facs);
-          const assigs = await api.getAllStockAssignments();
-          setAllAssignments(assigs);
-          try {
-            ungs = await api.getUngets();
+          const [facsRes, assigsRes, ungsRes, drsRes, ogsRes] = await Promise.allSettled([
+            api.getFacilities(),
+            api.getAllStockAssignments(),
+            api.getUngets(),
+            api.getDiresas(),
+            api.getOgess(),
+          ]);
+
+          if (facsRes.status === "fulfilled") setAllFacilities(facsRes.value || []);
+          if (assigsRes.status === "fulfilled") setAllAssignments(assigsRes.value || []);
+          if (ungsRes.status === "fulfilled") {
+            ungs = ungsRes.value || [];
             setAllUngets(ungs);
-          } catch (e) {}
-          try {
-            const drs = await api.getDiresas();
-            setAllDiresas(drs);
-          } catch (e) {}
-          try {
-            const ogs = await api.getOgess();
-            setAllOgess(ogs);
-          } catch (e) {}
+          }
+          if (drsRes.status === "fulfilled") setAllDiresas(drsRes.value || []);
+          if (ogsRes.status === "fulfilled") setAllOgess(ogsRes.value || []);
         } catch (err) {
           console.error(
             "Error loading facilities or assignments metadata:",
@@ -1404,23 +1404,26 @@ export const SheetSearchModule: React.FC = () => {
           visibleConfigs = deduplicated;
           
           setScriptUrls(visibleConfigs);
-        } else if (savedUrls) {
-          // Si no hay remoto pero sí local, intentar migrar al servidor
-          try {
-            const parsed = JSON.parse(savedUrls);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              const migrated = parsed.map((u) =>
-                typeof u === "string"
-                  ? {
-                      url: u,
-                      name: `UNGET ${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
-                    }
-                  : u,
-              );
-              setScriptUrls(migrated);
-              await api.saveUngetConfigs(user.username, migrated);
-            }
-          } catch (e) {}
+        } else {
+          // Si no hay remoto, verificar si hay respaldo local
+          const fallbackSavedUrls = localStorage.getItem(`aura_sig_urls_${user.username}`);
+          if (fallbackSavedUrls) {
+            try {
+              const parsed = JSON.parse(fallbackSavedUrls);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                const migrated = parsed.map((u) =>
+                  typeof u === "string"
+                    ? {
+                        url: u,
+                        name: `UNGET ${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
+                      }
+                    : u,
+                );
+                setScriptUrls(migrated);
+                await api.saveUngetConfigs(user.username, migrated);
+              }
+            } catch (e) {}
+          }
         }
       } catch (e) {
         console.error("Error loading configs:", e);
@@ -1449,35 +1452,25 @@ export const SheetSearchModule: React.FC = () => {
     );
   }
 
-  // Save to local storage when state changes
+  // Save to local storage and IndexedDB when state changes
   useEffect(() => {
     if (!user || isConfigLoading) return; // IMPORTANTE: No guardar si aún estamos cargando la config inicial
+
+    // Guardar en IndexedDB sin límites de 5MB
+    stockStorageService.saveUrls(user.username, scriptUrls).catch(() => {});
+    stockStorageService.saveStockData(user.username, sources, data, lastGlobalSync).catch(() => {});
+
+    // Guardar también URLs en localStorage como respaldo ligero
     try {
       localStorage.setItem(
         `aura_sig_urls_${user.username}`,
         JSON.stringify(scriptUrls),
       );
-      localStorage.setItem(
-        `aura_sig_sources_${user.username}`,
-        JSON.stringify(sources),
-      );
       if (lastGlobalSync) {
         localStorage.setItem(`aura_sig_lastsync_${user.username}`, lastGlobalSync.toISOString());
       }
     } catch (e) {
-      console.warn("Storage quota exceeded for URLs/Sources.", e);
-    }
-
-    try {
-      localStorage.setItem(
-        `aura_sig_data_${user.username}`,
-        JSON.stringify(data),
-      );
-    } catch (e) {
-      console.warn(
-        "Storage quota exceeded. Data will not be cached locally.",
-        e,
-      );
+      console.warn("Storage quota exceeded for URLs.", e);
     }
 
     if (
@@ -1487,7 +1480,7 @@ export const SheetSearchModule: React.FC = () => {
     ) {
       setSelectedSourceId("");
     }
-  }, [scriptUrls, sources, data, selectedSourceId, user]);
+  }, [scriptUrls, sources, data, selectedSourceId, user, isConfigLoading, lastGlobalSync]);
 
   const loadSupabaseSyncs = async (forceIds?: string[]) => {
     if (!supabase) return;
@@ -1558,72 +1551,9 @@ export const SheetSearchModule: React.FC = () => {
     }
   };
 
-  // Función ultra-resiliente para obtener JSON de Web App de Google Apps Script con múltiples reintentos y proxies de respaldo
+  // Función ultra-resiliente para obtener JSON de Web App de Google Apps Script con diagnóstico y proxies
   const fetchScriptUrlWithFallback = async (rawUrl: string): Promise<any> => {
-    const cleanUrl = rawUrl.trim();
-    if (!cleanUrl) throw new Error("URL vacía");
-
-    // Intento 1: Fetch directo con AbortController (timeout 30s)
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30000);
-      const res = await fetch(cleanUrl, {
-        signal: controller.signal,
-        redirect: "follow",
-      });
-      clearTimeout(timer);
-      if (res.ok) {
-        const json = await res.json();
-        if (Array.isArray(json)) return json;
-      }
-    } catch (e: any) {
-      console.warn(`[Intento 1 directo falló para ${cleanUrl}]:`, e?.message || e);
-    }
-
-    // Intento 2: Fetch directo con parámetro anti-caché
-    try {
-      const sep = cleanUrl.includes("?") ? "&" : "?";
-      const cacheUrl = `${cleanUrl}${sep}_t=${Date.now()}`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30000);
-      const res = await fetch(cacheUrl, {
-        signal: controller.signal,
-        redirect: "follow",
-      });
-      clearTimeout(timer);
-      if (res.ok) {
-        const json = await res.json();
-        if (Array.isArray(json)) return json;
-      }
-    } catch (e: any) {
-      console.warn(`[Intento 2 anti-cache falló para ${cleanUrl}]:`, e?.message || e);
-    }
-
-    // Intento 3: Proxies CORS alternativos
-    const proxies = [
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(cleanUrl)}`,
-      `https://corsproxy.io/?${encodeURIComponent(cleanUrl)}`,
-    ];
-
-    for (const proxyUrl of proxies) {
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 20000);
-        const res = await fetch(proxyUrl, { signal: controller.signal });
-        clearTimeout(timer);
-        if (res.ok) {
-          const text = await res.text();
-          try {
-            const json = JSON.parse(text);
-            if (Array.isArray(json)) return json;
-          } catch (pe) {}
-        }
-      } catch (e: any) {
-        console.warn(`[Proxy CORS falló para ${proxyUrl}]:`, e?.message || e);
-      }
-    }
-
-    throw new Error("No se pudo conectar a la Web App de Google. Verifique la URL o reintente.");
+    return await fetchGasWithResilience(rawUrl, { timeoutMs: 25000 });
   };
 
   const retrySingleUrl = async (configToRetry: UngetConfig) => {
@@ -1759,15 +1689,21 @@ export const SheetSearchModule: React.FC = () => {
     }
 
     try {
-      let allData: SIGData[] = [];
-      let newSources: SheetSource[] = [];
+      let accumulatedData: SIGData[] = [];
+      let accumulatedSources: SheetSource[] = [];
 
-      // Fetch todas las URLs en paralelo utilizando nuestro fetcher resiliente con fallbacks
-      const fetchPromises = urlsToUse.map(async (config, urlIndex) => {
+      // Fetch de todas las URLs con actualización progresiva no bloqueante
+      const fetchPromises = urlsToUse.map(async (config, fallbackIndex) => {
+        const actualIndex = scriptUrls.findIndex((u) => u.url === config.url);
+        const urlIndex = actualIndex >= 0 ? actualIndex : fallbackIndex;
+
         try {
           const json = await fetchScriptUrlWithFallback(config.url);
 
           if (Array.isArray(json)) {
+            const thisSources: SheetSource[] = [];
+            const thisData: SIGData[] = [];
+
             json.forEach((sheet: any) => {
               const uniqueSourceId = `${urlIndex}_${sheet.id}`;
 
@@ -1775,11 +1711,9 @@ export const SheetSearchModule: React.FC = () => {
               let lastUpdateTime = 0;
               let equipmentDateStr = "";
               let equipmentDateTime = 0;
-              let sheetAlmcod = "";
 
               if (Array.isArray(sheet.data) && sheet.data.length > 0) {
                 const firstRow = sheet.data[0];
-                sheetAlmcod = firstRow.ALMCOD || "";
 
                 if (
                   firstRow.ULTIMA_ACTUALIZACION ||
@@ -1801,14 +1735,12 @@ export const SheetSearchModule: React.FC = () => {
               }
 
               let displayName = sheet.name;
-              let facilityCode = sheet.id;
               if (allAssignments.length > 0 && allFacilities.length > 0) {
                 const matchingAssignment = allAssignments.find(
                   (a) =>
                     a.sheetUrl === config.url && a.sheetName === sheet.name,
                 );
                 if (matchingAssignment) {
-                  facilityCode = matchingAssignment.facilityCode;
                   const matchingF = allFacilities.find(
                     (f) => f.code === matchingAssignment.facilityCode,
                   );
@@ -1818,7 +1750,7 @@ export const SheetSearchModule: React.FC = () => {
                 }
               }
 
-              newSources.push({
+              thisSources.push({
                 id: uniqueSourceId,
                 name: displayName,
                 urlIndex,
@@ -1847,8 +1779,23 @@ export const SheetSearchModule: React.FC = () => {
                       sourceId: uniqueSourceId,
                     };
                   });
-                allData = [...allData, ...validData];
+                thisData.push(...validData);
               }
+            });
+
+            // Actualización progresiva en estado (para que los datos aparezcan inmediatamente sin esperar al más lento)
+            accumulatedSources.push(...thisSources);
+            accumulatedData.push(...thisData);
+
+            setSources((prev) => {
+              const filtered = prev.filter((s) => s.urlIndex !== urlIndex);
+              return [...filtered, ...thisSources];
+            });
+
+            setData((prev) => {
+              const sourceIdsToRemove = new Set(thisSources.map((s) => s.id));
+              const filtered = prev.filter((d) => !sourceIdsToRemove.has(d.sourceId || ""));
+              return [...filtered, ...thisData];
             });
           }
 
@@ -1866,17 +1813,14 @@ export const SheetSearchModule: React.FC = () => {
         }
       });
 
-      await Promise.all(fetchPromises);
-
-      setSources(newSources);
-      setData(allData);
+      await Promise.allSettled(fetchPromises);
       setLastGlobalSync(new Date());
 
-      if (supabase) {
+      if (supabase && accumulatedSources.length > 0) {
         // Auto sync tras descargar información
         try {
-          const syncPromises = newSources.map((sheet) => {
-            const sheetItems = allData.filter((r) => r.sourceId === sheet.id);
+          const syncPromises = accumulatedSources.map((sheet) => {
+            const sheetItems = accumulatedData.filter((r) => r.sourceId === sheet.id);
             const userAuthor = user?.username || "AutoSync";
             return supabaseService.registerSync({
               establishmentId: sheet.id,
@@ -1890,7 +1834,7 @@ export const SheetSearchModule: React.FC = () => {
           });
           const results = await Promise.allSettled(syncPromises);
 
-          // Actualización inteligente del estado local de sincronizaciones (forzando carga de resultados directamente)
+          // Actualización inteligente del estado local de sincronizaciones
           setSupabaseSyncs((prev) => {
             const updated = { ...prev };
             results.forEach((res, i) => {
@@ -1899,7 +1843,6 @@ export const SheetSearchModule: React.FC = () => {
                 res.value.success &&
                 res.value.record
               ) {
-                // Add the last_modification_date directly to ensure it propagates
                 const recordToSave = { ...res.value.record };
                 if (
                   res.value.record.has_changes &&
@@ -1908,10 +1851,12 @@ export const SheetSearchModule: React.FC = () => {
                   recordToSave.last_modification_date =
                     res.value.record.sync_date;
                 }
-                const rawId = newSources[i].id;
-                updated[rawId] = recordToSave;
-                if (rawId.includes("_")) {
-                  updated[rawId.split("_").slice(1).join("_")] = recordToSave;
+                const rawId = accumulatedSources[i]?.id;
+                if (rawId) {
+                  updated[rawId] = recordToSave;
+                  if (rawId.includes("_")) {
+                    updated[rawId.split("_").slice(1).join("_")] = recordToSave;
+                  }
                 }
               }
             });
@@ -1922,12 +1867,12 @@ export const SheetSearchModule: React.FC = () => {
         }
       }
 
-      if (allData.length === 0 && !silent) {
+      if (accumulatedData.length === 0 && !silent && Object.keys(connectionErrors).length === 0) {
         setError(
           "No se encontraron registros en las hojas de cálculo. Revise que tengan información.",
         );
-      } else if (allData.length > 0 && silent && error) {
-        setError(null); // Clear previous errors silently
+      } else if (accumulatedData.length > 0 && silent && error) {
+        setError(null);
       }
     } catch (err: any) {
       if (!silent)
@@ -2207,6 +2152,87 @@ export const SheetSearchModule: React.FC = () => {
         onClick: () => {},
       },
     });
+  };
+
+  const handleOpenQuickFix = (config: UngetConfig, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setQuickFixConfig(config);
+    setQuickFixUrlInput(config.url || "");
+    setGasTestResult(null);
+  };
+
+  const handleTestQuickFixUrl = async () => {
+    const urlToTest = quickFixUrlInput.trim();
+    if (!urlToTest) {
+      toast.error("Ingrese una URL de Google Apps Script para probar.");
+      return;
+    }
+    setIsTestingGasUrl(true);
+    setGasTestResult(null);
+    try {
+      const data = await fetchGasWithResilience(urlToTest, { timeoutMs: 25000 });
+      if (Array.isArray(data)) {
+        setGasTestResult({
+          success: true,
+          message: `¡Conexión verificada exitosamente! Se detectaron ${data.length} establecimientos en el libro.`,
+          count: data.length,
+        });
+      } else {
+        setGasTestResult({
+          success: false,
+          message: "La Web App respondió pero no devolvió el listado JSON de hojas esperado.",
+        });
+      }
+    } catch (err: any) {
+      setGasTestResult({
+        success: false,
+        message: err?.message || "No se pudo conectar con la Web App de Google Apps Script.",
+      });
+    } finally {
+      setIsTestingGasUrl(false);
+    }
+  };
+
+  const handleSaveQuickFixUrl = async () => {
+    if (!quickFixConfig || !user) return;
+    const cleanUrl = quickFixUrlInput.trim();
+    if (!cleanUrl) {
+      toast.error("La URL no puede estar vacía.");
+      return;
+    }
+    setIsSavingGasUrl(true);
+    try {
+      const updatedScriptUrls = scriptUrls.map((c) =>
+        c.url === quickFixConfig.url ? { ...c, url: cleanUrl } : c
+      );
+      setScriptUrls(updatedScriptUrls);
+
+      const myConfigsToSave = updatedScriptUrls
+        .filter((u) => !u.username || u.username === user.username)
+        .map((c) => ({ ...c, username: user.username }));
+
+      const res = await api.saveUngetConfigs(user.username, myConfigsToSave);
+      if (res.success) {
+        toast.success(`Enlace de ${quickFixConfig.name} actualizado con éxito.`);
+        setConnectionErrors((prev) => {
+          const next = { ...prev };
+          delete next[quickFixConfig.url];
+          return next;
+        });
+        const updatedConfig = { ...quickFixConfig, url: cleanUrl };
+        setQuickFixConfig(null);
+        retrySingleUrl(updatedConfig);
+      } else {
+        toast.error(res.message || "No se pudo guardar la configuración.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Error al guardar el enlace.");
+    } finally {
+      setIsSavingGasUrl(false);
+    }
   };
 
   const handleSelectUnget = (index: number) => {
@@ -4086,6 +4112,128 @@ function processSheet(sheet) {
         </div>
       )}
 
+      {/* MODAL RÁPIDO DE CORRECCIÓN / PRUEBA DE ENLACE DE UNGET */}
+      {quickFixConfig && (
+        <div className="fixed inset-0 z-[9999999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-xl overflow-hidden rounded-[2rem] shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-slate-200">
+            {/* Header */}
+            <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-teal-50/60 to-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-teal-600 text-white flex items-center justify-center shadow-md shadow-teal-600/20">
+                  <LinkIcon className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 uppercase tracking-tight">
+                    Configurar Enlace Web App
+                  </h3>
+                  <div className="text-xs font-bold text-teal-700 uppercase tracking-wide flex items-center gap-1.5 mt-0.5">
+                    <Building2 className="h-3.5 w-3.5 text-teal-500" />
+                    UNGET: {quickFixConfig.name}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickFixConfig(null)}
+                className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 sm:p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2">
+                  URL de la Web App de Google Apps Script (*.exec)
+                </label>
+                <div className="relative">
+                  <input
+                    type="url"
+                    value={quickFixUrlInput}
+                    onChange={(e) => {
+                      setQuickFixUrlInput(e.target.value);
+                      setGasTestResult(null);
+                    }}
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    className="w-full bg-slate-50 border border-slate-300 focus:border-teal-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-800 placeholder-slate-400 outline-none transition-all shadow-inner"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1.5 font-medium leading-relaxed">
+                  Asegúrese de que el enlace termine en <code className="bg-slate-100 text-teal-700 px-1 py-0.5 rounded font-bold font-mono text-[10px]">/exec</code> y tenga permisos de acceso configurados en <span className="font-bold text-slate-700">"Cualquier usuario"</span> (Anyone).
+                </p>
+              </div>
+
+              {/* Botón de prueba de conexión en vivo */}
+              <div className="flex items-center justify-between gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={handleTestQuickFixUrl}
+                  disabled={isTestingGasUrl || !quickFixUrlInput.trim()}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-extrabold rounded-xl transition-all flex items-center gap-2 border border-slate-200/80 disabled:opacity-50 cursor-pointer"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isTestingGasUrl ? "animate-spin text-teal-600" : ""}`} />
+                  {isTestingGasUrl ? "Probando conexión con Google..." : "Probar Conexión Ahora"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsInstructionModalOpen(true)}
+                  className="text-xs text-teal-700 hover:text-teal-800 font-bold underline flex items-center gap-1"
+                >
+                  <HelpCircle className="h-3.5 w-3.5" />
+                  ¿Cómo obtenerla?
+                </button>
+              </div>
+
+              {/* Resultado de la prueba */}
+              {gasTestResult && (
+                <div
+                  className={`p-3.5 rounded-xl border text-xs leading-relaxed animate-in fade-in duration-200 ${
+                    gasTestResult.success
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                      : "bg-red-50 border-red-200 text-red-900"
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5">
+                    {gasTestResult.success ? (
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1">
+                      <div className="font-extrabold uppercase tracking-tight text-[11px]">
+                        {gasTestResult.success ? "Conexión Exitosa" : "Fallo de Conexión"}
+                      </div>
+                      <div className="text-xs mt-0.5 font-medium">{gasTestResult.message}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setQuickFixConfig(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 rounded-xl transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveQuickFixUrl}
+                disabled={isSavingGasUrl || !quickFixUrlInput.trim()}
+                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-xs font-extrabold rounded-xl shadow-md shadow-teal-600/20 transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+              >
+                <Save className="h-4 w-4" />
+                {isSavingGasUrl ? "Guardando..." : "Guardar y Conectar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* INSTRUCTIONS MODAL */}
       {isInstructionModalOpen && (
         <div className="fixed inset-0 z-[10000000] flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200">
@@ -4630,20 +4778,13 @@ function processSheet(sheet) {
                             }`}
                           >
                             {/* Botones de acción rápidos */}
-                            {canManageConfigs &&
-                              (!config.username ||
-                                config.username === user?.username) &&
-                              !isSupabaseVirtual && (
-                              <div className="absolute top-4 right-4 flex items-center gap-2 opacity-100 sm:opacity-40 group-hover:opacity-100 transition-opacity z-10">
+                            {canManageConfigs && !isSupabaseVirtual && (
+                              <div className="absolute top-4 right-4 flex items-center gap-1.5 opacity-100 sm:opacity-60 group-hover:opacity-100 transition-opacity z-10">
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleDirectEdit(originalIdx, e);
-                                  }}
-                                  className="p-1.5 sm:p-2 bg-white/90 backdrop-blur-sm shadow-sm border border-gray-100 rounded-lg text-gray-500 hover:text-blue-600 hover:border-blue-200 transition-all"
-                                  title="Editar conexión"
+                                  onClick={(e) => handleOpenQuickFix(config, e)}
+                                  className="p-1.5 sm:p-2 bg-white/90 backdrop-blur-sm shadow-sm border border-gray-200 rounded-lg text-gray-600 hover:text-teal-700 hover:border-teal-300 transition-all cursor-pointer"
+                                  title="Configurar / Probar enlace Web App"
                                 >
                                   <Settings className="h-4 w-4" />
                                 </button>
@@ -4654,7 +4795,7 @@ function processSheet(sheet) {
                                     e.stopPropagation();
                                     handleDirectDelete(originalIdx, e);
                                   }}
-                                  className="p-1.5 sm:p-2 bg-white/90 backdrop-blur-sm shadow-sm border border-gray-100 rounded-lg text-gray-500 hover:text-red-600 hover:border-red-200 transition-all"
+                                  className="p-1.5 sm:p-2 bg-white/90 backdrop-blur-sm shadow-sm border border-gray-100 rounded-lg text-gray-500 hover:text-red-600 hover:border-red-200 transition-all cursor-pointer"
                                   title="Eliminar conexión"
                                 >
                                   <Trash2 className="h-4 w-4" />
@@ -4697,11 +4838,17 @@ function processSheet(sheet) {
                               {connectionErrors[config.url] && (
                                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                                   <div
-                                    className="text-[9px] font-black px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-100 inline-flex items-center gap-1 uppercase"
+                                    className="text-[9px] font-black px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 inline-flex items-center gap-1 uppercase"
                                     title={connectionErrors[config.url]}
                                   >
                                     <AlertCircle className="h-3 w-3 text-red-500 shrink-0" />
-                                    Error Consulta (CORS)
+                                    {connectionErrors[config.url].includes("404")
+                                      ? "URL No Encontrada (404)"
+                                      : connectionErrors[config.url].includes("Privado")
+                                      ? "Permisos Privados"
+                                      : connectionErrors[config.url].includes("Tiempo de espera")
+                                      ? "Timeout (>25s)"
+                                      : "Error de Consulta"}
                                   </div>
                                   <button
                                     type="button"
@@ -4716,6 +4863,17 @@ function processSheet(sheet) {
                                     <RefreshCw className={`h-2.5 w-2.5 ${retryingUrls[config.url] ? "animate-spin" : ""}`} />
                                     {retryingUrls[config.url] ? "Cargando..." : "Reintentar"}
                                   </button>
+                                  {canManageConfigs && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleOpenQuickFix(config, e)}
+                                      className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white inline-flex items-center gap-1 uppercase transition-all shadow-xs cursor-pointer"
+                                      title="Corregir enlace o probar conexión"
+                                    >
+                                      <Settings className="h-2.5 w-2.5" />
+                                      Editar Enlace
+                                    </button>
+                                  )}
                                 </div>
                               )}
 
