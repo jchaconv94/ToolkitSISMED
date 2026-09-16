@@ -24,6 +24,7 @@ export function getUserJurisdictionScope(user: User | null): UserJurisdictionSco
   }
 
   const role = String(user.role || '').toUpperCase();
+  const explicitLevel = user.jurisdictionLevel;
 
   // Extraer IDs del scope del usuario (personnelData o facilityData)
   const diresaId = user.personnelData?.diresaId || user.facilityData?.diresaId;
@@ -34,6 +35,8 @@ export function getUserJurisdictionScope(user: User | null): UserJurisdictionSco
 
   // 1. Nivel GLOBAL (Admin, Informático DIRESA, Administrador General)
   if (
+    explicitLevel === 'GLOBAL' ||
+    explicitLevel === 'DIRESA' ||
     role === 'ADMIN' ||
     role === 'SUPERADMIN' ||
     role === 'ADMINISTRADOR' ||
@@ -53,7 +56,7 @@ export function getUserJurisdictionScope(user: User | null): UserJurisdictionSco
   }
 
   // 2. Nivel OGESS (Informático de OGESS, Supervisor OGESS)
-  if (role.includes('OGESS')) {
+  if (explicitLevel === 'OGESS' || role.includes('OGESS')) {
     return {
       level: 'OGESS',
       diresaId,
@@ -67,7 +70,7 @@ export function getUserJurisdictionScope(user: User | null): UserJurisdictionSco
   }
 
   // 3. Nivel UNGET / RED (Informático SISMED de Red/UNGET, Supervisor Red)
-  if (role.includes('UNGET') || role.includes('RED')) {
+  if (explicitLevel === 'UNGET' || role.includes('UNGET') || role.includes('RED')) {
     return {
       level: 'UNGET',
       diresaId,
@@ -81,7 +84,7 @@ export function getUserJurisdictionScope(user: User | null): UserJurisdictionSco
   }
 
   // 4. Nivel MICRORED (Informático de Microred)
-  if (role.includes('MICRORED')) {
+  if (explicitLevel === 'MICRORED' || role.includes('MICRORED')) {
     return {
       level: 'MICRORED',
       diresaId,

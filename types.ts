@@ -673,6 +673,7 @@ export interface User {
   facilityData?: HealthFacility; // Hydrated data
   permissions: AppModule[]; // Computed from Role
   maxUrlsAllowed?: number;
+  jurisdictionLevel?: 'GLOBAL' | 'DIRESA' | 'OGESS' | 'UNGET' | 'MICRORED' | 'IPRESS';
 }
 
 export interface SystemConfig {

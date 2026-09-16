@@ -188,7 +188,8 @@ export const api = {
                             microredId: facilityData.microred_id
                         } : undefined as any,
                         permissions: roleConfig ? roleConfig.allowed_modules : [],
-                        maxUrlsAllowed: roleConfig ? roleConfig.max_urls_allowed : 0
+                        maxUrlsAllowed: roleConfig ? roleConfig.max_urls_allowed : 0,
+                        jurisdictionLevel: roleConfig ? (roleConfig.jurisdiction_level || roleConfig.jurisdictionLevel) : undefined
                     }
                 };
             }
@@ -210,7 +211,8 @@ export const api = {
                             isActive: authUser.isActive,
                             personnelData: personnel as Personnel,
                             facilityData: facility as HealthFacility,
-                            permissions: roleConfig ? roleConfig.allowedModules as any : []
+                            permissions: roleConfig ? roleConfig.allowedModules as any : [],
+                            jurisdictionLevel: (roleConfig as any)?.jurisdictionLevel
                         },
                         message: "Modo Offline"
                     };
@@ -270,7 +272,8 @@ export const api = {
                             microredId: facilityData.microred_id
                         } : undefined as any,
                         permissions: roleConfig ? roleConfig.allowed_modules : [],
-                        maxUrlsAllowed: roleConfig ? roleConfig.max_urls_allowed : 0
+                        maxUrlsAllowed: roleConfig ? roleConfig.max_urls_allowed : 0,
+                        jurisdictionLevel: roleConfig ? (roleConfig.jurisdiction_level || roleConfig.jurisdictionLevel) : undefined
                     }
                 };
             }
@@ -943,8 +946,8 @@ export const api = {
                     p_role: roleConfig.role,
                     p_old_role: roleConfig.oldRole || null,
                     p_label: roleConfig.label,
-                    p_allowed_modules: roleConfig.allowedModules,
-                    p_max_urls_allowed: roleConfig.maxUrlsAllowed,
+                    p_allowed_modules: roleConfig.allowedModules || [],
+                    p_max_urls_allowed: roleConfig.maxUrlsAllowed !== undefined && roleConfig.maxUrlsAllowed !== null && !isNaN(Number(roleConfig.maxUrlsAllowed)) ? Number(roleConfig.maxUrlsAllowed) : null,
                     p_jurisdiction_level: roleConfig.jurisdictionLevel || null
                 });
                 if (error) throw error;

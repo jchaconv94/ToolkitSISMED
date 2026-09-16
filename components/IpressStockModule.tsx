@@ -159,11 +159,13 @@ const normalizeAssignmentStockRow = (
 
 const getCurrentJurisdictionLevel = (user: any): string => {
   if (!user) return "IPRESS";
+  const explicit = user.jurisdictionLevel;
+  if (explicit) return explicit;
   const role = String(user.role || "").toUpperCase();
   if (role === "ADMIN" || role === "GLOBAL" || role.includes("SUPER") || role.includes("GENERAL") || role === "ADMINISTRADOR") return "GLOBAL";
   if (role.includes("DIRESA")) return "DIRESA";
   if (role.includes("OGESS")) return "OGESS";
-  if (role.includes("UNGET")) return "UNGET";
+  if (role.includes("UNGET") || role.includes("RED")) return "UNGET";
   if (role.includes("MICRORED")) return "MICRORED";
   return "IPRESS";
 };

@@ -987,11 +987,59 @@ export const SheetSearchModule: React.FC = () => {
   const userOgessId = user?.personnelData?.ogessId || user?.facilityData?.ogessId || (user as any)?.ogessId;
   const userUngetId = user?.personnelData?.ungetId || user?.facilityData?.ungetId || (user as any)?.ungetId;
   const userRole = (user?.role || "").toUpperCase();
+  const userExplicitLevel = user?.jurisdictionLevel;
 
-  const isUngetRole = userRole.includes("UNGET");
-  const isDiresaRole = userRole.includes("DIRESA");
-  const isOgessRole = userRole.includes("OGESS");
-  const isGlobalRole = userRole === "ADMIN" || userRole === "GLOBAL" || userRole.includes("SUPER") || userRole.includes("GENERAL") || userRole === "ADMINISTRADOR";
+  const isGlobalRole = userExplicitLevel === "GLOBAL" || userRole === "ADMIN" || userRole === "GLOBAL" || userRole.includes("SUPER") || userRole.includes("GENERAL") || userRole === "ADMINISTRADOR";
+  const isDiresaRole = !isGlobalRole && (userExplicitLevel === "DIRESA" || userRole.includes("DIRESA"));
+  const isOgessRole = !isGlobalRole && (userExplicitLevel === "OGESS" || userRole.includes("OGESS"));
+  const isUngetRole = !isGlobalRole && (userExplicitLevel === "UNGET" || userRole.includes("UNGET") || userRole.includes("RED"));
+
+  const canManageConfigs = useMemo(() => {
+    if (!user) return false;
+    const role = (user.role || "").toUpperCase();
+    const level = (user.jurisdictionLevel || "").toUpperCase();
+
+    // 1. Super Administradores y Administradores del Sistema
+    if (
+      role === "ADMIN" ||
+      role === "ADMINISTRADOR" ||
+      role.includes("SUPER") ||
+      role.includes("GENERAL") ||
+      level === "GLOBAL"
+    ) {
+      return true;
+    }
+
+    // 2. Informático SISMED o Responsable de Sistemas / Soporte
+    if (
+      role.includes("INFORMATIC") ||
+      role.includes("SISTEMAS") ||
+      role.includes("RESPONSABLE SISMED") ||
+      role.includes("ADMIN_SISMED") ||
+      role.includes("SOPORTE")
+    ) {
+      return true;
+    }
+
+    // 3. Nivel DIRESA u OGESS con rol administrativo
+    if (
+      (level === "DIRESA" || level === "OGESS" || role.includes("DIRESA") || role.includes("OGESS")) &&
+      (role.includes("ADMIN") || role.includes("COORDINADOR REGIONAL") || role.includes("DIRECTOR") || role.includes("JEFE"))
+    ) {
+      return true;
+    }
+
+    // 4. Administrador o Informático de UNGET / Red
+    if (
+      (level === "UNGET" || role.includes("UNGET") || role.includes("RED")) &&
+      (role.includes("ADMIN") || role.includes("RESPONSABLE SISMED") || role.includes("INFORMATIC"))
+    ) {
+      return true;
+    }
+
+    // Personal operativo, coordinadores asistenciales, farmacia e IPRESS NO gestionan URLs
+    return false;
+  }, [user]);
 
   const myUnget = useMemo(() => {
     if (!userUngetId || !allUngets || allUngets.length === 0) return null;
@@ -1124,26 +1172,30 @@ export const SheetSearchModule: React.FC = () => {
 
         let remoteConfigs: any[] = [];
         const role = user.role;
-        let level = "";
+        let level = user.jurisdictionLevel || "";
         const r = (role || "").toUpperCase();
-        if (
-          r === "ADMIN" ||
-          r === "GLOBAL" ||
-          r.includes("SUPER") ||
-          r.includes("GENERAL") ||
-          r === "ADMINISTRADOR"
-        )
-          level = "GLOBAL";
-        else if (r.includes("DIRESA")) level = "DIRESA";
-        else if (r.includes("OGESS")) level = "OGESS";
-        else if (r.includes("UNGET")) level = "UNGET";
-        else if (r.includes("MICRORED")) level = "MICRORED";
-        else if (
-          r.includes("FARMACIA") ||
-          r.includes("IPRESS") ||
-          r.includes("PERSONAL")
-        )
-          level = "IPRESS";
+        if (!level) {
+          if (
+            r === "ADMIN" ||
+            r === "GLOBAL" ||
+            r.includes("SUPER") ||
+            r.includes("GENERAL") ||
+            r === "ADMINISTRADOR"
+          )
+            level = "GLOBAL";
+          else if (r.includes("DIRESA")) level = "DIRESA";
+          else if (r.includes("OGESS")) level = "OGESS";
+          else if (r.includes("UNGET") || r.includes("RED")) level = "UNGET";
+          else if (r.includes("MICRORED")) level = "MICRORED";
+          else if (
+            r.includes("FARMACIA") ||
+            r.includes("IPRESS") ||
+            r.includes("PERSONAL")
+          )
+            level = "IPRESS";
+          else
+            level = "IPRESS";
+        }
 
         const userDiresaId =
           user.personnelData?.diresaId ||
@@ -1153,66 +1205,123 @@ export const SheetSearchModule: React.FC = () => {
           user.personnelData?.ogessId ||
           user.facilityData?.ogessId ||
           (user as any).ogessId;
+        const userUngetId =
+          user.personnelData?.ungetId ||
+          user.facilityData?.ungetId ||
+          (user as any).ungetId;
 
-        if (level === "GLOBAL" || level === "DIRESA" || level === "OGESS") {
-          try {
-            const [allConfigsRaw, allUsers, subscriptions] = await Promise.all([
-              api.getAllUngetConfigs(),
-              api.getUsers(),
-              api.getSubscriptions(user.username),
-            ]);
-            setAllUsersList(allUsers);
-            setSubscribedUsernames(subscriptions);
+        try {
+          const [allConfigsRaw, allUsers, subscriptions] = await Promise.all([
+            api.getAllUngetConfigs(),
+            api.getUsers(),
+            api.getSubscriptions(user.username),
+          ]);
+          setAllUsersList(allUsers);
+          setSubscribedUsernames(subscriptions);
 
-            // Alinear con los nombres oficiales de la base de datos
-            const allConfigs = alignConfigsWithOfficialUngets(allConfigsRaw, ungs);
+          // Alinear con los nombres oficiales de la base de datos
+          const allConfigs = alignConfigsWithOfficialUngets(allConfigsRaw, ungs);
 
-            const jurisdictionConfigs = allConfigs.filter((config) => {
-              // Encontrar usuario creador
-              const creator = allUsers.find(
-                (u) => u.username === config.username,
-              );
-              if (!creator) {
-                return level === "GLOBAL";
-              }
-              const creatorDiresaId =
-                creator.personnelData?.diresaId ||
-                creator.facilityData?.diresaId ||
-                (creator as any).diresaId ||
-                (creator as any).personnel?.diresaId;
-              const creatorOgessId =
-                creator.personnelData?.ogessId ||
-                creator.facilityData?.ogessId ||
-                (creator as any).ogessId ||
-                (creator as any).personnel?.ogessId;
-
-              if (level === "GLOBAL") return true;
-              if (level === "DIRESA" && userDiresaId)
-                return String(creatorDiresaId) === String(userDiresaId);
-              if (level === "OGESS" && userOgessId)
-                return String(creatorOgessId) === String(userOgessId);
-              return false;
-            });
-
-            setAllJurisdictionConfigs(jurisdictionConfigs);
-
-            remoteConfigs = allConfigs.filter((config) => {
-              // Si el creador es el mismo, siempre lo ve
-              if (config.username === user.username) return true;
-
-              // Only see other configs if explicitly subscribed (imported)
-              if (subscriptions.includes(config.username)) return true;
-
-              return false;
-            });
-          } catch (fetchErr) {
-            console.error(
-              "Error loading segmented unget configs from server:",
-              fetchErr,
+          const jurisdictionConfigs = allConfigs.filter((config) => {
+            // Encontrar usuario creador
+            const creator = allUsers.find(
+              (u) => u.username === config.username,
             );
-            remoteConfigs = alignConfigsWithOfficialUngets(await api.getUngetConfigs(user.username), ungs);
+            if (!creator) {
+              return level === "GLOBAL";
+            }
+            const creatorDiresaId =
+              creator.personnelData?.diresaId ||
+              creator.facilityData?.diresaId ||
+              (creator as any).diresaId ||
+              (creator as any).personnel?.diresaId;
+            const creatorOgessId =
+              creator.personnelData?.ogessId ||
+              creator.facilityData?.ogessId ||
+              (creator as any).ogessId ||
+              (creator as any).personnel?.ogessId;
+            const creatorUngetId =
+              creator.personnelData?.ungetId ||
+              creator.facilityData?.ungetId ||
+              (creator as any).ungetId ||
+              (creator as any).personnel?.ungetId;
+
+            if (level === "GLOBAL") return true;
+            if (level === "DIRESA" && userDiresaId)
+              return String(creatorDiresaId) === String(userDiresaId);
+            if (level === "OGESS" && userOgessId)
+              return String(creatorOgessId) === String(userOgessId);
+            if (level === "UNGET" && userUngetId)
+              return String(creatorUngetId) === String(userUngetId);
+            return false;
+          });
+
+          setAllJurisdictionConfigs(jurisdictionConfigs);
+
+          if (level === "GLOBAL") {
+            remoteConfigs = allConfigs.filter((config) => {
+              if (config.username === user.username) return true;
+              if (subscriptions.includes(config.username)) return true;
+              return false;
+            });
+            // Si el admin no tiene configuraciones propias ni suscripciones, cargar todas
+            if (remoteConfigs.length === 0 && subscriptions.length === 0) {
+              remoteConfigs = allConfigs;
+            }
+          } else if (level === "DIRESA") {
+            remoteConfigs = allConfigs.filter((config) => {
+              if (config.username === user.username) return true;
+              if (subscriptions.includes(config.username)) return true;
+              const ungetObj = ungs.find(u => (config.ungetId && String(u.id) === String(config.ungetId)) || normalizeName(u.name) === normalizeName(config.name));
+              if (ungetObj && userDiresaId && String(ungetObj.diresaId) === String(userDiresaId)) return true;
+              return false;
+            });
+          } else if (level === "OGESS") {
+            remoteConfigs = allConfigs.filter((config) => {
+              if (config.username === user.username) return true;
+              if (subscriptions.includes(config.username)) return true;
+              const ungetObj = ungs.find(u => (config.ungetId && String(u.id) === String(config.ungetId)) || normalizeName(u.name) === normalizeName(config.name));
+              if (ungetObj && userOgessId && String(ungetObj.ogessId) === String(userOgessId)) return true;
+              return false;
+            });
+          } else {
+            // Nivel UNGET, MICRORED o IPRESS: Herencia automática de la URL de su UNGET
+            const myOwn = allConfigs.filter((config) => config.username === user.username);
+
+            // Buscar en todas las configuraciones la que corresponda a la UNGET del usuario
+            const inheritedUngetConfigs = allConfigs.filter((config) => {
+              // 1. Coincidencia por ID de UNGET
+              if (config.ungetId && userUngetId && String(config.ungetId) === String(userUngetId)) return true;
+              // 2. Coincidencia por objeto myUnget
+              if (myUnget) {
+                if (config.ungetId && String(config.ungetId) === String(myUnget.id)) return true;
+                if (normalizeName(config.name) === normalizeName(myUnget.name) || config.name.toUpperCase().includes(myUnget.name.toUpperCase())) return true;
+              }
+              // 3. Coincidencia por creador de la misma UNGET
+              const creator = allUsers.find((u) => u.username === config.username);
+              const creatorUngetId =
+                creator?.personnelData?.ungetId ||
+                creator?.facilityData?.ungetId ||
+                (creator as any)?.ungetId ||
+                (creator as any)?.personnel?.ungetId;
+              if (creatorUngetId && userUngetId && String(creatorUngetId) === String(userUngetId)) return true;
+              return false;
+            });
+
+            // Si el usuario ya tiene su propia configuración la usa; si no, hereda la de su UNGET
+            remoteConfigs = myOwn.length > 0 ? myOwn : inheritedUngetConfigs;
+
+            // Incluir suscripciones si las tuviera
+            if (subscriptions.length > 0) {
+              const subs = allConfigs.filter((c) => subscriptions.includes(c.username));
+              remoteConfigs = [...remoteConfigs, ...subs];
+            }
           }
-        } else {
+        } catch (fetchErr) {
+          console.error(
+            "Error loading segmented unget configs from server:",
+            fetchErr,
+          );
           remoteConfigs = alignConfigsWithOfficialUngets(await api.getUngetConfigs(user.username), ungs);
         }
 
@@ -3397,23 +3506,21 @@ function processSheet(sheet) {
 
           {/* Action Buttons underneath breadcrumbs */}
           <div className="flex items-center gap-2 sm:gap-2.5 w-full md:w-auto overflow-x-auto pb-1 sm:pb-0 hide-scrollbar justify-start xl:justify-end shrink-0">
-            <button
-              onClick={() => {
-                if (user) {
-                  setTempUrls(
-                    scriptUrls.filter(
-                      (u) => (!u.username || u.username === user.username),
-                    ),
-                  );
-                  setTempSubscribedUsernames([...subscribedUsernames]);
-                }
-                setIsConfigOpen(!isConfigOpen);
-              }}
-              className="bg-white border border-slate-200 text-slate-700 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm whitespace-nowrap shrink-0"
-            >
-              <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-slate-500" />
-              Configurar
-            </button>
+            {canManageConfigs && (
+              <button
+                onClick={() => {
+                  if (user) {
+                    setTempUrls([...scriptUrls]);
+                    setTempSubscribedUsernames([...subscribedUsernames]);
+                  }
+                  setIsConfigOpen(!isConfigOpen);
+                }}
+                className="bg-white border border-slate-200 text-slate-700 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm whitespace-nowrap shrink-0"
+              >
+                <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-slate-500" />
+                Configurar
+              </button>
+            )}
             <button
               id="sync-btn"
               onClick={() => fetchData(undefined, true)}
@@ -3431,7 +3538,7 @@ function processSheet(sheet) {
         </div>
       </div>
 
-      {isConfigOpen && (
+      {isConfigOpen && canManageConfigs && (
         <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-[2.5rem] shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-white/20">
             {/* Header Modal */}
@@ -3784,8 +3891,8 @@ function processSheet(sheet) {
                                   {config.username &&
                                     config.username !== user?.username && (
                                       <div className="text-[8px] font-extrabold text-teal-700 bg-teal-50 border border-teal-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5">
-                                        <User className="h-2 w-2 text-teal-400" />
-                                        Asociado a: {config.username}
+                                        <CheckCircle2 className="h-2 w-2 text-teal-500" />
+                                        Heredado de la Jurisdicción ({config.username})
                                       </div>
                                     )}
                                 </div>
@@ -4523,8 +4630,10 @@ function processSheet(sheet) {
                             }`}
                           >
                             {/* Botones de acción rápidos */}
-                            {(!config.username ||
-                              config.username === user?.username) && !isSupabaseVirtual && (
+                            {canManageConfigs &&
+                              (!config.username ||
+                                config.username === user?.username) &&
+                              !isSupabaseVirtual && (
                               <div className="absolute top-4 right-4 flex items-center gap-2 opacity-100 sm:opacity-40 group-hover:opacity-100 transition-opacity z-10">
                                 <button
                                   type="button"
