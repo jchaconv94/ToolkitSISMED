@@ -356,23 +356,26 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
                   {renderCardSyncStatusPill(new Date(syncRecordDate).getTime())}
                 </div>
               </div>
-            ) : hasSyncRecord === false ? (
-              <div className="flex items-center justify-between bg-white border border-slate-200/80 shadow-3xs rounded-lg p-1.5 px-2">
-                <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[10px]">
-                  <FileClock className="h-3.5 w-3.5" />
-                  <span>Historial de cambios</span>
-                </div>
-                <span className="bg-slate-100 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded font-extrabold uppercase text-[8.5px] tracking-wide">
-                  Sin verificar
-                </span>
-              </div>
             ) : (
-              <div className="flex items-center justify-between bg-white border border-slate-200/80 shadow-3xs rounded-lg p-1.5 px-2">
-                <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[10px]">
-                  <FileClock className="h-3.5 w-3.5" />
-                  <span>Últimos movimientos</span>
+              <div
+                onClick={(e) => {
+                  if (onShowHistory) {
+                    e.stopPropagation();
+                    onShowHistory(e);
+                  }
+                }}
+                className={`w-full flex items-center justify-between gap-2 bg-white ${
+                  !isStaticPreview ? "hover:bg-slate-50 hover:border-slate-300 hover:shadow-xs cursor-pointer" : ""
+                } border border-slate-200/80 shadow-3xs rounded-lg p-1.5 px-2 transition-all duration-200 group`}
+                title="Haz clic para consultar o registrar el historial de cambios en Supabase"
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <FileClock className="h-3.5 w-3.5 text-slate-400 group-hover:text-teal-600 transition-colors shrink-0" />
+                  <span className="text-[10px] font-bold text-slate-600 group-hover:text-slate-900 transition-colors truncate">
+                    Historial de cambios
+                  </span>
                 </div>
-                <span className="bg-slate-100 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded font-extrabold uppercase text-[8.5px] tracking-wide">
+                <span className="bg-slate-100 text-slate-600 group-hover:bg-teal-50 group-hover:text-teal-700 group-hover:border-teal-200 border border-slate-200 px-1.5 py-0.5 rounded font-extrabold uppercase text-[8.5px] tracking-wide transition-colors">
                   Sin verificar
                 </span>
               </div>

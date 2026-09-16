@@ -620,6 +620,7 @@ export const SheetSearchModule: React.FC = () => {
   const [isConfigLoading, setIsConfigLoading] = useState(true); // Nuevo: Estado para carga de config
   const [error, setError] = useState<string | null>(null);
   const [connectionErrors, setConnectionErrors] = useState<Record<string, string>>({});
+  const [retryingUrls, setRetryingUrls] = useState<Record<string, boolean>>({});
   const [searchTerm, setSearchTerm] = useState("");
   const [sheetSearchTerm, setSheetSearchTerm] = useState("");
   const [ungetSearchTerm, setUngetSearchTerm] = useState("");
@@ -1383,8 +1384,15 @@ export const SheetSearchModule: React.FC = () => {
     if (!supabase) return;
     try {
       const sheetIds = forceIds || sources.map((s) => s.id);
+      const allPossibleIds = new Set<string>();
+      sheetIds.forEach((id) => {
+        allPossibleIds.add(id);
+        if (id.includes("_")) {
+          allPossibleIds.add(id.split("_").slice(1).join("_"));
+        }
+      });
       const latestSyncs = await supabaseService.getLatestSyncs(
-        sheetIds.length > 0 ? sheetIds : undefined,
+        allPossibleIds.size > 0 ? Array.from(allPossibleIds) : undefined,
       );
       setSupabaseSyncs(latestSyncs);
     } catch (e) {
@@ -1404,12 +1412,219 @@ export const SheetSearchModule: React.FC = () => {
     setIsLoadingHistory(true);
 
     try {
-      const history = await supabaseService.getHistoryForEstablishment(sheetId);
-      setSelectedFacilitySyncHistory(history);
+      let history = await supabaseService.getHistoryForEstablishment(sheetId);
+      if ((!history || history.length === 0) && sheetId.includes("_")) {
+        const cleanId = sheetId.split("_").slice(1).join("_");
+        history = await supabaseService.getHistoryForEstablishment(cleanId);
+      }
+
+      // Si aún no hay historial registrado en Supabase, auto-verificar/registrar si tenemos datos cargados
+      if ((!history || history.length === 0) && data && data.length > 0) {
+        const sheetItems = data.filter((r) => r.sourceId === sheetId);
+        if (sheetItems.length > 0) {
+          const userAuthor = user?.username || "VerificaciónManual";
+          const syncRes = await supabaseService.registerSync({
+            establishmentId: sheetId,
+            establishmentName: sheetName,
+            currentStock: sheetItems,
+            author: userAuthor,
+          });
+          if (syncRes && syncRes.success && syncRes.record) {
+            history = [syncRes.record];
+            setSupabaseSyncs((prev) => ({
+              ...prev,
+              [sheetId]: syncRes.record,
+            }));
+            toast.success("Sincronización verificada y registrada en Supabase");
+          }
+        }
+      }
+
+      setSelectedFacilitySyncHistory(history || []);
     } catch (e) {
+      console.error("Error al cargar historial:", e);
       toast.error("Error al cargar el historial de cambios.");
     } finally {
       setIsLoadingHistory(false);
+    }
+  };
+
+  // Función ultra-resiliente para obtener JSON de Web App de Google Apps Script con múltiples reintentos y proxies de respaldo
+  const fetchScriptUrlWithFallback = async (rawUrl: string): Promise<any> => {
+    const cleanUrl = rawUrl.trim();
+    if (!cleanUrl) throw new Error("URL vacía");
+
+    // Intento 1: Fetch directo con AbortController (timeout 30s)
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      const res = await fetch(cleanUrl, {
+        signal: controller.signal,
+        redirect: "follow",
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json)) return json;
+      }
+    } catch (e: any) {
+      console.warn(`[Intento 1 directo falló para ${cleanUrl}]:`, e?.message || e);
+    }
+
+    // Intento 2: Fetch directo con parámetro anti-caché
+    try {
+      const sep = cleanUrl.includes("?") ? "&" : "?";
+      const cacheUrl = `${cleanUrl}${sep}_t=${Date.now()}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      const res = await fetch(cacheUrl, {
+        signal: controller.signal,
+        redirect: "follow",
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json)) return json;
+      }
+    } catch (e: any) {
+      console.warn(`[Intento 2 anti-cache falló para ${cleanUrl}]:`, e?.message || e);
+    }
+
+    // Intento 3: Proxies CORS alternativos
+    const proxies = [
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(cleanUrl)}`,
+      `https://corsproxy.io/?${encodeURIComponent(cleanUrl)}`,
+    ];
+
+    for (const proxyUrl of proxies) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 20000);
+        const res = await fetch(proxyUrl, { signal: controller.signal });
+        clearTimeout(timer);
+        if (res.ok) {
+          const text = await res.text();
+          try {
+            const json = JSON.parse(text);
+            if (Array.isArray(json)) return json;
+          } catch (pe) {}
+        }
+      } catch (e: any) {
+        console.warn(`[Proxy CORS falló para ${proxyUrl}]:`, e?.message || e);
+      }
+    }
+
+    throw new Error("No se pudo conectar a la Web App de Google. Verifique la URL o reintente.");
+  };
+
+  const retrySingleUrl = async (configToRetry: UngetConfig) => {
+    setRetryingUrls((prev) => ({ ...prev, [configToRetry.url]: true }));
+    try {
+      const json = await fetchScriptUrlWithFallback(configToRetry.url);
+      if (Array.isArray(json)) {
+        const urlIndex = scriptUrls.findIndex((u) => u.url === configToRetry.url);
+        const effectiveIndex = urlIndex >= 0 ? urlIndex : 0;
+        let newSourcesForThis: SheetSource[] = [];
+        let newItemsForThis: SIGData[] = [];
+
+        json.forEach((sheet: any) => {
+          const uniqueSourceId = `${effectiveIndex}_${sheet.id}`;
+          let lastUpdateStr = "";
+          let lastUpdateTime = 0;
+          let equipmentDateStr = "";
+          let equipmentDateTime = 0;
+
+          if (Array.isArray(sheet.data) && sheet.data.length > 0) {
+            const firstRow = sheet.data[0];
+            if (
+              firstRow.ULTIMA_ACTUALIZACION ||
+              firstRow.Ultima_Actualizacion ||
+              firstRow["ULTIMA ACTUALIZACION"]
+            ) {
+              lastUpdateStr =
+                firstRow.ULTIMA_ACTUALIZACION ||
+                firstRow.Ultima_Actualizacion ||
+                firstRow["ULTIMA ACTUALIZACION"];
+              lastUpdateTime = parseDataDate(lastUpdateStr);
+            }
+            if (firstRow.FECHA_DEL_EQUIPO || firstRow["FECHA DEL EQUIPO"]) {
+              equipmentDateStr =
+                firstRow.FECHA_DEL_EQUIPO || firstRow["FECHA DEL EQUIPO"];
+              equipmentDateTime = parseDataDate(equipmentDateStr);
+            }
+          }
+
+          let displayName = sheet.name;
+          if (allAssignments.length > 0 && allFacilities.length > 0) {
+            const matchingAssignment = allAssignments.find(
+              (a) => a.sheetUrl === configToRetry.url && a.sheetName === sheet.name,
+            );
+            if (matchingAssignment) {
+              const matchingF = allFacilities.find(
+                (f) => f.code === matchingAssignment.facilityCode,
+              );
+              if (matchingF) displayName = matchingF.name;
+            }
+          }
+
+          newSourcesForThis.push({
+            id: uniqueSourceId,
+            name: displayName,
+            urlIndex: effectiveIndex,
+            lastUpdate: lastUpdateStr,
+            lastUpdateTime: lastUpdateTime || undefined,
+            equipmentDate: equipmentDateStr,
+            equipmentDateTime: equipmentDateTime || undefined,
+          });
+
+          if (Array.isArray(sheet.data)) {
+            const validData = sheet.data
+              .filter((row: any) => row && (row.ID_Producto || row.Nombre))
+              .map((row: any) => ({
+                ...row,
+                Fec_Vencim: formatDate(row.Fec_Vencim),
+                Ultima_Actualizacion: formatDate(
+                  row.ULTIMA_ACTUALIZACION ||
+                    row.Ultima_Actualizacion ||
+                    row["ULTIMA ACTUALIZACION"],
+                ),
+                FECHA_DEL_EQUIPO: formatDate(
+                  row.FECHA_DEL_EQUIPO || row["FECHA DEL EQUIPO"],
+                ),
+                sourceId: uniqueSourceId,
+              }));
+            newItemsForThis.push(...validData);
+          }
+        });
+
+        setSources((prev) => [
+          ...prev.filter((s) => s.urlIndex !== effectiveIndex),
+          ...newSourcesForThis,
+        ]);
+        setData((prev) => [
+          ...prev.filter(
+            (d) => !newSourcesForThis.some((s) => s.id === d.sourceId),
+          ),
+          ...newItemsForThis,
+        ]);
+
+        setConnectionErrors((prev) => {
+          const updated = { ...prev };
+          delete updated[configToRetry.url];
+          return updated;
+        });
+
+        toast.success(`Sincronización completada para ${configToRetry.name || "UNGET"}`);
+      }
+    } catch (err: any) {
+      console.error("Error al reintentar UNGET:", err);
+      setConnectionErrors((prev) => ({
+        ...prev,
+        [configToRetry.url]: err.message || "Error al conectar",
+      }));
+      toast.error(`No se pudo consultar ${configToRetry.name || "UNGET"}: ${err.message || "Error de red"}`);
+    } finally {
+      setRetryingUrls((prev) => ({ ...prev, [configToRetry.url]: false }));
     }
   };
 
@@ -1426,21 +1641,6 @@ export const SheetSearchModule: React.FC = () => {
       new Map(sourceUrls.map((u) => [u.url, u])).values(),
     );
 
-    // We will still fetch from Supabase even if there are no URLs
-    /* if (urlsToUse.length === 0) {
-      setSources([]);
-      setData([]);
-
-      if (!silent) {
-        setError(
-          "No hay orígenes activos. Primero debe configurar al menos una URL de Web App de Apps Script o suscribirse a otra entidad.",
-        );
-        setTempUrls([]);
-        setTempSubscribedUsernames([...subscribedUsernames]);
-      }
-      return;
-    } */
-
     if (!silent) {
       // Limpiar error inmediatamente al iniciar una carga válida
       setError(null);
@@ -1453,16 +1653,10 @@ export const SheetSearchModule: React.FC = () => {
       let allData: SIGData[] = [];
       let newSources: SheetSource[] = [];
 
-      // Fetch todas las URLs en paralelo
+      // Fetch todas las URLs en paralelo utilizando nuestro fetcher resiliente con fallbacks
       const fetchPromises = urlsToUse.map(async (config, urlIndex) => {
         try {
-          // Prevenir cache del navegador añadiendo un timestamp aleatorio
-          const separator = config.url.includes("?") ? "&" : "?";
-          const fetchUrl = `${config.url}${separator}t=${Date.now()}`;
-
-          const response = await fetch(fetchUrl);
-          if (!response.ok) throw new Error("HTTP " + response.status);
-          const json = await response.json();
+          const json = await fetchScriptUrlWithFallback(config.url);
 
           if (Array.isArray(json)) {
             json.forEach((sheet: any) => {
@@ -1605,7 +1799,11 @@ export const SheetSearchModule: React.FC = () => {
                   recordToSave.last_modification_date =
                     res.value.record.sync_date;
                 }
-                updated[newSources[i].id] = recordToSave;
+                const rawId = newSources[i].id;
+                updated[rawId] = recordToSave;
+                if (rawId.includes("_")) {
+                  updated[rawId.split("_").slice(1).join("_")] = recordToSave;
+                }
               }
             });
             return updated;
@@ -4388,9 +4586,27 @@ function processSheet(sheet) {
                                 {formatDisplayName(matchingUnget ? matchingUnget.name : config.name)}
                               </h3>
                               {connectionErrors[config.url] && (
-                                <div className="text-[9px] font-black px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-100 inline-flex items-center gap-1 uppercase mb-2">
-                                  <AlertCircle className="h-3 w-3 text-red-500 shrink-0" />
-                                  Error Consulta (CORS)
+                                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                  <div
+                                    className="text-[9px] font-black px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-100 inline-flex items-center gap-1 uppercase"
+                                    title={connectionErrors[config.url]}
+                                  >
+                                    <AlertCircle className="h-3 w-3 text-red-500 shrink-0" />
+                                    Error Consulta (CORS)
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      retrySingleUrl(config);
+                                    }}
+                                    disabled={retryingUrls[config.url]}
+                                    className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white inline-flex items-center gap-1 uppercase transition-all shadow-xs disabled:opacity-50 cursor-pointer"
+                                    title="Reintentar la consulta de esta UNGET"
+                                  >
+                                    <RefreshCw className={`h-2.5 w-2.5 ${retryingUrls[config.url] ? "animate-spin" : ""}`} />
+                                    {retryingUrls[config.url] ? "Cargando..." : "Reintentar"}
+                                  </button>
                                 </div>
                               )}
 
@@ -4741,7 +4957,8 @@ function processSheet(sheet) {
                                   sheet.id,
                                   data,
                                 );
-                                const syncRecord = supabaseSyncs[sheet.id];
+                                const cleanSheetId = sheet.id.includes("_") ? sheet.id.split("_").slice(1).join("_") : sheet.id;
+                                const syncRecord = supabaseSyncs[sheet.id] || supabaseSyncs[cleanSheetId] || (code ? supabaseSyncs[code] : undefined);
 
                                 const cardData = {
                                   id: sheet.id,
