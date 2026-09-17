@@ -16,11 +16,10 @@
 
 const STOCK_SPREADSHEET_ID = '1vic6MeMiA5Jk4_UWx8nI462yXe8irgxAoMncJiekOOA';
 const STOCK_METADATA_CACHE_KEY = 'toolkit_sismed_stock_metadata_v5';
-const STOCK_METADATA_CACHE_SECONDS = 30;
+const STOCK_METADATA_CACHE_SECONDS = 60;
 
 function doGet(e) {
   try {
-    const ss = SpreadsheetApp.openById(STOCK_SPREADSHEET_ID);
     const params = (e && e.parameter) || {};
     const action = String(params.action || '').trim();
     const targetSheetName = String(params.sheet || '').trim();
@@ -28,8 +27,14 @@ function doGet(e) {
     const forceRefresh = String(params.refresh || '') === '1';
 
     if (action === 'getMetadata' || action === 'checkUpdates') {
-      return jsonResponse_(getMetadata_(ss, forceRefresh));
+      // La metadata en caché se responde sin abrir el libro: abrirlo mientras las hojas
+      // se escriben constantemente es la parte lenta de la ejecución.
+      const cached = forceRefresh ? null : getCachedMetadata_();
+      if (cached) return jsonResponse_(cached);
+      return jsonResponse_(getMetadata_(SpreadsheetApp.openById(STOCK_SPREADSHEET_ID)));
     }
+
+    const ss = SpreadsheetApp.openById(STOCK_SPREADSHEET_ID);
 
     if (action === 'getSheets') {
       return jsonResponse_(getSheetList_(ss));
@@ -154,18 +159,17 @@ function getSheetList_(ss) {
  * Metadatos ligeros. Lee solo encabezado + primera fila de datos de cada hoja.
  * La fecha SISMED se repite por registro, por lo que no es necesario recorrer todo el stock.
  */
-function getMetadata_(ss, forceRefresh) {
-  const cache = CacheService.getScriptCache();
-
-  if (!forceRefresh) {
-    const cached = cache.get(STOCK_METADATA_CACHE_KEY);
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (_) {}
-    }
+function getCachedMetadata_() {
+  try {
+    const cached = CacheService.getScriptCache().get(STOCK_METADATA_CACHE_KEY);
+    return cached ? JSON.parse(cached) : null;
+  } catch (_) {
+    return null;
   }
+}
 
+function getMetadata_(ss) {
+  const cache = CacheService.getScriptCache();
   const sheets = ss.getSheets();
   const metadata = new Array(sheets.length);
 
