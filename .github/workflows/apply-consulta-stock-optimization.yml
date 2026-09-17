@@ -26,7 +26,7 @@ jobs:
           cache: npm
 
       - name: Aplicar cambios
-        run: python .github/apply_consulta_stock_optimization.py
+        run: python .github/apply_consulta_stock_optimization_v2.py
 
       - name: Instalar dependencias
         run: npm install
@@ -43,6 +43,7 @@ jobs:
       - name: Limpiar archivos temporales
         run: |
           rm .github/apply_consulta_stock_optimization.py
+          rm .github/apply_consulta_stock_optimization_v2.py
           rm .github/workflows/apply-consulta-stock-optimization.yml
 
       - name: Commit de cambios validados
