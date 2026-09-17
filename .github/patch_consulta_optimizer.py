@@ -21,16 +21,14 @@ if old_ui not in s:
     raise RuntimeError('No se encontró el patrón UI de movimientos en el aplicador v2')
 s = s.replace(old_ui, new_ui, 1)
 
-# La cabecera de tabla contiene un <span>, así que usar un patrón más amplio.
 old_header = "r'\\n\\s*<th[^>]*>\\s*Últimos Movimientos\\s*</th>',"
 new_header = "r'\\n\\s*<th[^>]*>.*?<span>Últimos Movimientos</span>.*?</th>',"
 if old_header not in s:
     raise RuntimeError('No se encontró el patrón cabecera Últimos Movimientos')
 s = s.replace(old_header, new_header, 1)
 
-# Limpiar auxiliar que solo existía para resolver el historial Supabase de la tarjeta.
 needle = "text = re.sub(r'\\n\\s*const syncRecord = supabaseSyncs\\[[^\\n]+\\];', '', text)"
-replacement = needle + "\ntext = re.sub(r'\\n\\s*const cleanSheetId = sheet\\.id\\.includes\\(\\\"_\\\"\\).*?;', '', text)"
+replacement = needle + "\ntext = re.sub(r'\\n\\s*const cleanSheetId = sheet\\.id\\.includes\\(\\\"_\\\"\\).*?;', '', text)\ntext = text.replace(', supabaseSyncs]', ']')\ntext = text.replace('supabaseSyncs,\\n', '')"
 if needle not in s:
     raise RuntimeError('No se encontró limpieza syncRecord')
 s = s.replace(needle, replacement, 1)
