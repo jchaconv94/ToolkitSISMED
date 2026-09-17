@@ -45,7 +45,7 @@ jobs:
           cache: npm
 
       - name: Instalar dependencias
-        run: npm ci
+        run: npm install
 
       - name: Verificacion TypeScript
         run: npm run lint
@@ -56,8 +56,10 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Quitar workflow temporal
-        run: rm .github/workflows/cleanup-consulta-stock-diff.yml
+      - name: Restaurar lockfile y quitar workflow temporal
+        run: |
+          git checkout origin/main -- package-lock.json
+          rm .github/workflows/cleanup-consulta-stock-diff.yml
 
       - name: Commit y push
         run: |
