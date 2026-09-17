@@ -1,0 +1,45 @@
+name: Aplicar Consulta Stock fase 3
+
+on:
+  push:
+    branches:
+      - optimize-consulta-stock-phase3
+    paths:
+      - .github/workflows/apply-consulta-stock-phase3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: optimize-consulta-stock-phase3
+          fetch-depth: 0
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Aplicar cambios dirigidos
+        run: node scripts/apply-consulta-stock-phase3.mjs
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Validar build
+        run: npm run build
+
+      - name: Retirar archivos temporales y guardar cambios
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-consulta-stock-phase3.yml scripts/apply-consulta-stock-phase3.mjs
+          git add components/SheetSearchModule.tsx
+          git commit -m "perf(stock): isolate Consulta Stock and accelerate first load"
+          git push origin HEAD:optimize-consulta-stock-phase3
