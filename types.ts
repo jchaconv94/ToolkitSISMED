@@ -756,6 +756,11 @@ export interface UngetConfig {
   id?: string;
   ungetId?: string;
   username?: string;
+  /**
+   * ID del libro de Google Sheets de la UNGET. Permite leer las pestañas directamente,
+   * sin pasar por Apps Script. Requiere la hoja compartida como lector con el enlace.
+   */
+  spreadsheetId?: string;
 }
 
 export interface SheetSource {

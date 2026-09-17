@@ -42,6 +42,59 @@ export const buildSheetExportUrl = (spreadsheetId: string, gid: string, range?: 
   return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/export?${params.toString()}`;
 };
 
+/**
+ * ID del libro a partir del enlace completo de Google Sheets o del ID pelado.
+ * Devuelve "" si no se reconoce.
+ */
+export const extractSpreadsheetId = (input?: string | null): string => {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  const fromUrl = raw.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]{20,})/)?.[1];
+  const candidate = fromUrl || raw.split("?")[0].split("#")[0].trim();
+  return SPREADSHEET_ID_PATTERN.test(candidate) ? candidate : "";
+};
+
+/**
+ * Comprueba que el libro se pueda leer sin iniciar sesión, es decir, compartido como
+ * "Cualquiera con el enlace: Lector". Lee una sola celda de la primera pestaña.
+ */
+export async function checkSpreadsheetAccess(
+  spreadsheetId: string,
+  options: { timeoutMs?: number } = {},
+): Promise<{ ok: boolean; message: string }> {
+  if (!SPREADSHEET_ID_PATTERN.test(spreadsheetId)) {
+    return { ok: false, message: "El enlace no parece de una hoja de cálculo de Google." };
+  }
+  const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/gviz/tq?tqx=out:csv&tq=${encodeURIComponent("select * limit 1")}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DIRECT_SHEET_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { method: "GET", credentials: "omit", signal: controller.signal });
+    const contentType = res.headers.get("content-type") || "";
+    if (res.ok && contentType.includes("text/csv")) {
+      return { ok: true, message: "Hoja accesible: la lectura directa quedará activada." };
+    }
+    if (res.status === 404) {
+      return { ok: false, message: "No se encontró esa hoja de cálculo. Revise el enlace." };
+    }
+    return {
+      ok: false,
+      message:
+        "La hoja no es accesible con el enlace. En Google Sheets, use Compartir y elija \"Cualquiera con el enlace\" como Lector.",
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      message:
+        err?.name === "AbortError"
+          ? "Google tardó demasiado en responder. Intente de nuevo."
+          : "No se pudo comprobar la hoja. Verifique el enlace y que esté compartida como lector.",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** CSV (RFC 4180): comillas, comillas escapadas y saltos de línea dentro de una celda. */
 export const parseCsv = (text: string): string[][] => {
   const source = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;

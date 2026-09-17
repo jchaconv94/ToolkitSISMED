@@ -1004,7 +1004,9 @@ export const api = {
                         ungetId: d.unget_id || null,
                         name: formatName(d.unget_name),
                         url: d.url,
-                        username: d.username
+                        username: d.username,
+                        // Requiere la migración SUPABASE_MIGRATION_UNGET_SPREADSHEET_ID.sql.
+                        spreadsheetId: d.spreadsheet_id || undefined
                     }));
                 }
             }
@@ -1085,12 +1087,17 @@ export const api = {
                     } else if (c.id) {
                         payload.unget_id = c.id;
                     }
+                    if (c.spreadsheetId) {
+                        payload.spreadsheet_id = c.spreadsheetId;
+                    }
 
                     const { error } = await supabase.from('unget_configs').insert(payload);
                     if (error) {
                         // Si ocurre un error de columna inexistente, reintentamos sin el unget_id
-                        if (error.message && (error.message.includes("column") || error.message.includes("unget_id"))) {
+                        if (error.message && (error.message.includes("column") || error.message.includes("unget_id") || error.message.includes("spreadsheet_id"))) {
+                            // Base sin las columnas nuevas: se conserva la conexión básica.
                             delete payload.unget_id;
+                            delete payload.spreadsheet_id;
                             await supabase.from('unget_configs').insert(payload);
                         } else {
                             throw error;
