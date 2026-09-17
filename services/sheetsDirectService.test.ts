@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   DirectSheetError,
+  checkSpreadsheetAccess,
+  extractSpreadsheetId,
   buildSheetExportUrl,
   canReadSheetDirect,
   csvRowsToObjects,
@@ -187,5 +189,50 @@ describe("fetchSheetsMetadataDirect", () => {
     const [meta] = await fetchSheetsMetadataDirect([refs[0]]);
     expect(meta.rowCount).toBe(0);
     expect(meta.lastUpdate).toBe("");
+  });
+});
+
+describe("extractSpreadsheetId", () => {
+  it("acepta el enlace completo de Google Sheets", () => {
+    expect(extractSpreadsheetId(`https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit#gid=0`)).toBe(SPREADSHEET_ID);
+    expect(extractSpreadsheetId(`https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit?usp=sharing`)).toBe(SPREADSHEET_ID);
+  });
+
+  it("acepta el ID pelado y descarta lo que no lo es", () => {
+    expect(extractSpreadsheetId(SPREADSHEET_ID)).toBe(SPREADSHEET_ID);
+    expect(extractSpreadsheetId(" " + SPREADSHEET_ID + " ")).toBe(SPREADSHEET_ID);
+    expect(extractSpreadsheetId("https://script.google.com/macros/s/AKfycbwsBW522vGhqZTkfs70/exec")).toBe("");
+    expect(extractSpreadsheetId("corto")).toBe("");
+    expect(extractSpreadsheetId("")).toBe("");
+    expect(extractSpreadsheetId(null)).toBe("");
+  });
+});
+
+describe("checkSpreadsheetAccess", () => {
+  it("confirma una hoja compartida como lector con el enlace", async () => {
+    const mock = fakeFetch([csvResponse("ALMCOD,Saldo\n06505F0101,1")]);
+    await expect(checkSpreadsheetAccess(SPREADSHEET_ID)).resolves.toEqual({
+      ok: true,
+      message: expect.stringContaining("accesible"),
+    });
+    expect(String(mock.mock.calls[0][0])).toContain("/gviz/tq");
+  });
+
+  it("explica qué hacer cuando la hoja es privada", async () => {
+    fakeFetch([{ status: 401, contentType: "text/html", body: "<html>login</html>" }]);
+    const result = await checkSpreadsheetAccess(SPREADSHEET_ID);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("Cualquiera con el enlace");
+  });
+
+  it("avisa si el enlace no corresponde a una hoja existente", async () => {
+    fakeFetch([{ status: 404, contentType: "text/html", body: "<html>" }]);
+    await expect(checkSpreadsheetAccess(SPREADSHEET_ID)).resolves.toMatchObject({ ok: false, message: expect.stringContaining("No se encontró") });
+  });
+
+  it("rechaza un identificador inválido sin consultar a Google", async () => {
+    const mock = fakeFetch([]);
+    await expect(checkSpreadsheetAccess("corto")).resolves.toMatchObject({ ok: false });
+    expect(mock).not.toHaveBeenCalled();
   });
 });

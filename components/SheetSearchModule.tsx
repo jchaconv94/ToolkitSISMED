@@ -65,6 +65,8 @@ import {
 import { stockStorageService } from "../services/stockStorageService";
 import {
   canReadSheetDirect,
+  checkSpreadsheetAccess,
+  extractSpreadsheetId,
   fetchSheetRowsDirect,
   fetchSheetsMetadataDirect,
   type DirectSheetRef,
@@ -167,6 +169,8 @@ type MetadataSourceContext = {
   urlIndex: number;
   assignments: any[];
   facilities: any[];
+  /** Hoja configurada para la UNGET; permite lectura directa aunque su script sea antiguo. */
+  configSpreadsheetId?: string;
 };
 
 /** Tarjeta de IPRESS construida solo con la metadata de Apps Script (sin su stock). */
@@ -201,7 +205,7 @@ const sourceFromMetadata = (
     lastUpdateTime: parseDataDate(lastUpdate) || existing?.lastUpdateTime || undefined,
     equipmentDate: equipmentDate || existing?.equipmentDate || "",
     equipmentDateTime: parseDataDate(equipmentDate) || existing?.equipmentDateTime || undefined,
-    spreadsheetId: meta.spreadsheetId || existing?.spreadsheetId || undefined,
+    spreadsheetId: meta.spreadsheetId || existing?.spreadsheetId || ctx.configSpreadsheetId || undefined,
   };
 };
 
@@ -245,6 +249,8 @@ const PREFETCH_COMMIT_SIZE = 4;
 const PREFETCH_PAUSE_MS = 400;
 /** Espera antes de empezar: primero se dibuja el directorio. */
 const PREFETCH_START_DELAY_MS = 1500;
+/** Tope por pasada: un usuario DIRESA puede ver 10 UNGET con ~30 IPRESS cada una. */
+const PREFETCH_MAX_SHEETS = 40;
 
 /** La lista de pestañas cambia poco: Apps Script se consulta para ella como máximo cada 30 min. */
 const GAS_SHEET_LIST_REFRESH_MS = 30 * 60 * 1000;
@@ -1277,6 +1283,10 @@ export const SheetSearchModule: React.FC = () => {
   >([]);
   const [newUrlInput, setNewUrlInput] = useState("");
   const [newNameInput, setNewNameInput] = useState("");
+  // Enlace o ID del libro de Google Sheets de la UNGET (lectura directa).
+  const [newSpreadsheetInput, setNewSpreadsheetInput] = useState("");
+  const [spreadsheetCheck, setSpreadsheetCheck] = useState<{ ok: boolean; message: string } | null>(null);
+  const [isCheckingSpreadsheet, setIsCheckingSpreadsheet] = useState(false);
   const [copied, setCopied] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<SIGData | null>(null);
 
@@ -1939,6 +1949,7 @@ export const SheetSearchModule: React.FC = () => {
           urlIndex: effectiveIndex,
           assignments: allAssignments,
           facilities: allFacilities,
+          configSpreadsheetId: configToRetry.spreadsheetId,
         },
       );
 
@@ -1990,6 +2001,7 @@ export const SheetSearchModule: React.FC = () => {
           urlIndex,
           assignments: allAssignments,
           facilities: allFacilities,
+          configSpreadsheetId: config.spreadsheetId,
         });
         const previousById = new Map(current.map((s) => [s.id, s]));
         const kept = merged.map((source) => {
@@ -2082,6 +2094,7 @@ export const SheetSearchModule: React.FC = () => {
                 urlIndex,
                 assignments: allAssignments,
                 facilities: allFacilities,
+                configSpreadsheetId: config.spreadsheetId,
               },
             );
 
@@ -2425,12 +2438,12 @@ export const SheetSearchModule: React.FC = () => {
 
   // Arranca cuando el directorio ya está en pantalla y nada más está cargando.
   useEffect(() => {
-    if (isConfigLoading || isLoading || isSilentSyncing || sources.length === 0) return;
+    if (isConfigLoading || isLoading || isSilentSyncing || selectedUngetIndex === null) return;
     const timer = setTimeout(() => {
       void prefetchFnRef.current();
     }, PREFETCH_START_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [sources, isConfigLoading, isLoading, isSilentSyncing]);
+  }, [sources, isConfigLoading, isLoading, isSilentSyncing, selectedUngetIndex]);
 
   // Se pausa con la pestaña en segundo plano y al salir del módulo.
   useEffect(() => {
@@ -2571,10 +2584,18 @@ export const SheetSearchModule: React.FC = () => {
     const name = matching ? matching.name : val;
     const ungetId = matching ? matching.id : undefined;
 
+    // La hoja es opcional: sin ella la UNGET sigue funcionando por Apps Script.
+    const sheetInput = newSpreadsheetInput.trim();
+    const spreadsheetId = sheetInput ? extractSpreadsheetId(sheetInput) : "";
+    if (sheetInput && !spreadsheetId) {
+      toast.error("El enlace de la hoja de cálculo no es válido. Pegue la dirección completa de Google Sheets.");
+      return;
+    }
+
     if (editingIndex !== null) {
       // Caso edición
       const updated = [...tempUrls];
-      updated[editingIndex] = { url, name, ungetId, username: user.username };
+      updated[editingIndex] = { url, name, ungetId, username: user.username, spreadsheetId: spreadsheetId || undefined };
       setTempUrls(updated);
       setEditingIndex(null);
     } else {
@@ -2589,11 +2610,29 @@ export const SheetSearchModule: React.FC = () => {
         toast.error("Esta URL ya está registrada.");
         return;
       }
-      setTempUrls([...tempUrls, { url, name, ungetId, username: user.username }]);
+      setTempUrls([...tempUrls, { url, name, ungetId, username: user.username, spreadsheetId: spreadsheetId || undefined }]);
     }
 
     setNewUrlInput("");
     setNewNameInput("");
+    setNewSpreadsheetInput("");
+    setSpreadsheetCheck(null);
+  };
+
+  /** Comprueba que la hoja esté compartida como lector con el enlace. */
+  const handleCheckSpreadsheet = async () => {
+    const spreadsheetId = extractSpreadsheetId(newSpreadsheetInput);
+    if (!spreadsheetId) {
+      setSpreadsheetCheck({ ok: false, message: "Pegue el enlace completo de la hoja de cálculo de Google." });
+      return;
+    }
+    setIsCheckingSpreadsheet(true);
+    setSpreadsheetCheck(null);
+    try {
+      setSpreadsheetCheck(await checkSpreadsheetAccess(spreadsheetId));
+    } finally {
+      setIsCheckingSpreadsheet(false);
+    }
   };
 
   const handleEditUrl = (index: number, e?: React.MouseEvent) => {
@@ -2602,6 +2641,8 @@ export const SheetSearchModule: React.FC = () => {
     setEditingIndex(index);
     setNewUrlInput(config.url);
     setNewNameInput(config.ungetId || config.name);
+    setNewSpreadsheetInput(config.spreadsheetId || "");
+    setSpreadsheetCheck(null);
     setTempSubscribedUsernames([...subscribedUsernames]);
     setIsConfigOpen(true);
   };
@@ -2624,6 +2665,8 @@ export const SheetSearchModule: React.FC = () => {
     setEditingIndex(targetIdx !== -1 ? targetIdx : null);
     setNewUrlInput(config.url);
     setNewNameInput(config.ungetId || config.name);
+    setNewSpreadsheetInput(config.spreadsheetId || "");
+    setSpreadsheetCheck(null);
     setIsConfigOpen(true);
   };
 
@@ -2772,10 +2815,11 @@ export const SheetSearchModule: React.FC = () => {
     type SheetPayload = { name?: string; spreadsheetId?: string; data?: any[] };
     let directPayload: SheetPayload | null = null;
     const gid = getCleanSourceId(source.id);
-    if (canReadSheetDirect(source.spreadsheetId, gid)) {
+    const spreadsheetId = source.spreadsheetId || config.spreadsheetId;
+    if (canReadSheetDirect(spreadsheetId, gid)) {
       try {
-        const directRows = await fetchSheetRowsDirect(source.spreadsheetId!, gid);
-        directPayload = { name: realSheetName, spreadsheetId: source.spreadsheetId, data: directRows };
+        const directRows = await fetchSheetRowsDirect(spreadsheetId!, gid);
+        directPayload = { name: realSheetName, spreadsheetId, data: directRows };
       } catch (directErr: any) {
         console.warn(
           `Lectura directa de ${source.name} no disponible; se usa Apps Script:`,
@@ -2906,11 +2950,19 @@ export const SheetSearchModule: React.FC = () => {
   const prefetchPendingSheets = async () => {
     if (prefetchRef.current.running || !prefetchRef.current.enabled) return;
 
-    const pending = sources.filter(
-      (source) =>
-        !dataBySource.has(source.id) &&
-        canReadSheetDirect(source.spreadsheetId, getCleanSourceId(source.id)),
-    );
+    // Solo la UNGET abierta: con varias UNGET a la vista serían cientos de hojas.
+    if (selectedUngetIndex === null) return;
+    const pending = sources
+      .filter(
+        (source) =>
+          source.urlIndex === selectedUngetIndex &&
+          !dataBySource.has(source.id) &&
+          canReadSheetDirect(
+            source.spreadsheetId || scriptUrls[source.urlIndex]?.spreadsheetId,
+            getCleanSourceId(source.id),
+          ),
+      )
+      .slice(0, PREFETCH_MAX_SHEETS);
     if (pending.length === 0) return;
 
     const shouldPause = () =>
@@ -4505,6 +4557,42 @@ function processSheet(sheet) {
                                 className="w-full text-[10px] sm:text-xs rounded-xl border-gray-200 focus:border-teal-500 focus:ring-teal-500 shadow-sm py-2.5 px-3 font-mono bg-gray-50/50"
                               />
                             </div>
+                            <div className="space-y-1">
+                              <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
+                                Hoja de cálculo (opcional, más rápido)
+                              </label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="url"
+                                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                                  value={newSpreadsheetInput}
+                                  onChange={(e) => {
+                                    setNewSpreadsheetInput(e.target.value);
+                                    setSpreadsheetCheck(null);
+                                  }}
+                                  className="flex-1 min-w-0 text-[10px] sm:text-xs rounded-xl border-gray-200 focus:border-teal-500 focus:ring-teal-500 shadow-sm py-2.5 px-3 font-mono bg-gray-50/50"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleCheckSpreadsheet}
+                                  disabled={isCheckingSpreadsheet || !newSpreadsheetInput.trim()}
+                                  className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 font-black text-[10px] uppercase tracking-wider transition-all shrink-0"
+                                >
+                                  {isCheckingSpreadsheet ? "Probando..." : "Probar"}
+                                </button>
+                              </div>
+                              {spreadsheetCheck ? (
+                                <p
+                                  className={`text-[9px] font-bold ml-1 ${spreadsheetCheck.ok ? "text-emerald-600" : "text-amber-600"}`}
+                                >
+                                  {spreadsheetCheck.message}
+                                </p>
+                              ) : (
+                                <p className="text-[9px] text-gray-400 ml-1 font-medium">
+                                  Comparta la hoja como "Cualquiera con el enlace: Lector". Sin esto, la UNGET sigue funcionando por Apps Script, pero más lento.
+                                </p>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -4529,6 +4617,8 @@ function processSheet(sheet) {
                                   setEditingIndex(null);
                                   setNewUrlInput("");
                                   setNewNameInput("");
+                                  setNewSpreadsheetInput("");
+                                  setSpreadsheetCheck(null);
                                 }}
                                 className="px-4 py-2.5 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200 transition-all font-bold text-[10px] sm:text-xs uppercase tracking-wider"
                               >

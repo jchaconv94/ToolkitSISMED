@@ -124,3 +124,6 @@ dist-ssr
 # OS
 .DS_Store
 Thumbs.db
+
+# Configuración local de herramientas (Claude Code)
+.claude/
