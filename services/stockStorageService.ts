@@ -58,14 +58,88 @@ const parseCachedDate = (value?: string | null): number => {
   return Number.isNaN(native) ? 0 : native;
 };
 
-const repairCachedSources = (sources: SheetSource[]): SheetSource[] =>
-  sources.map((source) => {
+const normalizeFieldName = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+
+const readRowValue = (row: Record<string, unknown>, aliases: string[]): string => {
+  for (const alias of aliases) {
+    if (row[alias] !== undefined && row[alias] !== null && String(row[alias]).trim() !== "") {
+      return String(row[alias]).trim();
+    }
+  }
+
+  const normalizedAliases = new Set(aliases.map(normalizeFieldName));
+  const matchingKey = Object.keys(row).find((key) => normalizedAliases.has(normalizeFieldName(key)));
+  if (!matchingKey) return "";
+
+  const value = row[matchingKey];
+  return value === undefined || value === null ? "" : String(value).trim();
+};
+
+/**
+ * Recupera fechas desde las propias filas cacheadas cuando una versión antigua guardó
+ * el source sin lastUpdate/lastUpdateTime. Esto permite reparar el estado de la tarjeta
+ * sin volver a descargar cientos de registros desde Google Sheets.
+ */
+const getSourceDatesFromCachedRows = (
+  sourceId: string,
+  rowsBySource: Map<string, SIGData[]>,
+): { lastUpdate: string; equipmentDate: string } => {
+  const rows = rowsBySource.get(sourceId) || [];
+
+  for (const rawRow of rows) {
+    const row = rawRow as unknown as Record<string, unknown>;
+    const lastUpdate = readRowValue(row, [
+      "ULTIMA_ACTUALIZACION",
+      "ULTIMA ACTUALIZACION",
+      "Ultima_Actualizacion",
+      "ultima_actualizacion",
+    ]);
+    const equipmentDate = readRowValue(row, [
+      "FECHA_DEL_EQUIPO",
+      "FECHA DEL EQUIPO",
+      "Fecha_Del_Equipo",
+      "fecha_equipo",
+    ]);
+
+    if (lastUpdate || equipmentDate) {
+      return { lastUpdate, equipmentDate };
+    }
+  }
+
+  return { lastUpdate: "", equipmentDate: "" };
+};
+
+const repairCachedSources = (sources: SheetSource[], data: SIGData[]): SheetSource[] => {
+  const rowsBySource = new Map<string, SIGData[]>();
+  for (const row of data) {
+    const sourceId = String(row.sourceId || "").trim();
+    if (!sourceId) continue;
+    const list = rowsBySource.get(sourceId);
+    if (list) list.push(row);
+    else rowsBySource.set(sourceId, [row]);
+  }
+
+  return sources.map((source) => {
+    const fallbackDates =
+      source.lastUpdate && source.equipmentDate
+        ? { lastUpdate: "", equipmentDate: "" }
+        : getSourceDatesFromCachedRows(source.id, rowsBySource);
+
+    const repairedLastUpdate = source.lastUpdate || fallbackDates.lastUpdate || undefined;
+    const repairedEquipmentDate = source.equipmentDate || fallbackDates.equipmentDate || undefined;
     const repairedLastUpdateTime =
-      source.lastUpdateTime || parseCachedDate(source.lastUpdate || null) || undefined;
+      source.lastUpdateTime || parseCachedDate(repairedLastUpdate || null) || undefined;
     const repairedEquipmentDateTime =
-      source.equipmentDateTime || parseCachedDate(source.equipmentDate || null) || undefined;
+      source.equipmentDateTime || parseCachedDate(repairedEquipmentDate || null) || undefined;
 
     if (
+      repairedLastUpdate === source.lastUpdate &&
+      repairedEquipmentDate === source.equipmentDate &&
       repairedLastUpdateTime === source.lastUpdateTime &&
       repairedEquipmentDateTime === source.equipmentDateTime
     ) {
@@ -74,10 +148,13 @@ const repairCachedSources = (sources: SheetSource[]): SheetSource[] =>
 
     return {
       ...source,
+      lastUpdate: repairedLastUpdate,
+      equipmentDate: repairedEquipmentDate,
       lastUpdateTime: repairedLastUpdateTime,
       equipmentDateTime: repairedEquipmentDateTime,
     };
   });
+};
 
 export const stockStorageService = {
   /**
@@ -126,18 +203,28 @@ export const stockStorageService = {
   /**
    * Carga inmediatamente el dataset de existencias en caché desde IndexedDB.
    * También repara cachés creadas por versiones antiguas que guardaban la fecha en texto
-   * pero no el timestamp usado por las tarjetas de estado (evita falsos "Sin datos").
+   * o solamente dentro de las filas, pero no el timestamp usado por las tarjetas.
    */
   async loadStockData(username: string): Promise<CachedStockData | null> {
     if (!username) return null;
     try {
       const cached = await stockStore.getItem<CachedStockData>(`stock_${username}`);
       if (cached && Array.isArray(cached.data) && Array.isArray(cached.sources)) {
-        const repairedSources = repairCachedSources(cached.sources);
+        const repairedSources = repairCachedSources(cached.sources, cached.data);
         const repaired: CachedStockData = {
           ...cached,
           sources: repairedSources,
         };
+
+        // Si se reparó el source, persistir una sola vez la versión corregida. Así el
+        // siguiente arranque ya no necesita inspeccionar las filas para reconstruir fechas.
+        if (repairedSources.some((source, index) => source !== cached.sources[index])) {
+          const repairedPayload: CachedStockData = {
+            ...repaired,
+            savedAt: Date.now(),
+          };
+          await stockStore.setItem(`stock_${username}`, repairedPayload);
+        }
 
         // Marcar la versión cargada como la última persistida para que un cambio puramente
         // visual no provoque de inmediato otra serialización masiva del mismo dataset.
