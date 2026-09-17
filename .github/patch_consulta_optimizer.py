@@ -28,7 +28,12 @@ if old_header not in s:
 s = s.replace(old_header, new_header, 1)
 
 needle = "text = re.sub(r'\\n\\s*const syncRecord = supabaseSyncs\\[[^\\n]+\\];', '', text)"
-replacement = needle + "\ntext = re.sub(r'\\n\\s*const cleanSheetId = sheet\\.id\\.includes\\(\\\"_\\\"\\).*?;', '', text)\ntext = text.replace(', supabaseSyncs]', ']')\ntext = text.replace('supabaseSyncs,\\n', '')"
+replacement = needle + '''
+text = re.sub(r'\\n\\s*const cleanSheetId = sheet\\.id\\.includes\\(\\\"_\\\"\\).*?;', '', text)
+text = re.sub(r'\\n\\s*const syncRecord = supabaseSyncs\\[sheet\\.id\\] \\|\\| supabaseSyncs\\[cleanSheetId\\] \\|\\| \\(code \\? supabaseSyncs\\[code\\] : undefined\\);', '', text)
+text = re.sub(r'\\n\\s*<td className=\\\"px-5 py-3 whitespace-nowrap text-center\\\">\\s*\\{\\(\\(\\) => \\{\\s*const syncRecord =\\s*supabaseSyncs\\[sheet\\.id\\];.*?\\}\\)\\(\\)\\}\\s*</td>', '', text, flags=re.S)
+text = text.replace(', supabaseSyncs]', ']')
+text = text.replace('supabaseSyncs,\\n', '')'''
 if needle not in s:
     raise RuntimeError('No se encontró limpieza syncRecord')
 s = s.replace(needle, replacement, 1)
