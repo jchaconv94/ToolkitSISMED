@@ -15,7 +15,7 @@
  */
 
 const STOCK_SPREADSHEET_ID = '1vic6MeMiA5Jk4_UWx8nI462yXe8irgxAoMncJiekOOA';
-const STOCK_METADATA_CACHE_KEY = 'toolkit_sismed_stock_metadata_v4';
+const STOCK_METADATA_CACHE_KEY = 'toolkit_sismed_stock_metadata_v5';
 const STOCK_METADATA_CACHE_SECONDS = 30;
 
 function doGet(e) {
@@ -111,6 +111,35 @@ function findHeaderIndex_(headers, aliases) {
   return -1;
 }
 
+/**
+ * Resuelve el código oficial del establecimiento sin asumir siempre 5 caracteres.
+ *
+ * Casos actuales:
+ *   FARM - P.S. SANTA ELENA-06523        -> 06523
+ *   ALM. ANEXO ... -030S05               -> 030S05
+ *
+ * Se prioriza el sufijo del nombre de la hoja porque representa el código con el que
+ * el establecimiento está registrado en la aplicación. El ALMCOD puede incluir además
+ * el código interno de farmacia/almacén (F01, 01, etc.).
+ */
+function getFacilityCode_(sheetName, almcod) {
+  const name = String(sheetName || '').trim();
+  const suffixMatch = name.match(/-([A-Z0-9]+)\s*$/i);
+  if (suffixMatch && suffixMatch[1]) {
+    return suffixMatch[1].toUpperCase();
+  }
+
+  const code = String(almcod || '').trim().toUpperCase();
+  if (!code) return '';
+
+  // RENIPRESS numérico habitual: 5 dígitos antes del código interno del almacén.
+  const numericMatch = code.match(/^(\d{5})(?=[A-Z]|\d{2,}$)/);
+  if (numericMatch) return numericMatch[1];
+
+  // Fallback conservador para integraciones antiguas.
+  return code.length >= 5 ? code.substring(0, 5) : code;
+}
+
 function getSheetList_(ss) {
   const sheets = ss.getSheets();
   return sheets.map(function (sheet) {
@@ -188,8 +217,7 @@ function getMetadata_(ss, forceRefresh) {
       lastUpdate: idxLastUpdate >= 0 ? String(firstRow[idxLastUpdate] || '').trim() : '',
       equipmentDate: idxEquipment >= 0 ? String(firstRow[idxEquipment] || '').trim() : '',
       almcod: almcod,
-      // RENIPRESS/IPRESS: los primeros cinco caracteres en códigos como 06523F0101.
-      codigoIpress: almcod.length >= 5 ? almcod.substring(0, 5) : almcod,
+      codigoIpress: getFacilityCode_(sheet.getName(), almcod),
       rowCount: base.rowCount
     };
   }
