@@ -9222,6 +9222,25 @@ function processSheet(sheet) {
         </div>
       )}
 
+      {/* Floating Deficiency Capture Bar when in Capture Mode */}
+      {isCaptureMode && viewLevel === "sheets" && (
+        <DeficiencyCaptureBar
+          selectedCount={selectedCaptureIds.size}
+          totalVisibleCount={filteredAndSortedSources.length}
+          deficiencyCount={deficiencyCount}
+          onSelectAll={handleSelectAllCapture}
+          onDeselectAll={handleDeselectAllCapture}
+          onAutoSelectDeficiencies={handleAutoSelectDeficiencies}
+          onOpenPreview={() => setIsCaptureModalOpen(true)}
+          onDirectDownload={() => setIsCaptureModalOpen(true)}
+          onDirectCopy={() => setIsCaptureModalOpen(true)}
+          onExit={() => {
+            setIsCaptureMode(false);
+            setSelectedCaptureIds(new Set());
+          }}
+        />
+      )}
+
       {/* Deficiency Capture Modal (Preview & Image Generation) */}
       <DeficiencyCaptureModal
         isOpen={isCaptureModalOpen}
