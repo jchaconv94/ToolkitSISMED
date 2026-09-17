@@ -4,6 +4,8 @@ Guía de contexto para agentes de IA que trabajen en este repositorio. Última a
 
 > **Lee la sección 8 antes de escribir cualquier componente o utilidad.** El error más caro que ha cometido una IA en este proyecto es volver a escribir algo que ya existía: llegó a haber cinco `HeaderCell` distintos, cuatro `formatDate` y seis `Field`. Antes de crear una tarjeta, un formateador, una celda de tabla o una regla de negocio, **búscala** en `components/ui/immunization.tsx` y `services/immunizationDomain.ts`.
 
+> **FRONTERA CRÍTICA DE STOCK (no mezclar):** `SIG_SEARCH` / `SheetSearchModule` (**Consulta Stock**) usa exclusivamente **Google Sheets → Google Apps Script → IndexedDB** para medicamentos, lotes, saldos, vencimientos y actualización. `STOCK_MONITORING` / `IpressStockModule` (**Monitoreo de Stock**) usa **Supabase (`stock_actual`)** y es independiente. **No introducir fallbacks cruzados, no leer `stock_actual` desde Consulta Stock y no registrar sus hojas en `stock_sync_history`.** Supabase puede alojar configuración general, pero no es la fuente de inventario de `SIG_SEARCH`.
+
 ---
 
 ## 1. Qué es este proyecto

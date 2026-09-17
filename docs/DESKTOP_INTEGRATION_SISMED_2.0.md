@@ -1,5 +1,11 @@
 # Especificaciones de Integración: Toolkit SISMED Desktop 2.0 -> App Web SISMED 2.0
 
+> ## Regla de arquitectura: Consulta Stock y Monitoreo Stock son independientes
+> - **Consulta Stock (`SIG_SEARCH` / `SheetSearchModule`)**: Google Sheets → Google Apps Script → IndexedDB → web. No consume `stock_actual` ni `stock_sync_history` como fuente de inventario.
+> - **Monitoreo de Stock (`STOCK_MONITORING` / `IpressStockModule`)**: Supabase (`stock_actual`) → web. Es un módulo independiente.
+> - No crear fallbacks cruzados entre ambos módulos.
+
+
 Este documento detalla la interfaz de comunicación y las expectativas del backend (Supabase) para la sincronización directa del stock utilizando el módulo Desktop "Sync SISMED 2.0".
 
 El objetivo principal es enviar la información del stock extraído de los archivos DBF del SISMED local directamente a la base de datos centralizada en Supabase a través de una Edge Function.
