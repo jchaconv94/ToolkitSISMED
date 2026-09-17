@@ -294,6 +294,8 @@ export interface GasSheetMetadata {
   almcod?: string;
   codigoIpress?: string;
   rowCount?: number;
+  /** ID del libro de Google Sheets; habilita la lectura directa (sheetsDirectService). */
+  spreadsheetId?: string;
 }
 
 type MetadataCacheEntry = {

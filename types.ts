@@ -772,6 +772,8 @@ export interface SheetSource {
   rowCount?: number;
   /** Código estable de IPRESS usado como llave preferente del historial en Supabase. */
   facilityCode?: string;
+  /** ID del libro de Google Sheets (lo informa getMetadata); permite leer la pestaña directamente. */
+  spreadsheetId?: string;
 }
 
 export interface SIGData {
