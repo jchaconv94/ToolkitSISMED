@@ -18,6 +18,18 @@ jobs:
           ref: fix-consulta-stock-runtime-v2
           fetch-depth: 0
 
+      - name: Corregir patcher
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('.github/scripts/fix_consulta_stock_runtime_v2.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'end = supa.index("  /**\\n   * Fetch full sync history log", start)'
+          new = 'end = supa.index(adapt("  /**\\n   * Fetch full sync history log", unl), start)'
+          if old not in text:
+              raise RuntimeError('No se encontró el marcador de supabaseClient en el patcher')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
       - name: Aplicar corrección focalizada
         run: python .github/scripts/fix_consulta_stock_runtime_v2.py
 
