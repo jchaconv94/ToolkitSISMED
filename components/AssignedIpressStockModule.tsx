@@ -153,15 +153,22 @@ const findAssignedSheetRows = (payload: unknown, sheetName: string): StockRow[] 
   return [];
 };
 
-const getFetchUrl = (url: string) => {
+/**
+ * Construye una petición selectiva al backend de stock.
+ * Antes este módulo llamaba a la raíz de la Web App, lo que descargaba las 22 hojas
+ * aunque el usuario solo tuviera asignada una IPRESS.
+ */
+const getFetchUrl = (url: string, sheetName: string) => {
   try {
     const parsed = new URL(url);
-    parsed.searchParams.delete("action");
-    parsed.searchParams.set("t", String(Date.now()));
+    parsed.searchParams.delete("sheets");
+    parsed.searchParams.set("action", "getStock");
+    parsed.searchParams.set("sheet", sheetName);
+    parsed.searchParams.set("_t", String(Date.now()));
     return parsed.toString();
   } catch {
     const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}t=${Date.now()}`;
+    return `${url}${separator}action=getStock&sheet=${encodeURIComponent(sheetName)}&_t=${Date.now()}`;
   }
 };
 
@@ -224,7 +231,7 @@ export const AssignedIpressStockModule: React.FC = () => {
         return;
       }
 
-      const response = await fetch(getFetchUrl(currentAssignment.sheetUrl));
+      const response = await fetch(getFetchUrl(currentAssignment.sheetUrl, currentAssignment.sheetName));
       if (!response.ok) throw new Error(`La conexión respondió HTTP ${response.status}`);
       const payload: unknown = await response.json();
       const sheetRows = findAssignedSheetRows(payload, currentAssignment.sheetName);
