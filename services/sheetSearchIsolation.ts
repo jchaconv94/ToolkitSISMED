@@ -22,9 +22,15 @@ export const sheetSearchSyncService = {
     currentStock: any[];
     author: string;
     sheetLastUpdateDate?: string | number;
-  }) {
+  }): Promise<{
+    success: boolean;
+    record?: any;
+    hasChangesSinceLast: boolean;
+    message?: string;
+  }> {
     return {
       success: false,
+      record: undefined,
       hasChangesSinceLast: false,
       message: "Consulta Stock usa Google Sheets y no registra snapshots en Supabase.",
     };
