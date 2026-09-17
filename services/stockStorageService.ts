@@ -1,5 +1,6 @@
 import localforage from "localforage";
 import { SheetSource, SIGData, UngetConfig } from "../types";
+import { parseSheetDateTime } from "./stockSyncHistory";
 
 // Configurar instancia aislada de localforage para Stock SIG
 const stockStore = localforage.createInstance({
@@ -68,32 +69,8 @@ const removeLegacyIndexedDbStockCache = async (username: string) => {
   }
 };
 
-const parseCachedDate = (value?: string | null): number => {
-  if (!value) return 0;
-  const raw = String(value).trim();
-  if (!raw) return 0;
-
-  // Formato habitual del SISMED / Google Sheets: DD/MM/YYYY HH:MM:SS
-  const match = raw.match(
-    /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/,
-  );
-  if (match) {
-    const [, day, month, year, hour = "0", minute = "0", second = "0"] = match;
-    const d = new Date(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hour),
-      Number(minute),
-      Number(second),
-    );
-    const ts = d.getTime();
-    if (!Number.isNaN(ts)) return ts;
-  }
-
-  const native = new Date(raw).getTime();
-  return Number.isNaN(native) ? 0 : native;
-};
+// Formato habitual del SISMED / Google Sheets: DD/MM/YYYY HH:MM:SS (nunca MM/DD).
+const parseCachedDate = parseSheetDateTime;
 
 const normalizeFieldName = (value: string) =>
   value

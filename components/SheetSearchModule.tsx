@@ -61,6 +61,7 @@ import {
   fetchGasSingleSheet,
 } from "../services/gasConnectionService";
 import { stockStorageService } from "../services/stockStorageService";
+import { findLatestValidSync } from "../services/stockSyncHistory";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -1647,10 +1648,9 @@ export const SheetSearchModule: React.FC = () => {
 
     setIsCheckingLatestSyncs(true);
     try {
-      const allPossibleIds = Array.from(
-        new Set(targetSources.flatMap((source) => getHistoryKeysForSource(source))),
-      );
-      const latestSyncs = await supabaseService.getLatestSyncs(allPossibleIds);
+      const keyGroups = targetSources.map((source) => getHistoryKeysForSource(source));
+      const allPossibleIds = Array.from(new Set(keyGroups.flat()));
+      const latestSyncs = await supabaseService.getLatestSyncs(allPossibleIds, keyGroups);
       const mappedSyncs: Record<string, any> = { ...latestSyncs };
 
       targetSources.forEach((source) => {
@@ -1717,8 +1717,8 @@ export const SheetSearchModule: React.FC = () => {
       }
 
       setSelectedFacilitySyncHistory(history || []);
-      if (history.length > 0) {
-        const latest = history[0];
+      const latest = findLatestValidSync(history);
+      if (latest) {
         setSupabaseSyncs((prev) => ({
           ...prev,
           [source.id]: latest,

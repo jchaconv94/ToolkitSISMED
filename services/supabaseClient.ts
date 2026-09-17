@@ -1,4 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
+import {
+  STOCK_SYNC_LIGHT_COLUMNS,
+  findGroupsWithoutSync,
+  getSyncDateCutoffIso,
+  pickLatestSyncs,
+  resolveSyncDateIso,
+} from "./stockSyncHistory";
 
 // Supabase Connection Configuration
 // If environment variables are not yet provided, we will fail gracefully and allow offline or mock checks
@@ -193,74 +200,102 @@ export interface StockSyncRecord {
   last_modification_date?: string; // Added to track when the last modification happened
 }
 
+/** Tope explícito por consulta; coincide con el máximo por defecto de PostgREST en Supabase. */
+const LATEST_SYNCS_BULK_LIMIT = 1000;
+/** IDs por consulta `in.(...)`, para no exceder el largo de URL con muchos establecimientos. */
+const LATEST_SYNCS_ID_CHUNK = 100;
+const LATEST_SYNCS_MAX_FALLBACK_QUERIES = 60;
+const LATEST_SYNCS_FALLBACK_CONCURRENCY = 6;
+
 /**
  * Service to manage Supabase synchronization state
  */
 export const supabaseService = {
   /**
-   * Fetches the latest stock synchronization records for all establishments
+   * Último registro válido de historial por establecimiento.
+   *
+   * `keyGroups` (opcional) agrupa las claves que pertenecen a un mismo establecimiento
+   * (facilityCode e IDs legacy) para no repetir consultas cuando ya se encontró una.
    */
   async getLatestSyncs(
     establishmentIds?: string[],
+    keyGroups?: string[][],
   ): Promise<Record<string, StockSyncRecord>> {
     if (!supabase) return {};
+    const client = supabase;
+    const cutoffIso = getSyncDateCutoffIso();
     try {
-      const latestMap: Record<string, StockSyncRecord> = {};
-
       if (establishmentIds && establishmentIds.length > 0) {
         const uniqueIds = Array.from(new Set(establishmentIds.filter(Boolean)));
-        if (uniqueIds.length === 0) return latestMap;
+        if (uniqueIds.length === 0) return {};
 
-        // Una sola consulta para todos los establecimientos; se conserva el más reciente de cada uno.
-        const { data, error } = await supabase
-          .from("stock_sync_history")
-          .select("id,establishment_id,establishment_name,sync_date,record_count,stock_hash,has_changes,changed_items_count,sync_author,created_at")
-          .in("establishment_id", uniqueIds)
-          .order("sync_date", { ascending: false });
+        const latestMap: Record<string, StockSyncRecord> = {};
+        let truncated = false;
 
-        if (error) throw error;
-        (data || []).forEach((row: StockSyncRecord) => {
-          if (!latestMap[row.establishment_id]) {
-            latestMap[row.establishment_id] = row;
-          }
-          if (
-            row.has_changes &&
-            !latestMap[row.establishment_id].last_modification_date
-          ) {
-            latestMap[row.establishment_id].last_modification_date = row.sync_date;
-          }
-        });
+        for (let i = 0; i < uniqueIds.length; i += LATEST_SYNCS_ID_CHUNK) {
+          const chunk = uniqueIds.slice(i, i + LATEST_SYNCS_ID_CHUNK);
+          const { data, error } = await client
+            .from("stock_sync_history")
+            .select(STOCK_SYNC_LIGHT_COLUMNS)
+            .in("establishment_id", chunk)
+            .lte("sync_date", cutoffIso)
+            .order("sync_date", { ascending: false })
+            .limit(LATEST_SYNCS_BULK_LIMIT);
+
+          if (error) throw error;
+          const rows = (data || []) as StockSyncRecord[];
+          Object.assign(latestMap, pickLatestSyncs(rows));
+          if (rows.length >= LATEST_SYNCS_BULK_LIMIT) truncated = true;
+        }
+
+        // Las hojas se actualizan constantemente, así que las filas recientes de unas pocas
+        // IPRESS pueden llenar el tope. Quien aparece en el lote ya trae su último registro
+        // (el orden es descendente); solo los ausentes se consultan por separado.
+        if (truncated) {
+          const pendingGroups = findGroupsWithoutSync(uniqueIds, latestMap, keyGroups)
+            .slice(0, LATEST_SYNCS_MAX_FALLBACK_QUERIES);
+          const queue = [...pendingGroups];
+          const worker = async () => {
+            for (let group = queue.shift(); group; group = queue.shift()) {
+              const { data, error } = await client
+                .from("stock_sync_history")
+                .select(STOCK_SYNC_LIGHT_COLUMNS)
+                .in("establishment_id", group)
+                .lte("sync_date", cutoffIso)
+                .order("sync_date", { ascending: false })
+                .limit(1);
+              if (error) {
+                console.error("Historial Supabase: no se pudo leer", group, error.message);
+                continue;
+              }
+              Object.assign(latestMap, pickLatestSyncs((data || []) as StockSyncRecord[]));
+            }
+          };
+          await Promise.all(
+            Array.from({ length: Math.min(LATEST_SYNCS_FALLBACK_CONCURRENCY, queue.length) }, worker),
+          );
+        }
+
         return latestMap;
       }
 
-      // Fallback: Query the latest records generally (this is unsafe if table is large, but kept for completeness if no IDs passed)
-      const { data, error } = await supabase
+      // Sin IDs: consulta general acotada, conservada por compatibilidad.
+      const { data, error } = await client
         .from("stock_sync_history")
-        .select("id,establishment_id,establishment_name,sync_date,record_count,stock_hash,has_changes,changed_items_count,sync_author,created_at")
+        .select(STOCK_SYNC_LIGHT_COLUMNS)
+        .lte("sync_date", cutoffIso)
         .order("sync_date", { ascending: false })
         .limit(10000);
 
       if (error) throw error;
-      if (!data) return {};
-
-      // Map to an object keyed by establishment_id of the actual LATEST record
-      data.forEach((row: StockSyncRecord) => {
-        if (!latestMap[row.establishment_id]) {
-          latestMap[row.establishment_id] = row;
-        }
-
-        // Also keep track of the most recent actual modification date!
-        if (
-          row.has_changes &&
-          !latestMap[row.establishment_id].last_modification_date
-        ) {
-          latestMap[row.establishment_id].last_modification_date =
-            row.sync_date;
-        }
-      });
-      return latestMap;
-    } catch (e) {
-      console.warn("Error fetching latest syncs from Supabase:", e);
+      return pickLatestSyncs((data || []) as StockSyncRecord[]);
+    } catch (e: any) {
+      // Supabase no debe bloquear la consulta de stock, pero el fallo tiene que verse:
+      // un 400 silencioso dejó todas las tarjetas en "Sin verificar".
+      console.error(
+        "Historial Supabase: error al consultar stock_sync_history:",
+        e?.message || e,
+      );
       return {};
     }
   },
@@ -322,16 +357,18 @@ export const supabaseService = {
     try {
       const stockHash = computeStockHash(currentStock);
 
-      // Determine the sync_date to use based on the sheet's actual last update time if provided
-      const finalSyncDate = sheetLastUpdateDate
-        ? new Date(sheetLastUpdateDate).toISOString()
-        : new Date().toISOString();
+      // Fecha de la última actualización de la hoja. Una fecha ilegible o futura ya no
+      // rompe el registro (`new Date(...).toISOString()` lanzaba RangeError) ni se guarda
+      // en el futuro; en esos casos se usa el momento actual.
+      const finalSyncDate = resolveSyncDateIso(sheetLastUpdateDate);
 
-      // 1. Get the last record for this establishment from Supabase
+      // 1. Último registro válido. Los que tienen fecha futura se ignoran: si no, cada
+      // cambio nuevo se compararía contra ese snapshot hasta que llegue su fecha.
       const { data: previousRecords, error: prevError } = await supabase
         .from("stock_sync_history")
         .select("*")
         .eq("establishment_id", establishmentId)
+        .lte("sync_date", getSyncDateCutoffIso())
         .order("sync_date", { ascending: false })
         .limit(1);
 
