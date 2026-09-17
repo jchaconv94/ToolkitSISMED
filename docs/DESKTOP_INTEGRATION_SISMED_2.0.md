@@ -1,7 +1,7 @@
 # Especificaciones de Integración: Toolkit SISMED Desktop 2.0 -> App Web SISMED 2.0
 
 > ## Regla de arquitectura: Consulta Stock y Monitoreo Stock son independientes
-> - **Consulta Stock (`SIG_SEARCH` / `SheetSearchModule`)**: Google Sheets → Google Apps Script → IndexedDB → web. No consume `stock_actual` ni `stock_sync_history` como fuente de inventario.
+> - **Consulta Stock (`SIG_SEARCH` / `SheetSearchModule`)**: Google Sheets → Google Apps Script → IndexedDB → web para el inventario. No consume `stock_actual`. Supabase `stock_sync_history` se usa únicamente para guardar y consultar el historial/auditoría de cambios derivados de esos snapshots de Google Sheets.
 > - **Monitoreo de Stock (`STOCK_MONITORING` / `IpressStockModule`)**: Supabase (`stock_actual`) → web. Es un módulo independiente.
 > - No crear fallbacks cruzados entre ambos módulos.
 

@@ -381,7 +381,6 @@ export const DeficiencyCaptureModal: React.FC<DeficiencyCaptureModalProps> = ({
                       <EstablishmentCard
                         data={item}
                         isStaticPreview={true}
-                        showHistoryRow={false}
                         className="h-full shadow-xs"
                       />
                     </div>

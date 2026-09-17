@@ -208,32 +208,26 @@ export const supabaseService = {
       const latestMap: Record<string, StockSyncRecord> = {};
 
       if (establishmentIds && establishmentIds.length > 0) {
-        // Guaranteed to fetch the latest sync for EACH requested establishment
-        const promises = establishmentIds.map(async (id) => {
-          const { data, error } = await supabase!
-            .from("stock_sync_history")
-            .select("*")
-            .eq("establishment_id", id)
-            .order("sync_date", { ascending: false })
-            .limit(1);
+        const uniqueIds = Array.from(new Set(establishmentIds.filter(Boolean)));
+        if (uniqueIds.length === 0) return latestMap;
 
-          if (!error && data && data.length > 0) {
-            return data[0];
-          }
-          return null;
-        });
+        // Una sola consulta para todos los establecimientos; se conserva el más reciente de cada uno.
+        const { data, error } = await supabase
+          .from("stock_sync_history")
+          .select("*")
+          .in("establishment_id", uniqueIds)
+          .order("sync_date", { ascending: false });
 
-        const results = await Promise.all(promises);
-        results.forEach((row) => {
-          if (row) {
+        if (error) throw error;
+        (data || []).forEach((row: StockSyncRecord) => {
+          if (!latestMap[row.establishment_id]) {
             latestMap[row.establishment_id] = row;
-            if (
-              row.has_changes &&
-              !latestMap[row.establishment_id].last_modification_date
-            ) {
-              latestMap[row.establishment_id].last_modification_date =
-                row.sync_date;
-            }
+          }
+          if (
+            row.has_changes &&
+            !latestMap[row.establishment_id].last_modification_date
+          ) {
+            latestMap[row.establishment_id].last_modification_date = row.sync_date;
           }
         });
         return latestMap;

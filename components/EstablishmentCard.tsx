@@ -170,7 +170,6 @@ interface EstablishmentCardProps {
   onClick?: () => void;
   onShowHistory?: (e: React.MouseEvent) => void;
   isStaticPreview?: boolean;
-  showHistoryRow?: boolean;
   className?: string;
 }
 
@@ -182,7 +181,6 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
   onClick,
   onShowHistory,
   isStaticPreview = false,
-  showHistoryRow = true,
   className = "",
 }) => {
   const {
@@ -344,8 +342,7 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
             </div>
           ) : null}
 
-          {/* Fila de historial opcional: cada módulo decide si posee una fuente histórica */}
-          {showHistoryRow && (
+          {/* Movements / Supabase Row */}
           <div
             className="w-full mt-2.5 pt-2.5 border-t border-slate-100 flex flex-col gap-2 relative z-20"
             onClick={(e) => {
@@ -413,7 +410,6 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
               </div>
             )}
           </div>
-          )}
         </div>
       </div>
 
