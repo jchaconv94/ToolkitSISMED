@@ -27,6 +27,24 @@ s = s[:modal_start] + s[modal_end:]
 
 if old not in s:
     raise RuntimeError("No se encontró el bloque del modal que debía ajustarse")
+s = s.replace(old, new, 1)
 
-path.write_text(s.replace(old, new, 1), encoding="utf-8")
+anchor = '''# Verificación estricta: Consulta Stock ya no debe tener acoplamiento directo al historial
+# de Supabase. api.* se conserva porque configuración/usuarios/jurisdicción sí viven allí.
+'''
+extra = '''# Retirar resets de los filtros de movimientos en botones "Limpiar" / "Restablecer".
+s, movement_reset_count = re.subn(
+    r'\\n\\s*setFilterMovementsUnit\\("hours"\\);\\n\\s*setFilterMovementsValue\\(0\\);\\n\\s*setFilterMovementsCondition\\("with"\\);',
+    '',
+    s,
+)
+if movement_reset_count == 0:
+    raise RuntimeError('No se encontraron resets de filtro de movimientos para limpiar')
+
+'''
+if anchor not in s:
+    raise RuntimeError("No se encontró el ancla para limpiar resets de movimientos")
+s = s.replace(anchor, extra + anchor, 1)
+
+path.write_text(s, encoding="utf-8")
 print("Patch script ajustado.")
