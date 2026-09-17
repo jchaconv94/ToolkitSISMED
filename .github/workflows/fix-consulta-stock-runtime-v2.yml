@@ -33,6 +33,21 @@ jobs:
       - name: Aplicar corrección focalizada
         run: python .github/scripts/fix_consulta_stock_runtime_v2.py
 
+      - name: Ajustar llamadas legacy del historial
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          path = Path('components/SheetSearchModule.tsx')
+          text = path.read_text(encoding='utf-8')
+          text, count = re.subn(
+              r'handleShowSyncHistory\(\s*sheet\.id\s*,\s*sheet\.name\s*,?\s*\)',
+              'handleShowSyncHistory(sheet)',
+              text,
+          )
+          print(f'Llamadas legacy ajustadas: {count}')
+          path.write_text(text, encoding='utf-8')
+
       - name: Configurar Node
         uses: actions/setup-node@v4
         with:
