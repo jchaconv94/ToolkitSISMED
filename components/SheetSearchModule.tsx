@@ -4557,7 +4557,8 @@ function processSheet(sheet) {
                                 className="w-full text-[10px] sm:text-xs rounded-xl border-gray-200 focus:border-teal-500 focus:ring-teal-500 shadow-sm py-2.5 px-3 font-mono bg-gray-50/50"
                               />
                             </div>
-                            <div className="space-y-1">
+                            {/* Ocupa las dos columnas: el enlace de Google Sheets es largo. */}
+                            <div className="space-y-1 sm:col-span-2">
                               <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
                                 Hoja de cálculo (opcional, más rápido)
                               </label>
