@@ -24,6 +24,9 @@ jobs:
         with:
           node-version: 20
 
+      - name: Ajustar script de parche
+        run: python3 scripts/fix_patch_consulta_stock_phase4.py
+
       - name: Aplicar parche
         run: python3 scripts/patch_consulta_stock_phase4.py
 
@@ -42,6 +45,7 @@ jobs:
       - name: Guardar cambios validados
         run: |
           rm scripts/patch_consulta_stock_phase4.py
+          rm scripts/fix_patch_consulta_stock_phase4.py
           rm .github/workflows/patch-consulta-stock-phase4.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
