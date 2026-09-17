@@ -319,6 +319,26 @@ export async function fetchGasMetadata(
 }
 
 /**
+ * Descarga una sola hoja mediante el endpoint exacto getStock.
+ * Es la ruta preferida cuando el usuario abre un establecimiento: evita leer el libro completo.
+ */
+export async function fetchGasSingleSheet(
+  rawUrl: string,
+  sheetName: string,
+  options: { timeoutMs?: number } = {}
+): Promise<any> {
+  const cleanUrl = normalizeGasBaseUrl(rawUrl || "");
+  const cleanSheetName = (sheetName || "").trim();
+  if (!cleanUrl || !cleanSheetName) return [];
+
+  const sep = cleanUrl.includes("?") ? "&" : "?";
+  const singleUrl = `${cleanUrl}${sep}action=getStock&sheet=${encodeURIComponent(cleanSheetName)}&_t=${Date.now()}`;
+  return await fetchGasWithResilience(singleUrl, {
+    timeoutMs: options.timeoutMs || 25000,
+  });
+}
+
+/**
  * Descarga selectiva únicamente de las hojas que cambiaron.
  */
 export async function fetchGasSelectiveSheets(

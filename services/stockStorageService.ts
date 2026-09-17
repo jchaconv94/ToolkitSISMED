@@ -11,12 +11,12 @@ const stockStore = localforage.createInstance({
 /**
  * Versión del esquema de caché de Consulta Stock.
  *
- * v3 fuerza una reconstrucción completa desde Google Sheets después de detectar cachés
- * históricas con fechas de vencimiento que podían conservar día/mes intercambiados.
+ * v4 reconstruye solo el directorio ligero desde metadata y evita reutilizar sources v3
+ * que no conocían el nombre real de hoja, rowCount ni la llave estable del historial.
  */
-const STOCK_DATA_CACHE_VERSION = 3;
+const STOCK_DATA_CACHE_VERSION = 4;
 const STOCK_DATA_CACHE_KEY_PREFIX = `stock_v${STOCK_DATA_CACHE_VERSION}_`;
-const LEGACY_STOCK_DATA_KEY_PREFIXES = ["stock_", "stock_v2_"];
+const LEGACY_STOCK_DATA_KEY_PREFIXES = ["stock_", "stock_v2_", "stock_v3_"];
 
 export interface CachedStockData {
   cacheVersion: number;
@@ -243,7 +243,7 @@ export const stockStorageService = {
    * También repara cachés creadas por versiones antiguas que guardaban la fecha en texto
    * o solamente dentro de las filas, pero no el timestamp usado por las tarjetas.
    *
-   * v3 usa un key nuevo. Si el usuario solo tiene un key antiguo, se limpia y se devuelve
+   * v4 usa un key nuevo. Si el usuario solo tiene un key antiguo, se limpia y se devuelve
    * null para obligar a Consulta Stock a reconstruirse desde Google Sheets / Apps Script.
    */
   async loadStockData(username: string): Promise<CachedStockData | null> {
