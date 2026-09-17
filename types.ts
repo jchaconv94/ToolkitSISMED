@@ -766,6 +766,8 @@ export interface SheetSource {
   lastUpdateTime?: number;
   equipmentDate?: string;
   equipmentDateTime?: number;
+  rowCount?: number;
+  facilityCode?: string;
 }
 
 export interface SIGData {

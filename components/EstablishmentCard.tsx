@@ -6,7 +6,6 @@ import {
   RefreshCw,
   Monitor,
   Package,
-  FileClock,
   Check,
   Square,
 } from "lucide-react";
@@ -22,9 +21,6 @@ export interface EstablishmentCardData {
   expiredCount: number;
   expiringThisMonthCount: number;
   totalItems: number;
-  syncRecordDate?: string | null;
-  hasSyncRecord?: boolean;
-  isCheckingSync?: boolean;
 }
 
 export const getCardUpdateStatus = (timestamp?: number | null) => {
@@ -168,7 +164,6 @@ interface EstablishmentCardProps {
   isSelected?: boolean;
   onToggleSelect?: () => void;
   onClick?: () => void;
-  onShowHistory?: (e: React.MouseEvent) => void;
   isStaticPreview?: boolean;
   className?: string;
 }
@@ -179,7 +174,6 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
   isSelected = false,
   onToggleSelect,
   onClick,
-  onShowHistory,
   isStaticPreview = false,
   className = "",
 }) => {
@@ -193,24 +187,11 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
     expiredCount,
     expiringThisMonthCount,
     totalItems,
-    syncRecordDate,
-    hasSyncRecord,
-    isCheckingSync,
   } = data;
 
   const statusObj = getCardUpdateStatus(lastUpdateTime);
   const isMismatch = !checkDatesMatch(lastUpdateTime, equipmentDateTime);
 
-  const formattedSyncDate = syncRecordDate
-    ? new Date(syncRecordDate).toLocaleString("es-PE", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      })
-    : null;
 
   const cardContent = (
     <div
@@ -342,74 +323,6 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
             </div>
           ) : null}
 
-          {/* Movements / Supabase Row */}
-          <div
-            className="w-full mt-2.5 pt-2.5 border-t border-slate-100 flex flex-col gap-2 relative z-20"
-            onClick={(e) => {
-              if (!isStaticPreview) e.stopPropagation();
-            }}
-          >
-            {isCheckingSync ? (
-              <div className="flex items-center justify-between bg-white border border-slate-200/80 shadow-3xs rounded-lg p-1.5 px-2">
-                <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[10px]">
-                  <FileClock className="h-3.5 w-3.5" />
-                  <span>Historial de cambios</span>
-                </div>
-                <div className="flex items-center gap-1 text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-100">
-                  <RefreshCw className="h-2.5 w-2.5 animate-spin" />
-                  <span className="font-extrabold uppercase text-[8.5px] tracking-wide">
-                    Comprobando
-                  </span>
-                </div>
-              </div>
-            ) : syncRecordDate ? (
-              <div
-                onClick={(e) => {
-                  if (onShowHistory) {
-                    e.stopPropagation();
-                    onShowHistory(e);
-                  }
-                }}
-                className={`w-full flex items-center justify-between gap-2 bg-white ${
-                  !isStaticPreview ? "hover:bg-slate-50 hover:border-slate-300 hover:shadow-xs cursor-pointer" : ""
-                } border border-slate-200/80 shadow-3xs rounded-lg p-1.5 px-2 transition-all duration-200 group`}
-                title={formattedSyncDate ? `Último cambio en inventario: ${formattedSyncDate}` : undefined}
-              >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <FileClock className="h-3.5 w-3.5 text-slate-400 group-hover:text-teal-600 transition-colors shrink-0" />
-                  <span className="text-[10px] font-bold text-slate-600 group-hover:text-slate-900 transition-colors truncate">
-                    Últimos movimientos
-                  </span>
-                </div>
-                <div className="flex items-center shrink-0">
-                  {renderCardSyncStatusPill(new Date(syncRecordDate).getTime())}
-                </div>
-              </div>
-            ) : (
-              <div
-                onClick={(e) => {
-                  if (onShowHistory) {
-                    e.stopPropagation();
-                    onShowHistory(e);
-                  }
-                }}
-                className={`w-full flex items-center justify-between gap-2 bg-white ${
-                  !isStaticPreview ? "hover:bg-slate-50 hover:border-slate-300 hover:shadow-xs cursor-pointer" : ""
-                } border border-slate-200/80 shadow-3xs rounded-lg p-1.5 px-2 transition-all duration-200 group`}
-                title="Haz clic para consultar o registrar el historial de cambios en Supabase"
-              >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <FileClock className="h-3.5 w-3.5 text-slate-400 group-hover:text-teal-600 transition-colors shrink-0" />
-                  <span className="text-[10px] font-bold text-slate-600 group-hover:text-slate-900 transition-colors truncate">
-                    Historial de cambios
-                  </span>
-                </div>
-                <span className="bg-slate-100 text-slate-600 group-hover:bg-teal-50 group-hover:text-teal-700 group-hover:border-teal-200 border border-slate-200 px-1.5 py-0.5 rounded font-extrabold uppercase text-[8.5px] tracking-wide transition-colors">
-                  Sin verificar
-                </span>
-              </div>
-            )}
-          </div>
         </div>
       </div>
 

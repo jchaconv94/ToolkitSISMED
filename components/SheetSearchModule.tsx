@@ -53,7 +53,6 @@ import { saveAs } from "file-saver";
 import { useAuth } from "../contexts/AuthContext";
 import { UngetConfig, SheetSource, SIGData } from "../types";
 import { api } from "../services/api";
-import { supabaseService, supabase } from "../services/supabaseClient";
 import {
   fetchGasWithResilience,
   fetchGasMetadata,
@@ -732,16 +731,6 @@ export const SheetSearchModule: React.FC = () => {
   const [ungetSearchTerm, setUngetSearchTerm] = useState("");
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
 
-  // Supabase Sync States
-  const [supabaseSyncs, setSupabaseSyncs] = useState<Record<string, any>>({});
-  const [selectedFacilitySyncHistory, setSelectedFacilitySyncHistory] =
-    useState<any[]>([]);
-  const [isSyncHistoryModalOpen, setIsSyncHistoryModalOpen] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [activeHistoryFacility, setActiveHistoryFacility] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
 
   // Filtros Avanzados (Sidebar Derecha)
   const [isAdvancedFiltersSidebarOpen, setIsAdvancedFiltersSidebarOpen] =
@@ -768,13 +757,6 @@ export const SheetSearchModule: React.FC = () => {
     "with" | "without"
   >("with");
 
-  const [filterMovementsUnit, setFilterMovementsUnit] = useState<
-    "hours" | "days"
-  >("hours");
-  const [filterMovementsValue, setFilterMovementsValue] = useState<number>(0);
-  const [filterMovementsCondition, setFilterMovementsCondition] = useState<
-    "with" | "without"
-  >("with");
 
   // Estados para dropdowns de filtros personalizados
   const [isSortOrderDropdownOpen, setIsSortOrderDropdownOpen] = useState(false);
@@ -1615,76 +1597,8 @@ export const SheetSearchModule: React.FC = () => {
     ) {
       setSelectedSourceId("");
     }
-  }, [scriptUrls, sources, data, selectedSourceId, user, isConfigLoading, lastGlobalSync]);
+  }, [scriptUrls, sources, data, user, isConfigLoading, lastGlobalSync]);
 
-  const loadSupabaseSyncs = async (forceIds?: string[]) => {
-    if (!supabase) return;
-    try {
-      const sheetIds = forceIds || sources.map((s) => s.id);
-      const allPossibleIds = new Set<string>();
-      sheetIds.forEach((id) => {
-        allPossibleIds.add(id);
-        if (id.includes("_")) {
-          allPossibleIds.add(id.split("_").slice(1).join("_"));
-        }
-      });
-      const latestSyncs = await supabaseService.getLatestSyncs(
-        allPossibleIds.size > 0 ? Array.from(allPossibleIds) : undefined,
-      );
-      setSupabaseSyncs(latestSyncs);
-    } catch (e) {
-      console.warn("Error cargando historial de Supabase:", e);
-    }
-  };
-
-  const handleShowSyncHistory = async (sheetId: string, sheetName: string) => {
-    if (!supabase) {
-      toast.error("Supabase no está configurado.");
-      return;
-    }
-
-    setActiveHistoryFacility({ id: sheetId, name: sheetName });
-    setIsSyncHistoryModalOpen(true);
-    setSelectedFacilitySyncHistory([]); // clear
-    setIsLoadingHistory(true);
-
-    try {
-      let history = await supabaseService.getHistoryForEstablishment(sheetId);
-      if ((!history || history.length === 0) && sheetId.includes("_")) {
-        const cleanId = sheetId.split("_").slice(1).join("_");
-        history = await supabaseService.getHistoryForEstablishment(cleanId);
-      }
-
-      // Si aún no hay historial registrado en Supabase, auto-verificar/registrar si tenemos datos cargados
-      if ((!history || history.length === 0) && data && data.length > 0) {
-        const sheetItems = data.filter((r) => r.sourceId === sheetId);
-        if (sheetItems.length > 0) {
-          const userAuthor = user?.username || "VerificaciónManual";
-          const syncRes = await supabaseService.registerSync({
-            establishmentId: sheetId,
-            establishmentName: sheetName,
-            currentStock: sheetItems,
-            author: userAuthor,
-          });
-          if (syncRes && syncRes.success && syncRes.record) {
-            history = [syncRes.record];
-            setSupabaseSyncs((prev) => ({
-              ...prev,
-              [sheetId]: syncRes.record,
-            }));
-            toast.success("Sincronización verificada y registrada en Supabase");
-          }
-        }
-      }
-
-      setSelectedFacilitySyncHistory(history || []);
-    } catch (e) {
-      console.error("Error al cargar historial:", e);
-      toast.error("Error al cargar el historial de cambios.");
-    } finally {
-      setIsLoadingHistory(false);
-    }
-  };
 
   // Función ultra-resiliente para obtener JSON de Web App de Google Apps Script con diagnóstico y proxies
   const fetchScriptUrlWithFallback = async (rawUrl: string): Promise<any> => {
@@ -1799,6 +1713,40 @@ export const SheetSearchModule: React.FC = () => {
     }
   };
 
+
+  const fetchSheetsInBatches = async (
+    rawUrl: string,
+    sheetNames: string[],
+    batchSize: number = 6,
+  ): Promise<any[]> => {
+    const uniqueNames = Array.from(
+      new Set(sheetNames.map((name) => name.trim()).filter(Boolean)),
+    );
+    if (uniqueNames.length === 0) return [];
+
+    const batches: string[][] = [];
+    for (let i = 0; i < uniqueNames.length; i += batchSize) {
+      batches.push(uniqueNames.slice(i, i + batchSize));
+    }
+
+    const result: any[] = [];
+    // Dos lotes simultáneos: mejora el tiempo total sin disparar demasiadas ejecuciones
+    // concurrentes de Apps Script.
+    for (let i = 0; i < batches.length; i += 2) {
+      const pair = batches.slice(i, i + 2);
+      const responses = await Promise.all(
+        pair.map((batch) =>
+          fetchGasSelectiveSheets(rawUrl, batch, { timeoutMs: 30000 }),
+        ),
+      );
+      responses.forEach((response) => {
+        if (Array.isArray(response)) result.push(...response);
+      });
+    }
+
+    return result;
+  };
+
   const fetchData = async (
     overrideUrls?: UngetConfig[],
     silent: boolean = false,
@@ -1834,118 +1782,188 @@ export const SheetSearchModule: React.FC = () => {
           let sheetsPayload: any = null;
           let isSelective = false;
 
-          // 1. INTENTO DE DELTA SYNC INTELIGENTE (si no es forzado y ya tenemos datos)
-          if (!forceFullRefresh) {
-            const currentSourcesForThisUrl = sources.filter((s) => s.urlIndex === urlIndex);
-            const hasExistingData =
-              currentSourcesForThisUrl.length > 0 &&
-              data.some((d) => currentSourcesForThisUrl.some((s) => s.id === d.sourceId));
+          // 1. METADATA FIRST: dibuja las tarjetas rápido y luego actualiza solo datos necesarios.
+          const currentSourcesForThisUrl = sources.filter(
+            (source) => source.urlIndex === urlIndex,
+          );
+          const hasExistingData =
+            currentSourcesForThisUrl.length > 0 &&
+            data.some((row) =>
+              currentSourcesForThisUrl.some((source) => source.id === row.sourceId),
+            );
 
-            if (hasExistingData) {
-              const metadataList = await fetchGasMetadata(config.url, { timeoutMs: 15000 });
-              if (metadataList && Array.isArray(metadataList) && metadataList.length > 0) {
-                const changedSheetNames: string[] = [];
-                const unchangedSources: SheetSource[] = [];
+          let metadataList: any[] | null = null;
+          try {
+            metadataList = await fetchGasMetadata(config.url, {
+              timeoutMs: 15000,
+              force: forceFullRefresh,
+            });
+          } catch (metadataError) {
+            console.warn(
+              `No se pudo precargar metadata de ${config.name || config.url}:`,
+              metadataError,
+            );
+          }
 
-                metadataList.forEach((meta) => {
-                  const existing = currentSourcesForThisUrl.find(
-                    (s) => s.name === meta.name || s.id === `${urlIndex}_${meta.id}`,
+          if (metadataList && metadataList.length > 0) {
+            const metadataSources: SheetSource[] = metadataList.map((meta) => {
+              const uniqueSourceId = `${urlIndex}_${meta.id}`;
+              let displayName = meta.name;
+
+              if (allAssignments.length > 0 && allFacilities.length > 0) {
+                const matchingAssignment = allAssignments.find(
+                  (assignment) =>
+                    assignment.sheetUrl === config.url &&
+                    assignment.sheetName === meta.name,
+                );
+                if (matchingAssignment) {
+                  const matchingFacility = allFacilities.find(
+                    (facility) => facility.code === matchingAssignment.facilityCode,
                   );
-                  const existingSheetRows = data.filter((d) => d.sourceId === (existing?.id || ""));
-                  const hasSheetData = existing && existingSheetRows.length > 0;
-
-                  const metaLastStr = (meta.lastUpdate || "").trim();
-                  const existingLastStr = (existing?.lastUpdate || "").trim();
-                  const metaEqStr = (meta.equipmentDate || "").trim();
-                  const existingEqStr = (existing?.equipmentDate || "").trim();
-
-                  // Parse timestamp milliseconds for exact comparison
-                  const metaLastTs = parseDataDate(metaLastStr);
-                  const existingLastTs = existing?.lastUpdateTime || parseDataDate(existingLastStr);
-                  const metaEqTs = parseDataDate(metaEqStr);
-                  const existingEqTs = existing?.equipmentDateTime || parseDataDate(existingEqStr);
-
-                  // Evaluate lastUpdate match strictly
-                  let lastUpdateMatches = false;
-                  if (metaLastStr && existingLastStr) {
-                    if (metaLastTs > 0 && existingLastTs > 0) {
-                      lastUpdateMatches = metaLastTs === existingLastTs;
-                    } else {
-                      lastUpdateMatches = metaLastStr === existingLastStr;
-                    }
-                  } else if (!metaLastStr && !existingLastStr) {
-                    lastUpdateMatches = true;
-                  } else {
-                    lastUpdateMatches = false;
-                  }
-
-                  // Evaluate equipmentDate match strictly
-                  let equipmentDateMatches = false;
-                  if (metaEqStr && existingEqStr) {
-                    if (metaEqTs > 0 && existingEqTs > 0) {
-                      equipmentDateMatches = metaEqTs === existingEqTs;
-                    } else {
-                      equipmentDateMatches = metaEqStr === existingEqStr;
-                    }
-                  } else if (!metaEqStr && !existingEqStr) {
-                    equipmentDateMatches = true;
-                  } else {
-                    equipmentDateMatches = false;
-                  }
-
-                  const isUpToDate =
-                    existing &&
-                    hasSheetData &&
-                    lastUpdateMatches &&
-                    equipmentDateMatches;
-
-                  if (isUpToDate && existing) {
-                    unchangedSources.push(existing);
-                  } else {
-                    changedSheetNames.push(meta.name);
-                  }
-                });
-
-                // Caso A: Ninguna hoja cambió (100% al día) - Respuesta instantánea
-                if (changedSheetNames.length === 0 && unchangedSources.length > 0) {
-                  accumulatedSources.push(...unchangedSources);
-                  const unchangedIds = new Set(unchangedSources.map((s) => s.id));
-                  const retainedData = data.filter((d) => unchangedIds.has(d.sourceId || ""));
-                  accumulatedData.push(...retainedData);
-
-                  setConnectionErrors((prev) => {
-                    const updated = { ...prev };
-                    delete updated[config.url];
-                    return updated;
-                  });
-                  return; // Terminado para esta UNGET en menos de 1 segundo
+                  if (matchingFacility) displayName = matchingFacility.name;
                 }
+              }
 
-                // Caso B: Solo algunas hojas cambiaron - Descarga selectiva
+              const lastUpdate = String(meta.lastUpdate || "").trim();
+              const equipmentDate = String(meta.equipmentDate || "").trim();
+
+              return {
+                id: uniqueSourceId,
+                name: displayName,
+                urlIndex,
+                lastUpdate,
+                lastUpdateTime: parseDataDate(lastUpdate) || undefined,
+                equipmentDate,
+                equipmentDateTime: parseDataDate(equipmentDate) || undefined,
+                rowCount: Number(meta.rowCount || 0),
+                facilityCode: String(meta.codigoIpress || "").trim() || undefined,
+              };
+            });
+
+            // Mostrar inmediatamente las IPRESS con su estado, aunque los medicamentos
+            // sigan descargándose en segundo plano.
+            setSources((prev) => {
+              const previousForUrl = new Map(
+                prev
+                  .filter((source) => source.urlIndex === urlIndex)
+                  .map((source) => [source.id, source]),
+              );
+              const hydrated = metadataSources.map((source) => ({
+                ...previousForUrl.get(source.id),
+                ...source,
+              }));
+              return [
+                ...prev.filter((source) => source.urlIndex !== urlIndex),
+                ...hydrated,
+              ];
+            });
+
+            if (hasExistingData && !forceFullRefresh) {
+              const changedSheetNames: string[] = [];
+              const unchangedSourceIds = new Set<string>();
+
+              metadataList.forEach((meta) => {
+                const sourceId = `${urlIndex}_${meta.id}`;
+                const existing = currentSourcesForThisUrl.find(
+                  (source) => source.id === sourceId || source.name === meta.name,
+                );
+                const hasSheetData =
+                  !!existing && data.some((row) => row.sourceId === existing.id);
+
+                const metaLastStr = String(meta.lastUpdate || "").trim();
+                const existingLastStr = String(existing?.lastUpdate || "").trim();
+                const metaEqStr = String(meta.equipmentDate || "").trim();
+                const existingEqStr = String(existing?.equipmentDate || "").trim();
+
+                const metaLastTs = parseDataDate(metaLastStr);
+                const existingLastTs =
+                  existing?.lastUpdateTime || parseDataDate(existingLastStr);
+                const metaEqTs = parseDataDate(metaEqStr);
+                const existingEqTs =
+                  existing?.equipmentDateTime || parseDataDate(existingEqStr);
+
+                const lastUpdateMatches =
+                  metaLastStr || existingLastStr
+                    ? metaLastTs > 0 && existingLastTs > 0
+                      ? metaLastTs === existingLastTs
+                      : metaLastStr === existingLastStr
+                    : true;
+                const equipmentDateMatches =
+                  metaEqStr || existingEqStr
+                    ? metaEqTs > 0 && existingEqTs > 0
+                      ? metaEqTs === existingEqTs
+                      : metaEqStr === existingEqStr
+                    : true;
+
                 if (
-                  changedSheetNames.length > 0 &&
-                  changedSheetNames.length <= 15 &&
-                  unchangedSources.length > 0
+                  existing &&
+                  hasSheetData &&
+                  lastUpdateMatches &&
+                  equipmentDateMatches
                 ) {
-                  try {
-                    const selectiveResult = await fetchGasSelectiveSheets(
-                      config.url,
-                      changedSheetNames,
-                      { timeoutMs: 30000 },
-                    );
-                    if (Array.isArray(selectiveResult) && selectiveResult.length > 0) {
-                      sheetsPayload = selectiveResult;
-                      isSelective = true;
-                    }
-                  } catch (e) {
-                    // Fallback a descarga completa
-                  }
+                  unchangedSourceIds.add(existing.id);
+                } else {
+                  changedSheetNames.push(meta.name);
                 }
+              });
+
+              if (changedSheetNames.length === 0 && unchangedSourceIds.size > 0) {
+                const hydratedUnchanged = metadataSources.filter((source) =>
+                  unchangedSourceIds.has(source.id),
+                );
+                accumulatedSources.push(...hydratedUnchanged);
+                accumulatedData.push(
+                  ...data.filter((row) =>
+                    unchangedSourceIds.has(row.sourceId || ""),
+                  ),
+                );
+                setConnectionErrors((prev) => {
+                  const updated = { ...prev };
+                  delete updated[config.url];
+                  return updated;
+                });
+                return;
+              }
+
+              if (changedSheetNames.length > 0) {
+                try {
+                  const selectiveResult = await fetchSheetsInBatches(
+                    config.url,
+                    changedSheetNames,
+                  );
+                  if (selectiveResult.length > 0) {
+                    sheetsPayload = selectiveResult;
+                    isSelective = unchangedSourceIds.size > 0;
+                  }
+                } catch (selectiveError) {
+                  console.warn(
+                    `Falló la descarga selectiva de ${config.name || config.url}; se usará fallback completo.`,
+                    selectiveError,
+                  );
+                }
+              }
+            } else {
+              // Primera carga (o actualización forzada): metadata ya está visible; descargar
+              // las hojas en lotes pequeños en vez de esperar una sola respuesta gigante.
+              try {
+                const initialResult = await fetchSheetsInBatches(
+                  config.url,
+                  metadataList.map((meta) => meta.name),
+                );
+                if (initialResult.length > 0) {
+                  sheetsPayload = initialResult;
+                }
+              } catch (initialError) {
+                console.warn(
+                  `Falló la carga inicial por lotes de ${config.name || config.url}; se usará fallback completo.`,
+                  initialError,
+                );
               }
             }
           }
 
-          // Si no fue selectivo o es carga inicial/completa
+          // Si metadata/selectivo no estuvo disponible, mantener compatibilidad con backends antiguos.
+
           if (!sheetsPayload) {
             sheetsPayload = await fetchScriptUrlWithFallback(config.url);
           }
@@ -1994,6 +2012,7 @@ export const SheetSearchModule: React.FC = () => {
                 lastUpdateTime: lastUpdateTime || undefined,
                 equipmentDate: equipmentDateStr,
                 equipmentDateTime: equipmentDateTime || undefined,
+                rowCount: Array.isArray(sheet.data) ? sheet.data.length : 0,
               });
 
               if (Array.isArray(sheet.data)) {
@@ -2061,56 +2080,6 @@ export const SheetSearchModule: React.FC = () => {
       await Promise.allSettled(fetchPromises);
       setLastGlobalSync(new Date());
 
-      if (supabase && accumulatedSources.length > 0) {
-        // Auto sync tras descargar información
-        try {
-          const syncPromises = accumulatedSources.map((sheet) => {
-            const sheetItems = accumulatedData.filter((r) => r.sourceId === sheet.id);
-            const userAuthor = user?.username || "AutoSync";
-            return supabaseService.registerSync({
-              establishmentId: sheet.id,
-              establishmentName: sheet.name,
-              currentStock: sheetItems,
-              author: userAuthor,
-              sheetLastUpdateDate: sheet.lastUpdateTime
-                ? new Date(sheet.lastUpdateTime).toISOString()
-                : undefined,
-            });
-          });
-          const results = await Promise.allSettled(syncPromises);
-
-          // Actualización inteligente del estado local de sincronizaciones
-          setSupabaseSyncs((prev) => {
-            const updated = { ...prev };
-            results.forEach((res, i) => {
-              if (
-                res.status === "fulfilled" &&
-                res.value.success &&
-                res.value.record
-              ) {
-                const recordToSave = { ...res.value.record };
-                if (
-                  res.value.record.has_changes &&
-                  !recordToSave.last_modification_date
-                ) {
-                  recordToSave.last_modification_date =
-                    res.value.record.sync_date;
-                }
-                const rawId = accumulatedSources[i]?.id;
-                if (rawId) {
-                  updated[rawId] = recordToSave;
-                  if (rawId.includes("_")) {
-                    updated[rawId.split("_").slice(1).join("_")] = recordToSave;
-                  }
-                }
-              }
-            });
-            return updated;
-          });
-        } catch (err) {
-          console.warn("Error auto-syncing to Supabase:", err);
-        }
-      }
 
       if (accumulatedData.length === 0 && !silent && Object.keys(connectionErrors).length === 0) {
         setError(
@@ -2138,9 +2107,6 @@ export const SheetSearchModule: React.FC = () => {
       if (scriptUrls.length > 0) {
         // Siempre hacemos fetch de manera silenciosa para no bloquear la pantalla, como sugirió el usuario.
         fetchData(undefined, true);
-        if (supabase) {
-          loadSupabaseSyncs().catch((e) => console.warn(e));
-        }
       } else {
         // Ejecutar para disparar el estado vacío
         fetchData(undefined, false);
@@ -3291,26 +3257,6 @@ function processSheet(sheet) {
         if (filterDateCondition === "without" && isWithinLimit) return false;
       }
 
-      // Movements limit filter
-      if (filterMovementsValue > 0) {
-        const syncRecord = supabaseSyncs[s.id];
-        let diffHours = Infinity;
-        if (syncRecord && syncRecord.sync_date) {
-          const now = new Date().getTime();
-          const diffMs = now - new Date(syncRecord.sync_date).getTime();
-          diffHours = diffMs / (1000 * 60 * 60);
-        }
-
-        const maxHours =
-          filterMovementsUnit === "hours"
-            ? filterMovementsValue
-            : filterMovementsValue * 24;
-        const isWithinLimit = diffHours <= maxHours;
-
-        if (filterMovementsCondition === "with" && !isWithinLimit) return false;
-        if (filterMovementsCondition === "without" && isWithinLimit)
-          return false;
-      }
 
       // Expiration filter
       if (filterHasPendingExpirations) {
@@ -3443,10 +3389,6 @@ function processSheet(sheet) {
     filterDateUnit,
     filterDateValue,
     filterDateCondition,
-    filterMovementsUnit,
-    filterMovementsValue,
-    filterMovementsCondition,
-    supabaseSyncs,
   ]);
 
   const toggleCardSelection = (sheetId: string) => {
@@ -3535,7 +3477,6 @@ function processSheet(sheet) {
         const code = getAlmCodeForSheet(id, data);
         const type = getSheetType(sheet.name);
         const isMismatch = !datesMatch(sheet.lastUpdateTime, sheet.equipmentDateTime);
-        const syncRecord = supabaseSyncs[id];
 
         return {
           id: sheet.id,
@@ -3559,12 +3500,10 @@ function processSheet(sheet) {
           syncStatusLabel: statusObj.label,
           syncStatusColor: statusObj.color,
           isMismatchEquipmentDate: isMismatch,
-          syncRecordDate: syncRecord?.sync_date,
-          hasSyncRecord: !!syncRecord,
         };
       })
       .filter(Boolean) as SelectedEstablishmentData[];
-  }, [selectedCaptureIds, sources, data, supabaseSyncs]);
+  }, [selectedCaptureIds, sources, data]);
 
   const activeCaptureUngetName = useMemo(() => {
     if (selectedUngetIndex !== null && scriptUrls[selectedUngetIndex]) {
@@ -4792,8 +4731,7 @@ function processSheet(sheet) {
                         !filter_gray ||
                         filterSortOrder !== "name_asc" ||
                         filterHasPendingExpirations ||
-                        filterDateValue > 0 ||
-                        filterMovementsValue > 0) && (
+                        filterDateValue > 0) && (
                         <span className="absolute top-0 right-0 -mr-1 -mt-1 w-2.5 h-2.5 bg-teal-500 rounded-full border-2 border-white animate-pulse" />
                       )}
                     </button>
@@ -5517,9 +5455,6 @@ function processSheet(sheet) {
                               setFilterDateUnit("hours");
                               setFilterDateValue(0);
                               setFilterDateCondition("with");
-                              setFilterMovementsUnit("hours");
-                              setFilterMovementsValue(0);
-                              setFilterMovementsCondition("with");
                             }}
                             className="mt-4 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-sm"
                           >
@@ -5550,23 +5485,18 @@ function processSheet(sheet) {
                                   sheet.id,
                                   data,
                                 );
-                                const cleanSheetId = sheet.id.includes("_") ? sheet.id.split("_").slice(1).join("_") : sheet.id;
-                                const syncRecord = supabaseSyncs[sheet.id] || supabaseSyncs[cleanSheetId] || (code ? supabaseSyncs[code] : undefined);
 
                                 const cardData = {
                                   id: sheet.id,
                                   name: description,
-                                  code: code || "",
+                                  code: code || sheet.facilityCode || "",
                                   lastUpdate: sheet.lastUpdate,
                                   lastUpdateTime: sheet.lastUpdateTime,
                                   equipmentDate: sheet.equipmentDate,
                                   equipmentDateTime: sheet.equipmentDateTime,
                                   expiredCount,
                                   expiringThisMonthCount,
-                                  totalItems: sheetData.length,
-                                  syncRecordDate: syncRecord?.sync_date,
-                                  hasSyncRecord: !!syncRecord,
-                                  isCheckingSync: isLoading || isSilentSyncing,
+                                  totalItems: sheetData.length || sheet.rowCount || 0,
                                 };
 
                                 return (
@@ -5577,7 +5507,6 @@ function processSheet(sheet) {
                                     isSelected={isSelected}
                                     onToggleSelect={() => toggleCardSelection(sheet.id)}
                                     onClick={() => handleSelectSheet(sheet.id)}
-                                    onShowHistory={() => handleShowSyncHistory(sheet.id, sheet.name)}
                                   />
                                 );
                               })}
@@ -6169,12 +6098,6 @@ function processSheet(sheet) {
                                       </th>
                                       <th
                                         scope="col"
-                                        className="px-5 py-3 font-black text-center sticky top-0 bg-slate-50 z-10 text-slate-500 uppercase tracking-wider"
-                                      >
-                                        <span>Últimos Movimientos</span>
-                                      </th>
-                                      <th
-                                        scope="col"
                                         className="px-5 py-3 font-black text-center sticky top-0 bg-slate-50 z-10"
                                       >
                                         <button
@@ -6391,38 +6314,6 @@ function processSheet(sheet) {
                                               </span>
                                               {statusObj.label}
                                             </span>
-                                          </td>
-                                          <td className="px-5 py-3 whitespace-nowrap text-center">
-                                            {(() => {
-                                              const syncRecord =
-                                                supabaseSyncs[sheet.id];
-                                              if (!syncRecord) {
-                                                return (
-                                                  <span className="text-[10px] font-bold text-slate-400">
-                                                    -
-                                                  </span>
-                                                );
-                                              }
-                                              return (
-                                                <div
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleShowSyncHistory(
-                                                      sheet.id,
-                                                      sheet.name,
-                                                    );
-                                                  }}
-                                                  className="inline-flex items-center justify-center cursor-pointer hover:opacity-80 transition-opacity"
-                                                  title={`Último cambio: ${new Date(syncRecord.sync_date).toLocaleString("es-PE")}`}
-                                                >
-                                                  {renderSyncStatusPill(
-                                                    new Date(
-                                                      syncRecord.sync_date,
-                                                    ).getTime(),
-                                                  )}
-                                                </div>
-                                              );
-                                            })()}
                                           </td>
                                           <td className="px-5 py-3 text-center whitespace-nowrap">
                                             <div className="flex items-center justify-center gap-1.5">
@@ -8425,20 +8316,6 @@ function processSheet(sheet) {
                     "NO ACTUALIZADOS",
                   )}
 
-                  {/* Filter Section: Movements Date Limit */}
-                  {renderRangeFilter(
-                    filterMovementsUnit,
-                    setFilterMovementsUnit,
-                    filterMovementsValue,
-                    setFilterMovementsValue,
-                    filterMovementsCondition,
-                    setFilterMovementsCondition,
-                    "Antigüedad de Últimos Movimientos",
-                    "CON MOV.",
-                    "SIN MOV.",
-                    "CON MOVIMIENTOS",
-                    "SIN MOVIMIENTOS",
-                  )}
 
                   {/* Filter Section: Sorting */}
                   <div className="space-y-3">
@@ -8605,9 +8482,6 @@ function processSheet(sheet) {
                     setFilterDateUnit("hours");
                     setFilterDateValue(0);
                     setFilterDateCondition("with");
-                    setFilterMovementsUnit("hours");
-                    setFilterMovementsValue(0);
-                    setFilterMovementsCondition("with");
                   }
                 }}
                 className="px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-900 font-extrabold text-[11px] uppercase tracking-wider rounded-xl border border-slate-200 shadow-sm transition-all shrink-0 active:scale-95"
@@ -9391,313 +9265,6 @@ function processSheet(sheet) {
         </div>
       )}
 
-      {/* Modal de Historial de Sincronización Supabase */}
-      {isSyncHistoryModalOpen && activeHistoryFacility && (
-        <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/45 backdrop-blur-xs animate-in fade-in duration-250 p-4">
-          <div
-            className="absolute inset-0"
-            onClick={() => setIsSyncHistoryModalOpen(false)}
-          />
-          <div className="bg-slate-50 w-full max-w-xl max-h-[85vh] rounded-3xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.35)] relative flex flex-col border border-white overflow-hidden animate-in zoom-in-95 duration-200">
-            {/* Header */}
-            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-white text-slate-900 sticky top-0 z-10">
-              <div className="flex flex-col gap-1">
-                <h2 className="text-sm font-black uppercase tracking-wider flex items-center gap-2 text-teal-900">
-                  <Database className="h-4 w-4 text-teal-600 shrink-0" />
-                  Historial de Cambios de Stock
-                </h2>
-                <p className="text-[11px] font-bold text-slate-400 truncate max-w-xs sm:max-w-md">
-                  {activeHistoryFacility.name}
-                </p>
-              </div>
-              <button
-                onClick={() => setIsSyncHistoryModalOpen(false)}
-                className="p-2 hover:bg-slate-100 rounded-full transition-colors group cursor-pointer"
-              >
-                <X className="h-5 w-5 text-slate-400 group-hover:text-slate-600" />
-              </button>
-            </div>
-
-            {/* History list */}
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/55 scrollbar-thin">
-              {isLoadingHistory ? (
-                <div className="py-12 text-center text-slate-400 flex flex-col items-center justify-center gap-3">
-                  <RefreshCw className="w-10 h-10 text-teal-500 animate-spin" />
-                  <span className="text-xs font-black uppercase tracking-wide">
-                    Cargando historial de cambios...
-                  </span>
-                </div>
-              ) : selectedFacilitySyncHistory.length === 0 ? (
-                <div className="py-12 text-center text-slate-400 flex flex-col items-center justify-center gap-3">
-                  <Database className="w-10 h-10 text-slate-300" />
-                  <span className="text-xs font-black uppercase tracking-wide">
-                    No hay movimientos registrados
-                  </span>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {selectedFacilitySyncHistory.map((item, index) => {
-                    const syncDate = new Date(item.sync_date);
-                    const formattedDate = syncDate.toLocaleDateString("es-PE", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      year: "numeric",
-                    });
-                    const formattedTime = syncDate.toLocaleTimeString("es-PE", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    });
-
-                    return (
-                      <div
-                        key={item.id || index}
-                        className={`bg-white rounded-2xl border border-slate-200/60 shadow-3xs flex flex-col relative overflow-hidden transition-all hover:border-slate-350 group/item ${
-                          index === 0
-                            ? "ring-2 ring-teal-500/20 border-teal-500/50"
-                            : ""
-                        }`}
-                      >
-                        {index === 0 && (
-                          <div className="absolute top-0 left-0 right-0 h-[3px] bg-teal-500" />
-                        )}
-
-                        <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative z-10">
-                          <div className="flex items-start gap-3">
-                            <div
-                              className={`p-2.5 rounded-xl shrink-0 ${
-                                item.has_changes
-                                  ? "bg-emerald-50 text-emerald-600 border border-emerald-150"
-                                  : "bg-amber-50 text-amber-600 border border-amber-150"
-                              }`}
-                            >
-                              {item.has_changes ? (
-                                <CheckCircle2 className="h-4 w-4" />
-                              ) : (
-                                <AlertTriangle className="h-4 w-4" />
-                              )}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-[10.5px] font-black text-slate-800">
-                                  {formattedDate} a las {formattedTime}
-                                </span>
-                                {index === 0 && (
-                                  <span className="bg-teal-50 text-teal-850 px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase tracking-wide border border-teal-100">
-                                    Actual
-                                  </span>
-                                )}
-                              </div>
-                              {(() => {
-                                let metadataObj: any = null;
-                                try {
-                                  if (item.changes_metadata) {
-                                    const parsed =
-                                      typeof item.changes_metadata === "string"
-                                        ? JSON.parse(item.changes_metadata)
-                                        : item.changes_metadata;
-                                    if (
-                                      parsed &&
-                                      typeof parsed === "object" &&
-                                      !Array.isArray(parsed)
-                                    ) {
-                                      metadataObj = parsed;
-                                    }
-                                  }
-                                } catch (e) {}
-
-                                const totalStock = metadataObj?.total_stock;
-                                const totalValue = metadataObj?.total_value;
-
-                                return (
-                                  <p className="text-[10px] font-bold text-slate-400 mt-1 flex flex-wrap items-center gap-1.5 leading-relaxed">
-                                    <span>
-                                      Artículos:{" "}
-                                      <span className="font-extrabold text-slate-600">
-                                        {item.record_count}
-                                      </span>
-                                    </span>
-                                    {totalStock !== undefined && (
-                                      <>
-                                        <span className="text-slate-300">
-                                          •
-                                        </span>
-                                        <span>
-                                          Stock Total:{" "}
-                                          <span className="font-extrabold text-slate-800">
-                                            {new Intl.NumberFormat(
-                                              "es-PE",
-                                            ).format(totalStock)}
-                                          </span>
-                                        </span>
-                                      </>
-                                    )}
-                                    {totalValue !== undefined && (
-                                      <>
-                                        <span className="text-slate-300">
-                                          •
-                                        </span>
-                                        <span>
-                                          Valorización:{" "}
-                                          <span className="font-extrabold text-emerald-650">
-                                            S/{" "}
-                                            {new Intl.NumberFormat("es-PE", {
-                                              minimumFractionDigits: 2,
-                                            }).format(totalValue)}
-                                          </span>
-                                        </span>
-                                      </>
-                                    )}
-                                  </p>
-                                );
-                              })()}
-                            </div>
-                          </div>
-
-                          <div className="flex sm:flex-col items-start sm:items-end gap-1.5 shrink-0">
-                            {item.has_changes ? (
-                              <div className="flex flex-col items-end gap-1">
-                                <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider shadow-4xs">
-                                  Stock Modificado (
-                                  {item.changed_items_count || "?"} items)
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider shadow-4xs">
-                                Stock sin cambios
-                              </span>
-                            )}
-                            <span
-                              className="text-[9px] text-slate-400 font-mono"
-                              title="Identificador único del estado"
-                            >
-                              Hash: {item.stock_hash}
-                            </span>
-                          </div>
-                        </div>
-                        {item.has_changes &&
-                          (() => {
-                            try {
-                              let changes: any[] = [];
-                              if (item.changes_metadata) {
-                                const parsed =
-                                  typeof item.changes_metadata === "string"
-                                    ? JSON.parse(item.changes_metadata)
-                                    : item.changes_metadata;
-                                changes = Array.isArray(parsed)
-                                  ? parsed
-                                  : parsed?.changes || [];
-                                changes = changes.filter((c: any) => c.change !== 0);
-                              }
-
-                              if (
-                                !Array.isArray(changes) ||
-                                changes.length === 0
-                              ) {
-                                return (
-                                  <div className="text-[10px] text-slate-400 bg-slate-50/50 border-t border-slate-100 p-4 shadow-inner italic text-center font-medium">
-                                    El detalle específico de los items
-                                    modificados no está disponible para este
-                                    registro histórico o no hubo cambios reales de stock.
-                                  </div>
-                                );
-                              }
-
-                              return (
-                                <details className="text-[10px] text-slate-600 border-t border-slate-100 group config-accordion bg-slate-50/50">
-                                  <summary className="font-bold text-slate-500 hover:text-slate-800 p-2.5 cursor-pointer select-none list-none flex items-center justify-center gap-1.5 hover:bg-slate-100/50 transition-colors text-[10px] uppercase tracking-wider">
-                                    <span>
-                                      Ver detalle de items modificados (
-                                      {changes.length})
-                                    </span>
-                                    <ChevronDown className="h-3 w-3 group-open:rotate-180 transition-transform text-slate-400" />
-                                  </summary>
-                                  <div className="bg-slate-50/80 p-0 max-h-72 overflow-y-auto w-full border-t border-slate-100/50">
-                                    {changes
-                                      .map((change: any, i: number) => {
-                                        const isPositive = change.change > 0;
-                                        return (
-                                          <div
-                                            key={i}
-                                            className="flex justify-between items-center py-2 px-4 border-b border-slate-100/60 last:border-0 hover:bg-white transition-colors relative group/row"
-                                          >
-                                            {/* Left subtle indicator */}
-                                            <div
-                                              className={`absolute left-0 top-0 bottom-0 w-[2px] ${isPositive ? "bg-emerald-400" : "bg-rose-400"} opacity-0 group-hover/row:opacity-100 transition-opacity`}
-                                            />
-
-                                            <div className="flex flex-col flex-1 min-w-0 pr-4">
-                                              <span
-                                                className="truncate font-bold text-slate-700 text-[11px] uppercase"
-                                                title={change.name || change.id}
-                                              >
-                                                {change.name || change.id}
-                                              </span>
-                                              <div className="flex flex-wrap items-center gap-2 mt-1">
-                                                {change.codigo &&
-                                                  change.codigo !==
-                                                    "UNKNOWN" && (
-                                                    <span className="text-slate-400 font-mono text-[9px] uppercase tracking-wider">
-                                                      C: {change.codigo}
-                                                    </span>
-                                                  )}
-                                                {change.lote &&
-                                                  change.lote !== "N/A" && (
-                                                    <span className="text-slate-400 font-mono text-[9px] uppercase tracking-wider">
-                                                      L: {change.lote}
-                                                    </span>
-                                                  )}
-                                                {change.vto &&
-                                                  change.vto !== "N/A" && (
-                                                    <span className="text-slate-400 font-mono text-[9px] uppercase tracking-wider">
-                                                      V: {change.vto}
-                                                    </span>
-                                                  )}
-                                              </div>
-                                            </div>
-                                            <div className="flex items-center gap-3 shrink-0">
-                                              <div className="flex items-center gap-1.5 font-mono text-[11px]">
-                                                <span className="text-slate-400 line-through decoration-slate-300">
-                                                  {change.previousQty}
-                                                </span>
-                                                <span className="text-slate-300">
-                                                  →
-                                                </span>
-                                                <span className="font-extrabold text-slate-700">
-                                                  {change.currentQty}
-                                                </span>
-                                              </div>
-                                              <div
-                                                className={`w-14 text-center px-1.5 py-1 rounded-md font-black text-[10px] uppercase tracking-wider shadow-4xs ${isPositive ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-rose-100 text-rose-700 border border-rose-200"}`}
-                                              >
-                                                {isPositive ? "+" : ""}
-                                                {change.change}
-                                              </div>
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                  </div>
-                                </details>
-                              );
-                            } catch (e) {
-                              return (
-                                <div className="text-[10px] text-slate-400 bg-slate-50 border-t border-slate-100/50 p-4 shadow-inner italic text-center">
-                                  Error al cargar el detalle de cambios
-                                  registrados.
-                                </div>
-                              );
-                            }
-                          })()}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Floating Deficiency Capture Bar when in Capture Mode */}
       {isCaptureMode && viewLevel === "sheets" && (
