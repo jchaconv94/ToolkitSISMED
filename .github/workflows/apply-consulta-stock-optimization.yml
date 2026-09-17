@@ -25,6 +25,9 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Preparar aplicador
+        run: python .github/patch_consulta_optimizer.py
+
       - name: Aplicar cambios
         run: python .github/apply_consulta_stock_optimization_v2.py
 
@@ -44,6 +47,7 @@ jobs:
         run: |
           rm .github/apply_consulta_stock_optimization.py
           rm .github/apply_consulta_stock_optimization_v2.py
+          rm .github/patch_consulta_optimizer.py
           rm .github/workflows/apply-consulta-stock-optimization.yml
 
       - name: Commit de cambios validados
