@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import {
   Search,
@@ -76,6 +76,9 @@ import {
 } from "./DeficiencyCaptureModal";
 import { DeficiencyCaptureBar } from "./DeficiencyCaptureBar";
 import { EstablishmentCard } from "./EstablishmentCard";
+
+/** Lista vacía compartida: evita crear un array nuevo por tarjeta sin datos. */
+const EMPTY_SOURCE_ROWS: SIGData[] = [];
 
 const normalizeName = (name: string): string => {
   if (!name) return "";
@@ -235,6 +238,13 @@ const runWithConcurrency = async <T,>(
   };
   await Promise.all(Array.from({ length: Math.min(limit, queue.length) }, worker));
 };
+
+/** Precarga en segundo plano: hojas en paralelo, tamaño de tanda y respiro entre hojas. */
+const PREFETCH_CONCURRENCY = 2;
+const PREFETCH_COMMIT_SIZE = 4;
+const PREFETCH_PAUSE_MS = 400;
+/** Espera antes de empezar: primero se dibuja el directorio. */
+const PREFETCH_START_DELAY_MS = 1500;
 
 /** La lista de pestañas cambia poco: Apps Script se consulta para ella como máximo cada 30 min. */
 const GAS_SHEET_LIST_REFRESH_MS = 30 * 60 * 1000;
@@ -861,6 +871,26 @@ export const SheetSearchModule: React.FC = () => {
   const [scriptUrls, setScriptUrls] = useState<UngetConfig[]>([]);
   const [sources, setSources] = useState<SheetSource[]>([]);
   const [data, setData] = useState<SIGData[]>([]);
+  /**
+   * Filas agrupadas por IPRESS. Cada tarjeta recorría toda la lista en cada dibujado: con
+   * las 22 IPRESS en memoria eso son cientos de miles de comparaciones por render.
+   */
+  const dataBySource = useMemo(() => {
+    const grouped = new Map<string, SIGData[]>();
+    for (const row of data) {
+      const sourceId = String(row?.sourceId || "");
+      if (!sourceId) continue;
+      const rows = grouped.get(sourceId);
+      if (rows) rows.push(row);
+      else grouped.set(sourceId, [row]);
+    }
+    return grouped;
+  }, [data]);
+  const rowsForSource = useCallback(
+    (sourceId?: string): SIGData[] =>
+      (sourceId && dataBySource.get(sourceId)) || EMPTY_SOURCE_ROWS,
+    [dataBySource],
+  );
   const [lastGlobalSync, setLastGlobalSync] = useState<Date | null>(null);
   const [allFacilities, setAllFacilities] = useState<any[]>([]);
   const [allUngets, setAllUngets] = useState<any[]>([]);
@@ -882,6 +912,8 @@ export const SheetSearchModule: React.FC = () => {
   const [retryingUrls, setRetryingUrls] = useState<Record<string, boolean>>({});
   // IPRESS cuyo stock se está descargando bajo demanda (evita descargas duplicadas por doble clic).
   const loadingSourceIdsRef = useRef<Set<string>>(new Set());
+  // Estado de la precarga en segundo plano.
+  const prefetchRef = useRef({ running: false, enabled: true });
   // Última consulta de la lista de pestañas a Apps Script, por URL (lectura directa activa).
   const gasSheetListRefreshRef = useRef<Record<string, number>>({});
   const [quickFixConfig, setQuickFixConfig] = useState<UngetConfig | null>(null);
@@ -1130,7 +1162,7 @@ export const SheetSearchModule: React.FC = () => {
       const code = getAlmCodeForSheet(sheet.id, data);
       const status = getUpdateStatus(sheet.lastUpdateTime);
 
-      const sheetData = data.filter((r) => r.sourceId === sheet.id);
+      const sheetData = rowsForSource(sheet.id);
       const { expiredCount, expiringThisMonthCount, expiringNextMonthCount } =
         getExpirationStats(sheetData);
 
@@ -2385,6 +2417,34 @@ export const SheetSearchModule: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scriptUrls, isConfigLoading]);
 
+  // La precarga se ejecuta con la versión más reciente del estado.
+  const prefetchFnRef = useRef<() => Promise<void>>(async () => {});
+  useEffect(() => {
+    prefetchFnRef.current = prefetchPendingSheets;
+  });
+
+  // Arranca cuando el directorio ya está en pantalla y nada más está cargando.
+  useEffect(() => {
+    if (isConfigLoading || isLoading || isSilentSyncing || sources.length === 0) return;
+    const timer = setTimeout(() => {
+      void prefetchFnRef.current();
+    }, PREFETCH_START_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [sources, isConfigLoading, isLoading, isSilentSyncing]);
+
+  // Se pausa con la pestaña en segundo plano y al salir del módulo.
+  useEffect(() => {
+    const handleVisibility = () => {
+      prefetchRef.current.enabled = !document.hidden;
+      if (!document.hidden) void prefetchFnRef.current();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      prefetchRef.current.enabled = false;
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, []);
+
   const handleSaveConfig = async () => {
     if (!user) return;
 
@@ -2691,16 +2751,15 @@ export const SheetSearchModule: React.FC = () => {
     setSearchTerm("");
   };
 
-  const loadSingleSourceStock = async (
-    sourceId: string,
-    registerHistory: boolean = true,
-  ): Promise<boolean> => {
-    if (data.some((row) => row.sourceId === sourceId)) return true;
-
-    const source = sources.find((item) => item.id === sourceId);
-    if (!source) return false;
+  /**
+   * Lee el stock de una IPRESS sin tocar el estado: lectura directa de Google Sheets y,
+   * si no es posible, Apps Script. La usan tanto "Consultar stock" como la precarga.
+   */
+  const readSourceStock = async (
+    source: SheetSource,
+  ): Promise<{ updatedSource: SheetSource; validData: SIGData[] }> => {
     const config = scriptUrls[source.urlIndex];
-    if (!config?.url) return false;
+    if (!config?.url) throw new Error("La UNGET de esta IPRESS ya no está configurada.");
 
     const assignment = allAssignments.find(
       (item) =>
@@ -2710,72 +2769,60 @@ export const SheetSearchModule: React.FC = () => {
     );
     const realSheetName = source.sheetName || assignment?.sheetName || source.name;
 
-    // Un doble clic mientras Apps Script responde no lanza una segunda descarga.
-    if (loadingSourceIdsRef.current.has(sourceId)) return false;
-    loadingSourceIdsRef.current.add(sourceId);
-    // Apps Script puede tardar varios segundos: sin este aviso el clic parece ignorado.
-    const loadingToastId = toast.loading(`Consultando stock de ${source.name}...`);
-
-    try {
-      // Lectura directa de Google Sheets (~1 s). Apps Script queda como respaldo: ejecuta
-      // rápido, pero su entrega falla con frecuencia.
-      type SheetPayload = { name?: string; spreadsheetId?: string; data?: any[] };
-      let directPayload: SheetPayload | null = null;
-      const gid = getCleanSourceId(sourceId);
-      if (canReadSheetDirect(source.spreadsheetId, gid)) {
-        try {
-          const directRows = await fetchSheetRowsDirect(source.spreadsheetId!, gid);
-          directPayload = { name: realSheetName, spreadsheetId: source.spreadsheetId, data: directRows };
-        } catch (directErr: any) {
-          console.warn(
-            `Lectura directa de ${source.name} no disponible; se usa Apps Script:`,
-            directErr?.message || directErr,
-          );
-        }
+    type SheetPayload = { name?: string; spreadsheetId?: string; data?: any[] };
+    let directPayload: SheetPayload | null = null;
+    const gid = getCleanSourceId(source.id);
+    if (canReadSheetDirect(source.spreadsheetId, gid)) {
+      try {
+        const directRows = await fetchSheetRowsDirect(source.spreadsheetId!, gid);
+        directPayload = { name: realSheetName, spreadsheetId: source.spreadsheetId, data: directRows };
+      } catch (directErr: any) {
+        console.warn(
+          `Lectura directa de ${source.name} no disponible; se usa Apps Script:`,
+          directErr?.message || directErr,
+        );
       }
-      let sheetPayload: SheetPayload;
-      if (directPayload) {
-        sheetPayload = directPayload;
-      } else {
-        const payload = await fetchGasSingleSheet(config.url, realSheetName);
-        if (!Array.isArray(payload) || payload.length === 0) {
-          throw new Error("La hoja no devolvió datos válidos.");
-        }
-        sheetPayload = payload[0];
+    }
+
+    let sheetPayload: SheetPayload;
+    if (directPayload) {
+      sheetPayload = directPayload;
+    } else {
+      const payload = await fetchGasSingleSheet(config.url, realSheetName);
+      if (!Array.isArray(payload) || payload.length === 0) {
+        throw new Error("La hoja no devolvió datos válidos.");
       }
+      sheetPayload = payload[0];
+    }
 
-      const rows = Array.isArray(sheetPayload.data) ? sheetPayload.data : [];
-      const firstRow = rows[0] || {};
-      const lastUpdateStr = getRowFieldValue(
-        firstRow,
-        "ULTIMA ACTUALIZACION",
-        "ULTIMA_ACTUALIZACION",
-        "ULTIMA ACTUALIZACIÓN",
-        "Ultima_Actualizacion",
-      );
-      const equipmentDateStr = getRowFieldValue(
-        firstRow,
-        "FECHA DEL EQUIPO",
-        "FECHA_DEL_EQUIPO",
-        "Fecha_Del_Equipo",
-      );
-      const validData = rows
-        .map((row: any) =>
-          normalizeRowData(
-            row,
-            lastUpdateStr,
-            equipmentDateStr,
-            sourceId,
-          ),
-        )
-        .filter((row: any): row is SIGData => row !== null);
+    const rows = Array.isArray(sheetPayload.data) ? sheetPayload.data : [];
+    const firstRow = rows[0] || {};
+    const lastUpdateStr = getRowFieldValue(
+      firstRow,
+      "ULTIMA ACTUALIZACION",
+      "ULTIMA_ACTUALIZACION",
+      "ULTIMA ACTUALIZACIÓN",
+      "Ultima_Actualizacion",
+    );
+    const equipmentDateStr = getRowFieldValue(
+      firstRow,
+      "FECHA DEL EQUIPO",
+      "FECHA_DEL_EQUIPO",
+      "Fecha_Del_Equipo",
+    );
+    const validData = rows
+      .map((row: any) => normalizeRowData(row, lastUpdateStr, equipmentDateStr, source.id))
+      .filter((row: any): row is SIGData => row !== null);
 
-      const stableFacilityCode =
-        source.facilityCode ||
-        assignment?.facilityCode ||
-        extractFacilityCodeFromSheetName(sheetPayload.name || realSheetName) ||
-        undefined;
-      const updatedSource: SheetSource = {
+    const stableFacilityCode =
+      source.facilityCode ||
+      assignment?.facilityCode ||
+      extractFacilityCodeFromSheetName(sheetPayload.name || realSheetName) ||
+      undefined;
+
+    return {
+      validData,
+      updatedSource: {
         ...source,
         sheetName: sheetPayload.name || realSheetName,
         rowCount: validData.length,
@@ -2783,55 +2830,133 @@ export const SheetSearchModule: React.FC = () => {
         lastUpdate: lastUpdateStr || source.lastUpdate,
         lastUpdateTime: parseDataDate(lastUpdateStr) || source.lastUpdateTime,
         equipmentDate: equipmentDateStr || source.equipmentDate,
-        equipmentDateTime:
-          parseDataDate(equipmentDateStr) || source.equipmentDateTime,
+        equipmentDateTime: parseDataDate(equipmentDateStr) || source.equipmentDateTime,
         spreadsheetId: sheetPayload.spreadsheetId || source.spreadsheetId,
-      };
+      },
+    };
+  };
 
-      setSources((prev) =>
-        prev.map((item) => (item.id === sourceId ? updatedSource : item)),
-      );
-      setData((prev) => [
-        ...prev.filter((row) => row.sourceId !== sourceId),
-        ...validData,
-      ]);
+  /** Historial en Supabase; nunca bloquea la carga del stock. */
+  const registerSourceHistory = (source: SheetSource, updatedSource: SheetSource, validData: SIGData[]) => {
+    if (!supabase || validData.length === 0) return;
+    const stableHistoryId = updatedSource.facilityCode || getCleanSourceId(source.id);
+    void supabaseService
+      .registerSync({
+        establishmentId: stableHistoryId,
+        establishmentName: source.name,
+        currentStock: validData,
+        author: user?.username || "ConsultaStock",
+        sheetLastUpdateDate: updatedSource.lastUpdateTime
+          ? new Date(updatedSource.lastUpdateTime).toISOString()
+          : undefined,
+      })
+      .then((result) => {
+        if (!result.success || !result.record) return;
+        setSupabaseSyncs((prev) => ({
+          ...prev,
+          [source.id]: result.record,
+          [stableHistoryId]: result.record,
+        }));
+      })
+      .catch((err) => console.warn("No se pudo actualizar el historial en segundo plano:", err));
+  };
 
-      if (supabase && registerHistory && validData.length > 0) {
-        const stableHistoryId =
-          stableFacilityCode || getCleanSourceId(sourceId);
-        void supabaseService
-          .registerSync({
-            establishmentId: stableHistoryId,
-            establishmentName: source.name,
-            currentStock: validData,
-            author: user?.username || "ConsultaStock",
-            sheetLastUpdateDate: updatedSource.lastUpdateTime
-              ? new Date(updatedSource.lastUpdateTime).toISOString()
-              : undefined,
-          })
-          .then((result) => {
-            if (!result.success || !result.record) return;
-            setSupabaseSyncs((prev) => ({
-              ...prev,
-              [sourceId]: result.record,
-              [stableHistoryId]: result.record,
-            }));
-          })
-          .catch((err) =>
-            console.warn("No se pudo actualizar el historial en segundo plano:", err),
-          );
-      }
+  const loadSingleSourceStock = async (
+    sourceId: string,
+    registerHistory: boolean = true,
+  ): Promise<boolean> => {
+    if (data.some((row) => row.sourceId === sourceId)) return true;
+
+    const source = sources.find((item) => item.id === sourceId);
+    if (!source) return false;
+    if (!scriptUrls[source.urlIndex]?.url) return false;
+
+    // Un doble clic mientras responde Google no lanza una segunda descarga.
+    if (loadingSourceIdsRef.current.has(sourceId)) return false;
+    loadingSourceIdsRef.current.add(sourceId);
+    const loadingToastId = toast.loading(`Consultando stock de ${source.name}...`);
+
+    try {
+      const { updatedSource, validData } = await readSourceStock(source);
+
+      setSources((prev) => prev.map((item) => (item.id === sourceId ? updatedSource : item)));
+      setData((prev) => [...prev.filter((row) => row.sourceId !== sourceId), ...validData]);
+
+      if (registerHistory) registerSourceHistory(source, updatedSource, validData);
 
       return true;
     } catch (err: any) {
       console.error("Error cargando una hoja bajo demanda:", err);
-      toast.error(
-        `No se pudo cargar ${source.name}: ${err?.message || "Error de conexión"}`,
-      );
+      toast.error(`No se pudo cargar ${source.name}: ${err?.message || "Error de conexión"}`);
       return false;
     } finally {
       loadingSourceIdsRef.current.delete(sourceId);
       toast.dismiss(loadingToastId);
+    }
+  };
+
+  /**
+   * Precarga en segundo plano el stock de las IPRESS que aún no está en memoria, para que
+   * abrirlas sea instantáneo.
+   *
+   * Cede el paso a lo que hace el usuario: se detiene si abre una IPRESS, si sincroniza o
+   * si deja la pestaña en segundo plano, y guarda por tandas para no escribir en IndexedDB
+   * una vez por hoja.
+   */
+  const prefetchPendingSheets = async () => {
+    if (prefetchRef.current.running || !prefetchRef.current.enabled) return;
+
+    const pending = sources.filter(
+      (source) =>
+        !dataBySource.has(source.id) &&
+        canReadSheetDirect(source.spreadsheetId, getCleanSourceId(source.id)),
+    );
+    if (pending.length === 0) return;
+
+    const shouldPause = () =>
+      !prefetchRef.current.enabled ||
+      loadingSourceIdsRef.current.size > 0 ||
+      (typeof document !== "undefined" && document.hidden);
+
+    prefetchRef.current.running = true;
+    let loaded = 0;
+    try {
+      let batchSources: SheetSource[] = [];
+      let batchRows: SIGData[] = [];
+
+      const commitBatch = () => {
+        if (batchSources.length === 0) return;
+        const updatedById = new Map(batchSources.map((item) => [item.id, item]));
+        const rows = batchRows;
+        setSources((prev) => prev.map((item) => updatedById.get(item.id) || item));
+        setData((prev) => [...prev.filter((row) => !updatedById.has(row.sourceId || "")), ...rows]);
+        batchSources = [];
+        batchRows = [];
+      };
+
+      await runWithConcurrency(pending, PREFETCH_CONCURRENCY, async (source) => {
+        if (shouldPause()) return;
+        try {
+          const { updatedSource, validData } = await readSourceStock(source);
+          batchSources.push(updatedSource);
+          batchRows.push(...validData);
+          loaded++;
+          registerSourceHistory(source, updatedSource, validData);
+          if (batchSources.length >= PREFETCH_COMMIT_SIZE) commitBatch();
+        } catch (err: any) {
+          // Una hoja que falla se reintenta en la próxima precarga.
+          console.warn(`Precarga de ${source.name} omitida:`, err?.message || err);
+        }
+        // Respiro entre hojas: la precarga nunca debe competir con lo que pide el usuario.
+        await new Promise((resolve) => setTimeout(resolve, PREFETCH_PAUSE_MS));
+      });
+
+      commitBatch();
+    } finally {
+      prefetchRef.current.running = false;
+      if (loaded > 0) {
+        console.info(`Precarga: ${loaded} de ${pending.length} IPRESS listas para consulta inmediata.`);
+      }
     }
   };
 
@@ -3333,7 +3458,7 @@ function processSheet(sheet) {
 
   const filteredData = useMemo(() => {
     let currentData = selectedSourceId
-      ? data.filter((item) => item && item.sourceId === selectedSourceId)
+      ? rowsForSource(selectedSourceId)
       : data;
     currentData = currentData.filter(Boolean);
 
@@ -3436,9 +3561,7 @@ function processSheet(sheet) {
 
   const modalStockData = useMemo(() => {
     if (!stockModalSourceId) return [];
-    let currentData = data.filter(
-      (item) => item && item.sourceId === stockModalSourceId,
-    );
+    let currentData = rowsForSource(stockModalSourceId);
 
     if (!stockModalSearchTerm.trim()) return currentData;
     const lowerTerm = stockModalSearchTerm.toLowerCase();
@@ -3468,7 +3591,7 @@ function processSheet(sheet) {
   const activeSheetData = useMemo(
     () =>
       selectedSourceId
-        ? data.filter((item) => item && item.sourceId === selectedSourceId)
+        ? rowsForSource(selectedSourceId)
         : [],
     [data, selectedSourceId],
   );
@@ -3483,7 +3606,7 @@ function processSheet(sheet) {
 
   const availableTipsums = useMemo(() => {
     const currentData = selectedSourceId
-      ? data.filter((item) => item && item.sourceId === selectedSourceId)
+      ? rowsForSource(selectedSourceId)
       : data;
     const set = new Set<string>();
     currentData.forEach((item) => {
@@ -3497,7 +3620,7 @@ function processSheet(sheet) {
 
   const availableFFinans = useMemo(() => {
     const currentData = selectedSourceId
-      ? data.filter((item) => item && item.sourceId === selectedSourceId)
+      ? rowsForSource(selectedSourceId)
       : data;
     const set = new Set<string>();
     currentData.forEach((item) => {
@@ -3511,7 +3634,7 @@ function processSheet(sheet) {
 
   const availableYears = useMemo(() => {
     const currentData = selectedSourceId
-      ? data.filter((item) => item && item.sourceId === selectedSourceId)
+      ? rowsForSource(selectedSourceId)
       : data;
     const set = new Set<string>();
     currentData.forEach((item) => {
@@ -3662,7 +3785,7 @@ function processSheet(sheet) {
 
       // Expiration filter
       if (filterHasPendingExpirations) {
-        const sheetData = data.filter((r) => r.sourceId === s.id);
+        const sheetData = rowsForSource(s.id);
         const { expiredCount, expiringThisMonthCount } =
           getExpirationStats(sheetData);
         if (expiredCount === 0 && expiringThisMonthCount === 0) return false;
@@ -3739,12 +3862,12 @@ function processSheet(sheet) {
         return t1_val - t2_val;
       }
       if (filterSortOrder === "expired_highest") {
-        const sheetData1 = data.filter((r) => r.sourceId === s1.id);
+        const sheetData1 = rowsForSource(s1.id);
         const stats1 = getExpirationStats(sheetData1);
         const expInd1 =
           stats1.expiredCount * 10 + stats1.expiringThisMonthCount;
 
-        const sheetData2 = data.filter((r) => r.sourceId === s2.id);
+        const sheetData2 = rowsForSource(s2.id);
         const stats2 = getExpirationStats(sheetData2);
         const expInd2 =
           stats2.expiredCount * 10 + stats2.expiringThisMonthCount;
@@ -3755,12 +3878,12 @@ function processSheet(sheet) {
         return s1.name.localeCompare(s2.name);
       }
       if (filterSortOrder === "expired_lowest") {
-        const sheetData1 = data.filter((r) => r.sourceId === s1.id);
+        const sheetData1 = rowsForSource(s1.id);
         const stats1 = getExpirationStats(sheetData1);
         const expInd1 =
           stats1.expiredCount * 10 + stats1.expiringThisMonthCount;
 
-        const sheetData2 = data.filter((r) => r.sourceId === s2.id);
+        const sheetData2 = rowsForSource(s2.id);
         const stats2 = getExpirationStats(sheetData2);
         const expInd2 =
           stats2.expiredCount * 10 + stats2.expiringThisMonthCount;
@@ -3820,7 +3943,7 @@ function processSheet(sheet) {
   const handleAutoSelectDeficiencies = () => {
     const deficientIds = new Set<string>();
     filteredAndSortedSources.forEach((sheet) => {
-      const sheetData = data.filter((r) => r.sourceId === sheet.id);
+      const sheetData = rowsForSource(sheet.id);
       const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);
       const statusObj = getUpdateStatus(sheet.lastUpdateTime);
       const isMismatch = !datesMatch(sheet.lastUpdateTime, sheet.equipmentDateTime);
@@ -3848,7 +3971,7 @@ function processSheet(sheet) {
   const deficiencyCount = useMemo(() => {
     let count = 0;
     filteredAndSortedSources.forEach((sheet) => {
-      const sheetData = data.filter((r) => r.sourceId === sheet.id);
+      const sheetData = rowsForSource(sheet.id);
       const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);
       const statusObj = getUpdateStatus(sheet.lastUpdateTime);
       const isMismatch = !datesMatch(sheet.lastUpdateTime, sheet.equipmentDateTime);
@@ -3872,7 +3995,7 @@ function processSheet(sheet) {
       .map((id) => {
         const sheet = sources.find((s) => s.id === id);
         if (!sheet) return null;
-        const sheetData = data.filter((r) => r.sourceId === id);
+        const sheetData = rowsForSource(id);
         const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);
         const statusObj = getUpdateStatus(sheet.lastUpdateTime);
         const lastDash = sheet.name.lastIndexOf("-");
@@ -5894,9 +6017,7 @@ function processSheet(sheet) {
                           {sheetsViewMode === "grid" && (
                             <div className={`grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] md:grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4 sm:gap-6 animate-in fade-in duration-200 ${isCaptureMode ? "pb-28" : ""}`}>
                               {filteredAndSortedSources.map((sheet) => {
-                                const sheetData = data.filter(
-                                  (r) => r.sourceId === sheet.id,
-                                );
+                                const sheetData = rowsForSource(sheet.id);
                                 const { expiredCount, expiringThisMonthCount } =
                                   getExpirationStats(sheetData);
                                 const isSelected = selectedCaptureIds.has(sheet.id);
@@ -5950,9 +6071,7 @@ function processSheet(sheet) {
                           {sheetsViewMode === "list" && (
                             <div className="flex flex-col gap-3.5 animate-in fade-in duration-200">
                               {filteredAndSortedSources.map((sheet) => {
-                                const sheetData = data.filter(
-                                  (r) => r.sourceId === sheet.id,
-                                );
+                                const sheetData = rowsForSource(sheet.id);
                                 const { expiredCount, expiringThisMonthCount } =
                                   getExpirationStats(sheetData);
                                 const lastDash = sheet.name.lastIndexOf("-");
@@ -6161,9 +6280,7 @@ function processSheet(sheet) {
                           {sheetsViewMode === "compact" && (
                             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] md:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 animate-in fade-in duration-200">
                               {filteredAndSortedSources.map((sheet) => {
-                                const sheetData = data.filter(
-                                  (r) => r.sourceId === sheet.id,
-                                );
+                                const sheetData = rowsForSource(sheet.id);
                                 const { expiredCount, expiringThisMonthCount } =
                                   getExpirationStats(sheetData);
                                 const lastDash = sheet.name.lastIndexOf("-");
@@ -6580,9 +6697,7 @@ function processSheet(sheet) {
                                   </thead>
                                   <tbody className="divide-y divide-slate-100 bg-white">
                                     {filteredAndSortedSources.map((sheet) => {
-                                      const sheetData = data.filter(
-                                        (r) => r.sourceId === sheet.id,
-                                      );
+                                      const sheetData = rowsForSource(sheet.id);
                                       const {
                                         expiredCount,
                                         expiringThisMonthCount,
