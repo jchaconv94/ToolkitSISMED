@@ -4,6 +4,8 @@ Este documento detalla la interfaz de comunicación y las expectativas del backe
 
 El objetivo principal es enviar la información del stock extraído de los archivos DBF del SISMED local directamente a la base de datos centralizada en Supabase a través de una Edge Function.
 
+> **Invariante de arquitectura:** `Consulta Stock` (`SIG_SEARCH`) y `Monitoreo de Stock` (`STOCK_MONITORING`) son módulos independientes. Consulta Stock usa Google Sheets + Google Apps Script como fuente de inventario. Monitoreo de Stock usa Supabase (`stock_actual`) como fuente de inventario. Ninguno debe usar la base del otro como fallback de existencias, lotes, saldos o vencimientos.
+
 ## 1. Esquema de Base de Datos en Supabase (Versión 14)
 
 Se han implementado las siguientes tablas destino:
@@ -76,13 +78,19 @@ La contraparte web (la Edge Function) ya está configurada para:
 3.  **Deducción de la Facilidad (`facility_code`)**: El sistema del servidor deduce automáticamente a quién pertenece este stock leyendo la instalación propietaria o analizando los primeros 5 caracteres del `almcod` facilitado.
 4.  **Flujo de Reemplazo**: Primero, el servicio eliminará en cascada todo el stock que esté asignado previamente a los `almcod` que están reportándose. Segundo, insertará la matriz de datos enviados. Por esta razón, la PC Escritorio debe asegurar de **mandar el inventario completo** por cada `almcod` habilitado. (Un re-sincronizado parcial borrará los ítems no enviados).
 
-## 3. Comportamiento en Frontend Web (Ya Implementado)
+## 3. Separación de módulos de stock en el Frontend Web
 
-A partir de esta actualización, las siguientes aplicaciones web funcionarán como ecosistema híbrido:
+Estos módulos comparten la aplicación y algunos estilos, pero **no comparten la fuente principal de inventario**:
 
-*   **`SheetSearchModule`** (Visor Global de DIRESA / OGESS / UNGET): El frontend buscará automáticamente en la base de datos `stock_actual` si ya hay información sincronizada bajo la cuenta vinculada con Supabase. **Si encuentra stock**, se salta los queries a `Apps Script` nativos. **Si no encuentra datos en PostgreSQL**, usará de forma transparente como método de respaldo a `Apps Script` (compatibilidad con la app heredada de Google Sheets).
-*   **`IPRESS_STOCK` / Stock SISMED** (Módulo Privado IPRESS): Para cada usuario final de nivel `FARMACIA` / `IPRESS`, el panel web consulta únicamente el `facility_code` del usuario. Primero utiliza los registros de `stock_actual`; si todavía no existe sincronización, usa como respaldo la hoja exacta configurada en `facility_stock_assignments` y aplica `visible_columns`. Es una vista de solo lectura y nunca muestra existencias de otra IPRESS.
-*   **`STOCK_MONITORING` / Monitoreo de Stock** (Módulo Supervisor): Conserva el directorio territorial, los estados de sincronización y el detalle de establecimientos. Tiene un permiso independiente y no se asigna al rol operativo FARMACIA.
+*   **`SIG_SEARCH` / Consulta Stock — `SheetSearchModule`**: su fuente oficial para medicamentos, lotes, saldos, fechas de vencimiento y fechas de actualización es **Google Sheets**, consultado mediante **Google Apps Script**. IndexedDB (`stockStorageService`) actúa únicamente como caché local para acelerar la apertura. Este módulo **no debe leer `stock_actual` como fuente de inventario ni usar Supabase como fallback del stock de Google Sheets**.
+*   **`STOCK_MONITORING` / Monitoreo de Stock — `IpressStockModule`**: es la evolución 2.0 de monitoreo y su fuente oficial de inventario es **Supabase `stock_actual`**, alimentada por Sync SISMED 2.0. Este módulo **no debe reemplazar sus datos por Google Sheets ni usar Apps Script como fallback de inventario**.
+*   **`IPRESS_STOCK` / Stock SISMED**: es una vista privada para la IPRESS y mantiene sus reglas propias. No debe confundirse con `SIG_SEARCH` ni con el directorio supervisor `STOCK_MONITORING`.
+
+### 3.1 Regla de fechas en Consulta Stock
+
+Google Sheets de Consulta Stock usa el formato visible **`DD/MM/YYYY`**. El Apps Script debe leer las hojas con `getDisplayValues()` y el frontend debe conservar e interpretar ese formato como día/mes/año. Ejemplo: `07/12/2026` significa **7 de diciembre de 2026**, nunca 12 de julio.
+
+Cuando cambie una regla de normalización de datos, la versión de caché IndexedDB de `Consulta Stock` debe incrementarse para impedir que registros antiguos incompatibles vuelvan a mostrarse sin releer Google Sheets.
 
 ## 4. Próximos pasos recomendados a la Inteligencia Artificial del Módulo Escritorio:
 
