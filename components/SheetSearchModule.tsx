@@ -53,13 +53,14 @@ import { saveAs } from "file-saver";
 import { useAuth } from "../contexts/AuthContext";
 import { UngetConfig, SheetSource, SIGData } from "../types";
 import { api } from "../services/api";
-import { supabaseService, supabase } from "../services/supabaseClient";
+import { sheetSearchSyncService as supabaseService, sheetSearchSupabase as supabase } from "../services/sheetSearchIsolation";
 import {
   fetchGasWithResilience,
   fetchGasMetadata,
   fetchGasSelectiveSheets,
 } from "../services/gasConnectionService";
 import { stockStorageService } from "../services/stockStorageService";
+import { fetchGasInitialWorkbook } from "../services/gasInitialLoadService";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -1615,7 +1616,7 @@ export const SheetSearchModule: React.FC = () => {
     ) {
       setSelectedSourceId("");
     }
-  }, [scriptUrls, sources, data, selectedSourceId, user, isConfigLoading, lastGlobalSync]);
+  }, [scriptUrls, sources, data, user, isConfigLoading, lastGlobalSync]);
 
   const loadSupabaseSyncs = async (forceIds?: string[]) => {
     if (!supabase) return;
@@ -1947,7 +1948,7 @@ export const SheetSearchModule: React.FC = () => {
 
           // Si no fue selectivo o es carga inicial/completa
           if (!sheetsPayload) {
-            sheetsPayload = await fetchScriptUrlWithFallback(config.url);
+            sheetsPayload = await fetchGasInitialWorkbook(config.url, { timeoutMs: 30000 });
           }
 
           if (Array.isArray(sheetsPayload)) {
