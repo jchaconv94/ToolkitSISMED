@@ -32,18 +32,25 @@ replacement = needle + '''
 text = re.sub(r'\\n\\s*const cleanSheetId = sheet\\.id\\.includes\\(\\\"_\\\"\\).*?;', '', text)
 text = re.sub(r'\\n\\s*const syncRecord = supabaseSyncs\\[sheet\\.id\\] \\|\\| supabaseSyncs\\[cleanSheetId\\] \\|\\| \\(code \\? supabaseSyncs\\[code\\] : undefined\\);', '', text)
 text = re.sub(r'\\n\\s*<td className=\\\"px-5 py-3 whitespace-nowrap text-center\\\">\\s*\\{\\(\\(\\) => \\{\\s*const syncRecord =\\s*supabaseSyncs\\[sheet\\.id\\];.*?\\}\\)\\(\\)\\}\\s*</td>', '', text, flags=re.S)
+text = re.sub(r'\\s*\\|\\|\\s*filterMovementsValue > 0', '', text)
 text = text.replace(', supabaseSyncs]', ']')
 text = text.replace('supabaseSyncs,\\n', '')'''
 if needle not in s:
     raise RuntimeError('No se encontró limpieza syncRecord')
 s = s.replace(needle, replacement, 1)
 
-# Si queda una referencia, imprimir su línea exacta antes de la guardia para corregirla con precisión.
+# Diagnóstico de cualquier referencia legacy que quede antes de abortar.
 guard = "# Estas referencias no deben existir ya en Consulta Stock."
-debug = '''if 'supabaseSyncs' in text:\n    print('DEBUG supabaseSyncs restante:')\n    for i, line in enumerate(text.splitlines(), 1):\n        if 'supabaseSyncs' in line:\n            print(f'{i}: {line}')\n\n'''
+debug = '''legacy_names = [\n    'supabaseService', 'supabaseSyncs', 'loadSupabaseSyncs', 'handleShowSyncHistory',\n    'filterMovementsUnit', 'filterMovementsValue', 'filterMovementsCondition',\n    'isSyncHistoryModalOpen', 'selectedFacilitySyncHistory', 'activeHistoryFacility'\n]\nfor legacy in legacy_names:\n    if legacy in text:\n        print(f'DEBUG {legacy} restante:')\n        for i, line in enumerate(text.splitlines(), 1):\n            if legacy in line:\n                print(f'{i}: {line}')\n\n'''
 if guard not in s:
     raise RuntimeError('No se encontró guardia final')
-s = s.replace(guard, debug + guard, 1)
+# Reemplazar el bloque debug anterior, si existe, para no duplicarlo.
+start = s.find("if 'supabaseSyncs' in text:")
+if start >= 0:
+    end = s.find(guard, start)
+    s = s[:start] + debug + s[end:]
+else:
+    s = s.replace(guard, debug + guard, 1)
 
 p.write_text(s, encoding='utf-8')
 print('Aplicador v2 corregido.')
