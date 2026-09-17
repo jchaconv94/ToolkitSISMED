@@ -11,11 +11,12 @@ const stockStore = localforage.createInstance({
 /**
  * Versión del esquema de caché de Consulta Stock.
  *
- * Se incrementa cuando cambia la forma en que interpretamos datos provenientes de
- * Google Sheets. La versión 2 invalida datos antiguos que podían conservar fechas de
- * vencimiento con día/mes intercambiados antes de la normalización DD/MM/YYYY actual.
+ * v3 fuerza una reconstrucción completa desde Google Sheets después de detectar cachés
+ * históricas con fechas de vencimiento que podían conservar día/mes intercambiados.
  */
-const STOCK_DATA_CACHE_VERSION = 2;
+const STOCK_DATA_CACHE_VERSION = 3;
+const STOCK_DATA_CACHE_KEY_PREFIX = `stock_v${STOCK_DATA_CACHE_VERSION}_`;
+const LEGACY_STOCK_DATA_KEY_PREFIXES = ["stock_", "stock_v2_"];
 
 export interface CachedStockData {
   cacheVersion: number;
@@ -41,6 +42,8 @@ type LastSavedRefs = {
  */
 const lastSavedRefsByUser = new Map<string, LastSavedRefs>();
 
+const stockCacheKey = (username: string) => `${STOCK_DATA_CACHE_KEY_PREFIX}${username}`;
+
 const removeLegacyBrowserStockCache = (username: string) => {
   if (!username || typeof localStorage === "undefined") return;
   try {
@@ -52,6 +55,16 @@ const removeLegacyBrowserStockCache = (username: string) => {
     localStorage.removeItem(`aura_sig_lastsync_${username}`);
   } catch {
     // Algunos navegadores pueden bloquear localStorage; IndexedDB seguirá funcionando.
+  }
+};
+
+const removeLegacyIndexedDbStockCache = async (username: string) => {
+  for (const prefix of LEGACY_STOCK_DATA_KEY_PREFIXES) {
+    try {
+      await stockStore.removeItem(`${prefix}${username}`);
+    } catch {
+      // Si falla una limpieza legacy, el nuevo key versionado sigue aislado.
+    }
   }
 };
 
@@ -212,7 +225,7 @@ export const stockStorageService = {
         lastSync: lastSyncIso,
         savedAt: Date.now(),
       };
-      await stockStore.setItem(`stock_${username}`, payload);
+      await stockStore.setItem(stockCacheKey(username), payload);
       lastSavedRefsByUser.set(username, {
         sources,
         data,
@@ -230,21 +243,26 @@ export const stockStorageService = {
    * También repara cachés creadas por versiones antiguas que guardaban la fecha en texto
    * o solamente dentro de las filas, pero no el timestamp usado por las tarjetas.
    *
-   * Si cambia la versión del esquema, se descarta el stock local y se obliga a Consulta
-   * Stock a volver a leer Google Sheets mediante Apps Script. Esto evita reutilizar fechas
-   * de vencimiento antiguas con día/mes invertidos.
+   * v3 usa un key nuevo. Si el usuario solo tiene un key antiguo, se limpia y se devuelve
+   * null para obligar a Consulta Stock a reconstruirse desde Google Sheets / Apps Script.
    */
   async loadStockData(username: string): Promise<CachedStockData | null> {
     if (!username) return null;
     try {
-      const cached = await stockStore.getItem<CachedStockData>(`stock_${username}`);
+      const currentKey = stockCacheKey(username);
+      const cached = await stockStore.getItem<CachedStockData>(currentKey);
 
       if (!cached || cached.cacheVersion !== STOCK_DATA_CACHE_VERSION) {
         lastSavedRefsByUser.delete(username);
-        await stockStore.removeItem(`stock_${username}`);
+        await stockStore.removeItem(currentKey);
+        await removeLegacyIndexedDbStockCache(username);
         removeLegacyBrowserStockCache(username);
         return null;
       }
+
+      // Limpieza preventiva: una vez existe v3, los keys previos ya no tienen utilidad.
+      await removeLegacyIndexedDbStockCache(username);
+      removeLegacyBrowserStockCache(username);
 
       if (Array.isArray(cached.data) && Array.isArray(cached.sources)) {
         const repairedSources = repairCachedSources(cached.sources, cached.data);
@@ -254,18 +272,14 @@ export const stockStorageService = {
           sources: repairedSources,
         };
 
-        // Si se reparó el source, persistir una sola vez la versión corregida. Así el
-        // siguiente arranque ya no necesita inspeccionar las filas para reconstruir fechas.
         if (repairedSources.some((source, index) => source !== cached.sources[index])) {
           const repairedPayload: CachedStockData = {
             ...repaired,
             savedAt: Date.now(),
           };
-          await stockStore.setItem(`stock_${username}`, repairedPayload);
+          await stockStore.setItem(currentKey, repairedPayload);
         }
 
-        // Marcar la versión cargada como la última persistida para que un cambio puramente
-        // visual no provoque de inmediato otra serialización masiva del mismo dataset.
         lastSavedRefsByUser.set(username, {
           sources: repairedSources,
           data: cached.data,
@@ -312,7 +326,8 @@ export const stockStorageService = {
     if (!username) return;
     try {
       lastSavedRefsByUser.delete(username);
-      await stockStore.removeItem(`stock_${username}`);
+      await stockStore.removeItem(stockCacheKey(username));
+      await removeLegacyIndexedDbStockCache(username);
       await stockStore.removeItem(`urls_${username}`);
       removeLegacyBrowserStockCache(username);
     } catch {}
