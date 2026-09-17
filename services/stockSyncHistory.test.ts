@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   FUTURE_SYNC_TOLERANCE_MS,
+  STOCK_SNAPSHOT_VERSION,
   STOCK_SYNC_LIGHT_COLUMNS,
+  buildStockSnapshot,
+  diffStockSnapshots,
+  getLastMovementDate,
+  parseSheetNumber,
+  readStockSnapshot,
+  stockItemKey,
   findGroupsWithoutSync,
   findLatestValidSync,
   getSyncDateCutoffIso,
@@ -193,5 +200,150 @@ describe("findGroupsWithoutSync", () => {
 
   it("solo consulta claves que fueron pedidas", () => {
     expect(findGroupsWithoutSync(["06528"], {}, [["06528", "no-pedida"]])).toEqual([["06528"]]);
+  });
+});
+
+const stockItem = (
+  codigo: string,
+  lote: string,
+  saldo: string,
+  extra: Record<string, string> = {},
+) => ({
+  ID_Producto: codigo,
+  Nombre: `MEDICAMENTO ${codigo}`,
+  Lote: lote,
+  Saldo: saldo,
+  Fec_Vencim: "07/12/2026",
+  TIPSUM: "CN",
+  FFINAN: "DYT",
+  Precio_Det: "6,4125",
+  ...extra,
+});
+
+describe("parseSheetNumber", () => {
+  it("lee los números como los muestra la hoja (coma decimal, punto de miles)", () => {
+    expect(parseSheetNumber("6,4125")).toBeCloseTo(6.4125);
+    expect(parseSheetNumber("0,133875")).toBeCloseTo(0.133875);
+    expect(parseSheetNumber("1.200")).toBe(1200);
+    expect(parseSheetNumber("1.200,50")).toBeCloseTo(1200.5);
+    expect(parseSheetNumber("51830")).toBe(51830);
+    expect(parseSheetNumber(478)).toBe(478);
+  });
+
+  it("devuelve 0 para valores vacíos o no numéricos", () => {
+    expect(parseSheetNumber("")).toBe(0);
+    expect(parseSheetNumber(null)).toBe(0);
+    expect(parseSheetNumber("DYT")).toBe(0);
+    expect(parseSheetNumber(NaN)).toBe(0);
+  });
+});
+
+describe("buildStockSnapshot / stockItemKey", () => {
+  it("agrupa por medicamento y lote, sumando tipo de suministro y fuente", () => {
+    const snapshot = buildStockSnapshot([
+      stockItem("00143", "L1", "100"),
+      stockItem("00143", "L1", "20", { TIPSUM: "CI", FFINAN: "ROR" }),
+      stockItem("00143", "L2", "5"),
+    ]);
+    expect(Object.keys(snapshot).sort()).toEqual(["00143|L1", "00143|L2"]);
+    expect(snapshot["00143|L1"].q).toBe(120);
+    expect(snapshot["00143|L1"].n).toBe("MEDICAMENTO 00143");
+    expect(snapshot["00143|L2"].v).toBe("07/12/2026");
+  });
+
+  it("usa marcadores cuando falta el código o el lote", () => {
+    expect(stockItemKey({ Nombre: "X" })).toBe("SIN_CODIGO|N/A");
+  });
+});
+
+describe("diffStockSnapshots", () => {
+  const previous = buildStockSnapshot([
+    stockItem("00143", "L1", "100"),
+    stockItem("00200", "L9", "50"),
+    stockItem("00259", "L3", "0"),
+  ]);
+
+  it("solo reporta medicamentos que subieron o bajaron", () => {
+    const current = buildStockSnapshot([
+      stockItem("00143", "L1", "80"),
+      stockItem("00200", "L9", "50"),
+      stockItem("00259", "L3", "0"),
+    ]);
+    const movements = diffStockSnapshots(previous, current);
+    expect(movements).toHaveLength(1);
+    expect(movements[0]).toMatchObject({ codigo: "00143", lote: "L1", previousQty: 100, currentQty: 80, change: -20 });
+  });
+
+  it("una reclasificación de tipo de suministro o fuente no es un movimiento", () => {
+    const current = buildStockSnapshot([
+      stockItem("00143", "L1", "60", { FFINAN: "ROR" }),
+      stockItem("00143", "L1", "40", { TIPSUM: "CI" }),
+      stockItem("00200", "L9", "50"),
+      stockItem("00259", "L3", "0"),
+    ]);
+    expect(diffStockSnapshots(previous, current)).toEqual([]);
+  });
+
+  it("un lote que aparece o desaparece con saldo 0 no es un movimiento", () => {
+    const current = buildStockSnapshot([
+      stockItem("00143", "L1", "100"),
+      stockItem("00200", "L9", "50"),
+      stockItem("00700", "L8", "0"),
+    ]);
+    expect(diffStockSnapshots(previous, current)).toEqual([]);
+  });
+
+  it("registra entradas nuevas y productos que se agotan, ordenados por magnitud", () => {
+    const current = buildStockSnapshot([
+      stockItem("00143", "L1", "105"),
+      stockItem("00700", "L8", "300"),
+    ]);
+    const movements = diffStockSnapshots(previous, current);
+    expect(movements.map((m) => `${m.codigo}|${m.lote}:${m.change}`)).toEqual([
+      "00700|L8:300",
+      "00200|L9:-50",
+      "00143|L1:5",
+    ]);
+    expect(movements[1].name).toBe("MEDICAMENTO 00200");
+  });
+});
+
+describe("readStockSnapshot", () => {
+  it("lee el formato nuevo", () => {
+    const metadata = JSON.stringify({
+      snapshot_version: STOCK_SNAPSHOT_VERSION,
+      items_snapshot: { "00143|L1": { q: 120, n: "ACICLOVIR" } },
+    });
+    expect(readStockSnapshot(metadata)).toEqual({ "00143|L1": { q: 120, n: "ACICLOVIR", v: undefined } });
+  });
+
+  it("convierte el formato antiguo agrupando por medicamento y lote", () => {
+    const metadata = JSON.stringify({
+      items_snapshot: {
+        "00143|L1|CN|DYT": { name: "ACICLOVIR", qty: 100, vto: "29/02/2028" },
+        "00143|L1|CI|ROR": { name: "ACICLOVIR", qty: 20 },
+      },
+    });
+    expect(readStockSnapshot(metadata)).toEqual({
+      "00143|L1": { q: 120, n: "ACICLOVIR", v: "29/02/2028" },
+    });
+  });
+
+  it("devuelve null cuando el registro no trae detalle utilizable", () => {
+    expect(readStockSnapshot(null)).toBeNull();
+    expect(readStockSnapshot("no es json")).toBeNull();
+    expect(readStockSnapshot(JSON.stringify({ total_stock: 10 }))).toBeNull();
+    expect(readStockSnapshot(JSON.stringify({ items_snapshot: {} }))).toBeNull();
+  });
+});
+
+describe("getLastMovementDate", () => {
+  it("usa la fecha del último cambio real y descarta la referencia inicial", () => {
+    expect(getLastMovementDate({ sync_date: "2026-09-17T14:00:00Z", has_changes: true })).toBe("2026-09-17T14:00:00Z");
+    expect(getLastMovementDate({ sync_date: "2026-09-17T14:00:00Z", has_changes: false })).toBeUndefined();
+    expect(
+      getLastMovementDate({ sync_date: "2026-09-17T14:00:00Z", has_changes: false, last_modification_date: "2026-09-16T09:00:00Z" }),
+    ).toBe("2026-09-16T09:00:00Z");
+    expect(getLastMovementDate(null)).toBeUndefined();
   });
 });

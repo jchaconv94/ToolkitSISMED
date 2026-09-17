@@ -69,7 +69,7 @@ import {
   fetchSheetsMetadataDirect,
   type DirectSheetRef,
 } from "../services/sheetsDirectService";
-import { findLatestValidSync } from "../services/stockSyncHistory";
+import { findLatestValidSync, getLastMovementDate } from "../services/stockSyncHistory";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -3907,7 +3907,7 @@ function processSheet(sheet) {
           syncStatusLabel: statusObj.label,
           syncStatusColor: statusObj.color,
           isMismatchEquipmentDate: isMismatch,
-          syncRecordDate: syncRecord?.sync_date,
+          syncRecordDate: getLastMovementDate(syncRecord),
           hasSyncRecord: !!syncRecord,
         };
       })
@@ -5926,7 +5926,7 @@ function processSheet(sheet) {
                                   expiredCount,
                                   expiringThisMonthCount,
                                   totalItems: sheetData.length > 0 ? sheetData.length : sheet.rowCount || 0,
-                                  syncRecordDate: syncRecord?.sync_date,
+                                  syncRecordDate: getLastMovementDate(syncRecord),
                                   hasSyncRecord: !!syncRecord,
                                   isCheckingSync: isCheckingLatestSyncs,
                                 };

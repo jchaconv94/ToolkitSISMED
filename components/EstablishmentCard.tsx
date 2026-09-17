@@ -404,8 +404,10 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
                     Historial de cambios
                   </span>
                 </div>
+                {/* Con registro en Supabase pero sin movimientos, el stock no varió: no es
+                    lo mismo que no haber comprobado nunca el historial. */}
                 <span className="bg-slate-100 text-slate-600 group-hover:bg-teal-50 group-hover:text-teal-700 group-hover:border-teal-200 border border-slate-200 px-1.5 py-0.5 rounded font-extrabold uppercase text-[8.5px] tracking-wide transition-colors">
-                  Sin verificar
+                  {hasSyncRecord ? "Sin movimientos" : "Sin verificar"}
                 </span>
               </div>
             )}
