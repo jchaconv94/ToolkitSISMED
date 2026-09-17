@@ -15,7 +15,8 @@
  */
 
 const STOCK_SPREADSHEET_ID = '1vic6MeMiA5Jk4_UWx8nI462yXe8irgxAoMncJiekOOA';
-const STOCK_METADATA_CACHE_KEY = 'toolkit_sismed_stock_metadata_v5';
+// v6: la metadata incluye spreadsheetId (lectura directa desde la web).
+const STOCK_METADATA_CACHE_KEY = 'toolkit_sismed_stock_metadata_v6';
 const STOCK_METADATA_CACHE_SECONDS = 60;
 
 function doGet(e) {
@@ -185,7 +186,8 @@ function getMetadata_(ss) {
       equipmentDate: '',
       almcod: '',
       codigoIpress: '',
-      rowCount: Math.max(0, lastRow - 1)
+      rowCount: Math.max(0, lastRow - 1),
+      spreadsheetId: STOCK_SPREADSHEET_ID
     };
 
     if (lastRow < 2 || lastCol < 1) {
@@ -222,7 +224,8 @@ function getMetadata_(ss) {
       equipmentDate: idxEquipment >= 0 ? String(firstRow[idxEquipment] || '').trim() : '',
       almcod: almcod,
       codigoIpress: getFacilityCode_(sheet.getName(), almcod),
-      rowCount: base.rowCount
+      rowCount: base.rowCount,
+      spreadsheetId: STOCK_SPREADSHEET_ID
     };
   }
 
@@ -248,6 +251,7 @@ function processSheet_(sheet) {
     return {
       id: sheet.getSheetId().toString(),
       name: sheet.getName(),
+      spreadsheetId: STOCK_SPREADSHEET_ID,
       data: []
     };
   }
@@ -282,6 +286,7 @@ function processSheet_(sheet) {
   return {
     id: sheet.getSheetId().toString(),
     name: sheet.getName(),
+    spreadsheetId: STOCK_SPREADSHEET_ID,
     data: rows
   };
 }

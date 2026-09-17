@@ -63,6 +63,12 @@ import {
   type GasSheetMetadata,
 } from "../services/gasConnectionService";
 import { stockStorageService } from "../services/stockStorageService";
+import {
+  canReadSheetDirect,
+  fetchSheetRowsDirect,
+  fetchSheetsMetadataDirect,
+  type DirectSheetRef,
+} from "../services/sheetsDirectService";
 import { findLatestValidSync } from "../services/stockSyncHistory";
 import {
   DeficiencyCaptureModal,
@@ -192,8 +198,47 @@ const sourceFromMetadata = (
     lastUpdateTime: parseDataDate(lastUpdate) || existing?.lastUpdateTime || undefined,
     equipmentDate: equipmentDate || existing?.equipmentDate || "",
     equipmentDateTime: parseDataDate(equipmentDate) || existing?.equipmentDateTime || undefined,
+    spreadsheetId: meta.spreadsheetId || existing?.spreadsheetId || undefined,
   };
 };
+
+/**
+ * Hojas de una UNGET que se pueden leer directamente de Google Sheets. Solo si todas las
+ * tarjetas guardadas tienen libro y pestaña; si no, se usa la metadata de Apps Script.
+ */
+const toDirectSheetRefs = (list: SheetSource[]): DirectSheetRef[] | null => {
+  if (list.length === 0) return null;
+  const refs = list.map((source) => ({
+    gid: getCleanSourceId(source.id),
+    sheetName: source.sheetName || "",
+    spreadsheetId: source.spreadsheetId || "",
+    rowCount: source.rowCount,
+    codigoIpress: source.facilityCode,
+    lastUpdate: source.lastUpdate,
+    equipmentDate: source.equipmentDate,
+  }));
+  return refs.every((ref) => ref.sheetName && canReadSheetDirect(ref.spreadsheetId, ref.gid))
+    ? refs
+    : null;
+};
+
+const runWithConcurrency = async <T,>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<void>,
+): Promise<void> => {
+  const queue = [...items];
+  const worker = async () => {
+    for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
+      await task(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, queue.length) }, worker));
+};
+
+/** La lista de pestañas cambia poco: Apps Script se consulta para ella como máximo cada 30 min. */
+const GAS_SHEET_LIST_REFRESH_MS = 30 * 60 * 1000;
+const DIRECT_SHEET_REFRESH_CONCURRENCY = 3;
 
 const sameSheetDate = (metaValue?: string, existingValue?: string, existingTs?: number) => {
   const current = (metaValue || "").trim();
@@ -837,6 +882,8 @@ export const SheetSearchModule: React.FC = () => {
   const [retryingUrls, setRetryingUrls] = useState<Record<string, boolean>>({});
   // IPRESS cuyo stock se está descargando bajo demanda (evita descargas duplicadas por doble clic).
   const loadingSourceIdsRef = useRef<Set<string>>(new Set());
+  // Última consulta de la lista de pestañas a Apps Script, por URL (lectura directa activa).
+  const gasSheetListRefreshRef = useRef<Record<string, number>>({});
   const [quickFixConfig, setQuickFixConfig] = useState<UngetConfig | null>(null);
   const [quickFixUrlInput, setQuickFixUrlInput] = useState("");
   const [isTestingGasUrl, setIsTestingGasUrl] = useState(false);
@@ -1893,6 +1940,51 @@ export const SheetSearchModule: React.FC = () => {
     }
   };
 
+  // Con lectura directa activa, Apps Script solo aporta la lista de pestañas (nuevas o
+  // eliminadas). Corre en segundo plano, como máximo cada 30 min, y no pisa fechas más
+  // recientes leídas directamente.
+  const refreshSheetListFromGas = async (config: UngetConfig, urlIndex: number) => {
+    const last = gasSheetListRefreshRef.current[config.url] || 0;
+    if (Date.now() - last < GAS_SHEET_LIST_REFRESH_MS) return;
+    gasSheetListRefreshRef.current[config.url] = Date.now();
+
+    try {
+      const metadataList = await fetchGasMetadata(config.url);
+      const loadedSourceIds = new Set(data.map((row) => row.sourceId || ""));
+      setSources((prev) => {
+        const current = prev.filter((s) => s.urlIndex === urlIndex);
+        const { merged } = mergeMetadataIntoSources(metadataList, current, loadedSourceIds, {
+          configUrl: config.url,
+          urlIndex,
+          assignments: allAssignments,
+          facilities: allFacilities,
+        });
+        const previousById = new Map(current.map((s) => [s.id, s]));
+        const kept = merged.map((source) => {
+          const previous = previousById.get(source.id);
+          if (!previous || (previous.lastUpdateTime || 0) <= (source.lastUpdateTime || 0)) {
+            return source;
+          }
+          return {
+            ...source,
+            lastUpdate: previous.lastUpdate,
+            lastUpdateTime: previous.lastUpdateTime,
+            equipmentDate: previous.equipmentDate,
+            equipmentDateTime: previous.equipmentDateTime,
+          };
+        });
+        return [...prev.filter((s) => s.urlIndex !== urlIndex), ...kept];
+      });
+    } catch (err: any) {
+      // Sin la lista de Apps Script se conserva la guardada; la lectura directa sigue y se
+      // vuelve a intentar en el siguiente intervalo.
+      console.warn(
+        `Lista de hojas de ${config.name || "UNGET"} no disponible en Apps Script:`,
+        err?.message || err,
+      );
+    }
+  };
+
   const fetchData = async (
     overrideUrls?: UngetConfig[],
     silent: boolean = false,
@@ -1937,10 +2029,21 @@ export const SheetSearchModule: React.FC = () => {
           if (forceFullRefresh) {
             sheetsPayload = await fetchScriptUrlWithFallback(config.url);
           } else {
-            const metadataList = await fetchGasMetadata(config.url);
+            const currentForUrl = sources.filter((s) => s.urlIndex === urlIndex);
+            const directRefs = toDirectSheetRefs(currentForUrl);
+            let metadataList: GasSheetMetadata[];
+            if (directRefs) {
+              // Directorio conocido: las fechas se leen directo de Google Sheets (~3 s para
+              // 22 hojas). La lista de pestañas se revisa con Apps Script en segundo plano.
+              metadataList = await fetchSheetsMetadataDirect(directRefs);
+              void refreshSheetListFromGas(config, urlIndex);
+            } else {
+              metadataList = await fetchGasMetadata(config.url);
+              gasSheetListRefreshRef.current[config.url] = Date.now();
+            }
             const { merged, changedSheetNames } = mergeMetadataIntoSources(
               metadataList,
-              sources.filter((s) => s.urlIndex === urlIndex),
+              currentForUrl,
               loadedSourceIds,
               {
                 configUrl: config.url,
@@ -1967,12 +2070,31 @@ export const SheetSearchModule: React.FC = () => {
               void loadSupabaseSyncs(merged);
             }
 
-            // Stock guardado que cambió: se refresca por lotes pequeños. Un lote fallido
-            // conserva sus datos anteriores y se reintentará en la próxima sincronización.
+            // Stock guardado que cambió: lectura directa por hoja y, si no es posible, Apps
+            // Script por lotes pequeños. Una hoja fallida conserva sus datos anteriores y se
+            // reintentará en la próxima sincronización.
             if (changedSheetNames.length > 0) {
               const refreshed: any[] = [];
-              for (let i = 0; i < changedSheetNames.length; i += CHANGED_SHEETS_BATCH_SIZE) {
-                const batch = changedSheetNames.slice(i, i + CHANGED_SHEETS_BATCH_SIZE);
+              const metaByName = new Map(metadataList.map((meta) => [meta.name, meta]));
+              const viaGas: string[] = [];
+              const viaDirect = changedSheetNames.filter((name) => {
+                const meta = metaByName.get(name);
+                const direct = canReadSheetDirect(meta?.spreadsheetId, meta?.id);
+                if (!direct) viaGas.push(name);
+                return direct;
+              });
+              await runWithConcurrency(viaDirect, DIRECT_SHEET_REFRESH_CONCURRENCY, async (name) => {
+                const meta = metaByName.get(name)!;
+                try {
+                  const rows = await fetchSheetRowsDirect(meta.spreadsheetId!, meta.id);
+                  refreshed.push({ id: meta.id, name, spreadsheetId: meta.spreadsheetId, data: rows });
+                } catch (directErr: any) {
+                  console.warn(`Lectura directa de "${name}" no disponible; se usa Apps Script:`, directErr?.message || directErr);
+                  viaGas.push(name);
+                }
+              });
+              for (let i = 0; i < viaGas.length; i += CHANGED_SHEETS_BATCH_SIZE) {
+                const batch = viaGas.slice(i, i + CHANGED_SHEETS_BATCH_SIZE);
                 try {
                   const result = await fetchGasSelectiveSheets(config.url, batch);
                   if (Array.isArray(result)) refreshed.push(...result);
@@ -2033,6 +2155,10 @@ export const SheetSearchModule: React.FC = () => {
                 sheetName: sheet.name,
                 rowCount: Array.isArray(sheet.data) ? sheet.data.length : 0,
                 facilityCode: extractFacilityCodeFromSheetName(sheet.name) || undefined,
+                spreadsheetId:
+                  sheet.spreadsheetId ||
+                  sources.find((s) => s.id === uniqueSourceId)?.spreadsheetId ||
+                  undefined,
                 lastUpdate: lastUpdateStr,
                 lastUpdateTime: lastUpdateTime || undefined,
                 equipmentDate: equipmentDateStr,
@@ -2591,12 +2717,33 @@ export const SheetSearchModule: React.FC = () => {
     const loadingToastId = toast.loading(`Consultando stock de ${source.name}...`);
 
     try {
-      const payload = await fetchGasSingleSheet(config.url, realSheetName);
-      if (!Array.isArray(payload) || payload.length === 0) {
-        throw new Error("La hoja no devolvió datos válidos.");
+      // Lectura directa de Google Sheets (~1 s). Apps Script queda como respaldo: ejecuta
+      // rápido, pero su entrega falla con frecuencia.
+      type SheetPayload = { name?: string; spreadsheetId?: string; data?: any[] };
+      let directPayload: SheetPayload | null = null;
+      const gid = getCleanSourceId(sourceId);
+      if (canReadSheetDirect(source.spreadsheetId, gid)) {
+        try {
+          const directRows = await fetchSheetRowsDirect(source.spreadsheetId!, gid);
+          directPayload = { name: realSheetName, spreadsheetId: source.spreadsheetId, data: directRows };
+        } catch (directErr: any) {
+          console.warn(
+            `Lectura directa de ${source.name} no disponible; se usa Apps Script:`,
+            directErr?.message || directErr,
+          );
+        }
+      }
+      let sheetPayload: SheetPayload;
+      if (directPayload) {
+        sheetPayload = directPayload;
+      } else {
+        const payload = await fetchGasSingleSheet(config.url, realSheetName);
+        if (!Array.isArray(payload) || payload.length === 0) {
+          throw new Error("La hoja no devolvió datos válidos.");
+        }
+        sheetPayload = payload[0];
       }
 
-      const sheetPayload = payload[0];
       const rows = Array.isArray(sheetPayload.data) ? sheetPayload.data : [];
       const firstRow = rows[0] || {};
       const lastUpdateStr = getRowFieldValue(
@@ -2638,6 +2785,7 @@ export const SheetSearchModule: React.FC = () => {
         equipmentDate: equipmentDateStr || source.equipmentDate,
         equipmentDateTime:
           parseDataDate(equipmentDateStr) || source.equipmentDateTime,
+        spreadsheetId: sheetPayload.spreadsheetId || source.spreadsheetId,
       };
 
       setSources((prev) =>
