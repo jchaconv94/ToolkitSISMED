@@ -2056,8 +2056,16 @@ export const SheetSearchModule: React.FC = () => {
   useEffect(() => {
     if (!isConfigLoading) {
       if (scriptUrls.length > 0) {
-        // Siempre hacemos fetch de manera silenciosa para no bloquear la pantalla, como sugirió el usuario.
-        fetchData(undefined, true);
+        // Si IndexedDB ya fue verificado hace pocos minutos, no volver a golpear GAS al entrar.
+        // El usuario conserva el botón Sincronizar para forzar una comprobación cuando lo necesite.
+        const hasCachedDataset = sources.length > 0 && data.length > 0;
+        const lastSyncAgeMs = lastGlobalSync
+          ? Date.now() - lastGlobalSync.getTime()
+          : Number.POSITIVE_INFINITY;
+        const CACHE_RECHECK_WINDOW_MS = 5 * 60 * 1000;
+        if (!hasCachedDataset || lastSyncAgeMs >= CACHE_RECHECK_WINDOW_MS) {
+          fetchData(undefined, true);
+        }
       } else {
         // Ejecutar para disparar el estado vacío
         fetchData(undefined, false);
@@ -3772,9 +3780,11 @@ function processSheet(sheet) {
               <RefreshCw
                 className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`}
               />
-              {isLoading || isSilentSyncing
+              {isLoading
                 ? "Sincronizando..."
-                : "Sincronizar"}
+                : isSilentSyncing
+                  ? "Verificando..."
+                  : "Sincronizar"}
             </button>
           </div>
         </div>
@@ -5455,6 +5465,7 @@ function processSheet(sheet) {
                                   <EstablishmentCard
                                     key={sheet.id}
                                     data={cardData}
+                                    showHistoryRow={false}
                                     isCaptureMode={isCaptureMode}
                                     isSelected={isSelected}
                                     onToggleSelect={() => toggleCardSelection(sheet.id)}
