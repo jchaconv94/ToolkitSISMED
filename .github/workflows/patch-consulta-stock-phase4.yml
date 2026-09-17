@@ -1,0 +1,50 @@
+name: Patch Consulta Stock Phase 4
+
+on:
+  push:
+    branches:
+      - optimize-consulta-stock-phase4
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    if: ${{ !contains(github.event.head_commit.message, '[phase4-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: optimize-consulta-stock-phase4
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Aplicar parche
+        run: python3 scripts/patch_consulta_stock_phase4.py
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: TypeScript lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Guardar cambios validados
+        run: |
+          rm scripts/patch_consulta_stock_phase4.py
+          rm .github/workflows/patch-consulta-stock-phase4.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "perf(consulta-stock): metadata first y separación de Supabase [phase4-patched]"
+          git push origin HEAD:optimize-consulta-stock-phase4
