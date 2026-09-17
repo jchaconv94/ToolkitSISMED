@@ -1,0 +1,24 @@
+name: Diagnosticar GAS primera carga
+
+on:
+  push:
+    branches:
+      - fix-consulta-stock-first-load-v3
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probar metadata Bellavista
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://script.google.com/macros/s/AKfycbwsBW522vGhqZTkfs70TdoJ6HACWjWsnf9kbFVfd78OhejWETTJCKeuOERiy1dIrRqA/exec?action=getMetadata&refresh=1'
+          for i in 1 2 3; do
+            echo "--- intento $i ---"
+            curl -L --fail --silent --show-error --max-time 60 \
+              -w '\nHTTP=%{http_code} total=%{time_total}s size=%{size_download}\n' \
+              "$URL" | head -c 2000
+            echo
+            sleep 1
+          done
