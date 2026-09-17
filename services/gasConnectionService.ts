@@ -126,17 +126,27 @@ export async function fetchGasWithResilience(
     // Intento directo JSON
     try {
       const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && parsed.error) {
+        throw new Error(`Error desde Google Apps Script: ${parsed.error}`);
+      }
       if (Array.isArray(parsed)) return parsed;
       if (parsed && typeof parsed === "object") {
         if (parsed.contents && typeof parsed.contents === "string") {
           try {
             const inner = JSON.parse(parsed.contents);
+            if (inner && typeof inner === "object" && inner.error) {
+              throw new Error(`Error desde Google Apps Script: ${inner.error}`);
+            }
             if (Array.isArray(inner) || typeof inner === "object") return inner;
           } catch {}
         }
         return parsed;
       }
-    } catch {}
+    } catch (e: any) {
+      if (e.message && e.message.includes("Error desde Google Apps Script")) {
+        throw e;
+      }
+    }
     return null;
   };
 
@@ -186,12 +196,21 @@ export async function fetchGasWithResilience(
 
     if (res.ok) {
       const text = await res.text();
-      const parsed = parseGasPayload(text);
-      if (parsed) return parsed;
+      try {
+        const parsed = parseGasPayload(text);
+        if (parsed) return parsed;
+      } catch (e: any) {
+        if (e.message && e.message.includes("Error desde Google Apps Script")) {
+          throw e; // Lanza inmediatamente, no intentar proxies si es error interno del script
+        }
+      }
       const diag = diagnoseGasResponse(res.status, text);
       lastDiagnostic = diag.diagnostic;
     }
   } catch (err: any) {
+    if (err.message && err.message.includes("Error desde Google Apps Script")) {
+      throw err;
+    }
     // Continuar a proxies
   }
 
@@ -215,15 +234,92 @@ export async function fetchGasWithResilience(
 
       if (res.ok) {
         const text = await res.text();
-        const parsed = parseGasPayload(text);
-        if (parsed) return parsed;
+        try {
+          const parsed = parseGasPayload(text);
+          if (parsed) return parsed;
+        } catch (e: any) {
+          if (e.message && e.message.includes("Error desde Google Apps Script")) {
+            throw e; // Bubble up explicitly
+          }
+        }
         const diag = diagnoseGasResponse(res.status, text);
         lastDiagnostic = diag.diagnostic;
       }
-    } catch {
+    } catch (err: any) {
+      if (err.message && err.message.includes("Error desde Google Apps Script")) {
+        throw err;
+      }
       // Continuar al siguiente proxy
     }
   }
 
   throw new Error(lastDiagnostic);
+}
+
+export interface GasSheetMetadata {
+  id: string;
+  name: string;
+  lastUpdate?: string;
+  equipmentDate?: string;
+  almcod?: string;
+  rowCount?: number;
+}
+
+/**
+ * Consulta ultrarrápida de metadatos de las hojas de cálculo (~500ms - 1s).
+ * Solo lee la primera fila de cada hoja para determinar si cambió la fecha de actualización.
+ */
+export async function fetchGasMetadata(
+  rawUrl: string,
+  options: { timeoutMs?: number } = {}
+): Promise<GasSheetMetadata[] | null> {
+  const cleanUrl = (rawUrl || "").trim();
+  if (!cleanUrl) return null;
+
+  const sep = cleanUrl.includes("?") ? "&" : "?";
+  const metaUrl = `${cleanUrl}${sep}action=getMetadata&_t=${Date.now()}`;
+
+  try {
+    const result = await fetchGasWithResilience(metaUrl, {
+      timeoutMs: options.timeoutMs || 18000,
+    });
+
+    if (Array.isArray(result) && result.length > 0) {
+      // Verificar si tiene estructura de metadatos (no contiene array data completo por hoja)
+      const isMetadata = result.every(
+        (item: any) =>
+          item &&
+          typeof item === "object" &&
+          item.name &&
+          (item.lastUpdate !== undefined || item.rowCount !== undefined || !item.data)
+      );
+      if (isMetadata) {
+        return result as GasSheetMetadata[];
+      }
+    }
+    return null;
+  } catch (e) {
+    console.warn("No se pudo obtener metadatos ligeros de GAS, usando fallback completo:", e);
+    return null;
+  }
+}
+
+/**
+ * Descarga selectiva únicamente de las hojas que cambiaron.
+ */
+export async function fetchGasSelectiveSheets(
+  rawUrl: string,
+  sheetNames: string[],
+  options: { timeoutMs?: number } = {}
+): Promise<any> {
+  const cleanUrl = (rawUrl || "").trim();
+  if (!cleanUrl || sheetNames.length === 0) return [];
+
+  const sep = cleanUrl.includes("?") ? "&" : "?";
+  const sheetsParam = encodeURIComponent(sheetNames.join(","));
+  const selectiveUrl = `${cleanUrl}${sep}sheets=${sheetsParam}&_t=${Date.now()}`;
+
+  return await fetchGasWithResilience(selectiveUrl, {
+    timeoutMs: options.timeoutMs || 35000,
+  });
 }

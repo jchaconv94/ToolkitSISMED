@@ -42,24 +42,34 @@ export const supabase =
  * Any change in stock, products, batches, or expiration dates will yield a different hash value.
  */
 export const computeStockHash = (products: any[]): string => {
-  const sortedSubset = [...products]
-    .filter((row) => row && (row.ID_Producto || row.Nombre))
-    .sort((a, b) => {
-      const idA = String(a.ID_Producto || a.Nombre || "");
-      const idB = String(b.ID_Producto || b.Nombre || "");
-      return idA.localeCompare(idB);
-    });
-
-  let stateStr = "";
-  for (const item of sortedSubset) {
-    const id = item.ID_Producto || item.Nombre || "";
+  // Agrupar por las mismas claves que usamos en el diff (codigo, lote, tipsum, ffinan)
+  // para que si hay filas duplicadas se sumen, y no dependa del orden
+  const grouped: Record<string, number> = {};
+  
+  for (const item of products) {
+    if (!item) continue;
+    const id = String(item.ID_Producto || item.medcod || item.Codigo_Sismed || item.CODIGO_SIG || item.Nombre || "UNKNOWN").trim();
+    const lot = String(item.Lote || "N/A").trim();
+    const tipsum = String(item.TIPSUM || "N/A").trim();
+    const ffinan = String(item.FFINAN || "N/A").trim();
+    
     const qty =
-      item.Saldo !== undefined
-        ? item.Saldo
-        : item.Saldo_Fisico || item.Stock || 0;
-    const lot = item.Lote || "";
-    const exp = item.Fec_Vencim || "";
-    stateStr += `${id}:${qty}:${lot}:${exp}|`;
+      Number(
+        item.Saldo !== undefined
+          ? item.Saldo
+          : item.Saldo_Fisico || item.Stock || 0,
+      ) || 0;
+      
+    const key = `${id}|${lot}|${tipsum}|${ffinan}`;
+    grouped[key] = (grouped[key] || 0) + qty;
+  }
+
+  // Ordenar las claves para asegurar un hash determinista
+  const sortedKeys = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+  
+  let stateStr = "";
+  for (const key of sortedKeys) {
+    stateStr += `${key}:${grouped[key]}|`;
   }
 
   // DJB2 simple hashing algorithm
@@ -395,23 +405,28 @@ export const supabaseService = {
             item.Vencimiento ||
             "N/A",
         );
-        const tipsum = String(item.TIPSUM || "N/A");
-        const ffinan = String(item.FFINAN || "N/A");
+        const tipsum = String(item.TIPSUM || "N/A").trim();
+        const ffinan = String(item.FFINAN || "N/A").trim();
 
-        const itemId = `${codSismed}|${nombre}|${lote}|${vto}|${tipsum}|${ffinan}`;
+        const itemId = `${codSismed}|${lote}|${tipsum}|${ffinan}`;
         const itemQty =
           Number(
             item.Saldo !== undefined
               ? item.Saldo
               : item.Saldo_Fisico || item.Stock || 0,
           ) || 0;
-        currentItemsSnapshot[itemId] = {
-          name: nombre,
-          qty: itemQty,
-          codigo: codSismed,
-          lote,
-          vto,
-        };
+        
+        if (currentItemsSnapshot[itemId]) {
+          currentItemsSnapshot[itemId].qty += itemQty;
+        } else {
+          currentItemsSnapshot[itemId] = {
+            name: nombre,
+            qty: itemQty,
+            codigo: codSismed,
+            lote,
+            vto,
+          };
+        }
       });
 
       const metadataObj: any = {

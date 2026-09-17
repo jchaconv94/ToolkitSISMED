@@ -15,7 +15,9 @@ export interface EstablishmentCardData {
   id: string;
   name: string;
   code?: string;
+  lastUpdate?: string | null;
   lastUpdateTime?: number | null;
+  equipmentDate?: string | null;
   equipmentDateTime?: number | null;
   expiredCount: number;
   expiringThisMonthCount: number;
@@ -77,16 +79,41 @@ export const getCardUpdateStatus = (timestamp?: number | null) => {
   };
 };
 
-export const formatCardFullDate = (timestamp?: number | null): string => {
-  if (!timestamp || timestamp === 0) return "Sin fecha";
-  const d = new Date(timestamp);
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
-  const hours = String(d.getHours()).padStart(2, "0");
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  const seconds = String(d.getSeconds()).padStart(2, "0");
-  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+export const formatCardFullDate = (val?: any): string => {
+  if (!val) return "Sin fecha";
+  if (typeof val === "number") {
+    if (val === 0) return "Sin fecha";
+    const d = new Date(val);
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const seconds = String(d.getSeconds()).padStart(2, "0");
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  }
+
+  const str = String(val).trim();
+  if (!str) return "Sin fecha";
+
+  const standardMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(\s+\d{1,2}:\d{2}(:\d{2})?)?$/);
+  if (standardMatch) {
+    const [, day, month, year, time] = standardMatch;
+    return `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}${time || ""}`;
+  }
+
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const seconds = String(d.getSeconds()).padStart(2, "0");
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  }
+
+  return str;
 };
 
 export const checkDatesMatch = (ts1?: number | null, ts2?: number | null): boolean => {
@@ -159,7 +186,9 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
   const {
     name,
     code,
+    lastUpdate,
     lastUpdateTime,
+    equipmentDate,
     equipmentDateTime,
     expiredCount,
     expiringThisMonthCount,
@@ -279,19 +308,19 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
           </h3>
 
           {/* Last updated info */}
-          {lastUpdateTime ? (
+          {(lastUpdate || lastUpdateTime) ? (
             <div className="flex flex-col gap-0.5 mt-2">
               <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500 flex-wrap">
                 <RefreshCw className="h-3 w-3 text-slate-400 shrink-0" />
                 <span>
                   Act:{" "}
                   <span className="font-bold text-slate-700">
-                    {formatCardFullDate(lastUpdateTime)}
+                    {formatCardFullDate(lastUpdate || lastUpdateTime)}
                   </span>
                 </span>
               </div>
 
-              {equipmentDateTime && (
+              {(equipmentDate || equipmentDateTime) && (
                 <div
                   className={`flex items-center gap-1.5 text-[10px] font-medium ${
                     isMismatch ? "text-rose-600" : "text-slate-400"
@@ -305,7 +334,7 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
                         isMismatch ? "text-rose-600 font-extrabold" : "text-slate-600"
                       }`}
                     >
-                      {formatCardFullDate(equipmentDateTime)}
+                      {formatCardFullDate(equipmentDate || equipmentDateTime)}
                     </span>
                   </span>
                 </div>

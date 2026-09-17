@@ -54,7 +54,11 @@ import { useAuth } from "../contexts/AuthContext";
 import { UngetConfig, SheetSource, SIGData } from "../types";
 import { api } from "../services/api";
 import { supabaseService, supabase } from "../services/supabaseClient";
-import { fetchGasWithResilience } from "../services/gasConnectionService";
+import {
+  fetchGasWithResilience,
+  fetchGasMetadata,
+  fetchGasSelectiveSheets,
+} from "../services/gasConnectionService";
 import { stockStorageService } from "../services/stockStorageService";
 import {
   DeficiencyCaptureModal,
@@ -105,38 +109,78 @@ const alignConfigsWithOfficialUngets = (configs: any[], ungs: any[]): any[] => {
 
 const parseDataDate = (str?: string): number => {
   if (!str) return 0;
-  // Intentar parseo nativo primero
-  let d = new Date(str);
-  if (!isNaN(d.getTime())) return d.getTime();
+  const trimmed = str.trim();
+  if (!trimmed) return 0;
 
-  // Intentar DD/MM/YYYY HH:MM:SS (común en sheets latinas)
+  // Intentar DD/MM/YYYY HH:MM:SS primero (formato estándar de Google Sheets en español)
   try {
-    const parts = str.trim().split(/\s+/);
+    const parts = trimmed.split(/\s+/);
     const datePart = parts[0].replace(",", "");
     const timePart = parts[1] || "00:00:00";
+    const paddedTime = timePart.split(':').map(p => p.padStart(2, "0")).join(':');
     const dateMatch = datePart.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
     if (dateMatch) {
       const [, day, month, year] = dateMatch;
-      d = new Date(
-        `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${timePart}`,
-      );
-      return d.getTime() || 0;
+      const isoStr = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${paddedTime}`;
+      const d = new Date(isoStr);
+      if (!isNaN(d.getTime())) return d.getTime();
     }
   } catch (e) {}
 
-  return 0;
+  // Intentar parseo nativo ISO / fallback
+  const d = new Date(trimmed);
+  return !isNaN(d.getTime()) ? d.getTime() : 0;
 };
 
-const formatFullDate = (timestamp?: number): string => {
-  if (!timestamp || timestamp === 0) return "Sin fecha";
-  const d = new Date(timestamp);
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
-  const hours = String(d.getHours()).padStart(2, "0");
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  const seconds = String(d.getSeconds()).padStart(2, "0");
-  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+const getRowFieldValue = (row: any, ...fieldPatterns: string[]): string => {
+  if (!row || typeof row !== "object") return "";
+  for (const pattern of fieldPatterns) {
+    if (row[pattern]) return String(row[pattern]);
+  }
+  const keys = Object.keys(row);
+  for (const pattern of fieldPatterns) {
+    const patNorm = pattern.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const matchingKey = keys.find((k) => k.toUpperCase().replace(/[^A-Z0-9]/g, "") === patNorm);
+    if (matchingKey && row[matchingKey]) return String(row[matchingKey]);
+  }
+  return "";
+};
+
+const formatFullDate = (val?: any): string => {
+  if (!val) return "Sin fecha";
+  if (typeof val === "number") {
+    if (val === 0) return "Sin fecha";
+    const d = new Date(val);
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const seconds = String(d.getSeconds()).padStart(2, "0");
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  }
+
+  const str = String(val).trim();
+  if (!str) return "Sin fecha";
+
+  const standardMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(\s+\d{1,2}:\d{2}(:\d{2})?)?$/);
+  if (standardMatch) {
+    const [, day, month, year, time] = standardMatch;
+    return `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}${time || ""}`;
+  }
+
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const seconds = String(d.getSeconds()).padStart(2, "0");
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  }
+
+  return str;
 };
 
 const datesMatch = (ts1?: number, ts2?: number): boolean => {
@@ -148,6 +192,90 @@ const datesMatch = (ts1?: number, ts2?: number): boolean => {
     d1.getMonth() === d2.getMonth() &&
     d1.getFullYear() === d2.getFullYear()
   );
+};
+
+const normalizeRowData = (
+  row: any,
+  lastUpdateStr: string,
+  equipmentDateStr: string,
+  uniqueSourceId: string,
+) => {
+  if (!row || typeof row !== "object") return null;
+
+  const idVal =
+    getRowFieldValue(
+      row,
+      "ID_Producto",
+      "ID_PRODUCTO",
+      "CODIGO_SIG",
+      "CODIGO",
+      "COD_SISMED",
+      "ID",
+      "COD_MED",
+      "COD_PROD",
+    ) || row.ID_Producto || "";
+
+  const nameVal =
+    getRowFieldValue(
+      row,
+      "Nombre",
+      "NOMBRE",
+      "DESCRIPCION",
+      "PRODUCTO",
+      "MEDICAMENTO",
+      "DENOMINACION",
+      "NOMBRE_PRODUCTO",
+      "DESC_PRODUCTO",
+      "MEDICAMENTO_INSUMO",
+      "DESC_ALM",
+    ) || row.Nombre || "";
+
+  const rawUltima =
+    getRowFieldValue(
+      row,
+      "ULTIMA_ACTUALIZACION",
+      "ULTIMA ACTUALIZACION",
+      "Ultima_Actualizacion",
+    ) || lastUpdateStr;
+  const rawEquipo =
+    getRowFieldValue(
+      row,
+      "FECHA_DEL_EQUIPO",
+      "FECHA DEL EQUIPO",
+      "Fecha_Del_Equipo",
+    ) || equipmentDateStr;
+  const fecVencim = getRowFieldValue(
+    row,
+    "Fec_Vencim",
+    "FEC_VENCIM",
+    "FECHA_VENCIMIENTO",
+    "FECHA_VENCIM",
+  );
+
+  const hasKeys = Object.keys(row).length > 0;
+  if (!hasKeys) return null;
+
+  const hasContent =
+    idVal ||
+    nameVal ||
+    row.Saldo !== undefined ||
+    row.SALDO !== undefined ||
+    row.Stock !== undefined ||
+    Object.values(row).some(
+      (v) => v !== undefined && v !== null && String(v).trim() !== "",
+    );
+
+  if (!hasContent) return null;
+
+  return {
+    ...row,
+    ID_Producto: idVal,
+    Nombre: nameVal,
+    Fec_Vencim: formatDate(fecVencim || row.Fec_Vencim),
+    Ultima_Actualizacion: formatDate(rawUltima),
+    FECHA_DEL_EQUIPO: formatDate(rawEquipo),
+    sourceId: uniqueSourceId,
+  };
 };
 
 const getUpdateStatus = (timestamp?: number) => {
@@ -392,9 +520,16 @@ const getSheetType = (name: string): "CS" | "PS" | "ALM" | "HOSP" | "OTRO" => {
 const formatDate = (dateValue: any): string => {
   if (!dateValue) return "";
   const str = String(dateValue).trim();
-  if (/^\d{2}[\/\-]\d{2}[\/\-]\d{4}/.test(str)) {
-    return str;
+  
+  // Si ya tiene formato D/M/YYYY, DD/M/YYYY, D/MM/YYYY o DD/MM/YYYY
+  const match = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (match) {
+    const day = match[1].padStart(2, "0");
+    const month = match[2].padStart(2, "0");
+    const year = match[3];
+    return `${day}/${month}/${year}`;
   }
+  
   try {
     const date = new Date(dateValue);
     if (!isNaN(date.getTime())) {
@@ -1553,7 +1688,9 @@ export const SheetSearchModule: React.FC = () => {
 
   // Función ultra-resiliente para obtener JSON de Web App de Google Apps Script con diagnóstico y proxies
   const fetchScriptUrlWithFallback = async (rawUrl: string): Promise<any> => {
-    return await fetchGasWithResilience(rawUrl, { timeoutMs: 25000 });
+    const sep = rawUrl.includes("?") ? "&" : "?";
+    const cacheBusterUrl = `${rawUrl}${sep}_t=${Date.now()}`;
+    return await fetchGasWithResilience(cacheBusterUrl, { timeoutMs: 35000 });
   };
 
   const retrySingleUrl = async (configToRetry: UngetConfig) => {
@@ -1618,20 +1755,15 @@ export const SheetSearchModule: React.FC = () => {
 
           if (Array.isArray(sheet.data)) {
             const validData = sheet.data
-              .filter((row: any) => row && (row.ID_Producto || row.Nombre))
-              .map((row: any) => ({
-                ...row,
-                Fec_Vencim: formatDate(row.Fec_Vencim),
-                Ultima_Actualizacion: formatDate(
-                  row.ULTIMA_ACTUALIZACION ||
-                    row.Ultima_Actualizacion ||
-                    row["ULTIMA ACTUALIZACION"],
+              .map((row: any) =>
+                normalizeRowData(
+                  row,
+                  lastUpdateStr,
+                  equipmentDateStr,
+                  uniqueSourceId,
                 ),
-                FECHA_DEL_EQUIPO: formatDate(
-                  row.FECHA_DEL_EQUIPO || row["FECHA DEL EQUIPO"],
-                ),
-                sourceId: uniqueSourceId,
-              }));
+              )
+              .filter((row: any): row is SIGData => row !== null);
             newItemsForThis.push(...validData);
           }
         });
@@ -1670,6 +1802,7 @@ export const SheetSearchModule: React.FC = () => {
   const fetchData = async (
     overrideUrls?: UngetConfig[],
     silent: boolean = false,
+    forceFullRefresh: boolean = false,
   ) => {
     if (isConfigLoading && !overrideUrls) return;
 
@@ -1692,19 +1825,136 @@ export const SheetSearchModule: React.FC = () => {
       let accumulatedData: SIGData[] = [];
       let accumulatedSources: SheetSource[] = [];
 
-      // Fetch de todas las URLs con actualización progresiva no bloqueante
+      // Fetch de todas las URLs con delta-sync inteligente
       const fetchPromises = urlsToUse.map(async (config, fallbackIndex) => {
         const actualIndex = scriptUrls.findIndex((u) => u.url === config.url);
         const urlIndex = actualIndex >= 0 ? actualIndex : fallbackIndex;
 
         try {
-          const json = await fetchScriptUrlWithFallback(config.url);
+          let sheetsPayload: any = null;
+          let isSelective = false;
 
-          if (Array.isArray(json)) {
+          // 1. INTENTO DE DELTA SYNC INTELIGENTE (si no es forzado y ya tenemos datos)
+          if (!forceFullRefresh) {
+            const currentSourcesForThisUrl = sources.filter((s) => s.urlIndex === urlIndex);
+            const hasExistingData =
+              currentSourcesForThisUrl.length > 0 &&
+              data.some((d) => currentSourcesForThisUrl.some((s) => s.id === d.sourceId));
+
+            if (hasExistingData) {
+              const metadataList = await fetchGasMetadata(config.url, { timeoutMs: 15000 });
+              if (metadataList && Array.isArray(metadataList) && metadataList.length > 0) {
+                const changedSheetNames: string[] = [];
+                const unchangedSources: SheetSource[] = [];
+
+                metadataList.forEach((meta) => {
+                  const existing = currentSourcesForThisUrl.find(
+                    (s) => s.name === meta.name || s.id === `${urlIndex}_${meta.id}`,
+                  );
+                  const existingSheetRows = data.filter((d) => d.sourceId === (existing?.id || ""));
+                  const hasSheetData = existing && existingSheetRows.length > 0;
+
+                  const metaLastStr = (meta.lastUpdate || "").trim();
+                  const existingLastStr = (existing?.lastUpdate || "").trim();
+                  const metaEqStr = (meta.equipmentDate || "").trim();
+                  const existingEqStr = (existing?.equipmentDate || "").trim();
+
+                  // Parse timestamp milliseconds for exact comparison
+                  const metaLastTs = parseDataDate(metaLastStr);
+                  const existingLastTs = existing?.lastUpdateTime || parseDataDate(existingLastStr);
+                  const metaEqTs = parseDataDate(metaEqStr);
+                  const existingEqTs = existing?.equipmentDateTime || parseDataDate(existingEqStr);
+
+                  // Evaluate lastUpdate match strictly
+                  let lastUpdateMatches = false;
+                  if (metaLastStr && existingLastStr) {
+                    if (metaLastTs > 0 && existingLastTs > 0) {
+                      lastUpdateMatches = metaLastTs === existingLastTs;
+                    } else {
+                      lastUpdateMatches = metaLastStr === existingLastStr;
+                    }
+                  } else if (!metaLastStr && !existingLastStr) {
+                    lastUpdateMatches = true;
+                  } else {
+                    lastUpdateMatches = false;
+                  }
+
+                  // Evaluate equipmentDate match strictly
+                  let equipmentDateMatches = false;
+                  if (metaEqStr && existingEqStr) {
+                    if (metaEqTs > 0 && existingEqTs > 0) {
+                      equipmentDateMatches = metaEqTs === existingEqTs;
+                    } else {
+                      equipmentDateMatches = metaEqStr === existingEqStr;
+                    }
+                  } else if (!metaEqStr && !existingEqStr) {
+                    equipmentDateMatches = true;
+                  } else {
+                    equipmentDateMatches = false;
+                  }
+
+                  const isUpToDate =
+                    existing &&
+                    hasSheetData &&
+                    lastUpdateMatches &&
+                    equipmentDateMatches;
+
+                  if (isUpToDate && existing) {
+                    unchangedSources.push(existing);
+                  } else {
+                    changedSheetNames.push(meta.name);
+                  }
+                });
+
+                // Caso A: Ninguna hoja cambió (100% al día) - Respuesta instantánea
+                if (changedSheetNames.length === 0 && unchangedSources.length > 0) {
+                  accumulatedSources.push(...unchangedSources);
+                  const unchangedIds = new Set(unchangedSources.map((s) => s.id));
+                  const retainedData = data.filter((d) => unchangedIds.has(d.sourceId || ""));
+                  accumulatedData.push(...retainedData);
+
+                  setConnectionErrors((prev) => {
+                    const updated = { ...prev };
+                    delete updated[config.url];
+                    return updated;
+                  });
+                  return; // Terminado para esta UNGET en menos de 1 segundo
+                }
+
+                // Caso B: Solo algunas hojas cambiaron - Descarga selectiva
+                if (
+                  changedSheetNames.length > 0 &&
+                  changedSheetNames.length <= 15 &&
+                  unchangedSources.length > 0
+                ) {
+                  try {
+                    const selectiveResult = await fetchGasSelectiveSheets(
+                      config.url,
+                      changedSheetNames,
+                      { timeoutMs: 30000 },
+                    );
+                    if (Array.isArray(selectiveResult) && selectiveResult.length > 0) {
+                      sheetsPayload = selectiveResult;
+                      isSelective = true;
+                    }
+                  } catch (e) {
+                    // Fallback a descarga completa
+                  }
+                }
+              }
+            }
+          }
+
+          // Si no fue selectivo o es carga inicial/completa
+          if (!sheetsPayload) {
+            sheetsPayload = await fetchScriptUrlWithFallback(config.url);
+          }
+
+          if (Array.isArray(sheetsPayload)) {
             const thisSources: SheetSource[] = [];
             const thisData: SIGData[] = [];
 
-            json.forEach((sheet: any) => {
+            sheetsPayload.forEach((sheet: any) => {
               const uniqueSourceId = `${urlIndex}_${sheet.id}`;
 
               let lastUpdateStr = "";
@@ -1713,25 +1963,11 @@ export const SheetSearchModule: React.FC = () => {
               let equipmentDateTime = 0;
 
               if (Array.isArray(sheet.data) && sheet.data.length > 0) {
-                const firstRow = sheet.data[0];
-
-                if (
-                  firstRow.ULTIMA_ACTUALIZACION ||
-                  firstRow.Ultima_Actualizacion ||
-                  firstRow["ULTIMA ACTUALIZACION"]
-                ) {
-                  lastUpdateStr =
-                    firstRow.ULTIMA_ACTUALIZACION ||
-                    firstRow.Ultima_Actualizacion ||
-                    firstRow["ULTIMA ACTUALIZACION"];
-                  lastUpdateTime = parseDataDate(lastUpdateStr);
-                }
-
-                if (firstRow.FECHA_DEL_EQUIPO || firstRow["FECHA DEL EQUIPO"]) {
-                  equipmentDateStr =
-                    firstRow.FECHA_DEL_EQUIPO || firstRow["FECHA DEL EQUIPO"];
-                  equipmentDateTime = parseDataDate(equipmentDateStr);
-                }
+                const firstRow = sheet.data[0]; // Fila 2 de Google Sheet
+                lastUpdateStr = getRowFieldValue(firstRow, "ULTIMA ACTUALIZACION", "ULTIMA_ACTUALIZACION", "ULTIMA ACTUALIZACIÓN", "Ultima_Actualizacion");
+                equipmentDateStr = getRowFieldValue(firstRow, "FECHA DEL EQUIPO", "FECHA_DEL_EQUIPO", "Fecha_Del_Equipo");
+                lastUpdateTime = parseDataDate(lastUpdateStr);
+                equipmentDateTime = parseDataDate(equipmentDateStr);
               }
 
               let displayName = sheet.name;
@@ -1762,41 +1998,50 @@ export const SheetSearchModule: React.FC = () => {
 
               if (Array.isArray(sheet.data)) {
                 const validData = sheet.data
-                  .filter((row: any) => row && (row.ID_Producto || row.Nombre))
-                  .map((row: any) => {
-                    const rawUltima =
-                      row.ULTIMA_ACTUALIZACION ||
-                      row.Ultima_Actualizacion ||
-                      row["ULTIMA ACTUALIZACION"];
-                    const rawEquipo =
-                      row.FECHA_DEL_EQUIPO || row["FECHA DEL EQUIPO"];
-
-                    return {
-                      ...row,
-                      Fec_Vencim: formatDate(row.Fec_Vencim),
-                      Ultima_Actualizacion: formatDate(rawUltima),
-                      FECHA_DEL_EQUIPO: formatDate(rawEquipo),
-                      sourceId: uniqueSourceId,
-                    };
-                  });
+                  .map((row: any) =>
+                    normalizeRowData(
+                      row,
+                      lastUpdateStr,
+                      equipmentDateStr,
+                      uniqueSourceId,
+                    ),
+                  )
+                  .filter((row: any): row is SIGData => row !== null);
                 thisData.push(...validData);
               }
             });
 
-            // Actualización progresiva en estado (para que los datos aparezcan inmediatamente sin esperar al más lento)
-            accumulatedSources.push(...thisSources);
-            accumulatedData.push(...thisData);
+            if (isSelective) {
+              // Fusionar selectivo con las fuentes existentes
+              const newSourceIds = new Set(thisSources.map((s) => s.id));
+              setSources((prev) => {
+                const updated = prev.filter(
+                  (s) => s.urlIndex !== urlIndex || !newSourceIds.has(s.id),
+                );
+                return [...updated, ...thisSources];
+              });
+              setData((prev) => {
+                const updated = prev.filter((d) => !newSourceIds.has(d.sourceId || ""));
+                return [...updated, ...thisData];
+              });
+              accumulatedSources.push(...thisSources);
+              accumulatedData.push(...thisData);
+            } else {
+              // Actualización progresiva en estado
+              accumulatedSources.push(...thisSources);
+              accumulatedData.push(...thisData);
 
-            setSources((prev) => {
-              const filtered = prev.filter((s) => s.urlIndex !== urlIndex);
-              return [...filtered, ...thisSources];
-            });
+              setSources((prev) => {
+                const filtered = prev.filter((s) => s.urlIndex !== urlIndex);
+                return [...filtered, ...thisSources];
+              });
 
-            setData((prev) => {
-              const sourceIdsToRemove = new Set(thisSources.map((s) => s.id));
-              const filtered = prev.filter((d) => !sourceIdsToRemove.has(d.sourceId || ""));
-              return [...filtered, ...thisData];
-            });
+              setData((prev) => {
+                const sourceIdsToRemove = new Set(thisSources.map((s) => s.id));
+                const filtered = prev.filter((d) => !sourceIdsToRemove.has(d.sourceId || ""));
+                return [...filtered, ...thisData];
+              });
+            }
           }
 
           setConnectionErrors((prev) => {
@@ -1871,8 +2116,11 @@ export const SheetSearchModule: React.FC = () => {
         setError(
           "No se encontraron registros en las hojas de cálculo. Revise que tengan información.",
         );
-      } else if (accumulatedData.length > 0 && silent && error) {
-        setError(null);
+      } else if (accumulatedData.length > 0) {
+        if (error) setError(null);
+        if (!silent) {
+          toast.success(`Sincronización completada: ${accumulatedData.length.toLocaleString()} productos cargados de ${accumulatedSources.length} hojas.`);
+        }
       }
     } catch (err: any) {
       if (!silent)
@@ -2585,70 +2833,148 @@ export const SheetSearchModule: React.FC = () => {
 
   const scriptCode = `function doGet(e) {
   // Reemplace 'TU_ID_AQUI' con el ID real de su Google Sheet
-  
   var id = 'TU_ID_AQUI';
   
   try {
     var ss = SpreadsheetApp.openById(id);
-    var targetSheetName = e.parameter.sheet; // Parametro de url ?sheet=NOMBRE
-    var action = e.parameter.action; // Opcional: acción a realizar
-    var result = [];
+    var action = e && e.parameter ? e.parameter.action : '';
+    var targetSheetName = e && e.parameter ? e.parameter.sheet : '';
+    var targetSheetsParam = e && e.parameter ? e.parameter.sheets : '';
     
-    // OPTIMIZACIÓN: Solo retornar la lista de hojas sin procesar todo el contenido (rápido)
-    if (action === 'getSheets') {
-        var sheets = ss.getSheets();
-        for (var i = 0; i < sheets.length; i++) {
-            result.push({ id: sheets[i].getSheetId().toString(), name: sheets[i].getName() });
+    // 1. MODO METADATOS ULTRARRÁPIDO (~500ms): Lee solo la fila 2 (primer registro de datos)
+    if (action === 'getMetadata' || action === 'checkUpdates') {
+      var sheets = ss.getSheets();
+      var metadata = [];
+      for (var i = 0; i < sheets.length; i++) {
+        var sh = sheets[i];
+        var shName = sh.getName();
+        var lastRow = sh.getLastRow();
+        if (lastRow < 2) {
+          metadata.push({ id: sh.getSheetId().toString(), name: shName, lastUpdate: '', equipmentDate: '', rowCount: 0 });
+          continue;
         }
-        return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+        
+        var lastCol = sh.getLastColumn();
+        // Fila 1 = encabezados, Fila 2 = primer registro de datos
+        var sampleRange = sh.getRange(1, 1, 2, lastCol).getDisplayValues();
+        var headers = sampleRange[0] || [];
+        var firstRow = sampleRange[1] || [];
+        
+        var lastUpdate = '';
+        var equipmentDate = '';
+        var almcod = '';
+
+        for (var h = 0; h < headers.length; h++) {
+          var hClean = cleanHeader(headers[h]);
+          if (hClean.indexOf('ULTIMA_ACT') >= 0 || hClean.indexOf('ULT_ACT') >= 0 || hClean === 'ULTIMA_ACTUALIZACION') {
+            lastUpdate = String(firstRow[h] || '').trim();
+          } else if (hClean.indexOf('FECHA_DEL_EQUIPO') >= 0 || hClean.indexOf('FECHA_EQUIPO') >= 0) {
+            equipmentDate = String(firstRow[h] || '').trim();
+          } else if (hClean === 'ALMCOD' || hClean.indexOf('ALM_COD') >= 0) {
+            almcod = String(firstRow[h] || '').trim();
+          }
+        }
+        
+        metadata.push({
+          id: sh.getSheetId().toString(),
+          name: shName,
+          lastUpdate: lastUpdate,
+          equipmentDate: equipmentDate,
+          almcod: almcod,
+          rowCount: lastRow - 1
+        });
+      }
+      return ContentService.createTextOutput(JSON.stringify(metadata)).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // 2. MODO LISTA DE HOJAS
+    if (action === 'getSheets') {
+      var sheets = ss.getSheets();
+      var sheetList = [];
+      for (var i = 0; i < sheets.length; i++) {
+        sheetList.push({ id: sheets[i].getSheetId().toString(), name: sheets[i].getName() });
+      }
+      return ContentService.createTextOutput(JSON.stringify(sheetList)).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // 3. MODO DESCARGA SELECTIVA (?sheets=HOJA1,HOJA2 o ?sheet=HOJA1)
+    var result = [];
+    if (targetSheetsParam) {
+      var requestedNames = targetSheetsParam.split(',').map(function(s){ return s.trim(); });
+      for (var r = 0; r < requestedNames.length; r++) {
+        var sh = ss.getSheetByName(requestedNames[r]);
+        if (sh) {
+          result.push(processSheet(sh));
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
     }
     
     if (targetSheetName) {
-        var sheet = ss.getSheetByName(targetSheetName);
-        if (sheet) {
-            result.push(processSheet(sheet));
-        } else {
-            return ContentService.createTextOutput(JSON.stringify({error: "Hoja no encontrada"})).setMimeType(ContentService.MimeType.JSON);
-        }
-    } else {
-        var sheets = ss.getSheets();
-        for (var i = 0; i < sheets.length; i++) {
-            result.push(processSheet(sheets[i]));
-        }
+      var sheet = ss.getSheetByName(targetSheetName);
+      if (sheet) {
+        result.push(processSheet(sheet));
+      } else {
+        return ContentService.createTextOutput(JSON.stringify({error: "Hoja no encontrada"})).setMimeType(ContentService.MimeType.JSON);
+      }
+      return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
     }
     
-    // Devolver un JSON válido respetando el Cross-Origin (CORS)
+    // 4. MODO COMPLETO (Todas las hojas)
+    var allSheets = ss.getSheets();
+    for (var i = 0; i < allSheets.length; i++) {
+      result.push(processSheet(allSheets[i]));
+    }
+    
     return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
   } catch(err) {
-      return ContentService.createTextOutput(JSON.stringify({error: err.message})).setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify({error: err.message})).setMimeType(ContentService.MimeType.JSON);
   }
 }
 
+function cleanHeader(s) {
+  if (!s) return '';
+  var str = String(s).trim().toUpperCase();
+  var accents = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','Ñ':'N'};
+  str = str.replace(/[ÁÉÍÓÚÑ]/g, function(m){ return accents[m]; });
+  return str.replace(/[^A-Z0-9]/g, '_').replace(/_+/g, '_');
+}
+
 function processSheet(sheet) {
-    var data = sheet.getDataRange().getValues();
-    if (data.length < 2) return { id: sheet.getSheetId().toString(), name: sheet.getName(), data: [] };
-    
-    var headers = data[0];
-    var rows = [];
-    
-    for (var j = 1; j < data.length; j++) {
-        var row = data[j];
-        var obj = {};
-        var hasData = false;
-        for (var k = 0; k < headers.length; k++) {
-            if (headers[k]) {
-                obj[headers[k].toString().trim()] = row[k] !== undefined ? row[k].toString() : "";
-                if (row[k]) hasData = true;
-            }
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) {
+    return { id: sheet.getSheetId().toString(), name: sheet.getName(), data: [] };
+  }
+  
+  var data = sheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+  var headers = data[0];
+  var rows = [];
+  
+  for (var j = 1; j < data.length; j++) {
+    var row = data[j];
+    var obj = {};
+    var hasData = false;
+    for (var k = 0; k < headers.length; k++) {
+      var key = headers[k];
+      if (key) {
+        var val = row[k];
+        obj[key.toString().trim()] = val !== undefined && val !== null ? String(val) : "";
+        if (val !== undefined && val !== null && String(val).trim() !== "") {
+          hasData = true;
         }
-        if(hasData) rows.push(obj);
+      }
     }
-    
-    return {
-        id: sheet.getSheetId().toString(),
-        name: sheet.getName(),
-        data: rows
-    };
+    if (hasData) {
+      rows.push(obj);
+    }
+  }
+  
+  return {
+    id: sheet.getSheetId().toString(),
+    name: sheet.getName(),
+    data: rows
+  };
 }`;
 
   const filteredUngets = useMemo(() => {
@@ -3549,7 +3875,7 @@ function processSheet(sheet) {
             )}
             <button
               id="sync-btn"
-              onClick={() => fetchData(undefined, true)}
+              onClick={() => fetchData()}
               disabled={isLoading || isSilentSyncing}
               className="flex-1 sm:flex-none bg-teal-600 text-white px-4 py-2 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:bg-teal-700 hover:shadow-md transition-all disabled:opacity-50 disabled:hover:shadow-none flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm whitespace-nowrap"
             >
@@ -5231,7 +5557,9 @@ function processSheet(sheet) {
                                   id: sheet.id,
                                   name: description,
                                   code: code || "",
+                                  lastUpdate: sheet.lastUpdate,
                                   lastUpdateTime: sheet.lastUpdateTime,
+                                  equipmentDate: sheet.equipmentDate,
                                   equipmentDateTime: sheet.equipmentDateTime,
                                   expiredCount,
                                   expiringThisMonthCount,
@@ -5385,20 +5713,20 @@ function processSheet(sheet) {
                                           Última Conexión
                                         </span>
                                         <div className="flex flex-col gap-0.5 text-[9px] 2xl:text-[10px] font-extrabold text-slate-600">
-                                          {sheet.lastUpdateTime && (
+                                          {(sheet.lastUpdate || sheet.lastUpdateTime) && (
                                             <div className="flex items-center gap-1">
                                               <RefreshCw className="h-3 w-3 text-slate-450 shrink-0" />
                                               <span className="truncate">
                                                 Act:{" "}
                                                 <span className="text-slate-850 font-black">
                                                   {formatFullDate(
-                                                    sheet.lastUpdateTime,
+                                                    sheet.lastUpdate || sheet.lastUpdateTime,
                                                   )}
                                                 </span>
                                               </span>
                                             </div>
                                           )}
-                                          {sheet.equipmentDateTime && (
+                                          {(sheet.equipmentDate || sheet.equipmentDateTime) && (
                                             <div className="flex items-center gap-1">
                                               <Monitor className="h-3 w-3 text-slate-450 shrink-0" />
                                               <span className="truncate flex-1 min-w-0">
@@ -5407,7 +5735,7 @@ function processSheet(sheet) {
                                                   className={`font-black ${!datesMatch(sheet.lastUpdateTime, sheet.equipmentDateTime) ? "text-rose-500 font-extrabold" : "text-slate-600"}`}
                                                 >
                                                   {formatFullDate(
-                                                    sheet.equipmentDateTime,
+                                                    sheet.equipmentDate || sheet.equipmentDateTime,
                                                   )}
                                                 </span>
                                               </span>
