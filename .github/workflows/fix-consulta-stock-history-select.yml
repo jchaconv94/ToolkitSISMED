@@ -1,0 +1,67 @@
+name: Validar consulta ligera de historial
+
+on:
+  push:
+    branches:
+      - fix-consulta-stock-runtime-v2
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: fix-consulta-stock-runtime-v2
+          fetch-depth: 0
+
+      - name: Evitar columna derivada en SELECT ligero
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('services/supabaseClient.ts')
+          raw = path.read_bytes()
+          text = raw.decode('utf-8')
+          old = 'id,establishment_id,establishment_name,sync_date,record_count,stock_hash,has_changes,changed_items_count,sync_author,created_at,last_modification_date'
+          new = 'id,establishment_id,establishment_name,sync_date,record_count,stock_hash,has_changes,changed_items_count,sync_author,created_at'
+          if old not in text:
+              raise RuntimeError('No se encontró el SELECT ligero esperado')
+          path.write_bytes(text.replace(old, new).encode('utf-8'))
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: TypeScript
+        run: npm run lint
+
+      - name: Pruebas
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Limpiar temporal
+        if: success()
+        run: |
+          git checkout -- package-lock.json 2>/dev/null || true
+          rm -f .github/workflows/fix-consulta-stock-history-select.yml
+
+      - name: Commit y push
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add services/supabaseClient.ts .github/workflows/fix-consulta-stock-history-select.yml
+          git commit -m "fix(stock): aligerar consulta de últimos movimientos"
+          git push origin HEAD:fix-consulta-stock-runtime-v2
