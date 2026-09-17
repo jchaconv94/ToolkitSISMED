@@ -33,5 +33,12 @@ if needle not in s:
     raise RuntimeError('No se encontró limpieza syncRecord')
 s = s.replace(needle, replacement, 1)
 
+# Si queda una referencia, imprimir su línea exacta antes de la guardia para corregirla con precisión.
+guard = "# Estas referencias no deben existir ya en Consulta Stock."
+debug = '''if 'supabaseSyncs' in text:\n    print('DEBUG supabaseSyncs restante:')\n    for i, line in enumerate(text.splitlines(), 1):\n        if 'supabaseSyncs' in line:\n            print(f'{i}: {line}')\n\n'''
+if guard not in s:
+    raise RuntimeError('No se encontró guardia final')
+s = s.replace(guard, debug + guard, 1)
+
 p.write_text(s, encoding='utf-8')
 print('Aplicador v2 corregido.')
