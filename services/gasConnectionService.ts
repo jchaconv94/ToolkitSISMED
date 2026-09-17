@@ -1,6 +1,6 @@
 /**
  * Servicio de conexión resiliente y diagnóstico para Google Apps Script Web Apps.
- * Usa conexión directa y un reintento anti-caché; no envía URLs ni stock a proxies CORS públicos.
+ * Usa conexión directa con reintentos ante fallos pasajeros; no envía URLs ni stock a proxies CORS públicos.
  */
 
 export interface GasFetchResult<T = any> {
@@ -13,12 +13,53 @@ export interface GasFetchResult<T = any> {
   latencyMs?: number;
 }
 
+export interface GasDiagnosis {
+  error: string;
+  diagnostic: string;
+  /** Fallo pasajero de Google: conviene reintentar y conservar los datos guardados. */
+  transient: boolean;
+}
+
+/** Error de una consulta a la Web App, con el diagnóstico ya resuelto. */
+export class GasRequestError extends Error {
+  readonly transient: boolean;
+  readonly diagnostic: string;
+
+  constructor(diagnosis: GasDiagnosis) {
+    super(`${diagnosis.error}: ${diagnosis.diagnostic}`);
+    this.name = "GasRequestError";
+    this.transient = diagnosis.transient;
+    this.diagnostic = diagnosis.diagnostic;
+  }
+}
+
+/**
+ * La Web App responde en dos saltos: `script.google.com/.../exec` (ejecuta el script)
+ * redirige a `script.googleusercontent.com/macros/echo` (entrega el resultado). Un 404
+ * en el segundo salto es un fallo pasajero de Google: la implementación existe. Una
+ * implementación inexistente responde 404 en el primer salto, sin redirección.
+ */
+const isGoogleEchoUrl = (url?: string) =>
+  String(url || "").includes("script.googleusercontent.com");
+
+export const GAS_TRANSIENT_ERROR = "Google no respondió (error temporal)";
+
 export function diagnoseGasResponse(
   status: number,
   responseText: string,
-  errorObj?: any
-): { error: string; diagnostic: string } {
+  errorObj?: any,
+  finalUrl?: string,
+): GasDiagnosis {
   const text = (responseText || "").toLowerCase();
+
+  if (status === 404 && isGoogleEchoUrl(finalUrl)) {
+    return {
+      error: GAS_TRANSIENT_ERROR,
+      diagnostic:
+        "Google Apps Script ejecutó la consulta pero no entregó la respuesta (404 temporal). La URL es válida; se reintentará automáticamente.",
+      transient: true,
+    };
+  }
 
   if (
     status === 404 ||
@@ -30,6 +71,7 @@ export function diagnoseGasResponse(
       error: "URL no encontrada (404)",
       diagnostic:
         "La URL no existe o la implementación fue eliminada en Google Apps Script. Genere una nueva implementación en la hoja de cálculo.",
+      transient: false,
     };
   }
 
@@ -46,6 +88,15 @@ export function diagnoseGasResponse(
       error: "Permisos restringidos (Privado)",
       diagnostic:
         "La Web App requiere inicio de sesión. En Google Apps Script, configure 'Quién tiene acceso' en 'Cualquier usuario' (Anyone).",
+      transient: false,
+    };
+  }
+
+  if (status >= 500) {
+    return {
+      error: GAS_TRANSIENT_ERROR,
+      diagnostic: `El servidor de Google respondió con error ${status}. Se reintentará automáticamente.`,
+      transient: true,
     };
   }
 
@@ -61,6 +112,7 @@ export function diagnoseGasResponse(
       error: "Error interno en Google Apps Script",
       diagnostic:
         "El script de Google contiene un error en la función doGet() o no tiene permisos de lectura sobre las pestañas.",
+      transient: false,
     };
   }
 
@@ -75,6 +127,7 @@ export function diagnoseGasResponse(
       error: "Límite de cuota de Google",
       diagnostic:
         "Se excedió la cuota de consultas por minuto de Google Apps Script. Espere unos momentos antes de reintentar.",
+      transient: true,
     };
   }
 
@@ -87,6 +140,7 @@ export function diagnoseGasResponse(
       error: "Tiempo de espera agotado",
       diagnostic:
         "El servidor de Google tardó demasiado en responder. La hoja puede ser muy pesada o el script está bloqueado.",
+      transient: true,
     };
   }
 
@@ -95,15 +149,83 @@ export function diagnoseGasResponse(
     diagnostic:
       errorObj?.message ||
       "No se pudo establecer conexión con los servidores de Google Apps Script. Verifique su conexión o intente nuevamente.",
+    transient: true,
   };
 }
 
 /**
- * Consulta resiliente mediante conexión directa y un único reintento directo.
+ * Etiqueta corta para la tarjeta de UNGET a partir del mensaje guardado en
+ * `connectionErrors`. `warning` = pasajero (se reintenta solo), `danger` = requiere acción.
+ */
+export function getGasErrorLabel(message?: string): { label: string; tone: "warning" | "danger" } {
+  const text = String(message || "");
+  if (text.includes(GAS_TRANSIENT_ERROR)) return { label: "Google no respondió", tone: "warning" };
+  if (text.includes("Tiempo de espera")) return { label: "Tiempo de espera agotado", tone: "warning" };
+  if (text.includes("cuota")) return { label: "Límite de Google", tone: "warning" };
+  if (text.includes("(404)")) return { label: "URL no encontrada (404)", tone: "danger" };
+  if (text.includes("Privado")) return { label: "Permisos privados", tone: "danger" };
+  return { label: "Error de consulta", tone: "danger" };
+}
+
+/** Espera entre reintentos de fallos pasajeros (ms). Hay tantos reintentos como valores. */
+const GAS_RETRY_DELAYS_MS = [2000, 5000];
+
+const GAS_SCRIPT_ERROR_PREFIX = "Error desde Google Apps Script";
+
+const waitForRetry = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+
+const parseGasPayload = (raw: string): any => {
+  if (!raw || typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === "object" && parsed.error) {
+      throw new Error(`${GAS_SCRIPT_ERROR_PREFIX}: ${parsed.error}`);
+    }
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === "object") {
+      if (parsed.contents && typeof parsed.contents === "string") {
+        try {
+          const inner = JSON.parse(parsed.contents);
+          if (inner && typeof inner === "object" && inner.error) {
+            throw new Error(`${GAS_SCRIPT_ERROR_PREFIX}: ${inner.error}`);
+          }
+          if (Array.isArray(inner) || typeof inner === "object") return inner;
+        } catch (e: any) {
+          if (e?.message?.includes(GAS_SCRIPT_ERROR_PREFIX)) throw e;
+        }
+      }
+      return parsed;
+    }
+  } catch (e: any) {
+    if (e?.message?.includes(GAS_SCRIPT_ERROR_PREFIX)) throw e;
+  }
+  return null;
+};
+
+/**
+ * Consulta directa a la Web App con reintentos solo ante fallos pasajeros.
+ *
+ * Google Apps Script devuelve con frecuencia un 404 temporal en el salto de entrega
+ * (más aún mientras las hojas se están escribiendo). Esos fallos, los tiempos de espera
+ * y los errores 5xx se reintentan con espera creciente; una URL inexistente, una Web App
+ * privada o un error devuelto por el propio script se informan de inmediato.
  */
 export async function fetchGasWithResilience(
   rawUrl: string,
-  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+  options: { timeoutMs?: number; signal?: AbortSignal; retryDelaysMs?: number[] } = {}
 ): Promise<any> {
   const cleanUrl = (rawUrl || "").trim();
   if (!cleanUrl) {
@@ -111,111 +233,57 @@ export async function fetchGasWithResilience(
   }
 
   const timeoutMs = options.timeoutMs || 50000;
-  let lastDiagnostic = "No se pudo conectar con la Web App.";
-
-  const parseGasPayload = (raw: string): any => {
-    if (!raw || typeof raw !== "string") return null;
-    const trimmed = raw.trim();
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (parsed && typeof parsed === "object" && parsed.error) {
-        throw new Error(`Error desde Google Apps Script: ${parsed.error}`);
-      }
-      if (Array.isArray(parsed)) return parsed;
-      if (parsed && typeof parsed === "object") {
-        if (parsed.contents && typeof parsed.contents === "string") {
-          try {
-            const inner = JSON.parse(parsed.contents);
-            if (inner && typeof inner === "object" && inner.error) {
-              throw new Error(`Error desde Google Apps Script: ${inner.error}`);
-            }
-            if (Array.isArray(inner) || typeof inner === "object") return inner;
-          } catch {}
-        }
-        return parsed;
-      }
-    } catch (e: any) {
-      if (e.message && e.message.includes("Error desde Google Apps Script")) {
-        throw e;
-      }
-    }
-    return null;
+  const retryDelays = options.retryDelaysMs ?? GAS_RETRY_DELAYS_MS;
+  const maxAttempts = retryDelays.length + 1;
+  let lastDiagnosis: GasDiagnosis = {
+    error: "Error de conexión / CORS",
+    diagnostic: "No se pudo conectar con la Web App.",
+    transient: true,
   };
 
-  // Estrategia 1: fetch directo.
-  try {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (options.signal?.aborted) break;
+
+    // Los reintentos cambian la URL para no reutilizar una respuesta intermedia.
+    const sep = cleanUrl.includes("?") ? "&" : "?";
+    const url = attempt === 1 ? cleanUrl : `${cleanUrl}${sep}_t=${Date.now()}&_retry=${attempt - 1}`;
+
     const controller = new AbortController();
     const abortFromCaller = () => controller.abort();
     options.signal?.addEventListener("abort", abortFromCaller, { once: true });
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(cleanUrl, {
+      const res = await fetch(url, {
         method: "GET",
         mode: "cors",
         credentials: "omit",
         signal: controller.signal,
         redirect: "follow",
       });
-
+      const text = await res.text().catch(() => "");
       if (res.ok) {
-        const text = await res.text();
         const parsed = parseGasPayload(text);
         if (parsed) return parsed;
-        const diag = diagnoseGasResponse(res.status, text);
-        lastDiagnostic = diag.diagnostic;
-      } else {
-        const text = await res.text().catch(() => "");
-        const diag = diagnoseGasResponse(res.status, text);
-        lastDiagnostic = diag.diagnostic;
       }
+      lastDiagnosis = diagnoseGasResponse(res.status, text, undefined, res.url);
+    } catch (err: any) {
+      if (err?.message?.includes(GAS_SCRIPT_ERROR_PREFIX)) throw err;
+      lastDiagnosis = diagnoseGasResponse(0, "", err);
     } finally {
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abortFromCaller);
     }
-  } catch (err: any) {
-    const diag = diagnoseGasResponse(0, "", err);
-    lastDiagnostic = diag.diagnostic;
-  }
 
-  // Estrategia 2: reintento directo con bypass de caché.
-  try {
-    const sep = cleanUrl.includes("?") ? "&" : "?";
-    const cacheBusterUrl = `${cleanUrl}${sep}_t=${Date.now()}&_retry=1`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(cacheBusterUrl, {
-        method: "GET",
-        mode: "cors",
-        credentials: "omit",
-        signal: controller.signal,
-        redirect: "follow",
-      });
-
-      if (res.ok) {
-        const text = await res.text();
-        try {
-          const parsed = parseGasPayload(text);
-          if (parsed) return parsed;
-        } catch (e: any) {
-          if (e.message && e.message.includes("Error desde Google Apps Script")) {
-            throw e;
-          }
-        }
-        const diag = diagnoseGasResponse(res.status, text);
-        lastDiagnostic = diag.diagnostic;
-      }
-    } finally {
-      clearTimeout(timer);
-    }
-  } catch (err: any) {
-    if (err.message && err.message.includes("Error desde Google Apps Script")) {
-      throw err;
+    if (!lastDiagnosis.transient) break;
+    if (attempt < maxAttempts) {
+      console.warn(
+        `Apps Script: intento ${attempt}/${maxAttempts} falló (${lastDiagnosis.error}); reintentando.`,
+      );
+      await waitForRetry(retryDelays[attempt - 1], options.signal);
     }
   }
 
-
-  throw new Error(lastDiagnostic);
+  throw new GasRequestError(lastDiagnosis);
 }
 
 export interface GasSheetMetadata {
@@ -236,7 +304,12 @@ type MetadataCacheEntry = {
 // Varias pantallas pueden pedir los mismos metadatos casi al mismo tiempo. Compartir la
 // promesa evita golpear Apps Script dos o tres veces por una sola apertura del módulo.
 const metadataCache = new Map<string, MetadataCacheEntry>();
-const metadataInflight = new Map<string, Promise<GasSheetMetadata[] | null>>();
+const metadataInflight = new Map<string, Promise<GasSheetMetadata[]>>();
+/**
+ * Tiempo por intento. Apps Script encola ejecuciones y a veces responde pasados los 30 s;
+ * cortar antes solo suma otra ejecución a la cola.
+ */
+export const GAS_REQUEST_TIMEOUT_MS = 45_000;
 const METADATA_CACHE_TTL_MS = 20_000;
 
 const normalizeGasBaseUrl = (rawUrl: string) => {
@@ -257,13 +330,15 @@ const normalizeGasBaseUrl = (rawUrl: string) => {
  * - Reutiliza durante 20 s una respuesta ya obtenida.
  * - Comparte peticiones concurrentes a la misma Web App.
  * - No descarga registros de stock.
+ * - Si falla, lanza `GasRequestError`: quien llama decide conservar los datos guardados.
+ *   Ya no se recurre a descargar el libro completo.
  */
 export async function fetchGasMetadata(
   rawUrl: string,
   options: { timeoutMs?: number; force?: boolean } = {}
-): Promise<GasSheetMetadata[] | null> {
+): Promise<GasSheetMetadata[]> {
   const cleanUrl = normalizeGasBaseUrl(rawUrl || "");
-  if (!cleanUrl) return null;
+  if (!cleanUrl) throw new Error("La URL de conexión está vacía.");
 
   const now = Date.now();
   if (!options.force) {
@@ -280,12 +355,13 @@ export async function fetchGasMetadata(
     const sep = cleanUrl.includes("?") ? "&" : "?";
     // Bucket temporal: evita una URL distinta por cada milisegundo y permite que capas de
     // red intermedias reutilicen brevemente una respuesta sin dejar datos obsoletos.
-    const cacheBucket = Math.floor(Date.now() / METADATA_CACHE_TTL_MS);
+    // Con `force` (reintento manual) la URL es única para no recibir la respuesta fallida.
+    const cacheBucket = options.force ? Date.now() : Math.floor(Date.now() / METADATA_CACHE_TTL_MS);
     const metaUrl = `${cleanUrl}${sep}action=getMetadata&_t=${cacheBucket}`;
 
     try {
       const result = await fetchGasWithResilience(metaUrl, {
-        timeoutMs: Math.max(options.timeoutMs || 18000, 35000),
+        timeoutMs: Math.max(options.timeoutMs || 0, GAS_REQUEST_TIMEOUT_MS),
       });
 
       if (Array.isArray(result) && result.length > 0) {
@@ -363,10 +439,15 @@ export async function fetchGasMetadata(
           if (metadata.length > 0) return cacheMetadata(metadata);
         }
       }
-      return null;
-    } catch (e) {
-      console.warn("No se pudo obtener metadatos ligeros de GAS, usando fallback completo:", e);
-      return null;
+      throw new GasRequestError({
+        error: "Respuesta inesperada de la Web App",
+        diagnostic:
+          "La Web App respondió, pero no devolvió el listado de hojas. Verifique que la implementación publicada corresponda a backend/STOCK_WEBAPP.gs.",
+        transient: false,
+      });
+    } catch (e: any) {
+      console.warn("Apps Script: no se pudo obtener la metadata de las hojas:", e?.message || e);
+      throw e;
     } finally {
       metadataInflight.delete(cleanUrl);
     }
@@ -392,7 +473,7 @@ export async function fetchGasSingleSheet(
   const sep = cleanUrl.includes("?") ? "&" : "?";
   const singleUrl = `${cleanUrl}${sep}action=getStock&sheet=${encodeURIComponent(cleanSheetName)}&_t=${Date.now()}`;
   return await fetchGasWithResilience(singleUrl, {
-    timeoutMs: options.timeoutMs || 25000,
+    timeoutMs: options.timeoutMs || GAS_REQUEST_TIMEOUT_MS,
   });
 }
 
@@ -413,6 +494,6 @@ export async function fetchGasSelectiveSheets(
   const selectiveUrl = `${cleanUrl}${sep}sheets=${sheetsParam}&_t=${Date.now()}`;
 
   return await fetchGasWithResilience(selectiveUrl, {
-    timeoutMs: options.timeoutMs || 35000,
+    timeoutMs: options.timeoutMs || GAS_REQUEST_TIMEOUT_MS,
   });
 }

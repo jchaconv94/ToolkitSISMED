@@ -59,6 +59,8 @@ import {
   fetchGasMetadata,
   fetchGasSelectiveSheets,
   fetchGasSingleSheet,
+  getGasErrorLabel,
+  type GasSheetMetadata,
 } from "../services/gasConnectionService";
 import { stockStorageService } from "../services/stockStorageService";
 import { findLatestValidSync } from "../services/stockSyncHistory";
@@ -150,6 +152,102 @@ const parseDataDate = (str?: string): number => {
   const d = new Date(trimmed);
   return !isNaN(d.getTime()) ? d.getTime() : 0;
 };
+
+type MetadataSourceContext = {
+  configUrl: string;
+  urlIndex: number;
+  assignments: any[];
+  facilities: any[];
+};
+
+/** Tarjeta de IPRESS construida solo con la metadata de Apps Script (sin su stock). */
+const sourceFromMetadata = (
+  meta: GasSheetMetadata,
+  ctx: MetadataSourceContext,
+  existing?: SheetSource,
+): SheetSource => {
+  const assignment = ctx.assignments.find(
+    (a) => a.sheetUrl === ctx.configUrl && a.sheetName === meta.name,
+  );
+  const facility = assignment
+    ? ctx.facilities.find((f) => f.code === assignment.facilityCode)
+    : null;
+  const lastUpdate = (meta.lastUpdate || "").trim();
+  const equipmentDate = (meta.equipmentDate || "").trim();
+
+  return {
+    ...existing,
+    id: existing?.id || `${ctx.urlIndex}_${meta.id}`,
+    name: facility?.name || meta.name,
+    urlIndex: ctx.urlIndex,
+    sheetName: meta.name,
+    rowCount: meta.rowCount ?? existing?.rowCount ?? 0,
+    facilityCode:
+      assignment?.facilityCode ||
+      meta.codigoIpress ||
+      extractFacilityCodeFromSheetName(meta.name) ||
+      existing?.facilityCode ||
+      undefined,
+    lastUpdate: lastUpdate || existing?.lastUpdate || "",
+    lastUpdateTime: parseDataDate(lastUpdate) || existing?.lastUpdateTime || undefined,
+    equipmentDate: equipmentDate || existing?.equipmentDate || "",
+    equipmentDateTime: parseDataDate(equipmentDate) || existing?.equipmentDateTime || undefined,
+  };
+};
+
+const sameSheetDate = (metaValue?: string, existingValue?: string, existingTs?: number) => {
+  const current = (metaValue || "").trim();
+  const previous = (existingValue || "").trim();
+  if (!current && !previous) return true;
+  if (!current || !previous) return false;
+  const currentTs = parseDataDate(current);
+  const previousTs = existingTs || parseDataDate(previous);
+  return currentTs > 0 && previousTs > 0 ? currentTs === previousTs : current === previous;
+};
+
+/**
+ * Aplica la metadata al directorio de una UNGET sin descargar stock.
+ *
+ * Las hojas cuyo stock ya está guardado y cambió conservan su tarjeta anterior hasta que
+ * se descarguen: si la descarga falla, la próxima sincronización las vuelve a detectar.
+ */
+const mergeMetadataIntoSources = (
+  metadataList: GasSheetMetadata[],
+  currentSources: SheetSource[],
+  loadedSourceIds: Set<string>,
+  ctx: MetadataSourceContext,
+): { merged: SheetSource[]; changedSheetNames: string[] } => {
+  const merged: SheetSource[] = [];
+  const changedSheetNames: string[] = [];
+
+  metadataList.forEach((meta) => {
+    const newId = `${ctx.urlIndex}_${meta.id}`;
+    const existing =
+      currentSources.find((s) => s.id === newId) ||
+      currentSources.find((s) => (s.sheetName || s.name) === meta.name);
+    const hasSheetData = !!existing && loadedSourceIds.has(existing.id);
+
+    if (!hasSheetData) {
+      merged.push(sourceFromMetadata(meta, ctx, existing ? { ...existing, id: newId } : undefined));
+      return;
+    }
+
+    const isUpToDate =
+      sameSheetDate(meta.lastUpdate, existing.lastUpdate, existing.lastUpdateTime) &&
+      sameSheetDate(meta.equipmentDate, existing.equipmentDate, existing.equipmentDateTime);
+    if (isUpToDate) {
+      merged.push(sourceFromMetadata(meta, ctx, existing));
+    } else {
+      merged.push(existing);
+      changedSheetNames.push(meta.name);
+    }
+  });
+
+  return { merged, changedSheetNames };
+};
+
+/** Hojas por petición al refrescar stock ya guardado; lotes pequeños fallan menos en Apps Script. */
+const CHANGED_SHEETS_BATCH_SIZE = 5;
 
 const getRowFieldValue = (row: any, ...fieldPatterns: string[]): string => {
   if (!row || typeof row !== "object") return "";
@@ -737,6 +835,8 @@ export const SheetSearchModule: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [connectionErrors, setConnectionErrors] = useState<Record<string, string>>({});
   const [retryingUrls, setRetryingUrls] = useState<Record<string, boolean>>({});
+  // IPRESS cuyo stock se está descargando bajo demanda (evita descargas duplicadas por doble clic).
+  const loadingSourceIdsRef = useRef<Set<string>>(new Set());
   const [quickFixConfig, setQuickFixConfig] = useState<UngetConfig | null>(null);
   const [quickFixUrlInput, setQuickFixUrlInput] = useState("");
   const [isTestingGasUrl, setIsTestingGasUrl] = useState(false);
@@ -1733,107 +1833,54 @@ export const SheetSearchModule: React.FC = () => {
     }
   };
 
-  // Función ultra-resiliente para obtener JSON de Web App de Google Apps Script con diagnóstico y proxies
+  // Descarga del libro completo. Solo para una recarga completa pedida explícitamente
+  // (`forceFullRefresh`): nunca como respaldo automático, porque son miles de filas.
   const fetchScriptUrlWithFallback = async (rawUrl: string): Promise<any> => {
     const sep = rawUrl.includes("?") ? "&" : "?";
     const cacheBusterUrl = `${rawUrl}${sep}_t=${Date.now()}`;
     return await fetchGasWithResilience(cacheBusterUrl, { timeoutMs: 35000 });
   };
 
+  // Reintento manual de una UNGET: solo metadata. El stock de cada IPRESS se sigue
+  // pidiendo bajo demanda; "Reintentar" ya no descarga el libro completo.
   const retrySingleUrl = async (configToRetry: UngetConfig) => {
     setRetryingUrls((prev) => ({ ...prev, [configToRetry.url]: true }));
     try {
-      const json = await fetchScriptUrlWithFallback(configToRetry.url);
-      if (Array.isArray(json)) {
-        const urlIndex = scriptUrls.findIndex((u) => u.url === configToRetry.url);
-        const effectiveIndex = urlIndex >= 0 ? urlIndex : 0;
-        let newSourcesForThis: SheetSource[] = [];
-        let newItemsForThis: SIGData[] = [];
+      const metadataList = await fetchGasMetadata(configToRetry.url, { force: true });
+      const byUrl = scriptUrls.findIndex((u) => u.url === configToRetry.url);
+      const byName = scriptUrls.findIndex((u) => u.name === configToRetry.name);
+      const effectiveIndex = byUrl >= 0 ? byUrl : byName >= 0 ? byName : 0;
+      const loadedSourceIds = new Set(data.map((row) => row.sourceId || ""));
+      const { merged, changedSheetNames } = mergeMetadataIntoSources(
+        metadataList,
+        sources.filter((s) => s.urlIndex === effectiveIndex),
+        loadedSourceIds,
+        {
+          configUrl: configToRetry.url,
+          urlIndex: effectiveIndex,
+          assignments: allAssignments,
+          facilities: allFacilities,
+        },
+      );
 
-        json.forEach((sheet: any) => {
-          const uniqueSourceId = `${effectiveIndex}_${sheet.id}`;
-          let lastUpdateStr = "";
-          let lastUpdateTime = 0;
-          let equipmentDateStr = "";
-          let equipmentDateTime = 0;
+      setSources((prev) => [
+        ...prev.filter((s) => s.urlIndex !== effectiveIndex),
+        ...merged,
+      ]);
+      setConnectionErrors((prev) => {
+        const updated = { ...prev };
+        delete updated[configToRetry.url];
+        return updated;
+      });
+      setError(null);
+      setLastGlobalSync(new Date());
+      if (supabase) void loadSupabaseSyncs(merged);
+      // El stock ya guardado que cambió se refresca en segundo plano, por lotes.
+      if (changedSheetNames.length > 0) void fetchData(undefined, true);
 
-          if (Array.isArray(sheet.data) && sheet.data.length > 0) {
-            const firstRow = sheet.data[0];
-            if (
-              firstRow.ULTIMA_ACTUALIZACION ||
-              firstRow.Ultima_Actualizacion ||
-              firstRow["ULTIMA ACTUALIZACION"]
-            ) {
-              lastUpdateStr =
-                firstRow.ULTIMA_ACTUALIZACION ||
-                firstRow.Ultima_Actualizacion ||
-                firstRow["ULTIMA ACTUALIZACION"];
-              lastUpdateTime = parseDataDate(lastUpdateStr);
-            }
-            if (firstRow.FECHA_DEL_EQUIPO || firstRow["FECHA DEL EQUIPO"]) {
-              equipmentDateStr =
-                firstRow.FECHA_DEL_EQUIPO || firstRow["FECHA DEL EQUIPO"];
-              equipmentDateTime = parseDataDate(equipmentDateStr);
-            }
-          }
-
-          let displayName = sheet.name;
-          if (allAssignments.length > 0 && allFacilities.length > 0) {
-            const matchingAssignment = allAssignments.find(
-              (a) => a.sheetUrl === configToRetry.url && a.sheetName === sheet.name,
-            );
-            if (matchingAssignment) {
-              const matchingF = allFacilities.find(
-                (f) => f.code === matchingAssignment.facilityCode,
-              );
-              if (matchingF) displayName = matchingF.name;
-            }
-          }
-
-          newSourcesForThis.push({
-            id: uniqueSourceId,
-            name: displayName,
-            urlIndex: effectiveIndex,
-            lastUpdate: lastUpdateStr,
-            lastUpdateTime: lastUpdateTime || undefined,
-            equipmentDate: equipmentDateStr,
-            equipmentDateTime: equipmentDateTime || undefined,
-          });
-
-          if (Array.isArray(sheet.data)) {
-            const validData = sheet.data
-              .map((row: any) =>
-                normalizeRowData(
-                  row,
-                  lastUpdateStr,
-                  equipmentDateStr,
-                  uniqueSourceId,
-                ),
-              )
-              .filter((row: any): row is SIGData => row !== null);
-            newItemsForThis.push(...validData);
-          }
-        });
-
-        setSources((prev) => [
-          ...prev.filter((s) => s.urlIndex !== effectiveIndex),
-          ...newSourcesForThis,
-        ]);
-        setData((prev) => [
-          ...prev.filter(
-            (d) => !newSourcesForThis.some((s) => s.id === d.sourceId),
-          ),
-          ...newItemsForThis,
-        ]);
-
-        setConnectionErrors((prev) => {
-          const updated = { ...prev };
-          delete updated[configToRetry.url];
-          return updated;
-        });
-
-        toast.success(`Sincronización completada para ${configToRetry.name || "UNGET"}`);
-      }
+      toast.success(
+        `Conexión restablecida con ${configToRetry.name || "UNGET"}: ${merged.length} establecimientos.`,
+      );
     } catch (err: any) {
       console.error("Error al reintentar UNGET:", err);
       setConnectionErrors((prev) => ({
@@ -1873,8 +1920,12 @@ export const SheetSearchModule: React.FC = () => {
       let accumulatedSources: SheetSource[] = [];
       let historyData: SIGData[] = [];
       let historySources: SheetSource[] = [];
+      const failures: string[] = [];
+      let succeededUrls = 0;
+      const loadedSourceIds = new Set(data.map((row) => row.sourceId || ""));
 
-      // Fetch de todas las URLs con delta-sync inteligente
+      // Metadata primero para cada UNGET. Solo se descarga stock de las IPRESS que ya
+      // estaban guardadas y cambiaron; las demás se consultan bajo demanda.
       const fetchPromises = urlsToUse.map(async (config, fallbackIndex) => {
         const actualIndex = scriptUrls.findIndex((u) => u.url === config.url);
         const urlIndex = actualIndex >= 0 ? actualIndex : fallbackIndex;
@@ -1883,189 +1934,60 @@ export const SheetSearchModule: React.FC = () => {
           let sheetsPayload: any = null;
           let isSelective = false;
 
-          // 1. METADATA PRIMERO. Sin caché mostramos el directorio antes de descargar
-          // todos los medicamentos. Con caché se mantiene el delta-sync normal.
-          if (!forceFullRefresh) {
-            const currentSourcesForThisUrl = sources.filter((s) => s.urlIndex === urlIndex);
-            const hasExistingData =
-              currentSourcesForThisUrl.length > 0 &&
-              data.some((d) => currentSourcesForThisUrl.some((s) => s.id === d.sourceId));
-
-            if (!hasExistingData) {
-              const initialMetadata = await fetchGasMetadata(config.url, { timeoutMs: 15000 });
-              if (initialMetadata && initialMetadata.length > 0) {
-                const previewSources: SheetSource[] = initialMetadata.map((meta) => {
-                  const uniqueSourceId = `${urlIndex}_${meta.id}`;
-                  const assignment = allAssignments.find(
-                    (a) => a.sheetUrl === config.url && a.sheetName === meta.name,
-                  );
-                  const facility = assignment
-                    ? allFacilities.find((f) => f.code === assignment.facilityCode)
-                    : null;
-
-                  return {
-                    id: uniqueSourceId,
-                    name: facility?.name || meta.name,
-                    urlIndex,
-                    lastUpdate: meta.lastUpdate || "",
-                    lastUpdateTime: parseDataDate(meta.lastUpdate || "") || undefined,
-                    equipmentDate: meta.equipmentDate || "",
-                    equipmentDateTime: parseDataDate(meta.equipmentDate || "") || undefined,
-                    sheetName: meta.name,
-                    rowCount: meta.rowCount || 0,
-                    facilityCode:
-                      assignment?.facilityCode ||
-                      meta.codigoIpress ||
-                      extractFacilityCodeFromSheetName(meta.name) ||
-                      undefined,
-                  };
-                });
-
-                setSources((prev) => [
-                  ...prev.filter((source) => source.urlIndex !== urlIndex),
-                  ...previewSources,
-                ]);
-
-                if (supabase) {
-                  void loadSupabaseSyncs(previewSources);
-                }
-
-                accumulatedSources.push(...previewSources);
-                setConnectionErrors((prev) => {
-                  const updated = { ...prev };
-                  delete updated[config.url];
-                  return updated;
-                });
-                return;
-              }
-            }
-
-            if (hasExistingData) {
-              const metadataList = await fetchGasMetadata(config.url, { timeoutMs: 15000 });
-              if (metadataList && Array.isArray(metadataList) && metadataList.length > 0) {
-                const changedSheetNames: string[] = [];
-                const unchangedSources: SheetSource[] = [];
-
-                metadataList.forEach((meta) => {
-                  const existing = currentSourcesForThisUrl.find(
-                    (s) => s.name === meta.name || s.id === `${urlIndex}_${meta.id}`,
-                  );
-                  const existingSheetRows = data.filter((d) => d.sourceId === (existing?.id || ""));
-                  const hasSheetData = existing && existingSheetRows.length > 0;
-
-                  const metaLastStr = (meta.lastUpdate || "").trim();
-                  const existingLastStr = (existing?.lastUpdate || "").trim();
-                  const metaEqStr = (meta.equipmentDate || "").trim();
-                  const existingEqStr = (existing?.equipmentDate || "").trim();
-
-                  // Parse timestamp milliseconds for exact comparison
-                  const metaLastTs = parseDataDate(metaLastStr);
-                  const existingLastTs = existing?.lastUpdateTime || parseDataDate(existingLastStr);
-                  const metaEqTs = parseDataDate(metaEqStr);
-                  const existingEqTs = existing?.equipmentDateTime || parseDataDate(existingEqStr);
-
-                  // Si la hoja todavía no fue abierta, refrescamos solo metadata. El stock se carga bajo demanda.
-                  if (existing && !hasSheetData) {
-                    unchangedSources.push({
-                      ...existing,
-                      sheetName: existing.sheetName || meta.name,
-                      rowCount: meta.rowCount ?? existing.rowCount,
-                      facilityCode:
-                        existing.facilityCode ||
-                        meta.codigoIpress ||
-                        extractFacilityCodeFromSheetName(meta.name) ||
-                        undefined,
-                      lastUpdate: metaLastStr || existing.lastUpdate,
-                      lastUpdateTime: metaLastTs || existing.lastUpdateTime,
-                      equipmentDate: metaEqStr || existing.equipmentDate,
-                      equipmentDateTime: metaEqTs || existing.equipmentDateTime,
-                    });
-                    return;
-                  }
-
-                  // Evaluate lastUpdate match strictly
-                  let lastUpdateMatches = false;
-                  if (metaLastStr && existingLastStr) {
-                    if (metaLastTs > 0 && existingLastTs > 0) {
-                      lastUpdateMatches = metaLastTs === existingLastTs;
-                    } else {
-                      lastUpdateMatches = metaLastStr === existingLastStr;
-                    }
-                  } else if (!metaLastStr && !existingLastStr) {
-                    lastUpdateMatches = true;
-                  } else {
-                    lastUpdateMatches = false;
-                  }
-
-                  // Evaluate equipmentDate match strictly
-                  let equipmentDateMatches = false;
-                  if (metaEqStr && existingEqStr) {
-                    if (metaEqTs > 0 && existingEqTs > 0) {
-                      equipmentDateMatches = metaEqTs === existingEqTs;
-                    } else {
-                      equipmentDateMatches = metaEqStr === existingEqStr;
-                    }
-                  } else if (!metaEqStr && !existingEqStr) {
-                    equipmentDateMatches = true;
-                  } else {
-                    equipmentDateMatches = false;
-                  }
-
-                  const isUpToDate =
-                    existing &&
-                    hasSheetData &&
-                    lastUpdateMatches &&
-                    equipmentDateMatches;
-
-                  if (isUpToDate && existing) {
-                    unchangedSources.push(existing);
-                  } else {
-                    changedSheetNames.push(meta.name);
-                  }
-                });
-
-                // Caso A: Ninguna hoja cambió (100% al día) - Respuesta instantánea
-                if (changedSheetNames.length === 0 && unchangedSources.length > 0) {
-                  accumulatedSources.push(...unchangedSources);
-                  const unchangedIds = new Set(unchangedSources.map((s) => s.id));
-                  const retainedData = data.filter((d) => unchangedIds.has(d.sourceId || ""));
-                  accumulatedData.push(...retainedData);
-
-                  setConnectionErrors((prev) => {
-                    const updated = { ...prev };
-                    delete updated[config.url];
-                    return updated;
-                  });
-                  return; // Terminado para esta UNGET en menos de 1 segundo
-                }
-
-                // Caso B: Solo algunas hojas cambiaron - Descarga selectiva
-                if (
-                  changedSheetNames.length > 0 &&
-                  changedSheetNames.length <= 15 &&
-                  unchangedSources.length > 0
-                ) {
-                  try {
-                    const selectiveResult = await fetchGasSelectiveSheets(
-                      config.url,
-                      changedSheetNames,
-                      { timeoutMs: 30000 },
-                    );
-                    if (Array.isArray(selectiveResult) && selectiveResult.length > 0) {
-                      sheetsPayload = selectiveResult;
-                      isSelective = true;
-                    }
-                  } catch (e) {
-                    // Fallback a descarga completa
-                  }
-                }
-              }
-            }
-          }
-
-          // Si no fue selectivo o es carga inicial/completa
-          if (!sheetsPayload) {
+          if (forceFullRefresh) {
             sheetsPayload = await fetchScriptUrlWithFallback(config.url);
+          } else {
+            const metadataList = await fetchGasMetadata(config.url);
+            const { merged, changedSheetNames } = mergeMetadataIntoSources(
+              metadataList,
+              sources.filter((s) => s.urlIndex === urlIndex),
+              loadedSourceIds,
+              {
+                configUrl: config.url,
+                urlIndex,
+                assignments: allAssignments,
+                facilities: allFacilities,
+              },
+            );
+
+            // El directorio se actualiza al instante, aunque luego falle alguna descarga.
+            setSources((prev) => [
+              ...prev.filter((source) => source.urlIndex !== urlIndex),
+              ...merged,
+            ]);
+            accumulatedSources.push(...merged);
+            setConnectionErrors((prev) => {
+              const updated = { ...prev };
+              delete updated[config.url];
+              return updated;
+            });
+            succeededUrls++;
+
+            if (supabase) {
+              void loadSupabaseSyncs(merged);
+            }
+
+            // Stock guardado que cambió: se refresca por lotes pequeños. Un lote fallido
+            // conserva sus datos anteriores y se reintentará en la próxima sincronización.
+            if (changedSheetNames.length > 0) {
+              const refreshed: any[] = [];
+              for (let i = 0; i < changedSheetNames.length; i += CHANGED_SHEETS_BATCH_SIZE) {
+                const batch = changedSheetNames.slice(i, i + CHANGED_SHEETS_BATCH_SIZE);
+                try {
+                  const result = await fetchGasSelectiveSheets(config.url, batch);
+                  if (Array.isArray(result)) refreshed.push(...result);
+                } catch (batchErr: any) {
+                  console.warn(
+                    `No se pudo refrescar ${batch.length} hoja(s) de ${config.name || "UNGET"}:`,
+                    batchErr?.message || batchErr,
+                  );
+                }
+              }
+              if (refreshed.length > 0) {
+                sheetsPayload = refreshed;
+                isSelective = true;
+              }
+            }
           }
 
           if (Array.isArray(sheetsPayload)) {
@@ -2149,12 +2071,12 @@ export const SheetSearchModule: React.FC = () => {
                 const updated = prev.filter((d) => !newSourceIds.has(d.sourceId || ""));
                 return [...updated, ...thisData];
               });
-              accumulatedSources.push(...thisSources);
               accumulatedData.push(...thisData);
             } else {
-              // Actualización progresiva en estado
+              // Recarga completa explícita
               accumulatedSources.push(...thisSources);
               accumulatedData.push(...thisData);
+              succeededUrls++;
 
               setSources((prev) => {
                 const filtered = prev.filter((s) => s.urlIndex !== urlIndex);
@@ -2166,25 +2088,29 @@ export const SheetSearchModule: React.FC = () => {
                 const filtered = prev.filter((d) => !sourceIdsToRemove.has(d.sourceId || ""));
                 return [...filtered, ...thisData];
               });
+
+              setConnectionErrors((prev) => {
+                const updated = { ...prev };
+                delete updated[config.url];
+                return updated;
+              });
             }
           }
-
-          setConnectionErrors((prev) => {
-            const updated = { ...prev };
-            delete updated[config.url];
-            return updated;
-          });
         } catch (err: any) {
+          // Se conservan las tarjetas y el stock guardados; solo se marca la UNGET.
           console.error(`Error fetching URL index ${urlIndex}:`, err);
+          const message = err?.message || "Failed to fetch";
+          failures.push(`${config.name || "UNGET"}: ${getGasErrorLabel(message).label}`);
           setConnectionErrors((prev) => ({
             ...prev,
-            [config.url]: err.message || "Failed to fetch",
+            [config.url]: message,
           }));
         }
       });
 
       await Promise.allSettled(fetchPromises);
-      setLastGlobalSync(new Date());
+      // "Sincronizado" solo cuando al menos una UNGET respondió.
+      if (succeededUrls > 0) setLastGlobalSync(new Date());
 
       if (supabase && historySources.length > 0) {
         const sourcesForHistory = [...historySources];
@@ -2237,15 +2163,38 @@ export const SheetSearchModule: React.FC = () => {
         })();
       }
 
-      if (accumulatedData.length === 0 && !silent && Object.keys(connectionErrors).length === 0) {
-        setError(
-          "No se encontraron registros en las hojas de cálculo. Revise que tengan información.",
-        );
-      } else if (accumulatedData.length > 0) {
-        if (error) setError(null);
+      // La carga por metadata no trae filas de stock: el éxito se mide por las UNGET que
+      // respondieron, no por `accumulatedData`. Antes, una sincronización correcta mostraba
+      // "No se encontraron registros" y ocultaba todas las tarjetas.
+      if (urlsToUse.length === 0) {
         if (!silent) {
-          toast.success(`Sincronización completada: ${accumulatedData.length.toLocaleString()} productos cargados de ${accumulatedSources.length} hojas.`);
+          setError(
+            "No se encontraron registros en las hojas de cálculo. Revise que tengan información.",
+          );
         }
+      } else if (succeededUrls > 0) {
+        setError(null);
+        if (failures.length > 0) {
+          if (!silent) {
+            toast.warning(`Algunas UNGET no respondieron: ${failures.join(" | ")}`);
+          }
+        } else if (accumulatedSources.length === 0) {
+          if (!silent) {
+            setError(
+              "La Web App respondió, pero no se encontraron hojas en el libro. Revise que tenga información.",
+            );
+          }
+        } else if (!silent) {
+          toast.success(
+            accumulatedData.length > 0
+              ? `Sincronización completada: ${accumulatedData.length.toLocaleString()} productos actualizados en ${accumulatedSources.length} establecimientos.`
+              : `Sincronización completada: ${accumulatedSources.length} establecimientos actualizados.`,
+          );
+        }
+      } else if (!silent) {
+        toast.error(
+          `No se pudo actualizar. ${failures.join(" | ")}. Se muestran los datos guardados.`,
+        );
       }
     } catch (err: any) {
       if (!silent)
@@ -2553,19 +2502,13 @@ export const SheetSearchModule: React.FC = () => {
     setIsTestingGasUrl(true);
     setGasTestResult(null);
     try {
-      const data = await fetchGasWithResilience(urlToTest, { timeoutMs: 25000 });
-      if (Array.isArray(data)) {
-        setGasTestResult({
-          success: true,
-          message: `¡Conexión verificada exitosamente! Se detectaron ${data.length} establecimientos en el libro.`,
-          count: data.length,
-        });
-      } else {
-        setGasTestResult({
-          success: false,
-          message: "La Web App respondió pero no devolvió el listado JSON de hojas esperado.",
-        });
-      }
+      // Solo metadata: probar el enlace no debe descargar el stock de todo el libro.
+      const metadata = await fetchGasMetadata(urlToTest, { force: true });
+      setGasTestResult({
+        success: true,
+        message: `¡Conexión verificada exitosamente! Se detectaron ${metadata.length} establecimientos en el libro.`,
+        count: metadata.length,
+      });
     } catch (err: any) {
       setGasTestResult({
         success: false,
@@ -2641,10 +2584,14 @@ export const SheetSearchModule: React.FC = () => {
     );
     const realSheetName = source.sheetName || assignment?.sheetName || source.name;
 
+    // Un doble clic mientras Apps Script responde no lanza una segunda descarga.
+    if (loadingSourceIdsRef.current.has(sourceId)) return false;
+    loadingSourceIdsRef.current.add(sourceId);
+    // Apps Script puede tardar varios segundos: sin este aviso el clic parece ignorado.
+    const loadingToastId = toast.loading(`Consultando stock de ${source.name}...`);
+
     try {
-      const payload = await fetchGasSingleSheet(config.url, realSheetName, {
-        timeoutMs: 25000,
-      });
+      const payload = await fetchGasSingleSheet(config.url, realSheetName);
       if (!Array.isArray(payload) || payload.length === 0) {
         throw new Error("La hoja no devolvió datos válidos.");
       }
@@ -2734,6 +2681,9 @@ export const SheetSearchModule: React.FC = () => {
         `No se pudo cargar ${source.name}: ${err?.message || "Error de conexión"}`,
       );
       return false;
+    } finally {
+      loadingSourceIdsRef.current.delete(sourceId);
+      toast.dismiss(loadingToastId);
     }
   };
 
@@ -4487,9 +4437,12 @@ function processSheet(sheet) {
                                     {config.url}
                                   </div>
                                   {connectionErrors[config.url] && (
-                                    <div className="text-[8px] font-extrabold text-red-600 bg-red-50 border border-red-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5">
+                                    <div
+                                      className="text-[8px] font-extrabold text-red-600 bg-red-50 border border-red-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5"
+                                      title={connectionErrors[config.url]}
+                                    >
                                       <AlertCircle className="h-2 w-2 text-red-400 shrink-0" />
-                                      CORS / Error de Consulta
+                                      {getGasErrorLabel(connectionErrors[config.url]).label}
                                     </div>
                                   )}
                                   {config.username &&
@@ -5295,7 +5248,7 @@ function processSheet(sheet) {
                 Cargando configuración...
               </span>
             </div>
-          ) : error && data.length === 0 ? (
+          ) : error && sources.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto py-20">
               <AlertCircle className="h-12 w-12 text-red-400 mb-4" />
               <h3 className="text-lg font-black text-gray-900 mb-2">
@@ -5324,7 +5277,14 @@ function processSheet(sheet) {
                           (u) => u.url === config.url && u.name === config.name,
                         );
                         const isSupabaseVirtual = config.url === "SUPABASE_NATIVE" || config.url.startsWith("SUPABASE_VIRTUAL_");
-                        
+                        const ungetSourceCount = sources.filter((s) => s.urlIndex === originalIdx).length;
+                        // Apps Script puede tardar 10-40 s en responder: sin tarjetas guardadas y sin
+                        // error todavía, la UNGET está conectando, no "vacía".
+                        const isConnecting =
+                          ungetSourceCount === 0 &&
+                          !connectionErrors[config.url] &&
+                          (isLoading || isSilentSyncing || !!retryingUrls[config.url]);
+
                         // Encontrar la UNGET en allUngets para obtener su DIRESA y OGESS asignados
                         const configNorm = normalizeName(config.name);
                         const matchingUnget = allUngets.find((u) => 
@@ -5415,19 +5375,24 @@ function processSheet(sheet) {
                               </h3>
                               {connectionErrors[config.url] && (
                                 <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                  <div
-                                    className="text-[9px] font-black px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 inline-flex items-center gap-1 uppercase"
-                                    title={connectionErrors[config.url]}
-                                  >
-                                    <AlertCircle className="h-3 w-3 text-red-500 shrink-0" />
-                                    {connectionErrors[config.url].includes("404")
-                                      ? "URL No Encontrada (404)"
-                                      : connectionErrors[config.url].includes("Privado")
-                                      ? "Permisos Privados"
-                                      : connectionErrors[config.url].includes("Tiempo de espera")
-                                      ? "Timeout (>25s)"
-                                      : "Error de Consulta"}
-                                  </div>
+                                  {(() => {
+                                    const { label, tone } = getGasErrorLabel(connectionErrors[config.url]);
+                                    return (
+                                      <div
+                                        className={`text-[9px] font-black px-2 py-0.5 rounded-md border inline-flex items-center gap-1 uppercase ${
+                                          tone === "warning"
+                                            ? "bg-amber-50 text-amber-700 border-amber-200"
+                                            : "bg-red-50 text-red-700 border-red-200"
+                                        }`}
+                                        title={connectionErrors[config.url]}
+                                      >
+                                        <AlertCircle
+                                          className={`h-3 w-3 shrink-0 ${tone === "warning" ? "text-amber-500" : "text-red-500"}`}
+                                        />
+                                        {label}
+                                      </div>
+                                    );
+                                  })()}
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -5456,12 +5421,7 @@ function processSheet(sheet) {
                               )}
 
                               <div className="sm:hidden text-[10px] sm:text-xs font-bold text-gray-500 mt-0.5 mb-1.5">
-                                {
-                                  sources.filter(
-                                    (s) => s.urlIndex === originalIdx,
-                                  ).length
-                                }{" "}
-                                Estab.
+                                {isConnecting ? "Conectando..." : `${ungetSourceCount} Estab.`}
                               </div>
 
                               {/* Resumen de establecimientos por tipo */}
@@ -5547,13 +5507,15 @@ function processSheet(sheet) {
                             </div>
 
                             <div className="hidden sm:flex items-center justify-between w-full mt-4 pt-4 border-t border-gray-50">
-                              <span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase tracking-wider">
-                                {
-                                  sources.filter(
-                                    (s) => s.urlIndex === originalIdx,
-                                  ).length
-                                }{" "}
-                                Establecimientos
+                              <span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase tracking-wider inline-flex items-center gap-1.5">
+                                {isConnecting ? (
+                                  <>
+                                    <RefreshCw className="h-3 w-3 animate-spin text-teal-500" />
+                                    Conectando con Google Sheets...
+                                  </>
+                                ) : (
+                                  `${ungetSourceCount} Establecimientos`
+                                )}
                               </span>
                               <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-teal-500 group-hover:translate-x-1 transition-all" />
                             </div>
