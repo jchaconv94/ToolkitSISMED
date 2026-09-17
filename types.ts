@@ -766,6 +766,12 @@ export interface SheetSource {
   lastUpdateTime?: number;
   equipmentDate?: string;
   equipmentDateTime?: number;
+  /** Nombre real de la pestaña en Google Sheets; no usar el nombre visual para consultar GAS. */
+  sheetName?: string;
+  /** Cantidad de filas reportada por getMetadata; permite mostrar el conteo sin descargar el stock. */
+  rowCount?: number;
+  /** Código estable de IPRESS usado como llave preferente del historial en Supabase. */
+  facilityCode?: string;
 }
 
 export interface SIGData {

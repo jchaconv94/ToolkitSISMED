@@ -214,7 +214,7 @@ export const supabaseService = {
         // Una sola consulta para todos los establecimientos; se conserva el más reciente de cada uno.
         const { data, error } = await supabase
           .from("stock_sync_history")
-          .select("*")
+          .select("id,establishment_id,establishment_name,sync_date,record_count,stock_hash,has_changes,changed_items_count,sync_author,created_at,last_modification_date")
           .in("establishment_id", uniqueIds)
           .order("sync_date", { ascending: false });
 
@@ -236,7 +236,7 @@ export const supabaseService = {
       // Fallback: Query the latest records generally (this is unsafe if table is large, but kept for completeness if no IDs passed)
       const { data, error } = await supabase
         .from("stock_sync_history")
-        .select("*")
+        .select("id,establishment_id,establishment_name,sync_date,record_count,stock_hash,has_changes,changed_items_count,sync_author,created_at,last_modification_date")
         .order("sync_date", { ascending: false })
         .limit(10000);
 

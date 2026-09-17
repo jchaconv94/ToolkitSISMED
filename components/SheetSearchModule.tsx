@@ -58,6 +58,7 @@ import {
   fetchGasWithResilience,
   fetchGasMetadata,
   fetchGasSelectiveSheets,
+  fetchGasSingleSheet,
 } from "../services/gasConnectionService";
 import { stockStorageService } from "../services/stockStorageService";
 import {
@@ -86,6 +87,23 @@ const formatDisplayName = (name: string): string => {
   if (!name) return "";
   return name.replace(/MARICAL C\.?/gi, "MARISCAL CACERES").replace(/\bMARICAL\b/gi, "MARISCAL");
 };
+
+const getCleanSourceId = (sourceId: string): string =>
+  sourceId.includes("_") ? sourceId.split("_").slice(1).join("_") : sourceId;
+
+const extractFacilityCodeFromSheetName = (name?: string): string => {
+  const match = String(name || "").trim().match(/-([A-Z0-9]+)\s*$/i);
+  return match?.[1]?.toUpperCase() || "";
+};
+
+const getHistoryKeysForSource = (source: SheetSource): string[] =>
+  Array.from(
+    new Set(
+      [source.facilityCode, source.id, getCleanSourceId(source.id)]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  );
 
 const alignConfigsWithOfficialUngets = (configs: any[], ungs: any[]): any[] => {
   if (!ungs || ungs.length === 0) return configs;
@@ -1622,83 +1640,91 @@ export const SheetSearchModule: React.FC = () => {
     }
   }, [sources, selectedSourceId]);
 
-  const loadSupabaseSyncs = async (forceIds?: string[]) => {
-    if (!supabase) return;
-    const sheetIds = forceIds || sources.map((s) => s.id);
-    if (sheetIds.length === 0) return;
+  const loadSupabaseSyncs = async (forceSources?: SheetSource[]) => {
+    if (!supabase) return {} as Record<string, any>;
+    const targetSources = forceSources || sources;
+    if (targetSources.length === 0) return {} as Record<string, any>;
 
     setIsCheckingLatestSyncs(true);
     try {
-      const allPossibleIds = new Set<string>();
-      sheetIds.forEach((id) => {
-        allPossibleIds.add(id);
-        if (id.includes("_")) {
-          allPossibleIds.add(id.split("_").slice(1).join("_"));
-        }
-      });
-
-      const latestSyncs = await supabaseService.getLatestSyncs(Array.from(allPossibleIds));
+      const allPossibleIds = Array.from(
+        new Set(targetSources.flatMap((source) => getHistoryKeysForSource(source))),
+      );
+      const latestSyncs = await supabaseService.getLatestSyncs(allPossibleIds);
       const mappedSyncs: Record<string, any> = { ...latestSyncs };
 
-      // Compatibilidad con historiales guardados con o sin el prefijo urlIndex_.
-      sheetIds.forEach((id) => {
-        const cleanId = id.includes("_") ? id.split("_").slice(1).join("_") : id;
-        const record = latestSyncs[id] || latestSyncs[cleanId];
-        if (record) {
-          mappedSyncs[id] = record;
-          mappedSyncs[cleanId] = record;
-        }
+      targetSources.forEach((source) => {
+        const candidates = getHistoryKeysForSource(source)
+          .map((key) => latestSyncs[key])
+          .filter(Boolean)
+          .sort(
+            (a, b) =>
+              new Date(b.sync_date || 0).getTime() -
+              new Date(a.sync_date || 0).getTime(),
+          );
+        const record = candidates[0];
+        if (!record) return;
+        mappedSyncs[source.id] = record;
+        getHistoryKeysForSource(source).forEach((key) => {
+          if (!mappedSyncs[key]) mappedSyncs[key] = record;
+        });
       });
 
       setSupabaseSyncs((prev) => ({ ...prev, ...mappedSyncs }));
+      return mappedSyncs;
     } catch (e) {
       console.warn("Error cargando historial de Supabase:", e);
+      return {} as Record<string, any>;
     } finally {
       setIsCheckingLatestSyncs(false);
     }
   };
 
-  const handleShowSyncHistory = async (sheetId: string, sheetName: string) => {
+  const handleShowSyncHistory = async (source: SheetSource) => {
     if (!supabase) {
       toast.error("Supabase no está configurado.");
       return;
     }
 
-    setActiveHistoryFacility({ id: sheetId, name: sheetName });
+    setActiveHistoryFacility({ id: source.id, name: source.name });
     setIsSyncHistoryModalOpen(true);
-    setSelectedFacilitySyncHistory([]); // clear
+    setSelectedFacilitySyncHistory([]);
     setIsLoadingHistory(true);
 
     try {
-      let history = await supabaseService.getHistoryForEstablishment(sheetId);
-      if ((!history || history.length === 0) && sheetId.includes("_")) {
-        const cleanId = sheetId.split("_").slice(1).join("_");
-        history = await supabaseService.getHistoryForEstablishment(cleanId);
-      }
+      const keys = getHistoryKeysForSource(source);
+      const historyResults = await Promise.all(
+        keys.map((key) => supabaseService.getHistoryForEstablishment(key)),
+      );
+      let history = historyResults
+        .flat()
+        .filter(
+          (row, index, arr) =>
+            index === arr.findIndex((other) => other.id === row.id),
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.sync_date || 0).getTime() -
+            new Date(a.sync_date || 0).getTime(),
+        );
 
-      // Si aún no hay historial registrado en Supabase, auto-verificar/registrar si tenemos datos cargados
-      if ((!history || history.length === 0) && data && data.length > 0) {
-        const sheetItems = data.filter((r) => r.sourceId === sheetId);
-        if (sheetItems.length > 0) {
-          const userAuthor = user?.username || "VerificaciónManual";
-          const syncRes = await supabaseService.registerSync({
-            establishmentId: sheetId,
-            establishmentName: sheetName,
-            currentStock: sheetItems,
-            author: userAuthor,
-          });
-          if (syncRes && syncRes.success && syncRes.record) {
-            history = [syncRes.record];
-            setSupabaseSyncs((prev) => ({
-              ...prev,
-              [sheetId]: syncRes.record,
-            }));
-            toast.success("Sincronización verificada y registrada en Supabase");
-          }
+      if (history.length === 0) {
+        const loaded = await loadSingleSourceStock(source.id, true);
+        if (loaded) {
+          const stableId = source.facilityCode || getCleanSourceId(source.id);
+          history = await supabaseService.getHistoryForEstablishment(stableId);
         }
       }
 
       setSelectedFacilitySyncHistory(history || []);
+      if (history.length > 0) {
+        const latest = history[0];
+        setSupabaseSyncs((prev) => ({
+          ...prev,
+          [source.id]: latest,
+          ...Object.fromEntries(keys.map((key) => [key, latest])),
+        }));
+      }
     } catch (e) {
       console.error("Error al cargar historial:", e);
       toast.error("Error al cargar el historial de cambios.");
@@ -1885,6 +1911,13 @@ export const SheetSearchModule: React.FC = () => {
                     lastUpdateTime: parseDataDate(meta.lastUpdate || "") || undefined,
                     equipmentDate: meta.equipmentDate || "",
                     equipmentDateTime: parseDataDate(meta.equipmentDate || "") || undefined,
+                    sheetName: meta.name,
+                    rowCount: meta.rowCount || 0,
+                    facilityCode:
+                      assignment?.facilityCode ||
+                      meta.codigoIpress ||
+                      extractFacilityCodeFromSheetName(meta.name) ||
+                      undefined,
                   };
                 });
 
@@ -1894,30 +1927,16 @@ export const SheetSearchModule: React.FC = () => {
                 ]);
 
                 if (supabase) {
-                  void loadSupabaseSyncs(previewSources.map((source) => source.id));
+                  void loadSupabaseSyncs(previewSources);
                 }
 
-                const names = initialMetadata.map((meta) => meta.name).filter(Boolean);
-                const batches: string[][] = [];
-                const INITIAL_BATCH_SIZE = 8;
-                for (let i = 0; i < names.length; i += INITIAL_BATCH_SIZE) {
-                  batches.push(names.slice(i, i + INITIAL_BATCH_SIZE));
-                }
-
-                const batchResults = await Promise.allSettled(
-                  batches.map((batch) =>
-                    fetchGasSelectiveSheets(config.url, batch, { timeoutMs: 30000 }),
-                  ),
-                );
-                const allBatchesSucceeded = batchResults.every(
-                  (result) => result.status === "fulfilled" && Array.isArray(result.value),
-                );
-                if (allBatchesSucceeded) {
-                  sheetsPayload = batchResults.flatMap((result) =>
-                    result.status === "fulfilled" ? result.value : [],
-                  );
-                  isSelective = true;
-                }
+                accumulatedSources.push(...previewSources);
+                setConnectionErrors((prev) => {
+                  const updated = { ...prev };
+                  delete updated[config.url];
+                  return updated;
+                });
+                return;
               }
             }
 
@@ -1944,6 +1963,25 @@ export const SheetSearchModule: React.FC = () => {
                   const existingLastTs = existing?.lastUpdateTime || parseDataDate(existingLastStr);
                   const metaEqTs = parseDataDate(metaEqStr);
                   const existingEqTs = existing?.equipmentDateTime || parseDataDate(existingEqStr);
+
+                  // Si la hoja todavía no fue abierta, refrescamos solo metadata. El stock se carga bajo demanda.
+                  if (existing && !hasSheetData) {
+                    unchangedSources.push({
+                      ...existing,
+                      sheetName: existing.sheetName || meta.name,
+                      rowCount: meta.rowCount ?? existing.rowCount,
+                      facilityCode:
+                        existing.facilityCode ||
+                        meta.codigoIpress ||
+                        extractFacilityCodeFromSheetName(meta.name) ||
+                        undefined,
+                      lastUpdate: metaLastStr || existing.lastUpdate,
+                      lastUpdateTime: metaLastTs || existing.lastUpdateTime,
+                      equipmentDate: metaEqStr || existing.equipmentDate,
+                      equipmentDateTime: metaEqTs || existing.equipmentDateTime,
+                    });
+                    return;
+                  }
 
                   // Evaluate lastUpdate match strictly
                   let lastUpdateMatches = false;
@@ -2070,6 +2108,9 @@ export const SheetSearchModule: React.FC = () => {
                 id: uniqueSourceId,
                 name: displayName,
                 urlIndex,
+                sheetName: sheet.name,
+                rowCount: Array.isArray(sheet.data) ? sheet.data.length : 0,
+                facilityCode: extractFacilityCodeFromSheetName(sheet.name) || undefined,
                 lastUpdate: lastUpdateStr,
                 lastUpdateTime: lastUpdateTime || undefined,
                 equipmentDate: equipmentDateStr,
@@ -2155,8 +2196,9 @@ export const SheetSearchModule: React.FC = () => {
             const syncPromises = sourcesForHistory.map((sheet) => {
               const sheetItems = dataForHistory.filter((r) => r.sourceId === sheet.id);
               const userAuthor = user?.username || "AutoSync";
+              const stableHistoryId = sheet.facilityCode || getCleanSourceId(sheet.id);
               return supabaseService.registerSync({
-                establishmentId: sheet.id,
+                establishmentId: stableHistoryId,
                 establishmentName: sheet.name,
                 currentStock: sheetItems,
                 author: userAuthor,
@@ -2219,7 +2261,7 @@ export const SheetSearchModule: React.FC = () => {
   useEffect(() => {
     if (!isConfigLoading) {
       if (scriptUrls.length > 0) {
-        const hasCachedDataset = sources.length > 0 && data.length > 0;
+        const hasCachedDataset = sources.length > 0;
         const lastSyncAgeMs = lastGlobalSync
           ? Date.now() - lastGlobalSync.getTime()
           : Number.POSITIVE_INFINITY;
@@ -2580,7 +2622,125 @@ export const SheetSearchModule: React.FC = () => {
     setSearchTerm("");
   };
 
-  const handleSelectSheet = (sourceId: string) => {
+  const loadSingleSourceStock = async (
+    sourceId: string,
+    registerHistory: boolean = true,
+  ): Promise<boolean> => {
+    if (data.some((row) => row.sourceId === sourceId)) return true;
+
+    const source = sources.find((item) => item.id === sourceId);
+    if (!source) return false;
+    const config = scriptUrls[source.urlIndex];
+    if (!config?.url) return false;
+
+    const assignment = allAssignments.find(
+      (item) =>
+        item.sheetUrl === config.url &&
+        ((source.facilityCode && item.facilityCode === source.facilityCode) ||
+          (source.sheetName && item.sheetName === source.sheetName)),
+    );
+    const realSheetName = source.sheetName || assignment?.sheetName || source.name;
+
+    try {
+      const payload = await fetchGasSingleSheet(config.url, realSheetName, {
+        timeoutMs: 25000,
+      });
+      if (!Array.isArray(payload) || payload.length === 0) {
+        throw new Error("La hoja no devolvió datos válidos.");
+      }
+
+      const sheetPayload = payload[0];
+      const rows = Array.isArray(sheetPayload.data) ? sheetPayload.data : [];
+      const firstRow = rows[0] || {};
+      const lastUpdateStr = getRowFieldValue(
+        firstRow,
+        "ULTIMA ACTUALIZACION",
+        "ULTIMA_ACTUALIZACION",
+        "ULTIMA ACTUALIZACIÓN",
+        "Ultima_Actualizacion",
+      );
+      const equipmentDateStr = getRowFieldValue(
+        firstRow,
+        "FECHA DEL EQUIPO",
+        "FECHA_DEL_EQUIPO",
+        "Fecha_Del_Equipo",
+      );
+      const validData = rows
+        .map((row: any) =>
+          normalizeRowData(
+            row,
+            lastUpdateStr,
+            equipmentDateStr,
+            sourceId,
+          ),
+        )
+        .filter((row: any): row is SIGData => row !== null);
+
+      const stableFacilityCode =
+        source.facilityCode ||
+        assignment?.facilityCode ||
+        extractFacilityCodeFromSheetName(sheetPayload.name || realSheetName) ||
+        undefined;
+      const updatedSource: SheetSource = {
+        ...source,
+        sheetName: sheetPayload.name || realSheetName,
+        rowCount: validData.length,
+        facilityCode: stableFacilityCode,
+        lastUpdate: lastUpdateStr || source.lastUpdate,
+        lastUpdateTime: parseDataDate(lastUpdateStr) || source.lastUpdateTime,
+        equipmentDate: equipmentDateStr || source.equipmentDate,
+        equipmentDateTime:
+          parseDataDate(equipmentDateStr) || source.equipmentDateTime,
+      };
+
+      setSources((prev) =>
+        prev.map((item) => (item.id === sourceId ? updatedSource : item)),
+      );
+      setData((prev) => [
+        ...prev.filter((row) => row.sourceId !== sourceId),
+        ...validData,
+      ]);
+
+      if (supabase && registerHistory && validData.length > 0) {
+        const stableHistoryId =
+          stableFacilityCode || getCleanSourceId(sourceId);
+        void supabaseService
+          .registerSync({
+            establishmentId: stableHistoryId,
+            establishmentName: source.name,
+            currentStock: validData,
+            author: user?.username || "ConsultaStock",
+            sheetLastUpdateDate: updatedSource.lastUpdateTime
+              ? new Date(updatedSource.lastUpdateTime).toISOString()
+              : undefined,
+          })
+          .then((result) => {
+            if (!result.success || !result.record) return;
+            setSupabaseSyncs((prev) => ({
+              ...prev,
+              [sourceId]: result.record,
+              [stableHistoryId]: result.record,
+            }));
+          })
+          .catch((err) =>
+            console.warn("No se pudo actualizar el historial en segundo plano:", err),
+          );
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error("Error cargando una hoja bajo demanda:", err);
+      toast.error(
+        `No se pudo cargar ${source.name}: ${err?.message || "Error de conexión"}`,
+      );
+      return false;
+    }
+  };
+
+  const handleSelectSheet = async (sourceId: string) => {
+    const loaded = await loadSingleSourceStock(sourceId, true);
+    if (!loaded) return;
+
     if (isTableFullscreen) {
       setStockModalSourceId(sourceId);
       setStockModalSearchTerm("");
@@ -5643,7 +5803,7 @@ function processSheet(sheet) {
                                   data,
                                 );
                                 const cleanSheetId = sheet.id.includes("_") ? sheet.id.split("_").slice(1).join("_") : sheet.id;
-                                const syncRecord = supabaseSyncs[sheet.id] || supabaseSyncs[cleanSheetId] || (code ? supabaseSyncs[code] : undefined);
+                                const syncRecord = supabaseSyncs[sheet.id] || (sheet.facilityCode ? supabaseSyncs[sheet.facilityCode] : undefined) || supabaseSyncs[cleanSheetId] || (code ? supabaseSyncs[code] : undefined);
 
                                 const cardData = {
                                   id: sheet.id,
@@ -5655,7 +5815,7 @@ function processSheet(sheet) {
                                   equipmentDateTime: sheet.equipmentDateTime,
                                   expiredCount,
                                   expiringThisMonthCount,
-                                  totalItems: sheetData.length,
+                                  totalItems: sheetData.length > 0 ? sheetData.length : sheet.rowCount || 0,
                                   syncRecordDate: syncRecord?.sync_date,
                                   hasSyncRecord: !!syncRecord,
                                   isCheckingSync: isCheckingLatestSyncs,
@@ -5669,7 +5829,7 @@ function processSheet(sheet) {
                                     isSelected={isSelected}
                                     onToggleSelect={() => toggleCardSelection(sheet.id)}
                                     onClick={() => handleSelectSheet(sheet.id)}
-                                    onShowHistory={() => handleShowSyncHistory(sheet.id, sheet.name)}
+                                    onShowHistory={() => handleShowSyncHistory(sheet)}
                                   />
                                 );
                               })}
@@ -6499,10 +6659,7 @@ function processSheet(sheet) {
                                                 <div
                                                   onClick={(e) => {
                                                     e.stopPropagation();
-                                                    handleShowSyncHistory(
-                                                      sheet.id,
-                                                      sheet.name,
-                                                    );
+                                                    handleShowSyncHistory(sheet);
                                                   }}
                                                   className="inline-flex items-center justify-center cursor-pointer hover:opacity-80 transition-opacity"
                                                   title={`Último cambio: ${new Date(syncRecord.sync_date).toLocaleString("es-PE")}`}
