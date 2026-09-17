@@ -1,0 +1,60 @@
+name: Normalizar diff Consulta Stock
+
+on:
+  push:
+    branches:
+      - optimize-consulta-stock-cold-start
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: optimize-consulta-stock-cold-start
+          fetch-depth: 0
+
+      - name: Normalizar LF en servicio GAS
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('services/gasConnectionService.ts')
+          text = p.read_bytes().decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
+          p.write_bytes(text.encode('utf-8'))
+          PY
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm install --no-audit --no-fund
+
+      - name: Verificación TypeScript
+        run: npm run lint
+
+      - name: Pruebas
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Restaurar lockfile y quitar workflow temporal
+        run: |
+          git checkout origin/main -- package-lock.json
+          rm .github/workflows/normalize-consulta-stock-diff.yml
+
+      - name: Commit y push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: normalizar formato final de Consulta Stock"
+          git push origin HEAD:optimize-consulta-stock-cold-start
