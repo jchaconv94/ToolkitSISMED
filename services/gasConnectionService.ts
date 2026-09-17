@@ -1,6 +1,6 @@
 /**
- * Servicio de conexión ultra-resiliente y diagnóstico para Google Apps Script Web Apps.
- * Implementa reintentos secuenciales, rotación de proxies CORS y análisis semántico de errores.
+ * Servicio de conexión resiliente y diagnóstico para Google Apps Script Web Apps.
+ * Usa conexión directa y un reintento anti-caché; no envía URLs ni stock a proxies CORS públicos.
  */
 
 export interface GasFetchResult<T = any> {
@@ -99,7 +99,7 @@ export function diagnoseGasResponse(
 }
 
 /**
- * Consulta resiliente con reintentos secuenciales y rotación de proxies.
+ * Consulta resiliente mediante conexión directa y un único reintento directo.
  */
 export async function fetchGasWithResilience(
   rawUrl: string,
@@ -214,46 +214,6 @@ export async function fetchGasWithResilience(
     }
   }
 
-  // Estrategia 3: proxies CORS como último respaldo.
-  const proxyEndpoints = [
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(cleanUrl)}`,
-    `https://api.allorigins.win/get?url=${encodeURIComponent(cleanUrl)}`,
-    `https://corsproxy.io/?url=${encodeURIComponent(cleanUrl)}`,
-    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(cleanUrl)}`,
-  ];
-
-  for (const proxyUrl of proxyEndpoints) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), Math.min(timeoutMs, 35000));
-      try {
-        const res = await fetch(proxyUrl, {
-          method: "GET",
-          signal: controller.signal,
-        });
-
-        if (res.ok) {
-          const text = await res.text();
-          try {
-            const parsed = parseGasPayload(text);
-            if (parsed) return parsed;
-          } catch (e: any) {
-            if (e.message && e.message.includes("Error desde Google Apps Script")) {
-              throw e;
-            }
-          }
-          const diag = diagnoseGasResponse(res.status, text);
-          lastDiagnostic = diag.diagnostic;
-        }
-      } finally {
-        clearTimeout(timer);
-      }
-    } catch (err: any) {
-      if (err.message && err.message.includes("Error desde Google Apps Script")) {
-        throw err;
-      }
-    }
-  }
 
   throw new Error(lastDiagnostic);
 }
