@@ -8,7 +8,17 @@ const stockStore = localforage.createInstance({
   description: "Caché de alto rendimiento para datos de existencias de Google Sheets",
 });
 
+/**
+ * Versión del esquema de caché de Consulta Stock.
+ *
+ * Se incrementa cuando cambia la forma en que interpretamos datos provenientes de
+ * Google Sheets. La versión 2 invalida datos antiguos que podían conservar fechas de
+ * vencimiento con día/mes intercambiados antes de la normalización DD/MM/YYYY actual.
+ */
+const STOCK_DATA_CACHE_VERSION = 2;
+
 export interface CachedStockData {
+  cacheVersion: number;
   sources: SheetSource[];
   data: SIGData[];
   lastSync: string | null;
@@ -30,6 +40,20 @@ type LastSavedRefs = {
  * omite una escritura cuando React realmente entrega un dataset nuevo.
  */
 const lastSavedRefsByUser = new Map<string, LastSavedRefs>();
+
+const removeLegacyBrowserStockCache = (username: string) => {
+  if (!username || typeof localStorage === "undefined") return;
+  try {
+    // Estos keys pertenecen al caché antiguo de Consulta Stock. No se elimina la URL
+    // configurada (`aura_sig_urls_*`) porque sigue siendo necesaria para reconectar con
+    // Google Apps Script y volver a descargar la fuente oficial.
+    localStorage.removeItem(`aura_sig_sources_${username}`);
+    localStorage.removeItem(`aura_sig_data_${username}`);
+    localStorage.removeItem(`aura_sig_lastsync_${username}`);
+  } catch {
+    // Algunos navegadores pueden bloquear localStorage; IndexedDB seguirá funcionando.
+  }
+};
 
 const parseCachedDate = (value?: string | null): number => {
   if (!value) return 0;
@@ -182,6 +206,7 @@ export const stockStorageService = {
 
     try {
       const payload: CachedStockData = {
+        cacheVersion: STOCK_DATA_CACHE_VERSION,
         sources,
         data,
         lastSync: lastSyncIso,
@@ -204,15 +229,28 @@ export const stockStorageService = {
    * Carga inmediatamente el dataset de existencias en caché desde IndexedDB.
    * También repara cachés creadas por versiones antiguas que guardaban la fecha en texto
    * o solamente dentro de las filas, pero no el timestamp usado por las tarjetas.
+   *
+   * Si cambia la versión del esquema, se descarta el stock local y se obliga a Consulta
+   * Stock a volver a leer Google Sheets mediante Apps Script. Esto evita reutilizar fechas
+   * de vencimiento antiguas con día/mes invertidos.
    */
   async loadStockData(username: string): Promise<CachedStockData | null> {
     if (!username) return null;
     try {
       const cached = await stockStore.getItem<CachedStockData>(`stock_${username}`);
-      if (cached && Array.isArray(cached.data) && Array.isArray(cached.sources)) {
+
+      if (!cached || cached.cacheVersion !== STOCK_DATA_CACHE_VERSION) {
+        lastSavedRefsByUser.delete(username);
+        await stockStore.removeItem(`stock_${username}`);
+        removeLegacyBrowserStockCache(username);
+        return null;
+      }
+
+      if (Array.isArray(cached.data) && Array.isArray(cached.sources)) {
         const repairedSources = repairCachedSources(cached.sources, cached.data);
         const repaired: CachedStockData = {
           ...cached,
+          cacheVersion: STOCK_DATA_CACHE_VERSION,
           sources: repairedSources,
         };
 
@@ -276,6 +314,7 @@ export const stockStorageService = {
       lastSavedRefsByUser.delete(username);
       await stockStore.removeItem(`stock_${username}`);
       await stockStore.removeItem(`urls_${username}`);
+      removeLegacyBrowserStockCache(username);
     } catch {}
   },
 };
