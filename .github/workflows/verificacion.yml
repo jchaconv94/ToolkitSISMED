@@ -1,0 +1,47 @@
+name: Verificación (lint, pruebas y build)
+
+# Corre lo mismo que se exige antes de mergear (AGENTS.md sección 2) en cada pull request
+# y en cada cambio de main. No toca la aplicación publicada: solo deja la marca verde o roja.
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Si se sube otro commit al mismo PR, la verificación anterior se cancela.
+concurrency:
+  group: verificacion-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Revisar tipos
+        run: npm run lint
+
+      - name: Ejecutar pruebas
+        run: npm test
+
+      # Sin las claves de Supabase y Google: solo comprueba que el proyecto compila.
+      # Los pull request desde una copia del repositorio no reciben secretos.
+      - name: Construir proyecto
+        run: npm run build
