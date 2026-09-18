@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  cachedSourcesStillMatch,
   describeConnectionMode,
   normalizeUngetName,
   pickOneConnectionPerUnget,
@@ -110,5 +111,31 @@ describe("ungetConnectionKeys", () => {
   it("no descarta una UNGET distinta", () => {
     const configurada = new Set(ungetConnectionKeys({ name: "Tocache" }));
     expect(ungetConnectionKeys({ name: "Picota", ungetId: "u-4" }).some((k) => configurada.has(k))).toBe(false);
+  });
+});
+
+describe("cachedSourcesStillMatch", () => {
+  const huallaga = { name: "Huallaga", ungetId: "u-h" };
+  const bellavista = { name: "Bellavista", ungetId: "u-b" };
+  const dorado = { name: "El Dorado", ungetId: "u-d" };
+
+  it("la caché sirve si cada posición sigue siendo la misma UNGET", () => {
+    expect(cachedSourcesStillMatch([huallaga, bellavista], [huallaga, bellavista])).toBe(true);
+    // El nombre puede venir escrito de otra forma; la UNGET es la misma.
+    expect(cachedSourcesStillMatch([bellavista], [{ name: "BELLAVISTA", ungetId: "u-b" }])).toBe(true);
+  });
+
+  it("no sirve si cambió el orden: es el caso que metió las hojas de Bellavista en Huallaga", () => {
+    expect(cachedSourcesStillMatch([bellavista, huallaga], [huallaga, bellavista])).toBe(false);
+  });
+
+  it("no sirve si cambió el número de conexiones", () => {
+    expect(cachedSourcesStillMatch([huallaga, bellavista, dorado], [huallaga, bellavista])).toBe(false);
+    expect(cachedSourcesStillMatch([], [huallaga])).toBe(false);
+  });
+
+  it("sin caché previa no hay nada que reutilizar", () => {
+    expect(cachedSourcesStillMatch(null, [huallaga])).toBe(false);
+    expect(cachedSourcesStillMatch([], [])).toBe(true);
   });
 });

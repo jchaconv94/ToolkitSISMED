@@ -73,6 +73,7 @@ import {
 } from "../services/sheetsDirectService";
 import { findLatestValidSync, getLastMovementDate } from "../services/stockSyncHistory";
 import {
+  cachedSourcesStillMatch,
   normalizeUngetName,
   pickOneConnectionPerUnget,
   ungetConnectionKeys,
@@ -1448,6 +1449,9 @@ export const SheetSearchModule: React.FC = () => {
 
     const loadConfigs = async () => {
       setIsConfigLoading(true);
+      // Lista con la que se guardaron los establecimientos de la caché: si la de ahora no
+      // coincide posición a posición, esos establecimientos apuntan a otra UNGET.
+      let conexionesEnCache: UngetConfig[] = [];
 
       // 1. CARGA RÁPIDA DESDE CACHÉ INDEXEDDB (Optimistic UI ultra-rápido)
       try {
@@ -1457,6 +1461,7 @@ export const SheetSearchModule: React.FC = () => {
         ]);
 
         if (cachedUrls && cachedUrls.length > 0) {
+          conexionesEnCache = cachedUrls;
           setScriptUrls(cachedUrls);
         } else {
           const savedUrls = localStorage.getItem(`aura_sig_urls_${user.username}`);
@@ -1753,6 +1758,18 @@ export const SheetSearchModule: React.FC = () => {
             ungetIdByUsername,
           });
           
+          // Cada establecimiento guarda la POSICIÓN de su UNGET en la lista, así que si la
+          // lista cambió de orden o de tamaño, la caché los pondría bajo otra UNGET. Es lo
+          // que pasó al consolidar de 15 conexiones a 7: las hojas de Bellavista salían
+          // dentro de Huallaga. En ese caso se reconstruyen.
+          if (!cachedSourcesStillMatch(conexionesEnCache, visibleConfigs)) {
+            setSources([]);
+            setData([]);
+            stockStorageService
+              .saveStockData(user.username, [], [], null)
+              .catch(() => {});
+          }
+
           setScriptUrls(visibleConfigs);
         } else {
           // Si no hay remoto, verificar si hay respaldo local

@@ -104,6 +104,29 @@ export const ungetConnectionKeys = (connection: UngetConnection): string[] => {
   return keys;
 };
 
+/**
+ * Si la caché de establecimientos sigue sirviendo para esta lista de conexiones.
+ *
+ * Cada establecimiento se guarda apuntando a **la posición** de su UNGET en la lista
+ * (`urlIndex`, y su `id` es `posición_hoja`). Si la lista cambia de orden o de tamaño, esas
+ * posiciones pasan a señalar a otra UNGET: el 18/09/2026, al consolidar de 15 conexiones a
+ * 7, las hojas de Bellavista aparecieron dentro de Huallaga. Cuando esto devuelve falso
+ * hay que reconstruir los establecimientos, no reutilizarlos.
+ */
+export const cachedSourcesStillMatch = (
+  previous: UngetConnection[] | null | undefined,
+  next: UngetConnection[] | null | undefined,
+): boolean => {
+  const anterior = previous || [];
+  const actual = next || [];
+  if (anterior.length !== actual.length) return false;
+  return anterior.every((connection, posicion) => {
+    const claves = ungetConnectionKeys(connection);
+    const enMismaPosicion = ungetConnectionKeys(actual[posicion]);
+    return claves.length > 0 && claves.some((clave) => enMismaPosicion.includes(clave));
+  });
+};
+
 /** Cómo lee su stock una UNGET, para mostrarlo en la lista de conexiones. */
 export type UngetConnectionMode = "directa" | "apps-script" | "sin-hoja";
 
