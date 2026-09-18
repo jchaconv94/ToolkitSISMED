@@ -39,11 +39,16 @@ export const MaintenanceScreen: React.FC<MaintenanceScreenProps> = ({
       <p className="text-sm text-slate-500 font-medium leading-relaxed mt-4">{message}</p>
 
       <div className="mt-8 pt-6 border-t border-slate-100 text-left">
-        <p className="text-[11px] text-slate-400 font-medium leading-relaxed flex items-start gap-2">
-          <ShieldCheck className="h-4 w-4 text-slate-300 shrink-0 mt-px" />
-          Durante el mantenimiento solo entran los administradores y los usuarios autorizados
-          para pruebas. Si necesita acceso, comuníquese con el administrador del sistema:
-          <span className="block font-bold text-slate-500">956606972 — Ing. Jordan Chacón Villacís</span>
+        <div className="flex items-start gap-2">
+          <ShieldCheck className="h-4 w-4 text-slate-300 shrink-0 mt-0.5" />
+          <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
+            Durante el mantenimiento solo entran los administradores y los usuarios autorizados
+            para pruebas. Si necesita acceso, comuníquese con el administrador del sistema:
+          </p>
+        </div>
+        {/* El contacto va en su propia línea: dentro del párrafo quedaba a un costado. */}
+        <p className="text-[11px] font-bold text-slate-600 mt-2 pl-6">
+          956606972 — Ing. Jordan Chacón Villacís
         </p>
       </div>
 
