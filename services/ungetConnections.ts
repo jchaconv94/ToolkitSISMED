@@ -91,6 +91,19 @@ export const pickOneConnectionPerUnget = <T extends UngetConnection>(
   return Array.from(chosen.values());
 };
 
+/**
+ * Todas las claves con las que se puede reconocer una UNGET: por identificador y por
+ * nombre. Mientras haya filas sin `unget_id`, una conexión puede coincidir por una u otra.
+ */
+export const ungetConnectionKeys = (connection: UngetConnection): string[] => {
+  const keys: string[] = [];
+  const id = String(connection?.ungetId || "").trim();
+  if (id) keys.push(`id:${id}`);
+  const nombre = normalizeUngetName(connection?.name);
+  if (nombre) keys.push(`nombre:${nombre}`);
+  return keys;
+};
+
 /** Cómo lee su stock una UNGET, para mostrarlo en la lista de conexiones. */
 export type UngetConnectionMode = "directa" | "apps-script" | "sin-hoja";
 
