@@ -18,6 +18,10 @@ import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../services/api";
+import {
+  findConnectionForAssignment,
+  readAssignedSheetRows,
+} from "../services/assignedSheetReader";
 import { StockAssignment } from "../types";
 
 type StockSource = "SYNC" | "SHEET";
@@ -129,48 +133,7 @@ const getExpirationState = (row: StockRow): Exclude<ExpirationFilter, "ALL"> | "
   return "NORMAL";
 };
 
-const findAssignedSheetRows = (payload: unknown, sheetName: string): StockRow[] => {
-  if (!payload || typeof payload !== "object") return [];
-  const root = payload as Record<string, unknown>;
-  const candidates = Array.isArray(payload)
-    ? payload
-    : Array.isArray(root.sheets)
-      ? root.sheets
-      : [];
 
-  if (candidates.length > 0) {
-    const sheets = candidates.filter(item => item && typeof item === "object") as Array<Record<string, unknown>>;
-    const targetName = sheetName.trim().toLocaleLowerCase("es");
-    const selected = sheets.find(sheet => String(sheet.name ?? "").trim().toLocaleLowerCase("es") === targetName)
-      || sheets.find(sheet => String(sheet.id ?? "").trim().toLocaleLowerCase("es") === targetName);
-    if (selected && Array.isArray(selected.data)) return selected.data as StockRow[];
-
-    const looksLikeRows = !sheets.some(sheet => Array.isArray(sheet.data));
-    if (looksLikeRows) return sheets as StockRow[];
-  }
-
-  if (Array.isArray(root.data)) return root.data as StockRow[];
-  return [];
-};
-
-/**
- * Construye una petición selectiva al backend de stock.
- * Antes este módulo llamaba a la raíz de la Web App, lo que descargaba las 22 hojas
- * aunque el usuario solo tuviera asignada una IPRESS.
- */
-const getFetchUrl = (url: string, sheetName: string) => {
-  try {
-    const parsed = new URL(url);
-    parsed.searchParams.delete("sheets");
-    parsed.searchParams.set("action", "getStock");
-    parsed.searchParams.set("sheet", sheetName);
-    parsed.searchParams.set("_t", String(Date.now()));
-    return parsed.toString();
-  } catch {
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}action=getStock&sheet=${encodeURIComponent(sheetName)}&_t=${Date.now()}`;
-  }
-};
 
 export const AssignedIpressStockModule: React.FC = () => {
   const { user } = useAuth();
@@ -204,9 +167,12 @@ export const AssignedIpressStockModule: React.FC = () => {
     setPage(1);
     setErrorMessage("");
     try {
-      const [nativeRows, assignments] = await Promise.all([
+      const [nativeRows, assignments, conexiones] = await Promise.all([
         api.getStockActual([facilityCode]),
-        api.getMyStockAssignments(facilityCode)
+        api.getMyStockAssignments(facilityCode),
+        // La conexión vigente de la UNGET: su URL puede haber cambiado desde que se
+        // creó la asignación, o puede que ya solo lea por hoja de cálculo.
+        api.getAllUngetConfigs()
       ]);
       const currentAssignment = (assignments[0] || null) as StockAssignment | null;
       setAssignment(currentAssignment);
@@ -231,10 +197,8 @@ export const AssignedIpressStockModule: React.FC = () => {
         return;
       }
 
-      const response = await fetch(getFetchUrl(currentAssignment.sheetUrl, currentAssignment.sheetName));
-      if (!response.ok) throw new Error(`La conexión respondió HTTP ${response.status}`);
-      const payload: unknown = await response.json();
-      const sheetRows = findAssignedSheetRows(payload, currentAssignment.sheetName);
+      const conexion = findConnectionForAssignment(currentAssignment, conexiones);
+      const sheetRows = (await readAssignedSheetRows(currentAssignment, conexion)) as StockRow[];
       if (sheetRows.length === 0) {
         throw new Error(`No se encontró la hoja asignada “${currentAssignment.sheetName}” o no contiene registros.`);
       }

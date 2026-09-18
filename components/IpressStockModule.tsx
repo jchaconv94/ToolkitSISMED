@@ -24,6 +24,11 @@ import {
   WifiOff
 } from "lucide-react";
 import { api } from "../services/api";
+import {
+  AssignedSheetRow,
+  findConnectionForAssignment,
+  readAssignedSheetRows,
+} from "../services/assignedSheetReader";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
 import { supabase, supabaseService, StockSyncRecord } from "../services/supabaseClient";
@@ -81,41 +86,7 @@ const parseSheetNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const getAssignmentFetchUrl = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    parsed.searchParams.delete("action");
-    parsed.searchParams.set("t", String(Date.now()));
-    return parsed.toString();
-  } catch {
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}t=${Date.now()}`;
-  }
-};
 
-const findAssignedSheetRows = (payload: unknown, sheetName: string): SheetStockRow[] => {
-  if (!payload || typeof payload !== "object") return [];
-  const root = payload as Record<string, unknown>;
-  const candidates = Array.isArray(payload)
-    ? payload
-    : Array.isArray(root.sheets)
-      ? root.sheets
-      : [];
-
-  if (candidates.length > 0) {
-    const sheets = candidates.filter(item => item && typeof item === "object") as Array<Record<string, unknown>>;
-    const targetName = sheetName.trim().toLocaleLowerCase("es");
-    const selected = sheets.find(sheet => String(sheet.name ?? "").trim().toLocaleLowerCase("es") === targetName)
-      || sheets.find(sheet => String(sheet.id ?? "").trim().toLocaleLowerCase("es") === targetName);
-    if (selected && Array.isArray(selected.data)) return selected.data as SheetStockRow[];
-
-    const looksLikeRows = !sheets.some(sheet => Array.isArray(sheet.data));
-    if (looksLikeRows) return sheets as SheetStockRow[];
-  }
-
-  if (Array.isArray(root.data)) return root.data as SheetStockRow[];
-  return [];
-};
 
 const normalizeAssignmentStockRow = (
   row: SheetStockRow,
@@ -514,11 +485,12 @@ export const StockMonitoringModule: React.FC = () => {
       );
 
       const assignmentsNeedingSheet = scopedAssignments.filter(assignment => !hasNativeStock(assignment.facilityCode));
+      // La conexión vigente de cada UNGET: la URL guardada en la asignación puede haber
+      // cambiado, y una UNGET que solo lee por hoja ya no tiene Web App a la que pedir.
+      const conexiones = assignmentsNeedingSheet.length > 0 ? await api.getAllUngetConfigs() : [];
       const assignedSheetResults = await Promise.allSettled(assignmentsNeedingSheet.map(async assignment => {
-        const response = await fetch(getAssignmentFetchUrl(assignment.sheetUrl));
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload: unknown = await response.json();
-        const rows = findAssignedSheetRows(payload, assignment.sheetName);
+        const conexion = findConnectionForAssignment(assignment, conexiones);
+        const rows: AssignedSheetRow[] = await readAssignedSheetRows(assignment, conexion);
         const facility = effectiveFacilitiesMap.get(assignment.facilityCode);
         return rows
           .map((row, index) => normalizeAssignmentStockRow(row, assignment, facility, index))
