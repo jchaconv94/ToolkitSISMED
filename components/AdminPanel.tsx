@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { RoleConfig, HealthFacility, AVAILABLE_MODULES, LaborRegime, Profession } from '../types';
-import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet } from 'lucide-react';
+import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -1761,6 +1761,69 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-teal-500 outline-none"
                                         />
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* MODO MANTENIMIENTO */}
+                        <div className="bg-white border border-amber-200 rounded-xl p-6 shadow-sm">
+                            <h3 className="font-bold text-gray-800 mb-2 flex items-center gap-2">
+                                <Wrench className="h-5 w-5 text-amber-500" />
+                                Modo mantenimiento
+                            </h3>
+                            <p className="text-xs text-gray-500 mb-5 leading-relaxed max-w-3xl">
+                                Cierra la aplicación mientras se trabaja en ella. Los administradores entran
+                                siempre; los demás ven una pantalla de mantenimiento, salvo los usuarios que
+                                autorice aquí para pruebas.
+                            </p>
+
+                            <label className="flex items-start gap-3 cursor-pointer mb-5">
+                                <input
+                                    type="checkbox"
+                                    checked={!!tempConfig.maintenanceMode}
+                                    onChange={(e) => setTempConfig({ ...tempConfig, maintenanceMode: e.target.checked })}
+                                    className="mt-0.5 h-5 w-5 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                                />
+                                <span>
+                                    <span className="block text-sm font-bold text-gray-800">
+                                        Activar el modo mantenimiento
+                                    </span>
+                                    <span className="block text-xs text-gray-400">
+                                        {tempConfig.maintenanceMode
+                                            ? 'La aplicación está cerrada para quien no esté autorizado.'
+                                            : 'La aplicación está abierta con normalidad.'}
+                                    </span>
+                                </span>
+                            </label>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-2">
+                                        Usuarios autorizados para pruebas
+                                    </label>
+                                    <textarea
+                                        value={tempConfig.maintenanceAllowedUsers || ''}
+                                        onChange={(e) => setTempConfig({ ...tempConfig, maintenanceAllowedUsers: e.target.value })}
+                                        placeholder="bellavista, picota"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none h-24 resize-none"
+                                    />
+                                    <p className="text-xs text-gray-400 mt-1">
+                                        Nombres de usuario separados por comas o uno por línea.
+                                    </p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-2">
+                                        Mensaje que verán
+                                    </label>
+                                    <textarea
+                                        value={tempConfig.maintenanceMessage || ''}
+                                        onChange={(e) => setTempConfig({ ...tempConfig, maintenanceMessage: e.target.value })}
+                                        placeholder="Estamos trabajando en el sistema. Volveremos a habilitarlo en cuanto termine el mantenimiento."
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none h-24 resize-none"
+                                    />
+                                    <p className="text-xs text-gray-400 mt-1">
+                                        Si lo deja vacío se muestra un mensaje por defecto.
+                                    </p>
                                 </div>
                             </div>
                         </div>

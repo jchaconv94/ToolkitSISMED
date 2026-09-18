@@ -678,6 +678,10 @@ export interface User {
 
 export interface SystemConfig {
   verificationDelaySeconds: number; // Tiempo de espera para el botón de validar
+  // Modo mantenimiento: cierra la aplicación salvo para administradores y autorizados.
+  maintenanceMode?: boolean;
+  maintenanceAllowedUsers?: string; // Usuarios de prueba, separados por comas o líneas
+  maintenanceMessage?: string;
   apiUrl?: string; // NUEVO: URL dinámica del backend
   warehouseCode?: string; // NUEVO: Código del Almacén General
   warehouseName?: string; // NUEVO: Nombre del Almacén General

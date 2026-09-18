@@ -27,6 +27,8 @@ import { ReviewWarningModal } from './components/ReviewWarningModal';
 import { ManualEntryModal } from './components/ManualEntryModal';
 import { SuccessModal } from './components/SuccessModal';
 import { LoginScreen } from './components/LoginScreen';
+import { MaintenanceScreen } from './components/MaintenanceScreen';
+import { maintenanceMessage, shouldBlockForMaintenance } from './services/maintenanceMode';
 import { AdminPanel } from './components/AdminPanel';
 import { UserProfile } from './components/UserProfile';
 import { WelcomeModal } from './components/WelcomeModal';
@@ -96,7 +98,9 @@ const App: React.FC = () => {
 
 // --- AUTHENTICATED LOGIC WRAPPER ---
 const AuthenticatedApp: React.FC = () => {
-    const { isAuthenticated, isLoading, user, logout, hasPermission } = useAuth();
+    const { isAuthenticated, isLoading, user, logout, hasPermission, systemConfig } = useAuth();
+    // Durante el mantenimiento, la pantalla deja pasar al acceso para administradores.
+    const [mostrarAccesoEnMantenimiento, setMostrarAccesoEnMantenimiento] = useState(false);
     // La vista inicial sale de la direccion, para que un enlace compartido abra donde debe.
     const [currentView, setCurrentView] = useState<AppModule>(
         () => moduleForPath(window.location.pathname) || 'DASHBOARD'
@@ -268,6 +272,20 @@ const AuthenticatedApp: React.FC = () => {
             <div className="min-h-screen flex items-center justify-center bg-gray-50">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600"></div>
             </div>
+        );
+    }
+
+    // Mantenimiento: solo entran los administradores y los autorizados para pruebas.
+    // Se enciende y se apaga desde Administración → Parámetros.
+    const enMantenimiento = shouldBlockForMaintenance(user, systemConfig);
+    if (enMantenimiento && !(!isAuthenticated && mostrarAccesoEnMantenimiento)) {
+        return (
+            <MaintenanceScreen
+                message={maintenanceMessage(systemConfig)}
+                isAuthenticated={isAuthenticated}
+                onLogout={logout}
+                onGoToLogin={() => setMostrarAccesoEnMantenimiento(true)}
+            />
         );
     }
 

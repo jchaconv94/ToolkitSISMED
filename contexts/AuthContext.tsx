@@ -166,6 +166,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
   }, [state.isAuthenticated]);
 
+  // La configuración del sistema se relee cada pocos minutos: así encender el modo
+  // mantenimiento cierra también las sesiones que ya estaban abiertas, sin pedirle a nadie
+  // que recargue. Es una lectura pequeña de una tabla de claves y valores.
+  useEffect(() => {
+      const releerConfig = async () => {
+          try {
+              const config = await api.getSystemConfig();
+              setState(prev => ({ ...prev, systemConfig: config }));
+          } catch (e) {
+              // Si falla, se conserva la configuración que ya estaba en memoria.
+          }
+      };
+      const intervalo = setInterval(releerConfig, 5 * 60 * 1000);
+      const alVolver = () => { if (document.visibilityState === 'visible') void releerConfig(); };
+      document.addEventListener('visibilitychange', alVolver);
+      return () => {
+          clearInterval(intervalo);
+          document.removeEventListener('visibilitychange', alVolver);
+      };
+  }, []);
+
   const updateUserContext = (data: Partial<User>) => {
       if (!state.user) return;
       const newUser = { ...state.user, ...data };
