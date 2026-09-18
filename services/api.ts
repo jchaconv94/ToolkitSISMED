@@ -1070,6 +1070,28 @@ export const api = {
     },
 
     /**
+     * Enlaces de hoja ya guardados, por URL de conexión. Un cliente con una versión
+     * anterior (u otra pestaña) puede guardar la configuración sin `spreadsheetId`; al
+     * reinsertar, se conserva el que ya estaba en la base.
+     */
+    getSavedSpreadsheetIds: async (usernames: string[]): Promise<Record<string, string>> => {
+        const saved: Record<string, string> = {};
+        if (!supabase || usernames.length === 0) return saved;
+        try {
+            const { data, error } = await supabase
+                .from('unget_configs')
+                .select('url,spreadsheet_id')
+                .in('username', usernames);
+            if (!error && data) {
+                for (const row of data) {
+                    if (row.url && row.spreadsheet_id) saved[row.url] = row.spreadsheet_id;
+                }
+            }
+        } catch (e) {}
+        return saved;
+    },
+
+    /**
      * Inserta una conexión UNGET. La tabla en producción no tiene `unget_id` y puede no
      * tener `spreadsheet_id` (migración pendiente): se reintenta quitando solo la columna
      * que falta, una a la vez, para no perder el enlace de la hoja.
@@ -1098,6 +1120,7 @@ export const api = {
         };
         try {
             if (supabase) {
+                const savedSheets = await api.getSavedSpreadsheetIds([username]);
                 await supabase.from('unget_configs').delete().eq('username', username);
                 for(const c of configs) {
                     const payload: any = {
@@ -1105,6 +1128,9 @@ export const api = {
                         unget_name: formatName(c.name),
                         url: c.url
                     };
+                    if (!c.spreadsheetId && savedSheets[c.url]) {
+                        c.spreadsheetId = savedSheets[c.url];
+                    }
                     if (c.ungetId) {
                         payload.unget_id = c.ungetId;
                     } else if (c.id) {
@@ -1195,13 +1221,15 @@ export const api = {
     saveMultipleUngetConfigs: async (configsToSave: any[], usernamesToClear: string[]): Promise<{ success: boolean; message?: string }> => {
         try {
             if (supabase) {
+                const savedSheets = await api.getSavedSpreadsheetIds(usernamesToClear);
                 for (const u of usernamesToClear) {
                     await supabase.from('unget_configs').delete().eq('username', u);
                 }
                 for (const c of configsToSave) {
                     const payload: Record<string, any> = { username: c.username, unget_name: c.name, url: c.url };
                     if (c.ungetId) payload.unget_id = c.ungetId;
-                    if (c.spreadsheetId) payload.spreadsheet_id = c.spreadsheetId;
+                    const spreadsheetId = c.spreadsheetId || savedSheets[c.url];
+                    if (spreadsheetId) payload.spreadsheet_id = spreadsheetId;
                     await api.insertUngetConfigRow(payload);
                 }
             }
