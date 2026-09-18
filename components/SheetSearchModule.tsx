@@ -73,6 +73,7 @@ import {
 } from "../services/sheetsDirectService";
 import { findLatestValidSync, getLastMovementDate } from "../services/stockSyncHistory";
 import {
+  assignmentBelongsToConnection,
   cachedSourcesStillMatch,
   normalizeUngetName,
   pickOneConnectionPerUnget,
@@ -177,6 +178,8 @@ const parseDataDate = (str?: string): number => {
 
 type MetadataSourceContext = {
   configUrl: string;
+  /** La UNGET de la conexión: las asignaciones cuelgan de ella, no de la URL. */
+  configUngetId?: string;
   urlIndex: number;
   assignments: any[];
   facilities: any[];
@@ -191,7 +194,9 @@ const sourceFromMetadata = (
   existing?: SheetSource,
 ): SheetSource => {
   const assignment = ctx.assignments.find(
-    (a) => a.sheetUrl === ctx.configUrl && a.sheetName === meta.name,
+    (a) =>
+      assignmentBelongsToConnection(a, { ungetId: ctx.configUngetId, url: ctx.configUrl }) &&
+      a.sheetName === meta.name,
   );
   const facility = assignment
     ? ctx.facilities.find((f) => f.code === assignment.facilityCode)
@@ -1972,6 +1977,7 @@ export const SheetSearchModule: React.FC = () => {
         loadedSourceIds,
         {
           configUrl: configToRetry.url,
+          configUngetId: configToRetry.ungetId,
           urlIndex: effectiveIndex,
           assignments: allAssignments,
           facilities: allFacilities,
@@ -2025,6 +2031,7 @@ export const SheetSearchModule: React.FC = () => {
         const current = prev.filter((s) => s.urlIndex === urlIndex);
         const { merged } = mergeMetadataIntoSources(metadataList, current, loadedSourceIds, {
           configUrl: config.url,
+          configUngetId: config.ungetId,
           urlIndex,
           assignments: allAssignments,
           facilities: allFacilities,
@@ -2185,6 +2192,7 @@ export const SheetSearchModule: React.FC = () => {
               loadedSourceIds,
               {
                 configUrl: config.url,
+                configUngetId: config.ungetId,
                 urlIndex,
                 assignments: allAssignments,
                 facilities: allFacilities,
@@ -2275,7 +2283,7 @@ export const SheetSearchModule: React.FC = () => {
               if (allAssignments.length > 0 && allFacilities.length > 0) {
                 const matchingAssignment = allAssignments.find(
                   (a) =>
-                    a.sheetUrl === config.url && a.sheetName === sheet.name,
+                    assignmentBelongsToConnection(a, config) && a.sheetName === sheet.name,
                 );
                 if (matchingAssignment) {
                   const matchingF = allFacilities.find(
@@ -2885,7 +2893,7 @@ export const SheetSearchModule: React.FC = () => {
 
     const assignment = allAssignments.find(
       (item) =>
-        item.sheetUrl === config.url &&
+        assignmentBelongsToConnection(item, config) &&
         ((source.facilityCode && item.facilityCode === source.facilityCode) ||
           (source.sheetName && item.sheetName === source.sheetName)),
     );

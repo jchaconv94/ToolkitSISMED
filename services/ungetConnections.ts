@@ -138,3 +138,22 @@ export const describeConnectionMode = (
   const url = String(connection?.url || "").trim();
   return url && !isVirtualUrl(url) ? "apps-script" : "sin-hoja";
 };
+
+/**
+ * Si una asignación IPRESS ↔ hoja pertenece a esta conexión.
+ *
+ * Se compara por UNGET, no por URL: la URL de una conexión cambia al configurar su hoja o
+ * al volver a desplegar su Web App, y entonces las asignaciones quedaban huérfanas sin que
+ * nadie se enterara. Mientras haya asignaciones sin `ungetId`, se sigue admitiendo la URL.
+ */
+export const assignmentBelongsToConnection = (
+  assignment: { ungetId?: string | null; sheetUrl?: string | null } | null | undefined,
+  connection: { ungetId?: string | null; url?: string | null } | null | undefined,
+): boolean => {
+  if (!assignment || !connection) return false;
+  const deLaAsignacion = String(assignment.ungetId || "").trim();
+  const deLaConexion = String(connection.ungetId || "").trim();
+  if (deLaAsignacion && deLaConexion) return deLaAsignacion === deLaConexion;
+  const url = String(assignment.sheetUrl || "").trim();
+  return !!url && url === String(connection.url || "").trim();
+};
