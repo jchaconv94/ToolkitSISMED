@@ -244,6 +244,21 @@ const readByKeys = (row: Record<string, string> | undefined, keys: Set<string>):
   return key ? String(row[key] ?? "").trim() : "";
 };
 
+/**
+ * Fechas de actualización y ALMCOD a partir del encabezado y la primera fila de una
+ * pestaña, tal como hace `getMetadata_` del backend. Lo usan la lectura CSV y la API.
+ */
+export const readHeadMetadata = (
+  rows: string[][],
+): { lastUpdate: string; equipmentDate: string; almcod: string } => {
+  const firstRow = csvRowsToObjects(rows.slice(0, 2))[0];
+  return {
+    lastUpdate: readByKeys(firstRow, LAST_UPDATE_KEYS),
+    equipmentDate: readByKeys(firstRow, EQUIPMENT_DATE_KEYS),
+    almcod: readByKeys(firstRow, ALMCOD_KEYS),
+  };
+};
+
 /** Hoja ya conocida (de la caché) que se puede consultar directamente. */
 export interface DirectSheetRef {
   gid: string;

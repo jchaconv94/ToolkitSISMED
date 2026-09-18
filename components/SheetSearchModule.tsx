@@ -73,6 +73,11 @@ import {
 } from "../services/sheetsDirectService";
 import { findLatestValidSync, getLastMovementDate } from "../services/stockSyncHistory";
 import {
+  fetchSheetsMetadataViaApi,
+  hasSheetsApiKey,
+  type KnownRowCounts,
+} from "../services/sheetsApiService";
+import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
 } from "./DeficiencyCaptureModal";
@@ -104,6 +109,18 @@ const formatDisplayName = (name: string): string => {
 
 const getCleanSourceId = (sourceId: string): string =>
   sourceId.includes("_") ? sourceId.split("_").slice(1).join("_") : sourceId;
+
+/**
+ * UNGET sin Web App: la conexión se identifica por su hoja de cálculo. Se guarda como URL
+ * sintética para no romper lo que usa `config.url` como clave (errores, índices, listas).
+ */
+const VIRTUAL_SHEET_URL_PREFIX = "sheets://";
+const isVirtualSheetUrl = (url?: string) => String(url || "").startsWith(VIRTUAL_SHEET_URL_PREFIX);
+/** La UNGET tiene una Web App de Apps Script utilizable como respaldo. */
+const hasWebApp = (config?: UngetConfig | null) => !!config?.url && !isVirtualSheetUrl(config.url);
+/** Texto que se muestra en lugar de la URL. */
+const describeConfigUrl = (config: UngetConfig) =>
+  isVirtualSheetUrl(config.url) ? "Google Sheets (lectura directa, sin Apps Script)" : config.url;
 
 const extractFacilityCodeFromSheetName = (name?: string): string => {
   const match = String(name || "").trim().match(/-([A-Z0-9]+)\s*$/i);
@@ -213,12 +230,15 @@ const sourceFromMetadata = (
  * Hojas de una UNGET que se pueden leer directamente de Google Sheets. Solo si todas las
  * tarjetas guardadas tienen libro y pestaña; si no, se usa la metadata de Apps Script.
  */
-const toDirectSheetRefs = (list: SheetSource[]): DirectSheetRef[] | null => {
+const toDirectSheetRefs = (
+  list: SheetSource[],
+  fallbackSpreadsheetId?: string,
+): DirectSheetRef[] | null => {
   if (list.length === 0) return null;
   const refs = list.map((source) => ({
     gid: getCleanSourceId(source.id),
     sheetName: source.sheetName || "",
-    spreadsheetId: source.spreadsheetId || "",
+    spreadsheetId: source.spreadsheetId || fallbackSpreadsheetId || "",
     rowCount: source.rowCount,
     codigoIpress: source.facilityCode,
     lastUpdate: source.lastUpdate,
@@ -920,6 +940,8 @@ export const SheetSearchModule: React.FC = () => {
   const loadingSourceIdsRef = useRef<Set<string>>(new Set());
   // Estado de la precarga en segundo plano.
   const prefetchRef = useRef({ running: false, enabled: true });
+  // Libros detectados ya guardados en la configuración, por conexión.
+  const persistedSpreadsheetIdsRef = useRef<Set<string>>(new Set());
   // Última consulta de la lista de pestañas a Apps Script, por URL (lectura directa activa).
   const gasSheetListRefreshRef = useRef<Record<string, number>>({});
   const [quickFixConfig, setQuickFixConfig] = useState<UngetConfig | null>(null);
@@ -1935,14 +1957,17 @@ export const SheetSearchModule: React.FC = () => {
   const retrySingleUrl = async (configToRetry: UngetConfig) => {
     setRetryingUrls((prev) => ({ ...prev, [configToRetry.url]: true }));
     try {
-      const metadataList = await fetchGasMetadata(configToRetry.url, { force: true });
       const byUrl = scriptUrls.findIndex((u) => u.url === configToRetry.url);
       const byName = scriptUrls.findIndex((u) => u.name === configToRetry.name);
       const effectiveIndex = byUrl >= 0 ? byUrl : byName >= 0 ? byName : 0;
+      const currentForRetry = sources.filter((s) => s.urlIndex === effectiveIndex);
+      const metadataList = await loadUngetMetadata(configToRetry, effectiveIndex, currentForRetry, {
+        force: true,
+      });
       const loadedSourceIds = new Set(data.map((row) => row.sourceId || ""));
       const { merged, changedSheetNames } = mergeMetadataIntoSources(
         metadataList,
-        sources.filter((s) => s.urlIndex === effectiveIndex),
+        currentForRetry,
         loadedSourceIds,
         {
           configUrl: configToRetry.url,
@@ -1987,6 +2012,7 @@ export const SheetSearchModule: React.FC = () => {
   // eliminadas). Corre en segundo plano, como máximo cada 30 min, y no pisa fechas más
   // recientes leídas directamente.
   const refreshSheetListFromGas = async (config: UngetConfig, urlIndex: number) => {
+    if (!hasWebApp(config)) return;
     const last = gasSheetListRefreshRef.current[config.url] || 0;
     if (Date.now() - last < GAS_SHEET_LIST_REFRESH_MS) return;
     gasSheetListRefreshRef.current[config.url] = Date.now();
@@ -2027,6 +2053,81 @@ export const SheetSearchModule: React.FC = () => {
         err?.message || err,
       );
     }
+  };
+
+  /**
+   * Guarda en la configuración el libro detectado (lo informa el script nuevo), para que el
+   * campo "Hoja de cálculo" lo muestre y la lectura directa no dependa de volver a detectarlo.
+   * Solo para conexiones propias: las heredadas de otro usuario no se pueden guardar.
+   */
+  const persistDetectedSpreadsheetId = (config: UngetConfig, spreadsheetId: string) => {
+    if (!user || !spreadsheetId || config.spreadsheetId === spreadsheetId) return;
+    if (config.username && config.username !== user.username) return;
+    const key = `${config.url}|${spreadsheetId}`;
+    if (persistedSpreadsheetIdsRef.current.has(key)) return;
+    persistedSpreadsheetIdsRef.current.add(key);
+
+    const updated = scriptUrls.map((c) => (c.url === config.url ? { ...c, spreadsheetId } : c));
+    setScriptUrls(updated);
+    const mine = updated
+      .filter((c) => !c.username || c.username === user.username)
+      .map((c) => ({ ...c, username: user.username }));
+    void api
+      .saveUngetConfigs(user.username, mine)
+      .catch((err) => console.warn("No se pudo guardar el libro detectado en la configuración:", err));
+  };
+
+  /**
+   * Lista de pestañas y fechas de una UNGET, por orden de preferencia:
+   * 1. Google Sheets API (1-2 peticiones por UNGET), si hay clave y hoja configurada o detectada.
+   * 2. Lectura directa CSV por pestaña, si el directorio ya se conoce.
+   * 3. Web App de Apps Script, si está configurada.
+   */
+  const loadUngetMetadata = async (
+    config: UngetConfig,
+    urlIndex: number,
+    currentForUrl: SheetSource[],
+    options: { force?: boolean } = {},
+  ): Promise<GasSheetMetadata[]> => {
+    const spreadsheetId =
+      config.spreadsheetId || currentForUrl.find((s) => s.spreadsheetId)?.spreadsheetId || "";
+    let lastError: any = null;
+
+    if (spreadsheetId && hasSheetsApiKey()) {
+      try {
+        const knownRowCounts: KnownRowCounts = {};
+        currentForUrl.forEach((s) => {
+          if (s.rowCount !== undefined) knownRowCounts[getCleanSourceId(s.id)] = s.rowCount;
+        });
+        return await fetchSheetsMetadataViaApi(spreadsheetId, { force: options.force, knownRowCounts });
+      } catch (err: any) {
+        lastError = err;
+        console.warn(
+          `Google Sheets API no disponible para ${config.name || "UNGET"}; se usa otra vía:`,
+          err?.message || err,
+        );
+      }
+    }
+
+    const directRefs = toDirectSheetRefs(currentForUrl, spreadsheetId);
+    if (directRefs) {
+      try {
+        const metadata = await fetchSheetsMetadataDirect(directRefs);
+        void refreshSheetListFromGas(config, urlIndex);
+        return metadata;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Lectura directa no disponible para ${config.name || "UNGET"}:`, err?.message || err);
+      }
+    }
+
+    if (hasWebApp(config)) {
+      const metadata = await fetchGasMetadata(config.url, { force: options.force });
+      gasSheetListRefreshRef.current[config.url] = Date.now();
+      return metadata;
+    }
+
+    throw lastError || new Error("Configure el enlace de la hoja de cálculo o la URL de la Web App de esta UNGET.");
   };
 
   const fetchData = async (
@@ -2070,21 +2171,13 @@ export const SheetSearchModule: React.FC = () => {
           let sheetsPayload: any = null;
           let isSelective = false;
 
-          if (forceFullRefresh) {
+          if (forceFullRefresh && hasWebApp(config)) {
             sheetsPayload = await fetchScriptUrlWithFallback(config.url);
           } else {
             const currentForUrl = sources.filter((s) => s.urlIndex === urlIndex);
-            const directRefs = toDirectSheetRefs(currentForUrl);
-            let metadataList: GasSheetMetadata[];
-            if (directRefs) {
-              // Directorio conocido: las fechas se leen directo de Google Sheets (~3 s para
-              // 22 hojas). La lista de pestañas se revisa con Apps Script en segundo plano.
-              metadataList = await fetchSheetsMetadataDirect(directRefs);
-              void refreshSheetListFromGas(config, urlIndex);
-            } else {
-              metadataList = await fetchGasMetadata(config.url);
-              gasSheetListRefreshRef.current[config.url] = Date.now();
-            }
+            const metadataList = await loadUngetMetadata(config, urlIndex, currentForUrl);
+            const detectedSpreadsheetId = metadataList.find((m) => m.spreadsheetId)?.spreadsheetId;
+            if (detectedSpreadsheetId) persistDetectedSpreadsheetId(config, detectedSpreadsheetId);
             const { merged, changedSheetNames } = mergeMetadataIntoSources(
               metadataList,
               currentForUrl,
@@ -2568,13 +2661,22 @@ export const SheetSearchModule: React.FC = () => {
 
   const handleAddUrl = () => {
     if (!user) return;
-    const url = newUrlInput.trim();
+    const webAppUrl = newUrlInput.trim();
     const val = newNameInput.trim();
 
-    if (!url) {
-      toast.error("Por favor, ingrese la URL de la Web App.");
+    // La hoja es la vía principal; la Web App queda como respaldo opcional.
+    const sheetInput = newSpreadsheetInput.trim();
+    const spreadsheetId = sheetInput ? extractSpreadsheetId(sheetInput) : "";
+    if (sheetInput && !spreadsheetId) {
+      toast.error("El enlace de la hoja de cálculo no es válido. Pegue la dirección completa de Google Sheets.");
       return;
     }
+    if (!webAppUrl && !spreadsheetId) {
+      toast.error("Indique el enlace de la hoja de cálculo o la URL de la Web App.");
+      return;
+    }
+    // Sin Web App, la conexión se identifica por su hoja.
+    const url = webAppUrl || `${VIRTUAL_SHEET_URL_PREFIX}${spreadsheetId}`;
     if (!val || val === "" || val.includes("-- Seleccionar")) {
       toast.error("Por favor, seleccione una UNGET válida de la lista.");
       return;
@@ -2583,14 +2685,6 @@ export const SheetSearchModule: React.FC = () => {
     const matching = allUngets.find(u => String(u.id) === val || u.name === val);
     const name = matching ? matching.name : val;
     const ungetId = matching ? matching.id : undefined;
-
-    // La hoja es opcional: sin ella la UNGET sigue funcionando por Apps Script.
-    const sheetInput = newSpreadsheetInput.trim();
-    const spreadsheetId = sheetInput ? extractSpreadsheetId(sheetInput) : "";
-    if (sheetInput && !spreadsheetId) {
-      toast.error("El enlace de la hoja de cálculo no es válido. Pegue la dirección completa de Google Sheets.");
-      return;
-    }
 
     if (editingIndex !== null) {
       // Caso edición
@@ -2639,7 +2733,7 @@ export const SheetSearchModule: React.FC = () => {
     if (e) e.stopPropagation();
     const config = tempUrls[index];
     setEditingIndex(index);
-    setNewUrlInput(config.url);
+    setNewUrlInput(isVirtualSheetUrl(config.url) ? "" : config.url);
     setNewNameInput(config.ungetId || config.name);
     setNewSpreadsheetInput(config.spreadsheetId || "");
     setSpreadsheetCheck(null);
@@ -2663,7 +2757,7 @@ export const SheetSearchModule: React.FC = () => {
       (u) => u.url === config.url && (u.ungetId === config.ungetId || u.name === config.name),
     );
     setEditingIndex(targetIdx !== -1 ? targetIdx : null);
-    setNewUrlInput(config.url);
+    setNewUrlInput(isVirtualSheetUrl(config.url) ? "" : config.url);
     setNewNameInput(config.ungetId || config.name);
     setNewSpreadsheetInput(config.spreadsheetId || "");
     setSpreadsheetCheck(null);
@@ -2802,7 +2896,7 @@ export const SheetSearchModule: React.FC = () => {
     source: SheetSource,
   ): Promise<{ updatedSource: SheetSource; validData: SIGData[] }> => {
     const config = scriptUrls[source.urlIndex];
-    if (!config?.url) throw new Error("La UNGET de esta IPRESS ya no está configurada.");
+    if (!config) throw new Error("La UNGET de esta IPRESS ya no está configurada.");
 
     const assignment = allAssignments.find(
       (item) =>
@@ -2832,6 +2926,11 @@ export const SheetSearchModule: React.FC = () => {
     if (directPayload) {
       sheetPayload = directPayload;
     } else {
+      if (!hasWebApp(config)) {
+        throw new Error(
+          "No se pudo leer la hoja directamente y esta UNGET no tiene Web App de respaldo. Revise que la hoja esté compartida como lector con el enlace.",
+        );
+      }
       const payload = await fetchGasSingleSheet(config.url, realSheetName);
       if (!Array.isArray(payload) || payload.length === 0) {
         throw new Error("La hoja no devolvió datos válidos.");
@@ -2913,7 +3012,7 @@ export const SheetSearchModule: React.FC = () => {
 
     const source = sources.find((item) => item.id === sourceId);
     if (!source) return false;
-    if (!scriptUrls[source.urlIndex]?.url) return false;
+    if (!scriptUrls[source.urlIndex]) return false;
 
     // Un doble clic mientras responde Google no lanza una segunda descarga.
     if (loadingSourceIdsRef.current.has(sourceId)) return false;
@@ -4544,7 +4643,7 @@ function processSheet(sheet) {
                             </div>
                             <div className="space-y-1">
                               <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
-                                URL Web App (Apps Script)
+                                URL Web App (Apps Script) · opcional si hay hoja de cálculo
                               </label>
                               <input
                                 type="url"
@@ -4560,7 +4659,7 @@ function processSheet(sheet) {
                             {/* Ocupa las dos columnas: el enlace de Google Sheets es largo. */}
                             <div className="space-y-1 sm:col-span-2">
                               <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
-                                Hoja de cálculo (opcional, más rápido)
+                                Hoja de cálculo (recomendado: lectura directa, sin Apps Script)
                               </label>
                               <div className="flex gap-2">
                                 <input
@@ -4590,7 +4689,7 @@ function processSheet(sheet) {
                                 </p>
                               ) : (
                                 <p className="text-[9px] text-gray-400 ml-1 font-medium">
-                                  Comparta la hoja como "Cualquiera con el enlace: Lector". Sin esto, la UNGET sigue funcionando por Apps Script, pero más lento.
+                                  Comparta la hoja como "Cualquiera con el enlace: Lector". Con la hoja configurada, la Web App solo se usa como respaldo.
                                 </p>
                               )}
                             </div>
@@ -4796,7 +4895,7 @@ function processSheet(sheet) {
                                     })()}
                                   </div>
                                   <div className="text-[8.5px] sm:text-[9.5px] text-slate-400 truncate font-mono mt-1 flex items-center gap-1 border-b border-transparent group-hover:border-slate-100 pb-0.5 max-w-[240px] md:max-w-xs xl:max-w-none">
-                                    {config.url}
+                                    {describeConfigUrl(config)}
                                   </div>
                                   {connectionErrors[config.url] && (
                                     <div
@@ -5846,8 +5945,8 @@ function processSheet(sheet) {
                                   {!isSupabaseVirtual && (
                                     <div className="flex items-center gap-1.5 text-[9px] text-gray-400 mt-1 pt-1 border-t border-dashed border-gray-100 italic">
                                       <LinkIcon className="h-2.5 w-2.5 shrink-0 text-slate-300" />
-                                      <span className="truncate max-w-[120px] sm:max-w-[150px]" title={config.url}>
-                                        {config.url}
+                                      <span className="truncate max-w-[120px] sm:max-w-[150px]" title={describeConfigUrl(config)}>
+                                        {describeConfigUrl(config)}
                                       </span>
                                     </div>
                                   )}
@@ -5862,7 +5961,7 @@ function processSheet(sheet) {
                                 <div className="flex items-center gap-1.5 text-[9px] sm:text-xs text-gray-400 mt-auto">
                                   <LinkIcon className="h-3 w-3 shrink-0" />
                                   <span className="truncate max-w-[120px] sm:max-w-[150px]">
-                                    {config.url}
+                                    {describeConfigUrl(config)}
                                   </span>
                                 </div>
                               )}
