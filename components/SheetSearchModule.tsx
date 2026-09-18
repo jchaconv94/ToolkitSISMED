@@ -920,7 +920,6 @@ export const SheetSearchModule: React.FC = () => {
   const [allJurisdictionConfigs, setAllJurisdictionConfigs] = useState<any[]>(
     [],
   );
-  const [subscribedUsernames, setSubscribedUsernames] = useState<string[]>([]);
 
   // UI states
   const [isLoading, setIsLoading] = useState(false);
@@ -1293,9 +1292,6 @@ export const SheetSearchModule: React.FC = () => {
   const [exportScope, setExportScope] = useState<"single" | "all">("single");
   const [editingIndex, setEditingIndex] = useState<number | null>(null); // Nuevo: índice que se está editando
   const [tempUrls, setTempUrls] = useState<UngetConfig[]>([]);
-  const [tempSubscribedUsernames, setTempSubscribedUsernames] = useState<
-    string[]
-  >([]);
   const [newUrlInput, setNewUrlInput] = useState("");
   const [newNameInput, setNewNameInput] = useState("");
   // Enlace o ID del libro de Google Sheets de la UNGET (lectura directa).
@@ -1582,13 +1578,11 @@ export const SheetSearchModule: React.FC = () => {
         let ungetIdByUsername: Record<string, string | undefined> = {};
 
         try {
-          const [allConfigsRaw, allUsers, subscriptions] = await Promise.all([
+          const [allConfigsRaw, allUsers] = await Promise.all([
             api.getAllUngetConfigs(),
             api.getUsers(),
-            api.getSubscriptions(user.username),
           ]);
           setAllUsersList(allUsers);
-          setSubscribedUsernames(subscriptions);
           ungetIdByUsername = Object.fromEntries(
             allUsers.map((u: any) => [
               u.username,
@@ -1638,7 +1632,6 @@ export const SheetSearchModule: React.FC = () => {
           if (level === "GLOBAL") {
             remoteConfigs = allConfigs.filter((config) => {
               if (config.username === user.username) return true;
-              if (subscriptions.includes(config.username)) return true;
               return false;
             });
             // Un usuario global ve todas las UNGET registradas, sin depender de a quién esté
@@ -1647,7 +1640,6 @@ export const SheetSearchModule: React.FC = () => {
           } else if (level === "DIRESA") {
             remoteConfigs = allConfigs.filter((config) => {
               if (config.username === user.username) return true;
-              if (subscriptions.includes(config.username)) return true;
               const ungetObj = ungs.find(u => (config.ungetId && String(u.id) === String(config.ungetId)) || normalizeName(u.name) === normalizeName(config.name));
               if (ungetObj && userDiresaId && String(ungetObj.diresaId) === String(userDiresaId)) return true;
               return false;
@@ -1655,7 +1647,6 @@ export const SheetSearchModule: React.FC = () => {
           } else if (level === "OGESS") {
             remoteConfigs = allConfigs.filter((config) => {
               if (config.username === user.username) return true;
-              if (subscriptions.includes(config.username)) return true;
               const ungetObj = ungs.find(u => (config.ungetId && String(u.id) === String(config.ungetId)) || normalizeName(u.name) === normalizeName(config.name));
               if (ungetObj && userOgessId && String(ungetObj.ogessId) === String(userOgessId)) return true;
               return false;
@@ -1687,11 +1678,8 @@ export const SheetSearchModule: React.FC = () => {
             // Si el usuario ya tiene su propia configuración la usa; si no, hereda la de su UNGET
             remoteConfigs = myOwn.length > 0 ? myOwn : inheritedUngetConfigs;
 
-            // Incluir suscripciones si las tuviera
-            if (subscriptions.length > 0) {
-              const subs = allConfigs.filter((c) => subscriptions.includes(c.username));
-              remoteConfigs = [...remoteConfigs, ...subs];
-            }
+            // La visibilidad sale de la jerarquía de Establecimientos: un usuario de una
+            // UNGET ve la conexión de su UNGET, y nada más.
           }
         } catch (fetchErr) {
           console.error(
@@ -1781,8 +1769,9 @@ export const SheetSearchModule: React.FC = () => {
                       }
                     : u,
                 );
+                // Solo para seguir viendo algo sin conexión: no se vuelve a guardar en la
+                // base, porque resucitaba conexiones que se habían borrado a propósito.
                 setScriptUrls(migrated);
-                await api.saveUngetConfigs(user.username, migrated);
               }
             } catch (e) {}
           }
@@ -2586,10 +2575,6 @@ export const SheetSearchModule: React.FC = () => {
       const result = await api.saveUngetConfigs(user.username, urlsToSave);
 
       if (result.success) {
-        // Guardar suscripciones en la base de datos (Supabase) y localmente como respaldo
-        await api.saveSubscriptions(user.username, tempSubscribedUsernames);
-        setSubscribedUsernames(tempSubscribedUsernames);
-
         // Actualizar localmente allJurisdictionConfigs en tiempo real para mantener la concordancia
         setAllJurisdictionConfigs((prev) => {
           const others = prev.filter((c) => c.username !== user.username);
@@ -2604,43 +2589,16 @@ export const SheetSearchModule: React.FC = () => {
           return [...others, ...myUpdated];
         });
 
-        // Buscar orígenes de las demás entidades suscritas
-        const updatedAllJurisdiction = [
-          ...allJurisdictionConfigs.filter((c) => c.username !== user.username),
-          ...urlsToSave.map((c) => ({ username: user.username, name: c.name, url: c.url, ungetId: c.ungetId, spreadsheetId: c.spreadsheetId }))
-        ];
-
-        const subscribedConfigs = updatedAllJurisdiction.filter((config) =>
-          tempSubscribedUsernames.includes(config.username),
-        );
-        
-        // Remover duplicados si el usuario estuviera de alguna manera suscrito a sí mismo
-        const othersUrls = subscribedConfigs.filter(
-          (u) => u.username !== user.username,
+        // Las conexiones de las demás UNGET ya vienen de la jerarquía; aquí solo se
+        // refrescan las que acaba de guardar este usuario, sin repetir ninguna UNGET.
+        const mergedScriptUrls = pickOneConnectionPerUnget(
+          [
+            ...allJurisdictionConfigs.filter((c) => c.username !== user.username),
+            ...urlsToSave,
+          ],
+          { currentUsername: user.username },
         );
 
-        let mergedScriptUrls = [...othersUrls, ...urlsToSave];
-        
-        // Deduplicar configs para evitar UNGETS repetidas si vienen de distintos usuarios
-        const deduplicatedMerged: typeof mergedScriptUrls = [];
-        for (const c of mergedScriptUrls) {
-           const cNorm = normalizeName(c.name);
-           const cId = c.ungetId;
-           const existingIdx = deduplicatedMerged.findIndex(e => 
-             (e.ungetId && cId && e.ungetId === cId) || 
-             normalizeName(e.name) === cNorm
-           );
-
-           if (existingIdx >= 0) {
-              if (c.username === user.username) {
-                 deduplicatedMerged[existingIdx] = c;
-              }
-           } else {
-              deduplicatedMerged.push(c);
-           }
-        }
-        mergedScriptUrls = deduplicatedMerged;
-        
         setScriptUrls(mergedScriptUrls);
         setIsConfigOpen(false);
         toast.success("Configuración guardada en la nube con éxito.");
@@ -2750,7 +2708,6 @@ export const SheetSearchModule: React.FC = () => {
     setNewSpreadsheetInput(config.spreadsheetId || "");
     setSpreadsheetCheck(null);
     setIsWebAppSectionOpen(hasWebApp(config));
-    setTempSubscribedUsernames([...subscribedUsernames]);
     setIsConfigOpen(true);
   };
 
@@ -2764,7 +2721,6 @@ export const SheetSearchModule: React.FC = () => {
       (u) => (!u.username || u.username === user.username),
     );
     setTempUrls(visibleUrls);
-    setTempSubscribedUsernames([...subscribedUsernames]);
 
     const targetIdx = visibleUrls.findIndex(
       (u) => u.url === config.url && (u.ungetId === config.ungetId || u.name === config.name),
@@ -4498,7 +4454,6 @@ function processSheet(sheet) {
                 onClick={() => {
                   if (user) {
                     setTempUrls([...scriptUrls]);
-                    setTempSubscribedUsernames([...subscribedUsernames]);
                   }
                   setIsConfigOpen(!isConfigOpen);
                 }}
@@ -4571,20 +4526,6 @@ function processSheet(sheet) {
                   r.includes("DIRESA") ||
                   r.includes("OGESS");
 
-                const showJurisdiction = (() => {
-                  if (!isAdminOrRegional) return false;
-                  const jurisdictionUsernames = Array.from(
-                    new Set(
-                      allJurisdictionConfigs
-                        .filter(
-                          (u) =>
-                            u.username && u.username !== user?.username,
-                        )
-                        .map((u) => u.username),
-                    ),
-                  );
-                  return jurisdictionUsernames.length > 0;
-                })();
 
                 return (
                   <div className="space-y-6 lg:space-y-8 max-w-7xl mx-auto">
@@ -4799,7 +4740,7 @@ function processSheet(sheet) {
                   {/* ---------- ROW 2: CONNECTIONS & JURISDICTION ---------- */}
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8 items-stretch animate-in fade-in slide-in-from-bottom-4 duration-300">
                     {/* Card: Lista de conexiones */}
-                    <div className={showJurisdiction ? "lg:col-span-7" : "lg:col-span-12"}>
+                    <div className="lg:col-span-12">
                       <div
                         className={`bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm flex flex-col h-full ${
                           isAdminOrRegional
@@ -4810,7 +4751,7 @@ function processSheet(sheet) {
                         <div className="flex flex-wrap gap-2 justify-between items-center mb-4">
                           <h4 className="text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-widest">
                             CONEXIONES CONFIGURADAS (
-                            {tempUrls.length + tempSubscribedUsernames.length})
+                            {tempUrls.length})
                           </h4>
                           {typeof maxUrlsAllowed === "number" && maxUrlsAllowed > 0 ? (
                             <span className="text-[9px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-2.5 py-1 rounded-full uppercase tracking-widest shrink-0">
@@ -4820,96 +4761,8 @@ function processSheet(sheet) {
                         </div>
 
                         <div className="space-y-2.5 flex-1 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar max-h-[258px]">
-                          {/* Map subscriptions */}
-                          {tempSubscribedUsernames.map((uName, idx) => {
-                            const uUser = allUsersList.find(
-                              (x) => x.username === uName,
-                            );
-                            const configsOfUser = allJurisdictionConfigs.filter(
-                              (c) => c.username === uName,
-                            );
-                            const configNames = configsOfUser
-                              .map((c) => c.name)
-                              .join(" / ");
-                            const fallbackName = uUser?.personnelData
-                              ? `${uUser.personnelData.firstName} ${uUser.personnelData.lastName}`
-                              : uName;
-                            const nameLabel = configNames || fallbackName;
-
-                            const personnel = uUser?.personnelData || uUser?.personnel;
-                            const personnelFullName = personnel
-                              ? `${personnel.firstName || ""} ${personnel.lastName || ""}`.trim()
-                              : "";
-
-                            return (
-                              <div
-                                key={`sub_${idx}`}
-                                className="group relative flex gap-2 sm:gap-3 items-center bg-gradient-to-r from-teal-50/50 to-emerald-50/40 border border-teal-100 p-3 rounded-lg transition-all shadow-sm hover:border-teal-200"
-                              >
-                                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-teal-100/70 text-teal-600 shadow-sm">
-                                  <Building2 className="h-4 w-4" />
-                                </div>
-                                <div className="flex-1 min-w-0 pr-1">
-                                  <div className="text-[10px] sm:text-xs font-extrabold text-teal-900 truncate uppercase mt-0.5 tracking-tight">
-                                    SUCRIPCIÓN ACTIVA: {nameLabel}
-                                  </div>
-                                  <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                                    <div className="flex items-center gap-1 text-teal-700 font-medium text-[8.5px] uppercase tracking-wide">
-                                      <User className="h-2.5 w-2.5 text-teal-400 shrink-0" />
-                                      <span className="truncate max-w-[130px] font-mono">
-                                        {personnelFullName || uName}
-                                      </span>
-                                    </div>
-                                    <span className="text-[8px] text-teal-600 font-extrabold bg-teal-100/60 px-1.5 py-0.5 rounded uppercase tracking-wider">
-                                      {configsOfUser.length} URL{configsOfUser.length === 1 ? '' : 'S'}
-                                    </span>
-                                    {(() => {
-                                      // Cuántas hojas de esa UNGET se leen directo: es lo que falta por migrar.
-                                      const conHoja = configsOfUser.filter((c: any) => c.spreadsheetId).length;
-                                      if (configsOfUser.length === 0) return null;
-                                      if (conHoja === configsOfUser.length) {
-                                        return (
-                                          <span className="text-[8px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded uppercase tracking-wider inline-flex items-center gap-1">
-                                            <CheckCircle2 className="h-2 w-2 text-emerald-500 shrink-0" />
-                                            Lectura directa
-                                          </span>
-                                        );
-                                      }
-                                      return (
-                                        <span
-                                          className="text-[8px] font-extrabold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded uppercase tracking-wider inline-flex items-center gap-1"
-                                          title="Esta UNGET todavía lee su stock con Apps Script. Configure el enlace de su hoja para que lea directo."
-                                        >
-                                          <AlertTriangle className="h-2 w-2 text-amber-500 shrink-0" />
-                                          {conHoja === 0
-                                            ? "Solo Apps Script"
-                                            : `${conHoja} de ${configsOfUser.length} con hoja`}
-                                        </span>
-                                      );
-                                    })()}
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setTempSubscribedUsernames(
-                                      tempSubscribedUsernames.filter(
-                                        (name) => name !== uName,
-                                      ),
-                                    )
-                                  }
-                                  className="p-1.5 sm:p-2 text-teal-600/50 bg-white border border-teal-100 hover:border-red-200 hover:text-red-500 rounded-lg transition-all hover:shadow-sm shrink-0"
-                                  title="Cancelar Suscripción"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            );
-                          })}
-
                           {/* Map own URLs */}
-                          {tempUrls.length > 0 ||
-                          tempSubscribedUsernames.length > 0 ? (
+                          {tempUrls.length > 0 ? (
                             tempUrls.map((config, idx) => (
                               <div
                                 key={idx}
@@ -5031,125 +4884,6 @@ function processSheet(sheet) {
                       </div>
                     </div>
 
-                    {/* ---------- JURISDICTION COLUMN ---------- */}
-                    {showJurisdiction && (
-                      <div className="lg:col-span-5">
-                        {(() => {
-                          const jurisdictionUsernames = Array.from(
-                            new Set(
-                              allJurisdictionConfigs
-                                .filter(
-                                  (u) =>
-                                    u.username && u.username !== user?.username,
-                                )
-                                .map((u) => u.username),
-                            ),
-                          );
-
-                          return (
-                            <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm flex flex-col h-full">
-                            <div className="flex items-center gap-2.5 mb-2">
-                              <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center">
-                                <Building2 className="w-4 h-4" />
-                              </div>
-                              <h4 className="text-[10px] sm:text-xs font-black text-slate-800 uppercase tracking-tight">
-                                Directorio de Jurisdicción
-                              </h4>
-                            </div>
-                            <p className="text-[9px] sm:text-[10px] font-medium text-slate-500 mb-3 leading-relaxed">
-                              Suscríbase a las entidades de su jurisdicción para
-                              poder ver el stock de cada UNGET.
-                            </p>
-
-                            <div className="space-y-2 max-h-[258px] overflow-y-auto pr-1.5 custom-scrollbar">
-                              {jurisdictionUsernames.map((uName, idx) => {
-                                const isAdded =
-                                  tempSubscribedUsernames.includes(uName);
-                                const uUser = allUsersList.find(
-                                  (x) => x.username === uName,
-                                );
-                                const configsOfUser =
-                                  allJurisdictionConfigs.filter(
-                                    (c) => c.username === uName,
-                                  );
-
-                                const configNames = configsOfUser
-                                  .map((c) => c.name)
-                                  .join(" / ");
-                                const fallbackName = uUser?.personnelData
-                                  ? `${uUser.personnelData.firstName} ${uUser.personnelData.lastName}`
-                                  : uName;
-                                const nameLabel = configNames || fallbackName;
-
-                                const personnel = uUser?.personnelData || uUser?.personnel;
-                                const personnelFullName = personnel
-                                  ? `${personnel.firstName || ""} ${personnel.lastName || ""}`.trim()
-                                  : "";
-
-                                return (
-                                  <div
-                                    key={idx}
-                                    className={`relative flex items-center justify-between p-2.5 sm:p-3 rounded-lg border transition-all duration-200 ${
-                                      isAdded
-                                        ? "bg-slate-50 border-slate-100 opacity-60"
-                                        : "bg-white border-slate-200 hover:border-teal-300 hover:shadow-md hover:shadow-teal-500/5 group"
-                                    }`}
-                                  >
-                                    <div className="flex flex-col min-w-0 flex-1 pr-2">
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <div
-                                          className="text-[11px] sm:text-xs font-extrabold text-slate-800 truncate uppercase tracking-tight"
-                                          title={nameLabel}
-                                        >
-                                          {nameLabel}
-                                        </div>
-                                        <div className="shrink-0 flex items-center gap-1 bg-teal-50 text-teal-700 border border-teal-100/60 px-1.5 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-wider">
-                                          <span className="w-1 h-1 bg-teal-500 rounded-full animate-pulse"></span>
-                                          {configsOfUser.length} {configsOfUser.length === 1 ? 'URL' : 'URLs'}
-                                        </div>
-                                      </div>
-                                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                                        <div className="flex items-center gap-1 bg-slate-50 border border-slate-100 text-slate-500 px-1.5 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-wider">
-                                          <User className="h-2.5 w-2.5 shrink-0 text-slate-400" />
-                                          <span className="truncate max-w-[240px] font-sans">
-                                            {personnelFullName || uName}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      disabled={isAdded}
-                                      onClick={() => {
-                                        setTempSubscribedUsernames([
-                                          ...tempSubscribedUsernames,
-                                          uName,
-                                        ]);
-                                      }}
-                                      className={`shrink-0 ml-2 px-3.5 py-2 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 flex items-center gap-1 ${
-                                        isAdded
-                                          ? "bg-slate-100 text-slate-400 border border-slate-200/50"
-                                          : "bg-teal-50 border border-teal-200/60 text-teal-700 hover:bg-teal-600 hover:text-white hover:border-teal-600 shadow-sm"
-                                      }`}
-                                    >
-                                      {isAdded ? (
-                                        <>
-                                          <Check className="h-3 w-3" />
-                                          <span>Suscrito</span>
-                                        </>
-                                      ) : (
-                                        <span>Suscribirse</span>
-                                      )}
-                                    </button>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
                 </div>
               </div>
                 );
