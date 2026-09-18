@@ -12,6 +12,11 @@
 --       de la hoja y la Web App que hubiera en las demás;
 --    4. pone un índice único que impide volver a duplicarlas.
 --
+--  Ejecutada el 18/09/2026: 15 filas quedaron en 7, una por UNGET. Bellavista heredó
+--  la hoja que estaba en la fila de admin. San Martin tenia dos informaticos (cfrio y
+--  sanmartin) y el usuario eligio conservar la de sanmartin, de ahi el primer criterio
+--  de desempate, que pone por delante los usuarios elegidos a mano.
+--
 --  Ver docs/REVISION_MODELO_CONEXIONES_2026-09-18.md
 --
 --  IMPORTANTE: el editor SQL de Supabase ejecuta todo lo pegado dentro de una
@@ -103,7 +108,8 @@ with clasificadas as (
          (c.spreadsheet_id is not null) as tiene_hoja,
          row_number() over (
            partition by c.unget_id
-           order by (p.unget_id is not distinct from c.unget_id) desc,
+           order by (c.username = any (array['sanmartin'])) desc,
+                    (p.unget_id is not distinct from c.unget_id) desc,
                     (c.spreadsheet_id is not null) desc,
                     c.id
          ) as puesto
@@ -131,7 +137,8 @@ with clasificadas as (
   select c.id,
          row_number() over (
            partition by c.unget_id
-           order by (p.unget_id is not distinct from c.unget_id) desc,
+           order by (c.username = any (array['sanmartin'])) desc,
+                    (p.unget_id is not distinct from c.unget_id) desc,
                     (c.spreadsheet_id is not null) desc,
                     c.id
          ) as puesto
