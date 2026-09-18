@@ -75,6 +75,7 @@ import { findLatestValidSync, getLastMovementDate } from "../services/stockSyncH
 import {
   fetchSheetsMetadataViaApi,
   hasSheetsApiKey,
+  listSheetTabs,
   type KnownRowCounts,
 } from "../services/sheetsApiService";
 import {
@@ -1309,6 +1310,9 @@ export const SheetSearchModule: React.FC = () => {
   const [newSpreadsheetInput, setNewSpreadsheetInput] = useState("");
   const [spreadsheetCheck, setSpreadsheetCheck] = useState<{ ok: boolean; message: string } | null>(null);
   const [isCheckingSpreadsheet, setIsCheckingSpreadsheet] = useState(false);
+  /** La Web App es un respaldo: la sección viene plegada y se abre si ya hay una configurada. */
+  const [isWebAppSectionOpen, setIsWebAppSectionOpen] = useState(false);
+  const [isShareHelpOpen, setIsShareHelpOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<SIGData | null>(null);
 
@@ -2601,7 +2605,9 @@ export const SheetSearchModule: React.FC = () => {
             username: user.username,
             name: c.name,
             url: c.url,
-            ungetId: c.ungetId
+            ungetId: c.ungetId,
+            // Sin esto, tras guardar la interfaz cree que la UNGET no tiene hoja configurada.
+            spreadsheetId: c.spreadsheetId,
           }));
           return [...others, ...myUpdated];
         });
@@ -2609,7 +2615,7 @@ export const SheetSearchModule: React.FC = () => {
         // Buscar orígenes de las demás entidades suscritas
         const updatedAllJurisdiction = [
           ...allJurisdictionConfigs.filter((c) => c.username !== user.username),
-          ...urlsToSave.map((c) => ({ username: user.username, name: c.name, url: c.url, ungetId: c.ungetId }))
+          ...urlsToSave.map((c) => ({ username: user.username, name: c.name, url: c.url, ungetId: c.ungetId, spreadsheetId: c.spreadsheetId }))
         ];
 
         const subscribedConfigs = updatedAllJurisdiction.filter((config) =>
@@ -2723,7 +2729,21 @@ export const SheetSearchModule: React.FC = () => {
     setIsCheckingSpreadsheet(true);
     setSpreadsheetCheck(null);
     try {
-      setSpreadsheetCheck(await checkSpreadsheetAccess(spreadsheetId));
+      const access = await checkSpreadsheetAccess(spreadsheetId);
+      if (!access.ok || !hasSheetsApiKey()) {
+        setSpreadsheetCheck(access);
+        return;
+      }
+      try {
+        const tabs = await listSheetTabs(spreadsheetId, { force: true });
+        setSpreadsheetCheck({
+          ok: true,
+          message: `Hoja accesible: ${tabs.length} pestaña${tabs.length === 1 ? "" : "s"} encontrada${tabs.length === 1 ? "" : "s"}.`,
+        });
+      } catch {
+        // La lectura directa ya quedó comprobada; el conteo es solo informativo.
+        setSpreadsheetCheck(access);
+      }
     } finally {
       setIsCheckingSpreadsheet(false);
     }
@@ -2737,6 +2757,7 @@ export const SheetSearchModule: React.FC = () => {
     setNewNameInput(config.ungetId || config.name);
     setNewSpreadsheetInput(config.spreadsheetId || "");
     setSpreadsheetCheck(null);
+    setIsWebAppSectionOpen(hasWebApp(config));
     setTempSubscribedUsernames([...subscribedUsernames]);
     setIsConfigOpen(true);
   };
@@ -4516,19 +4537,19 @@ function processSheet(sheet) {
 
       {isConfigOpen && canManageConfigs && (
         <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-[2.5rem] shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-white/20">
+          <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-white/20">
             {/* Header Modal */}
             <div className="p-5 sm:p-6 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0 z-10">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center text-teal-600">
+                <div className="w-10 h-10 bg-teal-50 rounded-lg flex items-center justify-center text-teal-600">
                   <Settings className="h-5 w-5" />
                 </div>
                 <div>
                   <h3 className="font-black text-gray-900 text-base sm:text-lg uppercase tracking-tight">
-                    Gestión de Orígenes UNGET
+                    Conexiones de stock
                   </h3>
                   <p className="text-[10px] sm:text-xs text-gray-500 font-medium tracking-tight mt-0.5">
-                    Configure sus conexiones a Google Apps Script
+                    Vincule la hoja de cálculo de su UNGET
                   </p>
                 </div>
               </div>
@@ -4576,25 +4597,23 @@ function processSheet(sheet) {
                 return (
                   <div className="space-y-6 lg:space-y-8 max-w-7xl mx-auto">
                     {/* ---------- ROW 1: EQUAL HEIGHTS HEADER PANEL ---------- */}
-                    <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 lg:gap-8 items-stretch font-sans">
-                      {/* Card: Añadir / Editar Origen */}
-                      <div className="xl:col-span-7">
-                        <div className="bg-white border border-gray-200 rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-6 shadow-sm h-full flex flex-col justify-between">
+                    <div className="font-sans">
+                      {/* Tarjeta: añadir o editar una conexión */}
+                      <div>
+                        <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm h-full flex flex-col justify-between">
                           <div>
                         <h4 className="text-xs sm:text-sm font-black text-gray-800 mb-4 sm:mb-5 flex items-center gap-2 uppercase tracking-tight">
                           <Plus
                             className={`h-5 w-5 ${editingIndex !== null ? "text-amber-500" : "text-teal-600"}`}
                           />
-                          {editingIndex !== null
-                            ? "Editar Origen Manual"
-                            : "Añadir Origen Manual"}
+                          {editingIndex !== null ? "Editar conexión" : "Nueva conexión"}
                         </h4>
 
                         <div className="space-y-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] gap-4">
                             <div className="space-y-1">
                               <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
-                                Nombre de la UNGET
+                                UNGET
                               </label>
                               {editingIndex !== null ? (
                                 <input
@@ -4605,10 +4624,10 @@ function processSheet(sheet) {
                                     return matching ? matching.name : newNameInput;
                                   })()}
                                   disabled
-                                  className="w-full text-xs sm:text-sm rounded-xl border-gray-200 bg-gray-100 cursor-not-allowed shadow-sm py-2.5 px-3 font-bold text-gray-400"
+                                  className="w-full text-xs sm:text-sm rounded-lg border-gray-200 bg-gray-100 cursor-not-allowed shadow-sm py-2.5 px-3 font-bold text-gray-400"
                                 />
                               ) : isUngetRole ? (
-                                <div className="bg-slate-50 border border-slate-200/60 rounded-xl px-3 py-2 flex flex-col justify-center min-h-[42px]">
+                                <div className="bg-slate-50 border border-slate-200/60 rounded-lg px-3 py-2 flex flex-col justify-center min-h-[42px]">
                                   <span className="text-[8px] font-bold text-teal-600 uppercase tracking-widest leading-none mb-1">
                                     Autocompletado
                                   </span>
@@ -4617,14 +4636,14 @@ function processSheet(sheet) {
                                   </span>
                                 </div>
                               ) : availableUngetsForConfig.length === 0 ? (
-                                <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200/50 rounded-xl px-3 py-2 font-bold min-h-[42px] leading-tight flex items-center justify-center">
+                                <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200/50 rounded-lg px-3 py-2 font-bold min-h-[42px] leading-tight flex items-center justify-center">
                                   Todas las UNGETs de su jurisdicción ya están configuradas.
                                 </div>
                               ) : (
                                 <select
                                   value={newNameInput}
                                   onChange={(e) => setNewNameInput(e.target.value)}
-                                  className="w-full text-xs sm:text-sm rounded-xl border-gray-200 focus:border-teal-500 focus:ring-teal-500 shadow-sm py-2 px-3 font-bold text-gray-700 bg-gray-50/50 h-[42px] min-h-[42px]"
+                                  className="w-full text-xs sm:text-sm rounded-lg border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2 px-3 font-bold text-gray-700 bg-white h-[42px] min-h-[42px]"
                                 >
                                   <option value="">-- Seleccionar UNGET --</option>
                                   {availableUngetsForConfig.map((unget: any) => {
@@ -4643,23 +4662,7 @@ function processSheet(sheet) {
                             </div>
                             <div className="space-y-1">
                               <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
-                                URL Web App (Apps Script) · opcional si hay hoja de cálculo
-                              </label>
-                              <input
-                                type="url"
-                                placeholder="https://script.google.com/..."
-                                value={newUrlInput}
-                                onChange={(e) => setNewUrlInput(e.target.value)}
-                                onKeyDown={(e) =>
-                                  e.key === "Enter" && handleAddUrl()
-                                }
-                                className="w-full text-[10px] sm:text-xs rounded-xl border-gray-200 focus:border-teal-500 focus:ring-teal-500 shadow-sm py-2.5 px-3 font-mono bg-gray-50/50"
-                              />
-                            </div>
-                            {/* Ocupa las dos columnas: el enlace de Google Sheets es largo. */}
-                            <div className="space-y-1 sm:col-span-2">
-                              <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
-                                Hoja de cálculo (recomendado: lectura directa, sin Apps Script)
+                                Enlace de la hoja de cálculo
                               </label>
                               <div className="flex gap-2">
                                 <input
@@ -4670,37 +4673,107 @@ function processSheet(sheet) {
                                     setNewSpreadsheetInput(e.target.value);
                                     setSpreadsheetCheck(null);
                                   }}
-                                  className="flex-1 min-w-0 text-[10px] sm:text-xs rounded-xl border-gray-200 focus:border-teal-500 focus:ring-teal-500 shadow-sm py-2.5 px-3 font-mono bg-gray-50/50"
+                                  className="flex-1 min-w-0 text-[10px] sm:text-xs rounded-lg border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2.5 px-3 font-mono bg-white"
                                 />
                                 <button
                                   type="button"
                                   onClick={handleCheckSpreadsheet}
                                   disabled={isCheckingSpreadsheet || !newSpreadsheetInput.trim()}
-                                  className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 font-black text-[10px] uppercase tracking-wider transition-all shrink-0"
+                                  className="px-3 py-2.5 rounded-lg border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 hover:border-slate-400 disabled:opacity-50 font-black text-[10px] uppercase tracking-wider transition-all shrink-0"
                                 >
                                   {isCheckingSpreadsheet ? "Probando..." : "Probar"}
                                 </button>
                               </div>
-                              {spreadsheetCheck ? (
+                              {spreadsheetCheck && (
                                 <p
-                                  className={`text-[9px] font-bold ml-1 ${spreadsheetCheck.ok ? "text-emerald-600" : "text-amber-600"}`}
+                                  className={`text-[9px] font-bold ml-1 flex items-start gap-1 ${spreadsheetCheck.ok ? "text-emerald-600" : "text-amber-600"}`}
                                 >
+                                  {spreadsheetCheck.ok ? (
+                                    <CheckCircle2 className="h-3 w-3 shrink-0 mt-px" />
+                                  ) : (
+                                    <AlertCircle className="h-3 w-3 shrink-0 mt-px" />
+                                  )}
                                   {spreadsheetCheck.message}
                                 </p>
-                              ) : (
-                                <p className="text-[9px] text-gray-400 ml-1 font-medium">
-                                  Comparta la hoja como "Cualquiera con el enlace: Lector". Con la hoja configurada, la Web App solo se usa como respaldo.
-                                </p>
+                              )}
+                              <p className="text-[9px] text-gray-400 ml-1 font-medium">
+                                Comparta la hoja como "Cualquiera con el enlace: Lector".{" "}
+                                <button
+                                  type="button"
+                                  onClick={() => setIsShareHelpOpen(!isShareHelpOpen)}
+                                  className="text-teal-600 font-black hover:underline"
+                                >
+                                  {isShareHelpOpen ? "Ocultar" : "Cómo se hace"}
+                                </button>
+                              </p>
+                              {isShareHelpOpen && (
+                                <ol className="text-[9px] text-slate-500 font-medium bg-slate-50 border border-slate-200/70 rounded-lg p-3 space-y-1 list-decimal list-inside leading-relaxed">
+                                  <li>Abra su hoja en Google Sheets y pulse "Compartir".</li>
+                                  <li>En "Acceso general", elija "Cualquiera con el enlace" y déjelo como "Lector".</li>
+                                  <li>Pulse "Copiar enlace", péguelo aquí arriba y use "Probar".</li>
+                                </ol>
+                              )}
+                            </div>
+                            {/* La Web App es respaldo: se pliega para no confundir a quien configura por primera vez. */}
+                            <div className="md:col-start-2 rounded-lg border border-slate-300 bg-slate-50 overflow-hidden">
+                              <button
+                                type="button"
+                                onClick={() => setIsWebAppSectionOpen(!isWebAppSectionOpen)}
+                                className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-slate-100/70 transition-colors"
+                              >
+                                <span className="flex items-center gap-2 min-w-0">
+                                  <ChevronRight
+                                    className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${isWebAppSectionOpen ? "rotate-90" : ""}`}
+                                  />
+                                  <span className="min-w-0">
+                                    <span className="block text-[10px] sm:text-xs font-black text-slate-700 uppercase tracking-tight">
+                                      Web App de Apps Script
+                                    </span>
+                                    <span className="block text-[9px] text-slate-400 font-medium">
+                                      Opcional · solo si la hoja no se puede compartir
+                                    </span>
+                                  </span>
+                                </span>
+                                {newUrlInput.trim() && !isWebAppSectionOpen && (
+                                  <span className="text-[8px] font-black text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0">
+                                    Configurada
+                                  </span>
+                                )}
+                              </button>
+                              {isWebAppSectionOpen && (
+                                <div className="px-3 pb-3 space-y-2">
+                                  <input
+                                    type="url"
+                                    placeholder="https://script.google.com/..."
+                                    value={newUrlInput}
+                                    onChange={(e) => setNewUrlInput(e.target.value)}
+                                    onKeyDown={(e) => e.key === "Enter" && handleAddUrl()}
+                                    className="w-full text-[10px] sm:text-xs rounded-lg border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2.5 px-3 font-mono bg-white"
+                                  />
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <p className="text-[9px] text-slate-400 font-medium">
+                                      Con la hoja configurada, la Web App solo se usa como respaldo.
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onClick={() => setIsInstructionModalOpen(true)}
+                                      className="text-[9px] font-black uppercase tracking-wider text-blue-600 hover:text-blue-700 shrink-0 flex items-center gap-1"
+                                    >
+                                      Ver guía paso a paso
+                                      <ArrowRight className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </div>
                               )}
                             </div>
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex gap-2.5 pt-1">
+                      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5 pt-1">
                             <button
                               onClick={handleAddUrl}
-                              className={`flex-1 py-2.5 rounded-xl text-white font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 ${editingIndex !== null ? "bg-amber-500 shadow-amber-500/20 hover:bg-amber-600 hover:shadow-amber-600/30" : "bg-teal-600 shadow-teal-600/20 hover:bg-teal-700 hover:shadow-teal-700/30"}`}
+                              className={`w-full sm:w-auto px-8 py-2.5 rounded-lg text-white font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 ${editingIndex !== null ? "bg-amber-500 shadow-amber-500/20 hover:bg-amber-600 hover:shadow-amber-600/30" : "bg-teal-600 shadow-teal-600/20 hover:bg-teal-700 hover:shadow-teal-700/30"}`}
                             >
                               {editingIndex !== null ? (
                                 <Check className="h-3.5 w-3.5" />
@@ -4720,7 +4793,7 @@ function processSheet(sheet) {
                                   setNewSpreadsheetInput("");
                                   setSpreadsheetCheck(null);
                                 }}
-                                className="px-4 py-2.5 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200 transition-all font-bold text-[10px] sm:text-xs uppercase tracking-wider"
+                                className="w-full sm:w-auto px-4 py-2.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-all font-bold text-[10px] sm:text-xs uppercase tracking-wider"
                               >
                                 Cancelar
                               </button>
@@ -4729,46 +4802,14 @@ function processSheet(sheet) {
                         </div>
                       </div>
 
-                    {/* Instructions Banner */}
-                    <div className="xl:col-span-5">
-                      <div className="bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-800 rounded-[1.5rem] sm:rounded-[2rem] p-5 sm:p-6 shadow-xl shadow-blue-900/10 text-white relative flex flex-col justify-between h-full overflow-hidden">
-                        <div className="absolute right-0 top-0 opacity-[0.07] pointer-events-none transform translate-x-10 -translate-y-10">
-                          <HelpCircle className="w-40 h-40" />
-                        </div>
-                        <div className="relative z-10 flex flex-col justify-between h-full flex-1">
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center backdrop-blur-sm shadow-sm ring-1 ring-white/20">
-                                <HelpCircle className="w-4 h-4 text-blue-100" />
-                              </div>
-                              <h3 className="text-xs sm:text-sm font-black uppercase tracking-tight">
-                                Instrucciones de Conexión
-                              </h3>
-                            </div>
-                            <p className="text-blue-100 text-[10px] sm:text-[11px] font-medium leading-relaxed pr-6 mt-1">
-                              Instrucciones rápidas para vincular Google Sheets a esta
-                              plataforma y recuperar información de stocks detallados.
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setIsInstructionModalOpen(true)}
-                            className="bg-white text-blue-700 hover:bg-blue-50 hover:shadow-lg w-full py-2.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all mt-4"
-                          >
-                            Ver paso a paso
-                            <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
                   </div>
 
                   {/* ---------- ROW 2: CONNECTIONS & JURISDICTION ---------- */}
-                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 lg:gap-8 items-stretch animate-in fade-in slide-in-from-bottom-4 duration-300">
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8 items-stretch animate-in fade-in slide-in-from-bottom-4 duration-300">
                     {/* Card: Lista de conexiones */}
-                    <div className={showJurisdiction ? "xl:col-span-7" : "xl:col-span-12"}>
+                    <div className={showJurisdiction ? "lg:col-span-7" : "lg:col-span-12"}>
                       <div
-                        className={`bg-white border border-gray-200 rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-6 shadow-sm flex flex-col h-full ${
+                        className={`bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm flex flex-col h-full ${
                           isAdminOrRegional
                             ? "min-h-[300px]"
                             : "h-auto max-h-[350px]"
@@ -4776,7 +4817,7 @@ function processSheet(sheet) {
                       >
                         <div className="flex flex-wrap gap-2 justify-between items-center mb-4">
                           <h4 className="text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-widest">
-                            ORÍGENES CONFIGURADOS (
+                            CONEXIONES CONFIGURADAS (
                             {tempUrls.length + tempSubscribedUsernames.length})
                           </h4>
                           {typeof maxUrlsAllowed === "number" && maxUrlsAllowed > 0 ? (
@@ -4811,9 +4852,9 @@ function processSheet(sheet) {
                             return (
                               <div
                                 key={`sub_${idx}`}
-                                className="group relative flex gap-2 sm:gap-3 items-center bg-gradient-to-r from-teal-50/50 to-emerald-50/40 border border-teal-100 p-3 rounded-2xl transition-all shadow-sm hover:border-teal-200"
+                                className="group relative flex gap-2 sm:gap-3 items-center bg-gradient-to-r from-teal-50/50 to-emerald-50/40 border border-teal-100 p-3 rounded-lg transition-all shadow-sm hover:border-teal-200"
                               >
-                                <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-teal-100/70 text-teal-600 shadow-sm">
+                                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-teal-100/70 text-teal-600 shadow-sm">
                                   <Building2 className="h-4 w-4" />
                                 </div>
                                 <div className="flex-1 min-w-0 pr-1">
@@ -4830,6 +4871,30 @@ function processSheet(sheet) {
                                     <span className="text-[8px] text-teal-600 font-extrabold bg-teal-100/60 px-1.5 py-0.5 rounded uppercase tracking-wider">
                                       {configsOfUser.length} URL{configsOfUser.length === 1 ? '' : 'S'}
                                     </span>
+                                    {(() => {
+                                      // Cuántas hojas de esa UNGET se leen directo: es lo que falta por migrar.
+                                      const conHoja = configsOfUser.filter((c: any) => c.spreadsheetId).length;
+                                      if (configsOfUser.length === 0) return null;
+                                      if (conHoja === configsOfUser.length) {
+                                        return (
+                                          <span className="text-[8px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded uppercase tracking-wider inline-flex items-center gap-1">
+                                            <CheckCircle2 className="h-2 w-2 text-emerald-500 shrink-0" />
+                                            Lectura directa
+                                          </span>
+                                        );
+                                      }
+                                      return (
+                                        <span
+                                          className="text-[8px] font-extrabold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded uppercase tracking-wider inline-flex items-center gap-1"
+                                          title="Esta UNGET todavía lee su stock con Apps Script. Configure el enlace de su hoja para que lea directo."
+                                        >
+                                          <AlertTriangle className="h-2 w-2 text-amber-500 shrink-0" />
+                                          {conHoja === 0
+                                            ? "Solo Apps Script"
+                                            : `${conHoja} de ${configsOfUser.length} con hoja`}
+                                        </span>
+                                      );
+                                    })()}
                                   </div>
                                 </div>
                                 <button
@@ -4841,7 +4906,7 @@ function processSheet(sheet) {
                                       ),
                                     )
                                   }
-                                  className="p-1.5 sm:p-2 text-teal-600/50 bg-white border border-teal-100 hover:border-red-200 hover:text-red-500 rounded-xl transition-all hover:shadow-sm shrink-0"
+                                  className="p-1.5 sm:p-2 text-teal-600/50 bg-white border border-teal-100 hover:border-red-200 hover:text-red-500 rounded-lg transition-all hover:shadow-sm shrink-0"
                                   title="Cancelar Suscripción"
                                 >
                                   <Trash2 className="h-4 w-4" />
@@ -4856,14 +4921,14 @@ function processSheet(sheet) {
                             tempUrls.map((config, idx) => (
                               <div
                                 key={idx}
-                                className={`group relative flex gap-2 sm:gap-3 items-center border p-3 rounded-2xl transition-all duration-200 shadow-sm ${
+                                className={`group relative flex gap-2 sm:gap-3 items-center border p-3 rounded-lg transition-all duration-200 shadow-sm ${
                                   editingIndex === idx
                                     ? "border-amber-400 bg-amber-50/40 shadow-md shadow-amber-500/5"
                                     : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-md hover:shadow-slate-500/5"
                                 }`}
                               >
                                 <div
-                                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${
+                                  className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow-sm ${
                                     editingIndex === idx
                                       ? "bg-amber-100 text-amber-600 border border-amber-200/50"
                                       : "bg-slate-50 border border-slate-100 text-slate-400"
@@ -4897,6 +4962,25 @@ function processSheet(sheet) {
                                   <div className="text-[8.5px] sm:text-[9.5px] text-slate-400 truncate font-mono mt-1 flex items-center gap-1 border-b border-transparent group-hover:border-slate-100 pb-0.5 max-w-[240px] md:max-w-xs xl:max-w-none">
                                     {describeConfigUrl(config)}
                                   </div>
+                                  {config.spreadsheetId ? (
+                                    <div className="text-[8px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5">
+                                      <CheckCircle2 className="h-2 w-2 text-emerald-500 shrink-0" />
+                                      Lectura directa
+                                    </div>
+                                  ) : hasWebApp(config) ? (
+                                    <div
+                                      className="text-[8px] font-extrabold text-amber-700 bg-amber-50 border border-amber-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5"
+                                      title="Configure la hoja de cálculo para leer sin Apps Script."
+                                    >
+                                      <AlertTriangle className="h-2 w-2 text-amber-500 shrink-0" />
+                                      Solo Apps Script
+                                    </div>
+                                  ) : (
+                                    <div className="text-[8px] font-extrabold text-slate-500 bg-slate-100 border border-slate-200/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5">
+                                      <AlertCircle className="h-2 w-2 text-slate-400 shrink-0" />
+                                      Sin hoja configurada
+                                    </div>
+                                  )}
                                   {connectionErrors[config.url] && (
                                     <div
                                       className="text-[8px] font-extrabold text-red-600 bg-red-50 border border-red-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5"
@@ -4918,7 +5002,7 @@ function processSheet(sheet) {
                                   <button
                                     type="button"
                                     onClick={(e) => handleEditUrl(idx, e)}
-                                    className={`p-1.5 sm:p-2 rounded-xl border transition-all ${
+                                    className={`p-1.5 sm:p-2 rounded-lg border transition-all ${
                                       editingIndex === idx
                                         ? "border-amber-200 text-amber-600 bg-amber-50/50 shadow-sm"
                                         : "border-slate-100 bg-slate-50 text-slate-400 hover:border-blue-200 hover:bg-blue-50/50 hover:text-blue-600 hover:shadow-sm"
@@ -4930,7 +5014,7 @@ function processSheet(sheet) {
                                   <button
                                     type="button"
                                     onClick={() => handleRemoveUrl(idx)}
-                                    className="p-1.5 sm:p-2 border border-slate-100 bg-slate-50 text-slate-400 hover:border-red-200 hover:bg-red-50/50 hover:text-red-500 rounded-xl transition-all hover:shadow-sm"
+                                    className="p-1.5 sm:p-2 border border-slate-100 bg-slate-50 text-slate-400 hover:border-red-200 hover:bg-red-50/50 hover:text-red-500 rounded-lg transition-all hover:shadow-sm"
                                     title="Eliminar Origen"
                                   >
                                     <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -4939,15 +5023,15 @@ function processSheet(sheet) {
                               </div>
                             ))
                           ) : (
-                            <div className="py-8 sm:py-10 text-center bg-slate-50/80 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center">
-                              <div className="w-10 h-10 bg-white rounded-xl shadow-sm border border-slate-100 flex items-center justify-center mb-3">
+                            <div className="py-8 sm:py-10 text-center bg-slate-50/80 rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center">
+                              <div className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-100 flex items-center justify-center mb-3">
                                 <LinkIcon className="h-5 w-5 text-slate-300" />
                               </div>
                               <h4 className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-widest">
-                                La lista está vacía
+                                Todavía no hay conexiones
                               </h4>
                               <p className="text-[9px] sm:text-[10px] text-slate-400 font-medium max-w-[200px] mt-1.5 leading-relaxed">
-                                Añada nuevos orígenes manualmente arriba.
+                                Añada la primera arriba, con el enlace de su hoja.
                               </p>
                             </div>
                           )}
@@ -4957,7 +5041,7 @@ function processSheet(sheet) {
 
                     {/* ---------- JURISDICTION COLUMN ---------- */}
                     {showJurisdiction && (
-                      <div className="xl:col-span-5">
+                      <div className="lg:col-span-5">
                         {(() => {
                           const jurisdictionUsernames = Array.from(
                             new Set(
@@ -4971,7 +5055,7 @@ function processSheet(sheet) {
                           );
 
                           return (
-                            <div className="bg-white border border-gray-200 rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-5 shadow-sm flex flex-col h-full">
+                            <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm flex flex-col h-full">
                             <div className="flex items-center gap-2.5 mb-2">
                               <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center">
                                 <Building2 className="w-4 h-4" />
@@ -5013,7 +5097,7 @@ function processSheet(sheet) {
                                 return (
                                   <div
                                     key={idx}
-                                    className={`relative flex items-center justify-between p-2.5 sm:p-3 rounded-2xl border transition-all duration-200 ${
+                                    className={`relative flex items-center justify-between p-2.5 sm:p-3 rounded-lg border transition-all duration-200 ${
                                       isAdded
                                         ? "bg-slate-50 border-slate-100 opacity-60"
                                         : "bg-white border-slate-200 hover:border-teal-300 hover:shadow-md hover:shadow-teal-500/5 group"
@@ -5050,7 +5134,7 @@ function processSheet(sheet) {
                                           uName,
                                         ]);
                                       }}
-                                      className={`shrink-0 ml-2 px-3.5 py-2 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 flex items-center gap-1 ${
+                                      className={`shrink-0 ml-2 px-3.5 py-2 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 flex items-center gap-1 ${
                                         isAdded
                                           ? "bg-slate-100 text-slate-400 border border-slate-200/50"
                                           : "bg-teal-50 border border-teal-200/60 text-teal-700 hover:bg-teal-600 hover:text-white hover:border-teal-600 shadow-sm"
@@ -5081,23 +5165,24 @@ function processSheet(sheet) {
             </div>
 
             {/* Footer Modal */}
-            <div className="p-6 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3 sticky bottom-0 z-10">
+            <div className="p-4 sm:p-6 border-t border-gray-100 bg-gray-50 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 sticky bottom-0 z-10">
               <button
                 onClick={() => {
                   setIsConfigOpen(false);
                   setEditingIndex(null);
                 }}
-                className="px-6 py-2.5 text-sm font-bold text-gray-500 hover:text-gray-700 transition-colors"
+                className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-gray-500 hover:text-gray-700 transition-colors whitespace-nowrap"
               >
-                Cerrar sin Guardar
+                Cerrar sin guardar
               </button>
               <button
                 onClick={handleSaveConfig}
                 disabled={isLoading}
-                className="bg-teal-600 text-white px-8 py-2.5 rounded-2xl text-sm font-black hover:bg-teal-700 transition-all shadow-lg shadow-teal-600/20 flex items-center gap-2 disabled:opacity-50"
+                className="w-full sm:w-auto bg-teal-600 text-white px-6 sm:px-8 py-2.5 rounded-lg text-sm font-black hover:bg-teal-700 transition-all shadow-lg shadow-teal-600/20 flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap"
               >
-                <Save className="h-4 w-4" />
-                GUARDAR Y SINCRONIZAR CAMBIOS
+                <Save className="h-4 w-4 shrink-0" />
+                <span className="sm:hidden">GUARDAR Y SINCRONIZAR</span>
+                <span className="hidden sm:inline">GUARDAR Y SINCRONIZAR CAMBIOS</span>
               </button>
             </div>
           </div>
@@ -5107,11 +5192,11 @@ function processSheet(sheet) {
       {/* MODAL RÁPIDO DE CORRECCIÓN / PRUEBA DE ENLACE DE UNGET */}
       {quickFixConfig && (
         <div className="fixed inset-0 z-[9999999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-xl overflow-hidden rounded-[2rem] shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-slate-200">
+          <div className="bg-white w-full max-w-xl overflow-hidden rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-slate-200">
             {/* Header */}
             <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-teal-50/60 to-slate-50">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-teal-600 text-white flex items-center justify-center shadow-md shadow-teal-600/20">
+                <div className="w-10 h-10 rounded-lg bg-teal-600 text-white flex items-center justify-center shadow-md shadow-teal-600/20">
                   <LinkIcon className="h-5 w-5" />
                 </div>
                 <div>
@@ -5127,7 +5212,7 @@ function processSheet(sheet) {
               <button
                 type="button"
                 onClick={() => setQuickFixConfig(null)}
-                className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
+                className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-white rounded-lg transition-all border border-transparent hover:border-slate-200"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -5148,7 +5233,7 @@ function processSheet(sheet) {
                       setGasTestResult(null);
                     }}
                     placeholder="https://script.google.com/macros/s/.../exec"
-                    className="w-full bg-slate-50 border border-slate-300 focus:border-teal-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-800 placeholder-slate-400 outline-none transition-all shadow-inner"
+                    className="w-full bg-slate-50 border border-slate-300 focus:border-teal-500 focus:bg-white rounded-lg px-3.5 py-2.5 text-xs font-mono text-slate-800 placeholder-slate-400 outline-none transition-all shadow-inner"
                   />
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1.5 font-medium leading-relaxed">
@@ -5162,7 +5247,7 @@ function processSheet(sheet) {
                   type="button"
                   onClick={handleTestQuickFixUrl}
                   disabled={isTestingGasUrl || !quickFixUrlInput.trim()}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-extrabold rounded-xl transition-all flex items-center gap-2 border border-slate-200/80 disabled:opacity-50 cursor-pointer"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-extrabold rounded-lg transition-all flex items-center gap-2 border border-slate-200/80 disabled:opacity-50 cursor-pointer"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${isTestingGasUrl ? "animate-spin text-teal-600" : ""}`} />
                   {isTestingGasUrl ? "Probando conexión con Google..." : "Probar Conexión Ahora"}
@@ -5180,7 +5265,7 @@ function processSheet(sheet) {
               {/* Resultado de la prueba */}
               {gasTestResult && (
                 <div
-                  className={`p-3.5 rounded-xl border text-xs leading-relaxed animate-in fade-in duration-200 ${
+                  className={`p-3.5 rounded-lg border text-xs leading-relaxed animate-in fade-in duration-200 ${
                     gasTestResult.success
                       ? "bg-emerald-50 border-emerald-200 text-emerald-900"
                       : "bg-red-50 border-red-200 text-red-900"
@@ -5208,7 +5293,7 @@ function processSheet(sheet) {
               <button
                 type="button"
                 onClick={() => setQuickFixConfig(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 rounded-xl transition-all"
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 rounded-lg transition-all"
               >
                 Cancelar
               </button>
@@ -5216,7 +5301,7 @@ function processSheet(sheet) {
                 type="button"
                 onClick={handleSaveQuickFixUrl}
                 disabled={isSavingGasUrl || !quickFixUrlInput.trim()}
-                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-xs font-extrabold rounded-xl shadow-md shadow-teal-600/20 transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-xs font-extrabold rounded-lg shadow-md shadow-teal-600/20 transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
               >
                 <Save className="h-4 w-4" />
                 {isSavingGasUrl ? "Guardando..." : "Guardar y Conectar"}
@@ -5229,14 +5314,14 @@ function processSheet(sheet) {
       {/* INSTRUCTIONS MODAL */}
       {isInstructionModalOpen && (
         <div className="fixed inset-0 z-[10000000] flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-2xl overflow-hidden rounded-[2.5rem] shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-white/20">
+          <div className="bg-white w-full max-w-2xl overflow-hidden rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-white/20">
             {/* Header Modal with Gradient */}
             <div className="p-6 sm:p-8 bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-800 text-white relative flex items-center justify-between overflow-hidden">
               <div className="absolute right-0 top-0 opacity-10 pointer-events-none transform translate-x-10 -translate-y-10">
                 <HelpCircle className="w-48 h-48" />
               </div>
               <div className="flex items-center gap-4 relative z-10">
-                <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-blue-50 backdrop-blur-sm border border-white/20">
+                <div className="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center text-blue-50 backdrop-blur-sm border border-white/20">
                   <HelpCircle className="h-6 w-6" />
                 </div>
                 <div>
@@ -5337,13 +5422,13 @@ function processSheet(sheet) {
                   <div className="absolute -top-3 left-6 bg-slate-800 text-[10px] text-white px-3.5 py-1 rounded-full font-black tracking-widest shadow-sm z-10 uppercase">
                     CÓDIGO RECOMENDADO
                   </div>
-                  <div className="relative pt-3 border border-slate-200 rounded-[1.5rem] bg-slate-900 shadow-xl overflow-hidden">
+                  <div className="relative pt-3 border border-slate-200 rounded-xl bg-slate-900 shadow-xl overflow-hidden">
                     <pre className="text-[11px] text-slate-300 p-6 sm:p-8 h-56 overflow-y-auto font-mono scrollbar-thin scrollbar-thumb-slate-700">
                       {scriptCode}
                     </pre>
                     <button
                       onClick={copyScript}
-                      className="absolute top-6 right-6 bg-white/10 hover:bg-white/20 p-2.5 rounded-xl text-white backdrop-blur-sm transition-all border border-white/10 flex items-center gap-2 hover:scale-105 active:scale-95"
+                      className="absolute top-6 right-6 bg-white/10 hover:bg-white/20 p-2.5 rounded-lg text-white backdrop-blur-sm transition-all border border-white/10 flex items-center gap-2 hover:scale-105 active:scale-95"
                     >
                       {copied ? (
                         <>
@@ -5370,7 +5455,7 @@ function processSheet(sheet) {
             <div className="p-5 sm:p-6 border-t border-slate-100 bg-white flex items-center justify-end">
               <button
                 onClick={() => setIsInstructionModalOpen(false)}
-                className="bg-blue-600 text-white hover:bg-blue-700 px-8 py-3 rounded-2xl text-xs sm:text-sm font-black transition-all shadow-md hover:shadow-lg hover:shadow-blue-600/20 active:scale-95 uppercase tracking-wide"
+                className="bg-blue-600 text-white hover:bg-blue-700 px-8 py-3 rounded-lg text-xs sm:text-sm font-black transition-all shadow-md hover:shadow-lg hover:shadow-blue-600/20 active:scale-95 uppercase tracking-wide"
               >
                 Entendido, Cerrar
               </button>
