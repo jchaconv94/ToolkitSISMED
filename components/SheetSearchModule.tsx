@@ -73,6 +73,10 @@ import {
 } from "../services/sheetsDirectService";
 import { findLatestValidSync, getLastMovementDate } from "../services/stockSyncHistory";
 import {
+  normalizeUngetName,
+  pickOneConnectionPerUnget,
+} from "../services/ungetConnections";
+import {
   fetchSheetsMetadataViaApi,
   hasSheetsApiKey,
   listSheetTabs,
@@ -88,20 +92,7 @@ import { EstablishmentCard } from "./EstablishmentCard";
 /** Lista vacía compartida: evita crear un array nuevo por tarjeta sin datos. */
 const EMPTY_SOURCE_ROWS: SIGData[] = [];
 
-const normalizeName = (name: string): string => {
-  if (!name) return "";
-  let n = name
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/\b(UNGET|UNGETS|OGESS|DIRESA|IPRESS)\b/g, "");
-    
-  // Handlers for common typos and abbreviations in UNGET names
-  n = n.replace(/\bMARICAL\b/g, "MARISCAL");
-  n = n.replace(/\bMARISCAL\s+C\.?/g, "MARISCAL CACERES");
-
-  return n.replace(/[^A-Z0-9]/g, "").trim();
-};
+const normalizeName = normalizeUngetName;
 
 const formatDisplayName = (name: string): string => {
   if (!name) return "";
@@ -1580,6 +1571,9 @@ export const SheetSearchModule: React.FC = () => {
           user.facilityData?.ungetId ||
           (user as any).ungetId;
 
+        // Sale de Establecimientos: qué UNGET tiene asignada cada usuario.
+        let ungetIdByUsername: Record<string, string | undefined> = {};
+
         try {
           const [allConfigsRaw, allUsers, subscriptions] = await Promise.all([
             api.getAllUngetConfigs(),
@@ -1588,6 +1582,12 @@ export const SheetSearchModule: React.FC = () => {
           ]);
           setAllUsersList(allUsers);
           setSubscribedUsernames(subscriptions);
+          ungetIdByUsername = Object.fromEntries(
+            allUsers.map((u: any) => [
+              u.username,
+              u.personnelData?.ungetId || u.facilityData?.ungetId || u.ungetId || undefined,
+            ]),
+          );
 
           // Alinear con los nombres oficiales de la base de datos
           const allConfigs = alignConfigsWithOfficialUngets(allConfigsRaw, ungs);
@@ -1634,10 +1634,9 @@ export const SheetSearchModule: React.FC = () => {
               if (subscriptions.includes(config.username)) return true;
               return false;
             });
-            // Si el admin no tiene configuraciones propias ni suscripciones, cargar todas
-            if (remoteConfigs.length === 0 && subscriptions.length === 0) {
-              remoteConfigs = allConfigs;
-            }
+            // Un usuario global ve todas las UNGET registradas, sin depender de a quién esté
+            // suscrito: la visibilidad sale de la jerarquía de Establecimientos.
+            remoteConfigs = allConfigs;
           } else if (level === "DIRESA") {
             remoteConfigs = allConfigs.filter((config) => {
               if (config.username === user.username) return true;
@@ -1752,26 +1751,12 @@ export const SheetSearchModule: React.FC = () => {
                 (config: any) => config.sheets && config.sheets.length > 0,
               );
           }
-          // Deduplicar configs para evitar UNGETS repetidas si vienen de distintos usuarios
-          const deduplicated: typeof visibleConfigs = [];
-          for (const c of visibleConfigs) {
-             const cNorm = normalizeName(c.name);
-             const cId = c.ungetId;
-             const existingIdx = deduplicated.findIndex(e => 
-               (e.ungetId && cId && e.ungetId === cId) || 
-               normalizeName(e.name) === cNorm
-             );
-
-             if (existingIdx >= 0) {
-                // Ya existe. Solo la reemplazamos si la nueva es del usuario actual (tiene prioridad)
-                if (c.username === user.username) {
-                   deduplicated[existingIdx] = c;
-                }
-             } else {
-                deduplicated.push(c);
-             }
-          }
-          visibleConfigs = deduplicated;
+          // Una UNGET, una conexión: mientras la base permita filas repetidas, se queda la
+          // que tiene hoja de cálculo y, en su defecto, la del informático de esa UNGET.
+          visibleConfigs = pickOneConnectionPerUnget(visibleConfigs, {
+            currentUsername: user.username,
+            ungetIdByUsername,
+          });
           
           setScriptUrls(visibleConfigs);
         } else {
