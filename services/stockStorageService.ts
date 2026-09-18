@@ -15,7 +15,11 @@ const stockStore = localforage.createInstance({
  * v4 reconstruye solo el directorio ligero desde metadata y evita reutilizar sources v3
  * que no conocían el nombre real de hoja, rowCount ni la llave estable del historial.
  */
-const STOCK_DATA_CACHE_VERSION = 4;
+// v5: los establecimientos guardados antes del 18/09/2026 apuntan a la posición que
+// tenía su UNGET cuando había conexiones duplicadas. Al consolidarlas, esas posiciones
+// pasaron a señalar a otra UNGET (las hojas de Bellavista salían dentro de Huallaga), así
+// que esa caché se descarta una vez y se reconstruye.
+const STOCK_DATA_CACHE_VERSION = 5;
 const STOCK_DATA_CACHE_KEY_PREFIX = `stock_v${STOCK_DATA_CACHE_VERSION}_`;
 const LEGACY_STOCK_DATA_KEY_PREFIXES = ["stock_", "stock_v2_", "stock_v3_"];
 
