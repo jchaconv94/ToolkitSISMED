@@ -1091,18 +1091,22 @@ export const api = {
                         payload.spreadsheet_id = c.spreadsheetId;
                     }
 
-                    const { error } = await supabase.from('unget_configs').insert(payload);
-                    if (error) {
-                        // Si ocurre un error de columna inexistente, reintentamos sin el unget_id
-                        if (error.message && (error.message.includes("column") || error.message.includes("unget_id") || error.message.includes("spreadsheet_id"))) {
-                            // Base sin las columnas nuevas: se conserva la conexión básica.
-                            delete payload.unget_id;
-                            delete payload.spreadsheet_id;
-                            await supabase.from('unget_configs').insert(payload);
-                        } else {
-                            throw error;
-                        }
+                    // La tabla en producción no tiene `unget_id` y puede no tener `spreadsheet_id`
+                    // (migración pendiente). Se reintenta quitando solo la columna que falta: antes
+                    // se quitaban las dos y el enlace de la hoja se perdía al guardar.
+                    const isMissingColumn = (err: any) =>
+                        !!err?.message && (err.message.includes("column") || err.message.includes("unget_id") || err.message.includes("spreadsheet_id"));
+                    const optionalColumns = ["unget_id", "spreadsheet_id"];
+                    let attempt: any = { ...payload };
+                    let { error } = await supabase.from('unget_configs').insert(attempt);
+                    while (error && isMissingColumn(error)) {
+                        const missing = optionalColumns.find((col) => col in attempt && error!.message.includes(col))
+                            || optionalColumns.find((col) => col in attempt);
+                        if (!missing) break;
+                        delete attempt[missing];
+                        ({ error } = await supabase.from('unget_configs').insert(attempt));
                     }
+                    if (error) throw error;
                 }
             }
             localStorage.setItem(`aura_sig_ungets_${username}`, JSON.stringify(configs));
