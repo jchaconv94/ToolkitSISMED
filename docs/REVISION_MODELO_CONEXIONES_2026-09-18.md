@@ -1,6 +1,6 @@
 # Revisión del modelo: organización, conexiones de stock y administración
 
-Fecha: 18/09/2026. Motivo: la tabla `unget_configs` tiene **15 filas para 9 UNGET** y solo una de ellas guarda el enlace de la hoja de cálculo. Lo que parecía un descuido al crear conexiones resultó ser una costura del modelo de datos.
+Fecha: 18/09/2026. Motivo: la tabla `unget_configs` tiene **15 filas para 7 UNGET** y solo una de ellas guarda el enlace de la hoja de cálculo. Lo que parecía un descuido al crear conexiones resultó ser una costura del modelo de datos.
 
 Todo lo que se afirma aquí está verificado en el código o en los datos, salvo lo marcado como *por confirmar*.
 
@@ -38,7 +38,7 @@ Tres tablas, ninguna referida a las anteriores por identificador:
 
 ### 2.1 Se pueden crear conexiones duplicadas de la misma UNGET
 
-Es lo que pasó: cada UNGET tiene una fila del usuario de la UNGET y otra de `admin`; San Martín tiene tres. Tres causas encadenadas:
+Es lo que pasó: cada UNGET tiene una fila del usuario de la UNGET y otra de `admin`; San Martín tiene tres, porque dos usuarios distintos configuraron la misma. Tres causas encadenadas:
 
 1. `unget_configs` no tiene ninguna restricción de unicidad.
 2. El filtro que debería evitarlo (`availableUngetsForConfig`, `SheetSearchModule.tsx:1395`) descarta las UNGET ya configuradas comparando contra `unget_id`, una columna que en producción **no existe** (`api.ts:1095` la trata como opcional y la descarta al insertar). Al recargar siempre vuelve nula, así que el filtro solo funciona dentro de la misma sesión.
@@ -85,7 +85,7 @@ El principio que pidió el usuario: **todo parte del módulo de Establecimientos
 Cada fase es un PR pequeño, con su SQL aparte y reversible. Ninguna rompe lo que ya funciona.
 
 **Fase 1 — Una conexión por UNGET.**
-`alter table unget_configs add column if not exists unget_id`, relleno por nombre normalizado contra `ungets`, consolidación de las 15 filas a 9 (conservando la que tenga hoja) e índice único. En la aplicación: escribir y leer `unget_id`, y que el selector descarte las UNGET ya configuradas **por cualquiera**, ofreciendo editar la existente. Copia de seguridad de la tabla antes de borrar nada.
+`alter table unget_configs add column if not exists unget_id`, relleno por nombre normalizado contra `ungets`, consolidación de las 15 filas a 7 (conservando la que tenga hoja) e índice único. En la aplicación: escribir y leer `unget_id`, y que el selector descarte las UNGET ya configuradas **por cualquiera**, ofreciendo editar la existente. Copia de seguridad de la tabla antes de borrar nada.
 
 **Fase 2 — La conexión es de la UNGET.**
 Permitir editar la conexión a cualquier usuario de esa UNGET y a los niveles superiores. Es cambio de aplicación: las políticas RLS ya lo permiten (`app_sesion_valida` es `FOR ALL`).
@@ -138,8 +138,18 @@ La tercera es la que más interesa: si devuelve filas, ya hay asignaciones huér
 
 ---
 
-## 6. Decisiones pendientes
+## 6. Decisiones tomadas (18/09/2026)
 
-1. **Quién conserva la conexión al consolidar**: la fila del usuario de la UNGET (recomendado: cada informático mantiene lo suyo) o la de `admin`.
-2. **Qué pasa con las suscripciones** una vez que la jerarquía cubre la visibilidad: se retiran o se conservan para casos sueltos.
-3. **Si una UNGET puede tener más de un libro de cálculo.** Hoy el modelo asume uno; El Dorado aparece con dos pestañas y San Martín con una, así que conviene confirmarlo antes de poner el índice único.
+1. **La conexión es de la UNGET y la mantiene su informático.** Al consolidar sobrevive la fila del usuario de la UNGET; `admin` deja de tener copias propias.
+2. **Una UNGET, un libro.** No puede haber dos libros de cálculo para la misma UNGET, así que el índice único es correcto.
+3. **La visibilidad sale de la jerarquía y las suscripciones se retiran**: `admin` ve todas, DIRESA las de su región, OGESS las de su OGESS y cada UNGET la suya.
+
+## 7. Orden de ejecución
+
+Se hace primero lo que no toca la base, para poder verificar cada paso:
+
+1. **Vista correcta sin tocar datos**: una conexión por UNGET en pantalla —aunque en la base haya varias filas— eligiendo la que tenga hoja, y `admin` viendo todas por jerarquía en vez de por suscripción. Con esto las tarjetas duplicadas desaparecen hoy mismo.
+2. **La base impide el duplicado**: columna `unget_id`, relleno por nombre, consolidación de 15 filas a 7 e índice único, con copia de seguridad previa.
+3. **Se retiran las suscripciones**, ya cubiertas por la jerarquía.
+4. **Asignaciones IPRESS ↔ pestaña por identificador**, no por URL.
+5. **Establecimientos muestra el estado de conexión de cada UNGET.**
