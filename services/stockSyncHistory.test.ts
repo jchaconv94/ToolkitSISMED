@@ -16,6 +16,7 @@ import {
   pickLatestSyncs,
   resolveSyncDateIso,
   type StockSyncDatedRow,
+  stripStockSnapshot,
 } from "./stockSyncHistory";
 
 type Row = StockSyncDatedRow & { id: string };
@@ -345,5 +346,46 @@ describe("getLastMovementDate", () => {
       getLastMovementDate({ sync_date: "2026-09-17T14:00:00Z", has_changes: false, last_modification_date: "2026-09-16T09:00:00Z" }),
     ).toBe("2026-09-16T09:00:00Z");
     expect(getLastMovementDate(null)).toBeUndefined();
+  });
+});
+
+describe("stripStockSnapshot", () => {
+  const metadata = JSON.stringify({
+    snapshot_version: 2,
+    total_stock: 120,
+    total_value: 96.19,
+    changes: [{ id: "00143|L1", codigo: "00143", lote: "L1", name: "ACICLOVIR", previousQty: 100, currentQty: 120, change: 20 }],
+    items_snapshot: { "00143|L1": { q: 120, n: "ACICLOVIR", v: "29/02/2028" } },
+  });
+
+  it("quita la foto y conserva totales y movimientos", () => {
+    const podado = stripStockSnapshot(metadata);
+    const parsed = JSON.parse(podado as string);
+    expect(parsed.items_snapshot).toBeUndefined();
+    expect(parsed.snapshot_pruned).toBe(true);
+    expect(parsed.total_stock).toBe(120);
+    expect(parsed.total_value).toBe(96.19);
+    expect(parsed.changes).toHaveLength(1);
+    // Lo que muestra la ventana de historial sigue intacto.
+    expect(parsed.changes[0].change).toBe(20);
+    expect(podado!.length).toBeLessThan(metadata.length);
+  });
+
+  it("un registro ya podado no vuelve a tocarse", () => {
+    const podado = stripStockSnapshot(metadata) as string;
+    expect(stripStockSnapshot(podado)).toBeNull();
+  });
+
+  it("devuelve null cuando no hay nada que recortar", () => {
+    expect(stripStockSnapshot(null)).toBeNull();
+    expect(stripStockSnapshot("")).toBeNull();
+    expect(stripStockSnapshot("no es json")).toBeNull();
+    expect(stripStockSnapshot(JSON.stringify([1, 2, 3]))).toBeNull();
+    expect(stripStockSnapshot(JSON.stringify({ total_stock: 10 }))).toBeNull();
+  });
+
+  it("el registro podado ya no sirve para comparar, y eso es lo esperado", () => {
+    expect(readStockSnapshot(metadata)).not.toBeNull();
+    expect(readStockSnapshot(stripStockSnapshot(metadata))).toBeNull();
   });
 });

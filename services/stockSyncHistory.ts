@@ -342,3 +342,28 @@ export const findGroupsWithoutSync = (
     (group) => group.length > 0 && !group.some((key) => latest[key]),
   );
 };
+
+/**
+ * Detalle de un registro ya superado, sin la foto de stock.
+ *
+ * `items_snapshot` ocupa entre 44 y 90 KB por registro y solo sirve para compararlo con la
+ * lectura siguiente: en cuanto hay un registro más nuevo del mismo establecimiento, deja de
+ * leerse. Los totales y la lista de movimientos, que es lo que muestra el historial, se
+ * conservan. Devuelve null si no hay nada que recortar.
+ */
+export const stripStockSnapshot = (changesMetadata?: string | null): string | null => {
+  if (!changesMetadata) return null;
+  let parsed: any;
+  try {
+    parsed = typeof changesMetadata === "string" ? JSON.parse(changesMetadata) : changesMetadata;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (parsed.items_snapshot === undefined) return null;
+
+  delete parsed.items_snapshot;
+  // Marca para saber que la foto se quitó a propósito y no que el registro viniera incompleto.
+  parsed.snapshot_pruned = true;
+  return JSON.stringify(parsed);
+};

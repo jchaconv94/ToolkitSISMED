@@ -6,6 +6,7 @@ import {
   diffStockSnapshots,
   parseSheetNumber,
   readStockSnapshot,
+  stripStockSnapshot,
   type StockMovement,
   findGroupsWithoutSync,
   getSyncDateCutoffIso,
@@ -212,6 +213,41 @@ const LATEST_SYNCS_BULK_LIMIT = 1000;
 const LATEST_SYNCS_ID_CHUNK = 100;
 const LATEST_SYNCS_MAX_FALLBACK_QUERIES = 60;
 const LATEST_SYNCS_FALLBACK_CONCURRENCY = 6;
+
+/**
+ * Quita la foto de stock del registro anterior cuando ya hay uno más nuevo.
+ *
+ * `items_snapshot` pesa entre 44 y 90 KB por registro y solo se usa para compararlo con la
+ * lectura siguiente; la ventana de historial muestra totales y movimientos, que se conservan.
+ * Sin esto la tabla crece varios MB al día y se come el espacio de la base.
+ *
+ * No se espera su resultado: es limpieza, no puede retrasar lo que ve el usuario, y si
+ * falla el registro nuevo ya quedó guardado igual.
+ */
+const prunePreviousSnapshot = (
+  client: NonNullable<typeof supabase>,
+  previousRecord: StockSyncRecord | undefined,
+  newSyncDate: string,
+): void => {
+  if (!previousRecord?.id) return;
+  // Si el registro nuevo quedó con fecha anterior, el viejo sigue siendo el de referencia.
+  if (Date.parse(previousRecord.sync_date) >= Date.parse(newSyncDate)) return;
+  const trimmed = stripStockSnapshot(previousRecord.changes_metadata);
+  if (!trimmed) return;
+
+  void client
+    .from("stock_sync_history")
+    .update({ changes_metadata: trimmed })
+    .eq("id", previousRecord.id)
+    .then(({ error }: { error: any }) => {
+      if (error) {
+        console.warn(
+          "Historial: no se pudo aligerar el registro anterior de " + previousRecord.establishment_id + ":",
+          error.message,
+        );
+      }
+    });
+};
 
 /**
  * Service to manage Supabase synchronization state
@@ -443,6 +479,7 @@ export const supabaseService = {
               .insert([{ ...payload, changes_metadata: changesMetadata }])
               .select();
             if (error) throw error;
+            prunePreviousSnapshot(client, latestRecord, finalSyncDate);
             return data && data[0] ? data[0] : { ...payload, changes_metadata: changesMetadata };
           } catch (insertError: any) {
             lastError = insertError;
