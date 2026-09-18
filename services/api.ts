@@ -1036,7 +1036,8 @@ export const api = {
                         ungetId: d.unget_id || null,
                         username: d.username,
                         name: formatName(d.unget_name),
-                        url: d.url
+                        url: d.url,
+                        spreadsheetId: d.spreadsheet_id || undefined
                     }));
                 }
             }
@@ -1068,6 +1069,28 @@ export const api = {
         return all;
     },
 
+    /**
+     * Inserta una conexión UNGET. La tabla en producción no tiene `unget_id` y puede no
+     * tener `spreadsheet_id` (migración pendiente): se reintenta quitando solo la columna
+     * que falta, una a la vez, para no perder el enlace de la hoja.
+     */
+    insertUngetConfigRow: async (payload: Record<string, any>): Promise<void> => {
+        if (!supabase) return;
+        const isMissingColumn = (err: any) =>
+            !!err?.message && (err.message.includes("column") || err.message.includes("unget_id") || err.message.includes("spreadsheet_id"));
+        const optionalColumns = ["unget_id", "spreadsheet_id"];
+        const attempt: Record<string, any> = { ...payload };
+        let { error } = await supabase.from('unget_configs').insert(attempt);
+        while (error && isMissingColumn(error)) {
+            const missing = optionalColumns.find((col) => col in attempt && error!.message.includes(col))
+                || optionalColumns.find((col) => col in attempt);
+            if (!missing) break;
+            delete attempt[missing];
+            ({ error } = await supabase.from('unget_configs').insert(attempt));
+        }
+        if (error) throw error;
+    },
+
     saveUngetConfigs: async (username: string, configs: any[]): Promise<{ success: boolean; message?: string }> => {
         const formatName = (name: string): string => {
             if (!name) return "";
@@ -1091,22 +1114,7 @@ export const api = {
                         payload.spreadsheet_id = c.spreadsheetId;
                     }
 
-                    // La tabla en producción no tiene `unget_id` y puede no tener `spreadsheet_id`
-                    // (migración pendiente). Se reintenta quitando solo la columna que falta: antes
-                    // se quitaban las dos y el enlace de la hoja se perdía al guardar.
-                    const isMissingColumn = (err: any) =>
-                        !!err?.message && (err.message.includes("column") || err.message.includes("unget_id") || err.message.includes("spreadsheet_id"));
-                    const optionalColumns = ["unget_id", "spreadsheet_id"];
-                    let attempt: any = { ...payload };
-                    let { error } = await supabase.from('unget_configs').insert(attempt);
-                    while (error && isMissingColumn(error)) {
-                        const missing = optionalColumns.find((col) => col in attempt && error!.message.includes(col))
-                            || optionalColumns.find((col) => col in attempt);
-                        if (!missing) break;
-                        delete attempt[missing];
-                        ({ error } = await supabase.from('unget_configs').insert(attempt));
-                    }
-                    if (error) throw error;
+                    await api.insertUngetConfigRow(payload);
                 }
             }
             localStorage.setItem(`aura_sig_ungets_${username}`, JSON.stringify(configs));
@@ -1191,11 +1199,10 @@ export const api = {
                     await supabase.from('unget_configs').delete().eq('username', u);
                 }
                 for (const c of configsToSave) {
-                    await supabase.from('unget_configs').insert({
-                        username: c.username,
-                        unget_name: c.name,
-                        url: c.url
-                    });
+                    const payload: Record<string, any> = { username: c.username, unget_name: c.name, url: c.url };
+                    if (c.ungetId) payload.unget_id = c.ungetId;
+                    if (c.spreadsheetId) payload.spreadsheet_id = c.spreadsheetId;
+                    await api.insertUngetConfigRow(payload);
                 }
             }
             // En localstorage
