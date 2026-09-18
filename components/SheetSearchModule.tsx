@@ -75,6 +75,7 @@ import { findLatestValidSync, getLastMovementDate } from "../services/stockSyncH
 import {
   normalizeUngetName,
   pickOneConnectionPerUnget,
+  ungetConnectionKeys,
 } from "../services/ungetConnections";
 import {
   fetchSheetsMetadataViaApi,
@@ -1386,25 +1387,31 @@ export const SheetSearchModule: React.FC = () => {
   const availableUngetsForConfig = useMemo(() => {
     if (!allUngets || allUngets.length === 0) return [];
     
-    // Filtramos las UNGETs únicamente por ID de base de datos para permitir homónimos en distintas jurisdicciones
-    const configuredIds = new Set(
-      tempUrls
-        .filter((_, idx) => idx !== editingIndex)
-        .map(u => String(u.ungetId || u.id || ""))
-        .filter(Boolean)
-    );
+    // Una UNGET, una conexión: se descartan las que ya configuró cualquiera, no solo yo.
+    // Antes solo miraba las propias, y por eso admin y el informático de la misma UNGET
+    // acababan creando dos conexiones que nadie relacionaba.
+    const configuradas = new Set<string>();
+    tempUrls
+      .filter((_, idx) => idx !== editingIndex)
+      .forEach((u) => ungetConnectionKeys(u).forEach((k) => configuradas.add(k)));
+    allJurisdictionConfigs
+      .filter((c) => c.username && c.username !== user?.username)
+      .forEach((c) => ungetConnectionKeys(c).forEach((k) => configuradas.add(k)));
+
+    const yaConfigurada = (u: any) =>
+      ungetConnectionKeys({ name: u.name, ungetId: u.id }).some((k) => configuradas.has(k));
     
     if (isDiresaRole && userDiresaId) {
-      return allUngets.filter(u => String(u.diresaId) === String(userDiresaId) && !configuredIds.has(String(u.id)));
+      return allUngets.filter(u => String(u.diresaId) === String(userDiresaId) && !yaConfigurada(u));
     }
     if (isOgessRole && userOgessId) {
-      return allUngets.filter(u => String(u.ogessId) === String(userOgessId) && !configuredIds.has(String(u.id)));
+      return allUngets.filter(u => String(u.ogessId) === String(userOgessId) && !yaConfigurada(u));
     }
     if (isGlobalRole) {
-      return allUngets.filter(u => !configuredIds.has(String(u.id)));
+      return allUngets.filter((u) => !yaConfigurada(u));
     }
     return [];
-  }, [allUngets, isDiresaRole, userDiresaId, isOgessRole, userOgessId, isGlobalRole, tempUrls, editingIndex]);
+  }, [allUngets, isDiresaRole, userDiresaId, isOgessRole, userOgessId, isGlobalRole, tempUrls, editingIndex, allJurisdictionConfigs, user?.username]);
 
   useEffect(() => {
     if (isConfigOpen && editingIndex === null) {

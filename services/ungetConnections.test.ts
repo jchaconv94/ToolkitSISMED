@@ -4,6 +4,7 @@ import {
   normalizeUngetName,
   pickOneConnectionPerUnget,
   ungetConnectionKey,
+  ungetConnectionKeys,
 } from "./ungetConnections";
 
 const esVirtual = (url?: string) => String(url || "").startsWith("sheets://");
@@ -85,5 +86,29 @@ describe("describeConnectionMode", () => {
     expect(describeConnectionMode({ name: "B", url: "https://script.google.com/x" }, esVirtual)).toBe("apps-script");
     expect(describeConnectionMode({ name: "C", url: "sheets://LIBRO" }, esVirtual)).toBe("sin-hoja");
     expect(describeConnectionMode({ name: "D" }, esVirtual)).toBe("sin-hoja");
+  });
+});
+
+describe("ungetConnectionKeys", () => {
+  it("reconoce la UNGET por identificador y por nombre", () => {
+    expect(ungetConnectionKeys({ name: "Bellavista", ungetId: "u-1" })).toEqual([
+      "id:u-1",
+      "nombre:BELLAVISTA",
+    ]);
+  });
+
+  it("una fila sin identificador todavía se reconoce por el nombre", () => {
+    expect(ungetConnectionKeys({ name: "BELLAVISTA" })).toEqual(["nombre:BELLAVISTA"]);
+  });
+
+  it("permite descartar una UNGET ya configurada por otro usuario", () => {
+    const configurada = new Set(ungetConnectionKeys({ name: "MARICAL C.", username: "MARISCAL" }));
+    const candidata = { name: "Mariscal Cáceres", ungetId: "u-9" };
+    expect(ungetConnectionKeys(candidata).some((k) => configurada.has(k))).toBe(true);
+  });
+
+  it("no descarta una UNGET distinta", () => {
+    const configurada = new Set(ungetConnectionKeys({ name: "Tocache" }));
+    expect(ungetConnectionKeys({ name: "Picota", ungetId: "u-4" }).some((k) => configurada.has(k))).toBe(false);
   });
 });
