@@ -549,6 +549,8 @@ export interface StockAssignment {
   facilityCode: string;
   sheetName: string;
   sheetUrl: string;
+  // La asignación pertenece a la UNGET: su URL puede cambiar sin romperla.
+  ungetId?: string;
   visibleColumns: string[];
   createdAt?: string;
 }
