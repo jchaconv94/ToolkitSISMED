@@ -11,7 +11,8 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "sync:historial": "tsx scripts/backgroundStockSync.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",
@@ -45,6 +46,7 @@
     "gh-pages": "^6.1.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
+    "tsx": "^4.23.13",
     "typescript": "^5.6.3",
     "vite": "^6.0.1",
     "vitest": "^4.1.1"

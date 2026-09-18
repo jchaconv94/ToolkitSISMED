@@ -1,17 +1,21 @@
 import { createClient } from "@supabase/supabase-js";
 import {
-  STOCK_SNAPSHOT_VERSION,
   STOCK_SYNC_LIGHT_COLUMNS,
   buildStockSnapshot,
-  diffStockSnapshots,
-  parseSheetNumber,
-  readStockSnapshot,
+  buildStockSyncMetadataAttempts,
+  computeStockHash,
+  computeStockTotals,
+  decideStockSyncAction,
   type StockMovement,
   findGroupsWithoutSync,
   getSyncDateCutoffIso,
   pickLatestSyncs,
   resolveSyncDateIso,
 } from "./stockSyncHistory";
+
+// El hash y la regla de decisión viven junto al resto del historial; se reexporta
+// `computeStockHash` porque forma parte de la API pública de este servicio.
+export { computeStockHash };
 
 // Supabase Connection Configuration
 // If environment variables are not yet provided, we will fail gracefully and allow offline or mock checks
@@ -48,50 +52,6 @@ export const supabase =
   supabaseUrl && supabaseAnonKey
     ? createClient(supabaseUrl, supabaseAnonKey, { global: { fetch: fetchWithSessionToken } })
     : null;
-
-/**
- * Programmatically computes a quick, non-cryptographic checksum/hash representing
- * the exact items and quantities in a stock list.
- * Any change in stock, products, batches, or expiration dates will yield a different hash value.
- */
-export const computeStockHash = (products: any[]): string => {
-  // Agrupar por las mismas claves que usamos en el diff (codigo, lote, tipsum, ffinan)
-  // para que si hay filas duplicadas se sumen, y no dependa del orden
-  const grouped: Record<string, number> = {};
-  
-  for (const item of products) {
-    if (!item) continue;
-    const id = String(item.ID_Producto || item.medcod || item.Codigo_Sismed || item.CODIGO_SIG || item.Nombre || "UNKNOWN").trim();
-    const lot = String(item.Lote || "N/A").trim();
-    const tipsum = String(item.TIPSUM || "N/A").trim();
-    const ffinan = String(item.FFINAN || "N/A").trim();
-    
-    const qty =
-      Number(
-        item.Saldo !== undefined
-          ? item.Saldo
-          : item.Saldo_Fisico || item.Stock || 0,
-      ) || 0;
-      
-    const key = `${id}|${lot}|${tipsum}|${ffinan}`;
-    grouped[key] = (grouped[key] || 0) + qty;
-  }
-
-  // Ordenar las claves para asegurar un hash determinista
-  const sortedKeys = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
-  
-  let stateStr = "";
-  for (const key of sortedKeys) {
-    stateStr += `${key}:${grouped[key]}|`;
-  }
-
-  // DJB2 simple hashing algorithm
-  let hash = 5381;
-  for (let i = 0; i < stateStr.length; i++) {
-    hash = (hash * 33) ^ stateStr.charCodeAt(i);
-  }
-  return `v1:${(hash >>> 0).toString(36)}`;
-};
 
 /**
  * Compares two stock lists to find exactly which items changed and by how much
@@ -387,32 +347,7 @@ export const supabaseService = {
       // Foto compacta del stock actual: medicamento + lote, sumando tipo de suministro y
       // fuente de financiamiento.
       const snapshot = buildStockSnapshot(currentStock);
-      const totalStock = Object.values(snapshot).reduce((sum, entry) => sum + entry.q, 0);
-      // Los precios llegan como los muestra la hoja ("6,4125"), así que `Number()` daba NaN
-      // y la valorización se guardaba en 0.
-      const totalValue = (currentStock || []).reduce((sum, item) => {
-        if (!item) return sum;
-        const quantity = parseSheetNumber(
-          item.Saldo !== undefined && item.Saldo !== null && String(item.Saldo).trim() !== ""
-            ? item.Saldo
-            : item.Saldo_Fisico ?? item.Stock ?? 0,
-        );
-        const price = parseSheetNumber(item.Precio_Det || item.Precio_Cab || item.Precio || 0);
-        return sum + quantity * price;
-      }, 0);
-
-      const previousSnapshot = latestRecord
-        ? readStockSnapshot(latestRecord.changes_metadata)
-        : null;
-
-      const buildMetadata = (movements: StockMovement[]) =>
-        JSON.stringify({
-          snapshot_version: STOCK_SNAPSHOT_VERSION,
-          total_stock: totalStock,
-          total_value: Number(totalValue.toFixed(2)),
-          changes: movements,
-          items_snapshot: snapshot,
-        }).replace(/ /g, ""); // Postgres rechaza bytes nulos.
+      const { totalStock, totalValue } = computeStockTotals(currentStock, snapshot);
 
       const insertRecord = async (movements: StockMovement[]) => {
         const payload: StockSyncRecord = {
@@ -426,14 +361,12 @@ export const supabaseService = {
           sync_author: author || "Sistema",
         };
 
-        // Si el detalle no entra, se recorta antes que perder la foto: sin ella la próxima
-        // lectura no podría comparar y volvería a marcar cambios inexistentes.
-        const attempts = [
-          buildMetadata(movements),
-          buildMetadata(movements.slice(0, 50)),
-          buildMetadata([]),
-          undefined,
-        ];
+        const attempts = buildStockSyncMetadataAttempts({
+          snapshot,
+          movements,
+          totalStock,
+          totalValue,
+        });
         let lastError: any = null;
 
         for (const changesMetadata of attempts) {
@@ -455,18 +388,25 @@ export const supabaseService = {
         throw lastError;
       };
 
-      // Sin foto anterior utilizable no se puede saber qué cambió. Se guarda una referencia
-      // inicial, que no cuenta como movimiento, y la próxima lectura ya podrá comparar.
-      if (!previousSnapshot) {
-        if (latestRecord && latestRecord.stock_hash === stockHash) {
-          return {
-            success: true,
-            record: latestRecord,
-            hasChangesSinceLast: false,
-            message: "Sin cambios desde el último registro.",
-          };
-        }
-        const record = await insertRecord([]);
+      // Misma regla que la captura en segundo plano: solo los aumentos o disminuciones
+      // por medicamento y lote generan un registro. Sin foto anterior utilizable se guarda
+      // una referencia inicial, que no cuenta como movimiento.
+      const decision = decideStockSyncAction({ previous: latestRecord, snapshot, stockHash });
+
+      if (decision.action === "skip") {
+        return {
+          success: true,
+          record: latestRecord,
+          hasChangesSinceLast: false,
+          message:
+            decision.reason === "sin-cambios"
+              ? "Sin cambios desde el último registro."
+              : "Sin movimientos de stock.",
+        };
+      }
+
+      const record = await insertRecord(decision.movements);
+      if (decision.action === "baseline") {
         return {
           success: true,
           record,
@@ -475,23 +415,11 @@ export const supabaseService = {
         };
       }
 
-      // Solo se guardan aumentos o disminuciones de stock por medicamento y lote.
-      const movements = diffStockSnapshots(previousSnapshot, snapshot);
-      if (movements.length === 0) {
-        return {
-          success: true,
-          record: latestRecord,
-          hasChangesSinceLast: false,
-          message: "Sin movimientos de stock.",
-        };
-      }
-
-      const record = await insertRecord(movements);
       return {
         success: true,
         record,
         hasChangesSinceLast: true,
-        message: `Movimientos registrados: ${movements.length} medicamento(s) con variación de stock.`,
+        message: `Movimientos registrados: ${decision.movements.length} medicamento(s) con variación de stock.`,
       };
     } catch (e: any) {
       console.error(

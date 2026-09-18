@@ -1,0 +1,58 @@
+name: Historial de stock en segundo plano
+
+# Registra en Supabase los movimientos de stock aunque nadie tenga la aplicación abierta.
+# Lee las hojas de Google de cada UNGET configurada y guarda solo los medicamentos que
+# subieron o bajaron. Ver docs/CAPTURA_HISTORIAL_SEGUNDO_PLANO.md.
+
+on:
+  schedule:
+    # Cada 15 minutos. GitHub puede retrasar las ejecuciones programadas cuando hay carga.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      modo_prueba:
+        description: "Solo revisar, sin guardar nada en Supabase"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Una ejecución a la vez: dos a la vez leerían las mismas hojas y duplicarían registros.
+concurrency:
+  group: historial-stock
+  cancel-in-progress: false
+
+jobs:
+  capturar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Capturar movimientos de stock
+        run: npm run sync:historial
+        env:
+          # Las hojas traen la fecha en hora de Perú; sin esto los registros se guardarían
+          # con cinco horas de diferencia respecto a los que escribe la aplicación.
+          TZ: America/Lima
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # Opción recomendada: usuario dedicado de la aplicación.
+          SYNC_USERNAME: ${{ secrets.SYNC_USERNAME }}
+          SYNC_PASSWORD: ${{ secrets.SYNC_PASSWORD }}
+          # Alternativa: clave de servicio de Supabase (salta RLS; solo si la anterior no sirve).
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Clave de Google Sheets API SIN restricción de sitio web: este proceso no es un
+          # navegador y la clave de la web (restringida por dominio) sería rechazada.
+          GOOGLE_SHEETS_API_KEY: ${{ secrets.GOOGLE_SHEETS_API_KEY_SERVER }}
+          DRY_RUN: ${{ inputs.modo_prueba && '1' || '' }}

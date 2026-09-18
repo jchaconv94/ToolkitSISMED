@@ -342,3 +342,143 @@ export const findGroupsWithoutSync = (
     (group) => group.length > 0 && !group.some((key) => latest[key]),
   );
 };
+
+/**
+ * Programmatically computes a quick, non-cryptographic checksum/hash representing
+ * the exact items and quantities in a stock list.
+ * Any change in stock, products, batches, or expiration dates will yield a different hash value.
+ */
+export const computeStockHash = (products: any[]): string => {
+  // Agrupar por las mismas claves que usamos en el diff (codigo, lote, tipsum, ffinan)
+  // para que si hay filas duplicadas se sumen, y no dependa del orden
+  const grouped: Record<string, number> = {};
+  
+  for (const item of products) {
+    if (!item) continue;
+    const id = String(item.ID_Producto || item.medcod || item.Codigo_Sismed || item.CODIGO_SIG || item.Nombre || "UNKNOWN").trim();
+    const lot = String(item.Lote || "N/A").trim();
+    const tipsum = String(item.TIPSUM || "N/A").trim();
+    const ffinan = String(item.FFINAN || "N/A").trim();
+    
+    const qty =
+      Number(
+        item.Saldo !== undefined
+          ? item.Saldo
+          : item.Saldo_Fisico || item.Stock || 0,
+      ) || 0;
+      
+    const key = `${id}|${lot}|${tipsum}|${ffinan}`;
+    grouped[key] = (grouped[key] || 0) + qty;
+  }
+
+  // Ordenar las claves para asegurar un hash determinista
+  const sortedKeys = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+  
+  let stateStr = "";
+  for (const key of sortedKeys) {
+    stateStr += `${key}:${grouped[key]}|`;
+  }
+
+  // DJB2 simple hashing algorithm
+  let hash = 5381;
+  for (let i = 0; i < stateStr.length; i++) {
+    hash = (hash * 33) ^ stateStr.charCodeAt(i);
+  }
+  return `v1:${(hash >>> 0).toString(36)}`;
+};
+
+/** Qué hacer con una lectura de stock frente al último registro guardado. */
+export type StockSyncAction = "skip" | "baseline" | "insert";
+
+export interface StockSyncDecision {
+  action: StockSyncAction;
+  movements: StockMovement[];
+  /** Por qué no se guarda nada: el stock es idéntico, o cambió sin mover cantidades. */
+  reason?: "sin-cambios" | "sin-movimientos";
+}
+
+/**
+ * Única regla de decisión del historial, compartida por la aplicación y por la captura
+ * en segundo plano (`scripts/backgroundStockSync.ts`):
+ *
+ * - `insert`: algún medicamento y lote subió o bajó de cantidad. Es el único caso que
+ *   genera un movimiento.
+ * - `baseline`: no hay foto anterior utilizable, así que se guarda una referencia inicial
+ *   (`has_changes` en falso) para poder comparar la próxima vez.
+ * - `skip`: no hay nada que guardar.
+ */
+export const decideStockSyncAction = (input: {
+  previous?: { stock_hash?: string; changes_metadata?: string | null } | null;
+  snapshot: StockSnapshot;
+  stockHash: string;
+}): StockSyncDecision => {
+  const previousSnapshot = input.previous ? readStockSnapshot(input.previous.changes_metadata) : null;
+
+  if (!previousSnapshot) {
+    // Sin foto anterior no se puede saber qué cambió; solo se evita repetir la referencia
+    // cuando el stock es idéntico al del último registro.
+    if (input.previous && input.previous.stock_hash === input.stockHash) {
+      return { action: "skip", movements: [], reason: "sin-cambios" };
+    }
+    return { action: "baseline", movements: [] };
+  }
+
+  const movements = diffStockSnapshots(previousSnapshot, input.snapshot);
+  return movements.length === 0
+    ? { action: "skip", movements: [], reason: "sin-movimientos" }
+    : { action: "insert", movements };
+};
+
+/** Totales que acompañan a cada registro del historial. */
+export const computeStockTotals = (
+  items: any[],
+  snapshot: StockSnapshot,
+): { totalStock: number; totalValue: number } => {
+  const totalStock = Object.values(snapshot).reduce((sum, entry) => sum + entry.q, 0);
+  // Los precios llegan como los muestra la hoja ("6,4125"), así que `Number()` daba NaN
+  // y la valorización se guardaba en 0.
+  const totalValue = (items || []).reduce((sum, item) => {
+    if (!item) return sum;
+    const quantity = parseSheetNumber(
+      item.Saldo !== undefined && item.Saldo !== null && String(item.Saldo).trim() !== ""
+        ? item.Saldo
+        : item.Saldo_Fisico ?? item.Stock ?? 0,
+    );
+    const price = parseSheetNumber(item.Precio_Det || item.Precio_Cab || item.Precio || 0);
+    return sum + quantity * price;
+  }, 0);
+  return { totalStock, totalValue: Number(totalValue.toFixed(2)) };
+};
+
+/** Detalle guardado en `changes_metadata`: totales, movimientos y foto para comparar. */
+export const buildStockSyncMetadata = (input: {
+  snapshot: StockSnapshot;
+  movements: StockMovement[];
+  totalStock: number;
+  totalValue: number;
+}): string =>
+  JSON.stringify({
+    snapshot_version: STOCK_SNAPSHOT_VERSION,
+    total_stock: input.totalStock,
+    total_value: input.totalValue,
+    changes: input.movements,
+    items_snapshot: input.snapshot,
+  // Postgres rechaza los bytes nulos que a veces trae la hoja.
+  }).replace(/\0/g, "");
+
+/**
+ * Intentos de guardado, del más completo al más pequeño. Si el detalle no entra, se recorta
+ * antes que perder la foto: sin ella la próxima lectura no podría comparar y volvería a
+ * marcar cambios inexistentes.
+ */
+export const buildStockSyncMetadataAttempts = (input: {
+  snapshot: StockSnapshot;
+  movements: StockMovement[];
+  totalStock: number;
+  totalValue: number;
+}): Array<string | undefined> => [
+  buildStockSyncMetadata(input),
+  buildStockSyncMetadata({ ...input, movements: input.movements.slice(0, 50) }),
+  buildStockSyncMetadata({ ...input, movements: [] }),
+  undefined,
+];

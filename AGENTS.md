@@ -43,6 +43,10 @@ npm test
 npm run build
 ```
 
+```bash
+npm run sync:historial
+```
+
 - `npm run lint` = `tsc --noEmit`. **No hay ESLint.** Es la única verificación estática.
 - `npm run build` = `tsc && vite build`. Vite emite una advertencia de *bundle grande*: es preexistente y **no bloquea**.
 - `npm test` = `vitest run`. 45 pruebas, cobertura deliberadamente enfocada en lo que se puede romper en silencio. No hay tests de componentes.
@@ -51,6 +55,7 @@ npm run build
   - `services/appRoutes.test.ts` — incluye una prueba que **falla si agregas un módulo sin declararle ruta**
   - `services/DropdownPositioningService.test.ts`
 - Servidor local: `http://127.0.0.1:3000/ToolkitSISMED/` (nota el `base: '/ToolkitSISMED/'` en `vite.config.ts`).
+- `npm run sync:historial` = captura del historial de stock sin navegador (`scripts/backgroundStockSync.ts`). La ejecuta GitHub Actions cada 15 minutos; en local necesita las variables de entorno de `docs/CAPTURA_HISTORIAL_SEGUNDO_PLANO.md` y `DRY_RUN=1` para no escribir.
 - En Windows, si `npm` falla desde bash, usar `npm.cmd`.
 
 **Regla de cierre de fase:** toda fase termina con `npm run lint` y `npm run build` en verde, y un documento `FASE_NN_*.md`. Si la fase toca aritmética de saldos o reportes, agregar también pruebas y dejar `npm test` en verde.
@@ -93,7 +98,8 @@ docs/                       Toda la documentación (fases, planes, auditorías).
 supabase/                   Todos los .sql que el usuario ejecuta a mano en el panel de Supabase
 supabase/functions/         Edge function sync-stock
 backend/                    Google Apps Script legado
-scripts/                    Previews de PDF/Excel y diagnóstico contra Supabase (ejecución manual)
+scripts/                    Previews de PDF/Excel, diagnóstico contra Supabase y la captura
+                            del historial de stock en segundo plano (backgroundStockSync.ts)
 reportes-ejemplo/           PDFs de referencia visual
 ```
 

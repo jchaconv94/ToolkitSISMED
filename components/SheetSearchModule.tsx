@@ -73,6 +73,11 @@ import {
 } from "../services/sheetsDirectService";
 import { findLatestValidSync, getLastMovementDate } from "../services/stockSyncHistory";
 import {
+  formatDate,
+  getRowFieldValue,
+  normalizeSheetRows,
+} from "../services/stockRowNormalizer";
+import {
   fetchSheetsMetadataViaApi,
   hasSheetsApiKey,
   type KnownRowCounts,
@@ -330,19 +335,6 @@ const mergeMetadataIntoSources = (
 /** Hojas por petición al refrescar stock ya guardado; lotes pequeños fallan menos en Apps Script. */
 const CHANGED_SHEETS_BATCH_SIZE = 5;
 
-const getRowFieldValue = (row: any, ...fieldPatterns: string[]): string => {
-  if (!row || typeof row !== "object") return "";
-  for (const pattern of fieldPatterns) {
-    if (row[pattern]) return String(row[pattern]);
-  }
-  const keys = Object.keys(row);
-  for (const pattern of fieldPatterns) {
-    const patNorm = pattern.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    const matchingKey = keys.find((k) => k.toUpperCase().replace(/[^A-Z0-9]/g, "") === patNorm);
-    if (matchingKey && row[matchingKey]) return String(row[matchingKey]);
-  }
-  return "";
-};
 
 const formatFullDate = (val?: any): string => {
   if (!val) return "Sin fecha";
@@ -392,89 +384,6 @@ const datesMatch = (ts1?: number, ts2?: number): boolean => {
   );
 };
 
-const normalizeRowData = (
-  row: any,
-  lastUpdateStr: string,
-  equipmentDateStr: string,
-  uniqueSourceId: string,
-) => {
-  if (!row || typeof row !== "object") return null;
-
-  const idVal =
-    getRowFieldValue(
-      row,
-      "ID_Producto",
-      "ID_PRODUCTO",
-      "CODIGO_SIG",
-      "CODIGO",
-      "COD_SISMED",
-      "ID",
-      "COD_MED",
-      "COD_PROD",
-    ) || row.ID_Producto || "";
-
-  const nameVal =
-    getRowFieldValue(
-      row,
-      "Nombre",
-      "NOMBRE",
-      "DESCRIPCION",
-      "PRODUCTO",
-      "MEDICAMENTO",
-      "DENOMINACION",
-      "NOMBRE_PRODUCTO",
-      "DESC_PRODUCTO",
-      "MEDICAMENTO_INSUMO",
-      "DESC_ALM",
-    ) || row.Nombre || "";
-
-  const rawUltima =
-    getRowFieldValue(
-      row,
-      "ULTIMA_ACTUALIZACION",
-      "ULTIMA ACTUALIZACION",
-      "Ultima_Actualizacion",
-    ) || lastUpdateStr;
-  const rawEquipo =
-    getRowFieldValue(
-      row,
-      "FECHA_DEL_EQUIPO",
-      "FECHA DEL EQUIPO",
-      "Fecha_Del_Equipo",
-    ) || equipmentDateStr;
-  const fecVencim = getRowFieldValue(
-    row,
-    "Fec_Vencim",
-    "FEC_VENCIM",
-    "FECHA_VENCIMIENTO",
-    "FECHA_VENCIM",
-  );
-
-  const hasKeys = Object.keys(row).length > 0;
-  if (!hasKeys) return null;
-
-  const hasContent =
-    idVal ||
-    nameVal ||
-    row.Saldo !== undefined ||
-    row.SALDO !== undefined ||
-    row.Stock !== undefined ||
-    Object.values(row).some(
-      (v) => v !== undefined && v !== null && String(v).trim() !== "",
-    );
-
-  if (!hasContent) return null;
-
-  return {
-    ...row,
-    ID_Producto: idVal,
-    Nombre: nameVal,
-    Fec_Vencim: formatDate(fecVencim || row.Fec_Vencim),
-    Ultima_Actualizacion: formatDate(rawUltima),
-    FECHA_DEL_EQUIPO: formatDate(rawEquipo),
-    sourceId: uniqueSourceId,
-  };
-};
 
 const getUpdateStatus = (timestamp?: number) => {
   if (!timestamp || timestamp === 0)
@@ -715,30 +624,6 @@ const getSheetType = (name: string): "CS" | "PS" | "ALM" | "HOSP" | "OTRO" => {
   return "OTRO";
 };
 
-const formatDate = (dateValue: any): string => {
-  if (!dateValue) return "";
-  const str = String(dateValue).trim();
-  
-  // Si ya tiene formato D/M/YYYY, DD/M/YYYY, D/MM/YYYY o DD/MM/YYYY
-  const match = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-  if (match) {
-    const day = match[1].padStart(2, "0");
-    const month = match[2].padStart(2, "0");
-    const year = match[3];
-    return `${day}/${month}/${year}`;
-  }
-  
-  try {
-    const date = new Date(dateValue);
-    if (!isNaN(date.getTime())) {
-      const day = date.getDate().toString().padStart(2, "0");
-      const month = (date.getMonth() + 1).toString().padStart(2, "0");
-      const year = date.getFullYear();
-      return `${day}/${month}/${year}`;
-    }
-  } catch (e) {}
-  return str;
-};
 
 const formatAlmCode = (code: string | undefined): string => {
   if (!code) return "-";
@@ -2304,17 +2189,7 @@ export const SheetSearchModule: React.FC = () => {
               });
 
               if (Array.isArray(sheet.data)) {
-                const validData = sheet.data
-                  .map((row: any) =>
-                    normalizeRowData(
-                      row,
-                      lastUpdateStr,
-                      equipmentDateStr,
-                      uniqueSourceId,
-                    ),
-                  )
-                  .filter((row: any): row is SIGData => row !== null);
-                thisData.push(...validData);
+                thisData.push(...(normalizeSheetRows(sheet.data, uniqueSourceId).rows as SIGData[]));
               }
             });
 
@@ -2938,24 +2813,11 @@ export const SheetSearchModule: React.FC = () => {
       sheetPayload = payload[0];
     }
 
-    const rows = Array.isArray(sheetPayload.data) ? sheetPayload.data : [];
-    const firstRow = rows[0] || {};
-    const lastUpdateStr = getRowFieldValue(
-      firstRow,
-      "ULTIMA ACTUALIZACION",
-      "ULTIMA_ACTUALIZACION",
-      "ULTIMA ACTUALIZACIÓN",
-      "Ultima_Actualizacion",
-    );
-    const equipmentDateStr = getRowFieldValue(
-      firstRow,
-      "FECHA DEL EQUIPO",
-      "FECHA_DEL_EQUIPO",
-      "Fecha_Del_Equipo",
-    );
-    const validData = rows
-      .map((row: any) => normalizeRowData(row, lastUpdateStr, equipmentDateStr, source.id))
-      .filter((row: any): row is SIGData => row !== null);
+    const {
+      rows: validData,
+      lastUpdate: lastUpdateStr,
+      equipmentDate: equipmentDateStr,
+    } = normalizeSheetRows(sheetPayload.data as any[], source.id);
 
     const stableFacilityCode =
       source.facilityCode ||
