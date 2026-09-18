@@ -1359,11 +1359,10 @@ export const SheetSearchModule: React.FC = () => {
       return true;
     }
 
-    // 4. Administrador, Coordinador o Informático de UNGET / Red
-    if (
-      (level === "UNGET" || role.includes("UNGET") || role.includes("RED") || role.includes("COORDINADOR") || role === "COORDINADOR") &&
-      (role.includes("ADMIN") || role.includes("RESPONSABLE SISMED") || role.includes("INFORMATIC") || role.includes("COORDINADOR") || role === "COORDINADOR")
-    ) {
+    // 4. Cualquier usuario de una UNGET o Red: la conexión pertenece a su UNGET y es él
+    // quien tiene que poner el enlace de su hoja. Solo puede tocar la suya, porque el
+    // formulario le autocompleta su UNGET y solo ve la conexión de su jurisdicción.
+    if (level === "UNGET" || role.includes("UNGET") || role.includes("RED") || role.includes("COORDINADOR")) {
       return true;
     }
 

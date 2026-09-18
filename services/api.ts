@@ -1121,26 +1121,57 @@ export const api = {
         try {
             if (supabase) {
                 const savedSheets = await api.getSavedSpreadsheetIds([username]);
-                await supabase.from('unget_configs').delete().eq('username', username);
+
+                // La conexión pertenece a la UNGET: si ya existe una fila para esa UNGET se
+                // actualiza, la haya creado quien la haya creado. Borrar por usuario y volver
+                // a insertar chocaba con el índice único y le robaba la conexión a su
+                // informático.
+                const ungetIds = configs
+                    .map((c: any) => String(c.ungetId || c.id || '').trim())
+                    .filter(Boolean);
+                const existentesPorUnget = new Map<string, any>();
+                if (ungetIds.length > 0) {
+                    const { data: existentes } = await supabase
+                        .from('unget_configs')
+                        .select('id,unget_id,username')
+                        .in('unget_id', ungetIds);
+                    (existentes || []).forEach((fila: any) => {
+                        existentesPorUnget.set(String(fila.unget_id), fila);
+                    });
+                }
+
                 for(const c of configs) {
-                    const payload: any = {
-                        username,
-                        unget_name: formatName(c.name),
-                        url: c.url
-                    };
+                    const ungetId = String(c.ungetId || c.id || '').trim();
                     if (!c.spreadsheetId && savedSheets[c.url]) {
                         c.spreadsheetId = savedSheets[c.url];
                     }
-                    if (c.ungetId) {
-                        payload.unget_id = c.ungetId;
-                    } else if (c.id) {
-                        payload.unget_id = c.id;
-                    }
-                    if (c.spreadsheetId) {
-                        payload.spreadsheet_id = c.spreadsheetId;
-                    }
+                    const datos: any = {
+                        unget_name: formatName(c.name),
+                        url: c.url
+                    };
+                    if (ungetId) datos.unget_id = ungetId;
+                    if (c.spreadsheetId) datos.spreadsheet_id = c.spreadsheetId;
 
-                    await api.insertUngetConfigRow(payload);
+                    const existente = ungetId ? existentesPorUnget.get(ungetId) : null;
+                    if (existente) {
+                        // No se cambia `username`: sigue siendo de su informático.
+                        await supabase.from('unget_configs').update(datos).eq('id', existente.id);
+                    } else {
+                        await api.insertUngetConfigRow({ ...datos, username });
+                    }
+                }
+
+                // Se retiran solo las conexiones propias que el usuario quitó de la lista.
+                const conservadas = new Set(ungetIds);
+                const { data: mias } = await supabase
+                    .from('unget_configs')
+                    .select('id,unget_id')
+                    .eq('username', username);
+                const aRetirar = (mias || [])
+                    .filter((fila: any) => !fila.unget_id || !conservadas.has(String(fila.unget_id)))
+                    .map((fila: any) => fila.id);
+                if (aRetirar.length > 0) {
+                    await supabase.from('unget_configs').delete().in('id', aRetirar);
                 }
             }
             localStorage.setItem(`aura_sig_ungets_${username}`, JSON.stringify(configs));
