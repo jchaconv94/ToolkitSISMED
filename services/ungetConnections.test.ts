@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  assignmentBelongsToConnection,
   cachedSourcesStillMatch,
   describeConnectionMode,
   normalizeUngetName,
@@ -137,5 +138,32 @@ describe("cachedSourcesStillMatch", () => {
   it("sin caché previa no hay nada que reutilizar", () => {
     expect(cachedSourcesStillMatch(null, [huallaga])).toBe(false);
     expect(cachedSourcesStillMatch([], [])).toBe(true);
+  });
+});
+
+describe("assignmentBelongsToConnection", () => {
+  const conexion = { ungetId: "u-b", url: "https://script.google.com/bellavista" };
+
+  it("empareja por UNGET aunque la conexión haya cambiado de URL", () => {
+    const asignacion = { ungetId: "u-b", sheetUrl: "https://script.google.com/viejo" };
+    expect(assignmentBelongsToConnection(asignacion, conexion)).toBe(true);
+    // Es el caso que rompía todo: la UNGET pasa a lectura directa.
+    expect(assignmentBelongsToConnection(asignacion, { ungetId: "u-b", url: "sheets://LIBRO" })).toBe(true);
+  });
+
+  it("no empareja asignaciones de otra UNGET aunque compartan URL", () => {
+    expect(assignmentBelongsToConnection({ ungetId: "u-h", sheetUrl: conexion.url }, conexion)).toBe(false);
+  });
+
+  it("mientras la asignación no tenga UNGET, se sigue admitiendo la URL", () => {
+    expect(assignmentBelongsToConnection({ sheetUrl: conexion.url }, conexion)).toBe(true);
+    expect(assignmentBelongsToConnection({ sheetUrl: "https://otra" }, conexion)).toBe(false);
+    expect(assignmentBelongsToConnection({ ungetId: "u-b" }, { url: conexion.url })).toBe(false);
+  });
+
+  it("no se cae con datos incompletos", () => {
+    expect(assignmentBelongsToConnection(null, conexion)).toBe(false);
+    expect(assignmentBelongsToConnection({ sheetUrl: "" }, conexion)).toBe(false);
+    expect(assignmentBelongsToConnection({ sheetUrl: conexion.url }, null)).toBe(false);
   });
 });

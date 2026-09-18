@@ -1295,6 +1295,7 @@ export const api = {
                         facilityCode: d.facility_code,
                         sheetName: d.sheet_name,
                         sheetUrl: d.sheet_url,
+                        ungetId: d.unget_id || undefined,
                         visibleColumns: d.visible_columns || [],
                         createdAt: d.created_at
                     }));
@@ -1315,6 +1316,7 @@ export const api = {
                         facilityCode: d.facility_code,
                         sheetName: d.sheet_name,
                         sheetUrl: d.sheet_url,
+                        ungetId: d.unget_id || undefined,
                         visibleColumns: d.visible_columns || [],
                         createdAt: d.created_at
                     }));
@@ -1335,6 +1337,7 @@ export const api = {
                         facilityCode: d.facility_code,
                         sheetName: d.sheet_name,
                         sheetUrl: d.sheet_url,
+                        ungetId: d.unget_id || undefined,
                         visibleColumns: d.visible_columns || [],
                         createdAt: d.created_at
                     }));
@@ -1376,6 +1379,8 @@ export const api = {
                             admin_username: assignment.adminUsername,
                             sheet_name: assignment.sheetName,
                             sheet_url: assignment.sheetUrl,
+                            // La asignación pertenece a la UNGET: su URL puede cambiar.
+                            unget_id: assignment.ungetId || null,
                             visible_columns: assignment.visibleColumns
                         })
                         .eq('id', existingFacility.id);
@@ -1388,6 +1393,7 @@ export const api = {
                     facility_code: assignment.facilityCode,
                     sheet_name: assignment.sheetName,
                     sheet_url: assignment.sheetUrl,
+                    unget_id: assignment.ungetId || null,
                     visible_columns: assignment.visibleColumns
                 });
                 if (error) throw error;
@@ -1431,6 +1437,7 @@ export const api = {
                     facility_code: assignment.facilityCode,
                     sheet_name: assignment.sheetName,
                     sheet_url: assignment.sheetUrl,
+                    unget_id: assignment.ungetId || null,
                     visible_columns: assignment.visibleColumns
                 }).eq('id', id);
                 if (error) throw error;

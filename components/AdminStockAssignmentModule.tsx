@@ -375,11 +375,14 @@ export const AdminStockAssignmentModule: React.FC = () => {
 
     setIsSaving(true);
     try {
+      const conexion = ungetConfigs.find((c: any) => c.url === selectedConnectionUrl);
       const data = {
         adminUsername: currentUser?.username,
         facilityCode: selectedFacilityCode,
         sheetName: selectedSheetName,
         sheetUrl: selectedConnectionUrl,
+        // La asignación pertenece a la UNGET: su URL puede cambiar y no debe romperla.
+        ungetId: conexion?.ungetId || undefined,
         visibleColumns: visibleColumns
       };
 
