@@ -14,14 +14,18 @@
 --  la aplicación hace esta poda sola al guardar cada registro nuevo. Este archivo es
 --  para limpiar de una vez lo que ya estaba guardado antes.
 --
---  Ejecutar en el SQL Editor de Supabase.
+--  IMPORTANTE: el editor SQL de Supabase ejecuta todo lo que le pegas dentro de una
+--  transacción, y VACUUM no puede correr ahí ("VACUUM cannot run inside a transaction
+--  block"). Si falla, la transacción se deshace entera y el UPDATE tampoco queda
+--  aplicado. Por eso cada paso va por separado: pega y ejecuta uno, luego el siguiente.
 -- ============================================================================
 
--- 1) Cuánto ocupa ahora (para comparar después).
-select pg_size_pretty(pg_total_relation_size('public.stock_sync_history')) as antes;
 
--- 2) Poda: conserva intacta la foto MÁS RECIENTE de cada establecimiento,
---    que es la que la aplicación usa para detectar los próximos movimientos.
+-- ----------------------------------------------------------------------------
+--  PASO 1 - Poda. Conserva intacta la foto MÁS RECIENTE de cada establecimiento,
+--  que es la que la aplicación usa para detectar los próximos movimientos.
+-- ----------------------------------------------------------------------------
+
 update public.stock_sync_history h
 set changes_metadata = (h.changes_metadata::jsonb - 'items_snapshot')::text
 where h.changes_metadata is not null
@@ -35,17 +39,27 @@ where h.changes_metadata is not null
     limit 1
   );
 
--- 3) Postgres no devuelve el espacio al disco por sí solo: hasta aquí lo reutiliza,
---    pero el tamaño informado sigue igual. Esto lo compacta (bloquea la tabla unos
---    segundos; con pocos MB es inmediato).
+
+-- ----------------------------------------------------------------------------
+--  PASO 2 - Comprobación. `con_foto` debería quedar en torno a
+--  `establecimientos`: una foto por IPRESS y ninguna más.
+-- ----------------------------------------------------------------------------
+
+select count(*) filter (where changes_metadata::jsonb ? 'items_snapshot') as con_foto,
+       count(distinct establishment_id) as establecimientos,
+       count(*) as registros,
+       pg_size_pretty(pg_total_relation_size('public.stock_sync_history')) as tamano
+from public.stock_sync_history
+where changes_metadata is not null and left(btrim(changes_metadata), 1) = '{';
+
+
+-- ----------------------------------------------------------------------------
+--  PASO 3 (opcional) - Compactar. Postgres reutiliza por dentro el espacio que
+--  liberó el paso 1, pero el tamaño informado no baja hasta compactar.
+--
+--  Ejecutar ESTA LÍNEA SOLA, sin nada más seleccionado. Bloquea la tabla unos
+--  segundos (con pocos MB es inmediato), así que mejor cuando nadie sincroniza.
+--  Si el editor lo rechaza igualmente, se puede omitir: la tabla ya no crece.
+-- ----------------------------------------------------------------------------
+
 vacuum full public.stock_sync_history;
-
--- 4) Cuánto ocupa después.
-select pg_size_pretty(pg_total_relation_size('public.stock_sync_history')) as despues;
-
--- Comprobación opcional: cuántos registros conservan foto. Debería quedar
--- aproximadamente uno por establecimiento.
--- select count(*) filter (where changes_metadata::jsonb ? 'items_snapshot') as con_foto,
---        count(*) as total
--- from public.stock_sync_history
--- where changes_metadata is not null and left(btrim(changes_metadata), 1) = '{';
