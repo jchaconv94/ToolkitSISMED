@@ -235,6 +235,9 @@ const sourceFromMetadata = (
     urlIndex: ctx.urlIndex,
     sheetName: meta.name,
     rowCount: meta.rowCount ?? existing?.rowCount ?? 0,
+    // La metadata ya trae el ALMCOD de la cabecera. Conservarlo permite mostrar el código
+    // en cuanto aparece la tarjeta, sin esperar a que se descargue el stock entero.
+    almcod: (meta.almcod || "").trim() || existing?.almcod || undefined,
     facilityCode,
     lastUpdate: lastUpdate || existing?.lastUpdate || "",
     lastUpdateTime: parseDataDate(lastUpdate) || existing?.lastUpdateTime || undefined,
@@ -815,9 +818,24 @@ const getItemExpiration = (
  */
 const readAlmCode = (row: any): string => getRowFieldValue(row, "ALMCOD", "ALM_COD", "ALM COD");
 
-const getAlmCodeForSheet = (sheetId: string, sheetData: SIGData[]): string => {
+/**
+ * Código de almacén de una hoja.
+ *
+ * Se prefiere el del stock descargado, que es el más fresco, pero si todavía no se ha
+ * descargado se usa el que la metadata leyó de la cabecera. Antes solo se miraba el stock,
+ * así que el código tardaba en aparecer —o no aparecía nunca en una hoja cuyo stock no se
+ * llega a descargar— mientras el conteo de ítems, que sí sale de la metadata, ya estaba
+ * ahí. Esa asimetría es la que hacía pensar que la hoja no tenía ALMCOD.
+ */
+const getAlmCodeForSheet = (
+  sheetId: string,
+  sheetData: SIGData[],
+  almcodDeMetadata?: string,
+): string => {
   const row = sheetData.find((r) => r.sourceId === sheetId && readAlmCode(r));
-  return row ? formatAlmCode(readAlmCode(row)) : "";
+  if (row) return formatAlmCode(readAlmCode(row));
+  const deMetadata = String(almcodDeMetadata || "").trim();
+  return deMetadata ? formatAlmCode(deMetadata) : "";
 };
 
 const getExpirationStats = (records: SIGData[]) => {
@@ -938,6 +956,19 @@ export const SheetSearchModule: React.FC = () => {
     (sourceId?: string): SIGData[] =>
       (sourceId && dataBySource.get(sourceId)) || EMPTY_SOURCE_ROWS,
     [dataBySource],
+  );
+  const almcodBySource = useMemo(() => {
+    const porId = new Map<string, string>();
+    for (const source of sources) {
+      if (source?.id && source.almcod) porId.set(source.id, source.almcod);
+    }
+    return porId;
+  }, [sources]);
+  /** Código de almacén de una hoja, sin esperar a que se descargue su stock. */
+  const codeForSheet = useCallback(
+    (sheetId?: string): string =>
+      sheetId ? getAlmCodeForSheet(sheetId, data, almcodBySource.get(sheetId)) : "",
+    [data, almcodBySource],
   );
   const [lastGlobalSync, setLastGlobalSync] = useState<Date | null>(null);
   const [allFacilities, setAllFacilities] = useState<any[]>([]);
@@ -1201,7 +1232,7 @@ export const SheetSearchModule: React.FC = () => {
     // Rellenar Datos (Fila 4 en adelante)
     sortedReportSources.forEach((sheet, idx) => {
       const description = describeSheetName(sheet.name);
-      const code = getAlmCodeForSheet(sheet.id, data);
+      const code = codeForSheet(sheet.id);
       const status = getUpdateStatus(sheet.lastUpdateTime);
 
       const sheetData = rowsForSource(sheet.id);
@@ -3901,7 +3932,7 @@ function processSheet(sheet) {
       if (sheetSearchTerm) {
         const term = sheetSearchTerm.toLowerCase();
         const description = describeSheetName(s.name);
-        const code = getAlmCodeForSheet(s.id, data);
+        const code = codeForSheet(s.id);
         if (
           !description.toLowerCase().includes(term) &&
           !code.toLowerCase().includes(term)
@@ -3977,13 +4008,13 @@ function processSheet(sheet) {
     // Sorting
     return [...matching].sort((s1, s2) => {
       if (filterSortOrder === "code_asc") {
-        const c1 = getAlmCodeForSheet(s1.id, data) || "";
-        const c2 = getAlmCodeForSheet(s2.id, data) || "";
+        const c1 = codeForSheet(s1.id) || "";
+        const c2 = codeForSheet(s2.id) || "";
         return c1.localeCompare(c2);
       }
       if (filterSortOrder === "code_desc") {
-        const c1 = getAlmCodeForSheet(s1.id, data) || "";
-        const c2 = getAlmCodeForSheet(s2.id, data) || "";
+        const c1 = codeForSheet(s1.id) || "";
+        const c2 = codeForSheet(s2.id) || "";
         return c2.localeCompare(c1);
       }
       if (filterSortOrder === "type_asc") {
@@ -4179,7 +4210,7 @@ function processSheet(sheet) {
         const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);
         const statusObj = getUpdateStatus(sheet.lastUpdateTime);
         const description = describeSheetName(sheet.name);
-        const code = getAlmCodeForSheet(id, data);
+        const code = codeForSheet(id);
         const type = getSheetType(sheet.name);
         const isMismatch = !datesMatch(sheet.lastUpdateTime, sheet.equipmentDateTime);
         const syncRecord = supabaseSyncs[id];
@@ -4229,7 +4260,7 @@ function processSheet(sheet) {
 
       const term = sheetSearchTerm.toLowerCase();
       const description = describeSheetName(s.name);
-      const code = getAlmCodeForSheet(s.id, data);
+      const code = codeForSheet(s.id);
 
       return (
         description.toLowerCase().includes(term) ||
@@ -4479,7 +4510,7 @@ function processSheet(sheet) {
                         "Hoja";
                       const desc = describeSheetName(name);
                       const code = selectedSourceId
-                        ? getAlmCodeForSheet(selectedSourceId, data)
+                        ? codeForSheet(selectedSourceId)
                         : "";
                       return code ? `${desc} (${code})` : desc;
                     })()}
@@ -6065,10 +6096,7 @@ function processSheet(sheet) {
                                   getExpirationStats(sheetData);
                                 const isSelected = selectedCaptureIds.has(sheet.id);
                                 const description = describeSheetName(sheet.name);
-                                const code = getAlmCodeForSheet(
-                                  sheet.id,
-                                  data,
-                                );
+                                const code = codeForSheet(sheet.id);
                                 const cleanSheetId = sheet.id.includes("_") ? sheet.id.split("_").slice(1).join("_") : sheet.id;
                                 const syncRecord = supabaseSyncs[sheet.id] || (sheet.facilityCode ? supabaseSyncs[sheet.facilityCode] : undefined) || supabaseSyncs[cleanSheetId] || (code ? supabaseSyncs[code] : undefined);
 
@@ -6111,7 +6139,7 @@ function processSheet(sheet) {
                                 const { expiredCount, expiringThisMonthCount } =
                                   getExpirationStats(sheetData);
                                 const description = describeSheetName(sheet.name);
-                                const code = getAlmCodeForSheet(sheet.id, data);
+                                const code = codeForSheet(sheet.id);
                                 const statusObj = getUpdateStatus(
                                   sheet.lastUpdateTime,
                                 );
@@ -6313,7 +6341,7 @@ function processSheet(sheet) {
                                 const { expiredCount, expiringThisMonthCount } =
                                   getExpirationStats(sheetData);
                                 const description = describeSheetName(sheet.name);
-                                const code = getAlmCodeForSheet(sheet.id, data);
+                                const code = codeForSheet(sheet.id);
                                 const isSelected = selectedCaptureIds.has(sheet.id);
 
                                 return (
@@ -6725,10 +6753,7 @@ function processSheet(sheet) {
                                         expiringThisMonthCount,
                                       } = getExpirationStats(sheetData);
                                       const description = describeSheetName(sheet.name);
-                                      const code = getAlmCodeForSheet(
-                                        sheet.id,
-                                        data,
-                                      );
+                                      const code = codeForSheet(sheet.id);
                                       const type = getSheetType(sheet.name);
 
                                       let typeBadge = (
@@ -7335,7 +7360,7 @@ function processSheet(sheet) {
               const sheetInfo = sources.find(
                 (s) => s.id === stockModalSourceId,
               );
-              const code = getAlmCodeForSheet(stockModalSourceId || "", data);
+              const code = codeForSheet(stockModalSourceId || "");
               const statusObj = sheetInfo
                 ? getUpdateStatus(sheetInfo.lastUpdateTime)
                 : null;
@@ -9763,7 +9788,7 @@ function processSheet(sheet) {
                     <tbody className="bg-white divide-y divide-slate-100">
                       {sortedReportSources.map((sheet) => {
                         const description = describeSheetName(sheet.name);
-                        const code = getAlmCodeForSheet(sheet.id, data);
+                        const code = codeForSheet(sheet.id);
                         const status = getUpdateStatus(sheet.lastUpdateTime);
                         const dateStr = sheet.lastUpdateTime
                           ? formatFullDate(sheet.lastUpdateTime)
