@@ -81,10 +81,13 @@ import {
 } from "../services/ungetConnections";
 import { INTENT_OPEN_STOCK_CONNECTIONS, takeNavigationIntent } from "../services/appRoutes";
 import {
+  describeSheetName,
   fetchSheetsMetadataViaApi,
+  findFacilityByCode,
   hasSheetsApiKey,
   isFacilitySheet,
   listSheetTabs,
+  officialFacilityCode,
   type KnownRowCounts,
 } from "../services/sheetsApiService";
 import {
@@ -123,6 +126,7 @@ const extractFacilityCodeFromSheetName = (name?: string): string => {
   const match = String(name || "").trim().match(/-([A-Z0-9]+)\s*$/i);
   return match?.[1]?.toUpperCase() || "";
 };
+
 
 const getHistoryKeysForSource = (source: SheetSource): string[] =>
   Array.from(
@@ -200,9 +204,27 @@ const sourceFromMetadata = (
       assignmentBelongsToConnection(a, { ungetId: ctx.configUngetId, url: ctx.configUrl }) &&
       a.sheetName === meta.name,
   );
+  const facilityCode =
+    assignment?.facilityCode ||
+    meta.codigoIpress ||
+    extractFacilityCodeFromSheetName(meta.name) ||
+    existing?.facilityCode ||
+    undefined;
+
+  // Sin asignación se reconoce el establecimiento por el código de la pestaña
+  // (`C.S. NUEVO LIMA-06519`). Antes el único puente era la tabla de asignaciones, así que
+  // casi todas las tarjetas mostraban el nombre crudo de la pestaña.
+  //
+  // La búsqueda se limita a los establecimientos de la UNGET de esta conexión: dos UNGET
+  // pueden tener códigos que se reduzcan al mismo oficial, y ponerle a una tarjeta el
+  // nombre del establecimiento de otra UNGET sería peor que dejarla como está.
+  const candidatas = ctx.configUngetId
+    ? ctx.facilities.filter((f) => String(f?.ungetId || "") === String(ctx.configUngetId))
+    : ctx.facilities;
   const facility = assignment
     ? ctx.facilities.find((f) => f.code === assignment.facilityCode)
-    : null;
+    : findFacilityByCode(facilityCode, candidatas);
+
   const lastUpdate = (meta.lastUpdate || "").trim();
   const equipmentDate = (meta.equipmentDate || "").trim();
 
@@ -213,12 +235,7 @@ const sourceFromMetadata = (
     urlIndex: ctx.urlIndex,
     sheetName: meta.name,
     rowCount: meta.rowCount ?? existing?.rowCount ?? 0,
-    facilityCode:
-      assignment?.facilityCode ||
-      meta.codigoIpress ||
-      extractFacilityCodeFromSheetName(meta.name) ||
-      existing?.facilityCode ||
-      undefined,
+    facilityCode,
     lastUpdate: lastUpdate || existing?.lastUpdate || "",
     lastUpdateTime: parseDataDate(lastUpdate) || existing?.lastUpdateTime || undefined,
     equipmentDate: equipmentDate || existing?.equipmentDate || "",
@@ -743,17 +760,8 @@ const formatDate = (dateValue: any): string => {
   return str;
 };
 
-const formatAlmCode = (code: string | undefined): string => {
-  if (!code) return "-";
-  const c = String(code).trim();
-  if (c.length >= 8) {
-    if (c.substring(5, 8).toUpperCase() === "F01") {
-      return c.substring(0, 5);
-    }
-    return c.substring(0, c.length - 2);
-  }
-  return c;
-};
+/** Código oficial para mostrar. La regla vive en `officialFacilityCode`, junto a la que lo empareja con el registro. */
+const formatAlmCode = (code: string | undefined): string => officialFacilityCode(code) || "-";
 
 const getItemExpiration = (
   item: SIGData,
@@ -1192,14 +1200,7 @@ export const SheetSearchModule: React.FC = () => {
 
     // Rellenar Datos (Fila 4 en adelante)
     sortedReportSources.forEach((sheet, idx) => {
-      const lastDash = sheet.name.lastIndexOf("-");
-      const description =
-        lastDash === -1
-          ? sheet.name.replace(/^FARM\s*-\s*/i, "")
-          : sheet.name
-              .substring(0, lastDash)
-              .trim()
-              .replace(/^FARM\s*-\s*/i, "");
+      const description = describeSheetName(sheet.name);
       const code = getAlmCodeForSheet(sheet.id, data);
       const status = getUpdateStatus(sheet.lastUpdateTime);
 
@@ -3899,14 +3900,7 @@ function processSheet(sheet) {
       // Search term filter
       if (sheetSearchTerm) {
         const term = sheetSearchTerm.toLowerCase();
-        const lastDash = s.name.lastIndexOf("-");
-        const description =
-          lastDash === -1
-            ? s.name.replace(/^FARM\s*-\s*/i, "")
-            : s.name
-                .substring(0, lastDash)
-                .trim()
-                .replace(/^FARM\s*-\s*/i, "");
+        const description = describeSheetName(s.name);
         const code = getAlmCodeForSheet(s.id, data);
         if (
           !description.toLowerCase().includes(term) &&
@@ -4184,11 +4178,7 @@ function processSheet(sheet) {
         const sheetData = rowsForSource(id);
         const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);
         const statusObj = getUpdateStatus(sheet.lastUpdateTime);
-        const lastDash = sheet.name.lastIndexOf("-");
-        const description =
-          lastDash === -1
-            ? sheet.name.replace(/^FARM\s*-\s*/i, "")
-            : sheet.name.substring(0, lastDash).trim().replace(/^FARM\s*-\s*/i, "");
+        const description = describeSheetName(sheet.name);
         const code = getAlmCodeForSheet(id, data);
         const type = getSheetType(sheet.name);
         const isMismatch = !datesMatch(sheet.lastUpdateTime, sheet.equipmentDateTime);
@@ -4238,14 +4228,7 @@ function processSheet(sheet) {
       if (!sheetSearchTerm) return true;
 
       const term = sheetSearchTerm.toLowerCase();
-      const lastDash = s.name.lastIndexOf("-");
-      const description =
-        lastDash === -1
-          ? s.name.replace(/^FARM\s*-\s*/i, "")
-          : s.name
-              .substring(0, lastDash)
-              .trim()
-              .replace(/^FARM\s*-\s*/i, "");
+      const description = describeSheetName(s.name);
       const code = getAlmCodeForSheet(s.id, data);
 
       return (
@@ -4494,14 +4477,7 @@ function processSheet(sheet) {
                       const name =
                         sources.find((s) => s.id === selectedSourceId)?.name ||
                         "Hoja";
-                      const lastDash = name.lastIndexOf("-");
-                      const desc =
-                        lastDash === -1
-                          ? name.replace(/^FARM\s*-\s*/i, "")
-                          : name
-                              .substring(0, lastDash)
-                              .trim()
-                              .replace(/^FARM\s*-\s*/i, "");
+                      const desc = describeSheetName(name);
                       const code = selectedSourceId
                         ? getAlmCodeForSheet(selectedSourceId, data)
                         : "";
@@ -6088,14 +6064,7 @@ function processSheet(sheet) {
                                 const { expiredCount, expiringThisMonthCount } =
                                   getExpirationStats(sheetData);
                                 const isSelected = selectedCaptureIds.has(sheet.id);
-                                const lastDash = sheet.name.lastIndexOf("-");
-                                const description =
-                                  lastDash === -1
-                                    ? sheet.name.replace(/^FARM\s*-\s*/i, "")
-                                    : sheet.name
-                                        .substring(0, lastDash)
-                                        .trim()
-                                        .replace(/^FARM\s*-\s*/i, "");
+                                const description = describeSheetName(sheet.name);
                                 const code = getAlmCodeForSheet(
                                   sheet.id,
                                   data,
@@ -6141,14 +6110,7 @@ function processSheet(sheet) {
                                 const sheetData = rowsForSource(sheet.id);
                                 const { expiredCount, expiringThisMonthCount } =
                                   getExpirationStats(sheetData);
-                                const lastDash = sheet.name.lastIndexOf("-");
-                                const description =
-                                  lastDash === -1
-                                    ? sheet.name.replace(/^FARM\s*-\s*/i, "")
-                                    : sheet.name
-                                        .substring(0, lastDash)
-                                        .trim()
-                                        .replace(/^FARM\s*-\s*/i, "");
+                                const description = describeSheetName(sheet.name);
                                 const code = getAlmCodeForSheet(sheet.id, data);
                                 const statusObj = getUpdateStatus(
                                   sheet.lastUpdateTime,
@@ -6350,14 +6312,7 @@ function processSheet(sheet) {
                                 const sheetData = rowsForSource(sheet.id);
                                 const { expiredCount, expiringThisMonthCount } =
                                   getExpirationStats(sheetData);
-                                const lastDash = sheet.name.lastIndexOf("-");
-                                const description =
-                                  lastDash === -1
-                                    ? sheet.name.replace(/^FARM\s*-\s*/i, "")
-                                    : sheet.name
-                                        .substring(0, lastDash)
-                                        .trim()
-                                        .replace(/^FARM\s*-\s*/i, "");
+                                const description = describeSheetName(sheet.name);
                                 const code = getAlmCodeForSheet(sheet.id, data);
                                 const isSelected = selectedCaptureIds.has(sheet.id);
 
@@ -6769,18 +6724,7 @@ function processSheet(sheet) {
                                         expiredCount,
                                         expiringThisMonthCount,
                                       } = getExpirationStats(sheetData);
-                                      const lastDash =
-                                        sheet.name.lastIndexOf("-");
-                                      const description =
-                                        lastDash === -1
-                                          ? sheet.name.replace(
-                                              /^FARM\s*-\s*/i,
-                                              "",
-                                            )
-                                          : sheet.name
-                                              .substring(0, lastDash)
-                                              .trim()
-                                              .replace(/^FARM\s*-\s*/i, "");
+                                      const description = describeSheetName(sheet.name);
                                       const code = getAlmCodeForSheet(
                                         sheet.id,
                                         data,
@@ -7395,14 +7339,7 @@ function processSheet(sheet) {
               const statusObj = sheetInfo
                 ? getUpdateStatus(sheetInfo.lastUpdateTime)
                 : null;
-              const description = sheetInfo
-                ? sheetInfo.name.lastIndexOf("-") === -1
-                  ? sheetInfo.name.replace(/^FARM\s*-\s*/i, "")
-                  : sheetInfo.name
-                      .substring(0, sheetInfo.name.lastIndexOf("-"))
-                      .trim()
-                      .replace(/^FARM\s*-\s*/i, "")
-                : "";
+              const description = sheetInfo ? describeSheetName(sheetInfo.name) : "";
 
               return (
                 sheetInfo && (
@@ -9825,14 +9762,7 @@ function processSheet(sheet) {
                     </thead>
                     <tbody className="bg-white divide-y divide-slate-100">
                       {sortedReportSources.map((sheet) => {
-                        const lastDash = sheet.name.lastIndexOf("-");
-                        const description =
-                          lastDash === -1
-                            ? sheet.name.replace(/^FARM\s*-\s*/i, "")
-                            : sheet.name
-                                .substring(0, lastDash)
-                                .trim()
-                                .replace(/^FARM\s*-\s*/i, "");
+                        const description = describeSheetName(sheet.name);
                         const code = getAlmCodeForSheet(sheet.id, data);
                         const status = getUpdateStatus(sheet.lastUpdateTime);
                         const dateStr = sheet.lastUpdateTime

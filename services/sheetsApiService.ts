@@ -216,6 +216,50 @@ export const facilityCodeFromSheetName = (sheetName: string, almcod?: string): s
 };
 
 /**
+ * Código oficial de un establecimiento, quitando el sufijo interno de farmacia o almacén.
+ *
+ *   06519F01    -> 06519      (sufijo de farmacia)
+ *   06505F0101  -> 06505
+ *   030S05      -> 030S05     (ya es el oficial)
+ *
+ * Hace falta porque las dos mitades del sistema escriben el mismo establecimiento de forma
+ * distinta: la pestaña lleva el código oficial en su nombre (`C.S. NUEVO LIMA-06519`) y el
+ * registro puede llevar el interno (`06519F01`). Devuelve "" si no hay código.
+ */
+export const officialFacilityCode = (code?: string | null): string => {
+  const c = String(code || "").trim();
+  if (!c) return "";
+  if (c.length >= 8) {
+    if (c.substring(5, 8).toUpperCase() === "F01") return c.substring(0, 5);
+    return c.substring(0, c.length - 2);
+  }
+  return c;
+};
+
+/**
+ * Establecimiento registrado que corresponde a un código leído de una pestaña.
+ *
+ * Primero busca la coincidencia exacta. Si no la hay, admite que el registro lleve el
+ * sufijo interno, pero **solo cuando no hay ambigüedad**: si dos establecimientos se
+ * reducen al mismo código oficial no se elige ninguno, porque mostrar el nombre equivocado
+ * es peor que no mostrar ninguno.
+ */
+export const findFacilityByCode = <T extends { code?: string | null }>(
+  code: string | null | undefined,
+  facilities: T[] | null | undefined,
+): T | null => {
+  const buscado = String(code || "").trim().toUpperCase();
+  if (!buscado) return null;
+
+  const lista = (facilities || []).filter(Boolean);
+  const exacto = lista.find((f) => String(f?.code || "").trim().toUpperCase() === buscado);
+  if (exacto) return exacto;
+
+  const porOficial = lista.filter((f) => officialFacilityCode(f?.code).toUpperCase() === buscado);
+  return porOficial.length === 1 ? porOficial[0] : null;
+};
+
+/**
  * Si una pestaña corresponde a un establecimiento.
  *
  * El libro de una UNGET puede tener pestañas que no son establecimientos: la `Sheet3` que
@@ -243,6 +287,21 @@ export const isFacilitySheet = (meta: {
   if (String(meta?.almcod || "").trim()) return true;
   if (meta?.rowCount === undefined) return true;
   return meta.rowCount > 0;
+};
+
+/**
+ * Nombre de un establecimiento para mostrar en pantalla.
+ *
+ * Quita el código pegado al final (`C.S. NUEVO LIMA-06519`) y el prefijo `FARM -`. Cada
+ * pantalla de Consulta Stock lo resolvía por su cuenta recortando por el **último** guion,
+ * repetido once veces. Eso valía para los nombres de pestaña, pero la tarjeta ya puede
+ * mostrar el nombre oficial del registro, y uno como «P.S. NUEVO TARAPOTO - ANEXO» se
+ * quedaba a medias. Aquí solo se quita un código del final, no cualquier guion.
+ */
+export const describeSheetName = (name?: string | null): string => {
+  const limpio = String(name || "").trim();
+  const sinCodigo = limpio.replace(/-[A-Z0-9]+\s*$/i, "").trim();
+  return (sinCodigo || limpio).replace(/^FARM\s*-\s*/i, "").trim() || limpio;
 };
 
 /** Conteo de filas ya conocido por pestaña, para no volver a pedirlo en cada sincronización. */
