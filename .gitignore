@@ -126,4 +126,10 @@ dist-ssr
 Thumbs.db
 
 # Configuración local de herramientas (Claude Code)
-.claude/
+#
+# Se ignora el contenido de la carpeta, no la carpeta: Git no puede reincluir un archivo
+# cuyo directorio está excluido, y `launch.json` sí se comparte (dice cómo levantar la
+# aplicación, igual para todo el equipo). Los ajustes locales y las credenciales siguen
+# fuera.
+.claude/*
+!.claude/launch.json
