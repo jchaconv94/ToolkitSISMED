@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   assignmentBelongsToConnection,
+  buildUngetConnectionStatus,
   cachedSourcesStillMatch,
   describeConnectionMode,
+  isVirtualSheetUrl,
   normalizeUngetName,
   pickOneConnectionPerUnget,
   ungetConnectionKey,
@@ -88,6 +90,82 @@ describe("describeConnectionMode", () => {
     expect(describeConnectionMode({ name: "B", url: "https://script.google.com/x" }, esVirtual)).toBe("apps-script");
     expect(describeConnectionMode({ name: "C", url: "sheets://LIBRO" }, esVirtual)).toBe("sin-hoja");
     expect(describeConnectionMode({ name: "D" }, esVirtual)).toBe("sin-hoja");
+  });
+});
+
+describe("isVirtualSheetUrl", () => {
+  it("reconoce la marca de lectura directa", () => {
+    expect(isVirtualSheetUrl("sheets://LIBRO")).toBe(true);
+    expect(isVirtualSheetUrl("https://script.google.com/x")).toBe(false);
+    expect(isVirtualSheetUrl(undefined)).toBe(false);
+    expect(isVirtualSheetUrl(null)).toBe(false);
+  });
+});
+
+describe("buildUngetConnectionStatus", () => {
+  const ungets = [
+    { id: "u-1", name: "Bellavista" },
+    { id: "u-2", name: "Tocache" },
+    { id: "u-3", name: "El Dorado" },
+  ];
+
+  it("distingue lectura directa, Apps Script y UNGET sin nadie que la haya configurado", () => {
+    const estados = buildUngetConnectionStatus(ungets, [
+      { name: "Bellavista", ungetId: "u-1", username: "bellavista", spreadsheetId: "LIBRO_B" },
+      { name: "Tocache", ungetId: "u-2", username: "mirian", url: "https://script.google.com/t" },
+    ]);
+
+    expect(estados.get("u-1")?.state).toBe("directa");
+    expect(estados.get("u-2")?.state).toBe("apps-script");
+    // Es lo que esta vista viene a resolver: antes no aparecía en ningún lado.
+    expect(estados.get("u-3")?.state).toBe("sin-conexion");
+  });
+
+  it("dice quién mantiene la conexión", () => {
+    const estados = buildUngetConnectionStatus(ungets, [
+      { name: "Bellavista", ungetId: "u-1", username: "bellavista", spreadsheetId: "LIBRO_B" },
+    ]);
+    expect(estados.get("u-1")?.maintainer).toBe("bellavista");
+    expect(estados.get("u-3")?.maintainer).toBeUndefined();
+  });
+
+  it("empareja por nombre mientras la fila no tenga identificador", () => {
+    const estados = buildUngetConnectionStatus(ungets, [
+      { name: "BELLAVISTA", username: "admin", url: "https://script.google.com/b" },
+    ]);
+    expect(estados.get("u-1")?.state).toBe("apps-script");
+  });
+
+  it("con varias filas de la misma UNGET manda la que tiene hoja", () => {
+    // El caso real: el enlace estaba en la fila de `admin` y la lista mostraba la otra.
+    const estados = buildUngetConnectionStatus(ungets, [
+      { name: "Bellavista", ungetId: "u-1", username: "bellavista", url: "https://script.google.com/b" },
+      { name: "BELLAVISTA", username: "admin", spreadsheetId: "LIBRO_B" },
+    ]);
+    expect(estados.get("u-1")?.state).toBe("directa");
+    expect(estados.get("u-1")?.maintainer).toBe("admin");
+  });
+
+  it("una conexión configurada con un nombre que no está registrado no ensucia a nadie", () => {
+    const estados = buildUngetConnectionStatus(ungets, [
+      { name: "Mariscal Cáceres", username: "admin", spreadsheetId: "LIBRO_M" },
+    ]);
+    expect(estados.size).toBe(3);
+    expect([...estados.values()].every((e) => e.state === "sin-conexion")).toBe(true);
+  });
+
+  it("una conexión sin hoja y sin Web App no cuenta como configurada del todo", () => {
+    const estados = buildUngetConnectionStatus(ungets, [
+      { name: "Tocache", ungetId: "u-2", username: "mirian" },
+    ]);
+    expect(estados.get("u-2")?.state).toBe("sin-hoja");
+  });
+
+  it("no se cae con listas vacías ni con huecos", () => {
+    expect(buildUngetConnectionStatus([], []).size).toBe(0);
+    expect(buildUngetConnectionStatus(null, null).size).toBe(0);
+    expect(buildUngetConnectionStatus([{ id: "", name: "Sin id" }], []).size).toBe(0);
+    expect(buildUngetConnectionStatus(ungets, [null as any]).get("u-1")?.state).toBe("sin-conexion");
   });
 });
 

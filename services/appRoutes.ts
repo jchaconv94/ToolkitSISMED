@@ -72,3 +72,44 @@ export const moduleForPath = (pathname: string): AppModule | null => {
   if (ruta.startsWith(`${APP_BASE}/`)) ruta = ruta.slice(APP_BASE.length);
   return MODULOS_POR_RUTA.get(ruta) || null;
 };
+
+/** Dónde se deja escrito a qué vino el usuario al cambiar de módulo. */
+const CLAVE_INTENCION = "toolkit_intencion_navegacion";
+
+/**
+ * Lleva la aplicación a otro módulo desde cualquier componente.
+ *
+ * `App.tsx` mantiene la vista en un único estado y la sincroniza con la dirección del
+ * navegador, escuchando `popstate`. Cambiar la dirección y avisar por ahí evita tener que
+ * pasar una función de navegación por toda la cadena de componentes, que en administración
+ * atraviesa pantallas muy grandes.
+ *
+ * `intent` es un recado de un solo uso para el módulo de destino: lo recoge con
+ * `takeNavigationIntent()` al montarse, y sirve para abrirlo en la pantalla que hace falta
+ * en vez de dejar al usuario buscándola.
+ */
+export const navigateToModule = (module: AppModule, intent?: string): void => {
+  if (intent) {
+    try {
+      window.sessionStorage.setItem(CLAVE_INTENCION, intent);
+    } catch {
+      // Sin almacenamiento de sesión se navega igual; solo se pierde el recado.
+    }
+  }
+  window.history.pushState({ view: module }, "", pathForModule(module));
+  window.dispatchEvent(new PopStateEvent("popstate"));
+};
+
+/** Recoge el recado de navegación y lo borra, para que no se repita al volver a entrar. */
+export const takeNavigationIntent = (): string | null => {
+  try {
+    const intencion = window.sessionStorage.getItem(CLAVE_INTENCION);
+    if (intencion) window.sessionStorage.removeItem(CLAVE_INTENCION);
+    return intencion;
+  } catch {
+    return null;
+  }
+};
+
+/** Recado: abrir Consulta Stock con el panel de conexiones desplegado. */
+export const INTENT_OPEN_STOCK_CONNECTIONS = "consulta-stock:conexiones";

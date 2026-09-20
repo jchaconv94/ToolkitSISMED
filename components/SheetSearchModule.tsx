@@ -79,6 +79,7 @@ import {
   pickOneConnectionPerUnget,
   ungetConnectionKeys,
 } from "../services/ungetConnections";
+import { INTENT_OPEN_STOCK_CONNECTIONS, takeNavigationIntent } from "../services/appRoutes";
 import {
   fetchSheetsMetadataViaApi,
   hasSheetsApiKey,
@@ -1423,6 +1424,13 @@ export const SheetSearchModule: React.FC = () => {
       }
     }
   }, [isConfigOpen, editingIndex, isUngetRole, myUnget]);
+
+  // Quien llega desde Administración → Establecimientos viene a configurar una conexión,
+  // así que el panel se abre solo en vez de dejarlo buscando el botón.
+  useEffect(() => {
+    if (!canManageConfigs) return;
+    if (takeNavigationIntent() === INTENT_OPEN_STOCK_CONNECTIONS) setIsConfigOpen(true);
+  }, [canManageConfigs]);
 
   // Publicar evento al cambiar el estado de los filtros avanzados para contraer el sidebar de App.tsx
   useEffect(() => {

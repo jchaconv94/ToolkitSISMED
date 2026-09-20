@@ -153,3 +153,19 @@ Se hace primero lo que no toca la base, para poder verificar cada paso:
 3. **Se retiran las suscripciones**, ya cubiertas por la jerarquía.
 4. **Asignaciones IPRESS ↔ pestaña por identificador**, no por URL.
 5. **Establecimientos muestra el estado de conexión de cada UNGET.**
+
+## 8. Estado del plan (20/09/2026)
+
+Los cinco pasos están aplicados.
+
+| Paso | Estado |
+| --- | --- |
+| 1. Una conexión por UNGET en pantalla | PR #31 |
+| 2. Columna `unget_id` e índice único | PR #31 + `supabase/SUPABASE_MIGRACION_CONEXION_POR_UNGET.sql` |
+| 3. Retirada de suscripciones | PR #31 |
+| 4. Asignaciones por identificador | PR #33 y #34 + `supabase/SUPABASE_MIGRACION_ASIGNACIONES_POR_UNGET.sql` |
+| 5. Estado de conexión en Establecimientos | este PR |
+
+La migración del paso 4 se ejecutó el 20/09/2026: las 5 asignaciones existentes quedaron ancladas a su UNGET (Bellavista 4, Tocache 1) y ninguna estaba huérfana, porque se hizo mientras las URL todavía coincidían.
+
+Queda fuera del modelo, como trabajo de operación: cada informático debe configurar el enlace de su hoja de cálculo —compartida como «Cualquiera con el enlace: Lector»— para que su UNGET deje de leer por Apps Script. La columna «Conexión» de Establecimientos es lo que permite ver de un vistazo a quién le falta.

@@ -2,10 +2,67 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { HealthFacility, Unget, Diresa, Ogess, Microred } from '../types';
-import { Building2, Plus, Edit, Trash2, MapPin, Search, ChevronLeft, ChevronRight, Save, X, Network, Globe, Filter, FilterX, Info, Copy, Check, Hash, Phone, Mail, Activity, ShieldAlert, ShieldCheck, FileSpreadsheet } from 'lucide-react';
+import { Building2, Plus, Edit, Trash2, MapPin, Search, ChevronLeft, ChevronRight, Save, X, Network, Globe, Filter, FilterX, Info, Copy, Check, Hash, Phone, Mail, Activity, ShieldAlert, ShieldCheck, FileSpreadsheet, Zap, PlugZap, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { CustomSelect } from './ui/CustomSelect';
+import { buildUngetConnectionStatus, type UngetConnectionState } from '../services/ungetConnections';
+import { INTENT_OPEN_STOCK_CONNECTIONS, navigateToModule } from '../services/appRoutes';
+
+/**
+ * Cómo se muestra el estado de conexión de una UNGET.
+ *
+ * Los colores siguen la convención del proyecto: verde lo que funciona bien, ámbar lo que
+ * funciona pero conviene cambiar, rojo lo que está roto y gris lo que nadie ha tocado.
+ */
+const CONNECTION_STATE_UI: Record<UngetConnectionState, { label: string; hint: string; chip: string; dark: string; Icon: React.ElementType }> = {
+    'directa': {
+        label: 'Lectura directa',
+        hint: 'Lee la hoja de cálculo directamente. Es el camino rápido.',
+        chip: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        dark: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
+        Icon: Zap
+    },
+    'apps-script': {
+        label: 'Apps Script',
+        hint: 'Lee por el Web App de Google: es lento y a veces responde 404. Conviene configurar la hoja.',
+        chip: 'bg-amber-50 text-amber-700 border-amber-200',
+        dark: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
+        Icon: Globe
+    },
+    'sin-hoja': {
+        label: 'Sin hoja',
+        hint: 'Tiene conexión creada pero sin hoja de cálculo ni Web App: no puede leer stock.',
+        chip: 'bg-rose-50 text-rose-700 border-rose-200',
+        dark: 'bg-rose-500/10 text-rose-300 border-rose-500/20',
+        Icon: ShieldAlert
+    },
+    'sin-conexion': {
+        label: 'Sin configurar',
+        hint: 'Nadie ha configurado la conexión de esta UNGET.',
+        chip: 'bg-slate-100 text-slate-500 border-slate-200',
+        dark: 'bg-slate-700/40 text-slate-300 border-slate-600/40',
+        Icon: PlugZap
+    }
+};
+
+/** Mientras no se sepa el estado, se dice que no se sabe. */
+const CONNECTION_STATE_UI_UNKNOWN: Record<'loading' | 'error', typeof CONNECTION_STATE_UI['directa']> = {
+    loading: {
+        label: 'Consultando…',
+        hint: 'Leyendo el estado de conexión.',
+        chip: 'bg-slate-50 text-slate-400 border-slate-200',
+        dark: 'bg-slate-700/40 text-slate-400 border-slate-600/40',
+        Icon: Activity
+    },
+    error: {
+        label: 'No se pudo leer',
+        hint: 'No se pudo consultar el estado de conexión. No significa que falte configurarla.',
+        chip: 'bg-slate-50 text-slate-400 border-slate-200',
+        dark: 'bg-slate-700/40 text-slate-400 border-slate-600/40',
+        Icon: ShieldAlert
+    }
+};
 
 const AVAILABLE_COLUMNS = [
   { key: "ALMCOD", label: "Código Almacén", defaultState: false },
@@ -24,7 +81,7 @@ const AVAILABLE_COLUMNS = [
 ];
 
 export const AdminOrganizationModule: React.FC = () => {
-    const { user } = useAuth();
+    const { user, hasPermission } = useAuth();
 
     // Premium spreadsheet-like column filter states
     const [activeFilterId, setActiveFilterId] = useState<string | null>(null);
@@ -93,6 +150,8 @@ export const AdminOrganizationModule: React.FC = () => {
     const [ogess, setOgess] = useState<Ogess[]>([]);
     const [ungets, setUngets] = useState<Unget[]>([]);
     const [microredes, setMicroredes] = useState<Microred[]>([]);
+    const [stockConnections, setStockConnections] = useState<any[]>([]);
+    const [connectionsStatus, setConnectionsStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [facilities, setFacilities] = useState<HealthFacility[]>([]);
     
     const [isLoading, setIsLoading] = useState(true);
@@ -680,6 +739,51 @@ export const AdminOrganizationModule: React.FC = () => {
     useEffect(() => {
         fetchData();
     }, []);
+
+    // Las conexiones de stock viven en otro módulo y en otra tabla. Se leen aparte a
+    // propósito: si esa lectura falla, Establecimientos sigue mostrando la organización y
+    // solo se queda sin el estado de conexión.
+    useEffect(() => {
+        let vigente = true;
+        api.getAllUngetConfigs()
+            .then(configs => {
+                if (!vigente) return;
+                setStockConnections(configs || []);
+                setConnectionsStatus('ready');
+            })
+            .catch(e => {
+                console.warn("No se pudo leer el estado de conexión de las UNGET:", e);
+                if (vigente) setConnectionsStatus('error');
+            });
+        return () => { vigente = false; };
+    }, []);
+
+    /** Estado de conexión por identificador de UNGET. */
+    const connectionByUnget = useMemo(
+        () => buildUngetConnectionStatus(ungets, stockConnections, { currentUsername: user?.username }),
+        [ungets, stockConnections, user?.username]
+    );
+
+    /**
+     * Cómo pintar el estado de una UNGET.
+     *
+     * Mientras las conexiones no hayan llegado —o si no se pudieron leer— no se dice «Sin
+     * configurar»: esa etiqueta pide actuar, y afirmarla sin saberlo manda al informático a
+     * rehacer una conexión que quizá ya existe.
+     */
+    const getConnectionUi = (ungetId?: string) => {
+        if (connectionsStatus !== 'ready') return CONNECTION_STATE_UI_UNKNOWN[connectionsStatus];
+        return CONNECTION_STATE_UI[connectionByUnget.get(String(ungetId || ''))?.state || 'sin-conexion'];
+    };
+
+    /** Solo se ofrece el acceso a quien puede entrar a Consulta Stock. */
+    const canReachStockConnections = hasPermission('SIG_SEARCH');
+
+    const goToStockConnections = () => {
+        setSelectedDetailItem(null);
+        setSelectedDetailType(null);
+        navigateToModule('SIG_SEARCH', INTENT_OPEN_STOCK_CONNECTIONS);
+    };
 
     // --- DIRESA CRUD --- //
     const handleSaveDiresa = async (e?: React.FormEvent) => {
@@ -1771,6 +1875,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                                 setFilterUngetId('');
                                                             }, "unget-diresa")}
                                                         </th>
+                                                        <th className="p-4">Conexión</th>
                                                         <th className="p-4 text-right pr-6">Acciones</th>
                                                     </tr>
                                                 </thead>
@@ -1791,6 +1896,20 @@ export const AdminOrganizationModule: React.FC = () => {
                                                             <td className="p-4 text-slate-700 font-semibold">{getOgessName(u.ogessId)}</td>
                                                             <td className="p-4">
                                                                 <span className="bg-teal-50 text-teal-800 px-2 py-0.5 rounded-lg text-xs font-bold border border-teal-100">{getDiresaName(u.diresaId)}</span>
+                                                            </td>
+                                                            <td className="p-4">
+                                                                {(() => {
+                                                                    const ui = getConnectionUi(u.id);
+                                                                    return (
+                                                                        <span
+                                                                            title={ui.hint}
+                                                                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-bold border whitespace-nowrap ${ui.chip}`}
+                                                                        >
+                                                                            <ui.Icon className="h-3 w-3 shrink-0" />
+                                                                            {ui.label}
+                                                                        </span>
+                                                                    );
+                                                                })()}
                                                             </td>
                                                             <td className="p-4 flex gap-2 justify-end pr-6">
                                                                 <button 
@@ -1853,6 +1972,15 @@ export const AdminOrganizationModule: React.FC = () => {
                                                         <div className="flex flex-wrap gap-1.5 mt-1">
                                                             <span className="bg-slate-100 text-slate-700 font-extrabold px-1.5 py-0.5 rounded text-[9px]">OGESS: {getOgessName(u.ogessId)}</span>
                                                             <span className="bg-teal-50 border border-teal-100 text-teal-800 font-extrabold px-1.5 py-0.5 rounded text-[9px]">DIRESA: {getDiresaName(u.diresaId)}</span>
+                                                            {(() => {
+                                                                const ui = getConnectionUi(u.id);
+                                                                return (
+                                                                    <span className={`inline-flex items-center gap-1 border font-extrabold px-1.5 py-0.5 rounded text-[9px] ${ui.chip}`}>
+                                                                        <ui.Icon className="h-2.5 w-2.5 shrink-0" />
+                                                                        {ui.label}
+                                                                    </span>
+                                                                );
+                                                            })()}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -2174,6 +2302,46 @@ export const AdminOrganizationModule: React.FC = () => {
                                     </div>
                                 </div>
                             )}
+
+                            {/* Estado de la conexión de stock: solo la UNGET tiene una. */}
+                            {selectedDetailType === 'UNGET' && (() => {
+                                // Sin el estado leído no se afirma nada: `getConnectionUi` ya lo dice,
+                                // y quien la mantiene se deja en blanco en vez de inventarlo.
+                                const estado = connectionsStatus === 'ready'
+                                    ? connectionByUnget.get(String(selectedDetailItem.id || ''))
+                                    : undefined;
+                                const ui = getConnectionUi(selectedDetailItem.id);
+                                return (
+                                    <div className="space-y-2 border-t border-slate-800 pt-4 bg-slate-900/30 p-4 rounded-2xl">
+                                        <h4 className="text-[9px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                                            <FileSpreadsheet className="h-3 w-3 text-teal-400" /> Conexión de Stock
+                                        </h4>
+                                        <div className="divide-y divide-slate-800">
+                                            <div className="py-2 flex justify-between items-center gap-2 text-xs font-bold">
+                                                <span className="text-slate-400 text-[11px]">Estado</span>
+                                                <span className={`inline-flex items-center gap-1 border font-black px-2 py-0.5 rounded-lg text-[10px] ${ui.dark}`}>
+                                                    <ui.Icon className="h-3 w-3 shrink-0" />
+                                                    {ui.label}
+                                                </span>
+                                            </div>
+                                            <div className="py-2 flex justify-between items-center gap-2 text-xs font-bold">
+                                                <span className="text-slate-400 text-[11px]">La mantiene</span>
+                                                <span className="text-slate-300 font-mono font-black text-[10px]">{estado?.maintainer || '—'}</span>
+                                            </div>
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 leading-snug pt-1">{ui.hint}</p>
+                                        {canReachStockConnections && (
+                                            <button
+                                                onClick={goToStockConnections}
+                                                className="w-full mt-1 flex items-center justify-center gap-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-300 border border-teal-500/20 font-black uppercase tracking-wider text-[10px] px-3 py-2 rounded-xl transition cursor-pointer"
+                                            >
+                                                <Settings2 className="h-3 w-3" />
+                                                Configurar conexión
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })()}
 
                             {/* Tags section in left column */}
                             <div className="space-y-2 border-t border-slate-800 pt-4 mt-auto bg-slate-900/30 p-4 rounded-2xl">
