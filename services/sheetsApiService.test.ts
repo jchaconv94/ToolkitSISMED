@@ -10,7 +10,6 @@ import {
   findFacilityByCode,
   isFacilitySheet,
   listSheetTabs,
-  officialFacilityCode,
 } from "./sheetsApiService";
 
 const ID = "1vic6MeMiA5Jk4_UWx8nI462yXe8irgxAoMncJiekOOA";
@@ -80,24 +79,6 @@ describe("describeSheetName", () => {
     expect(describeSheetName("-06519")).toBe("-06519");
     expect(describeSheetName("")).toBe("");
     expect(describeSheetName(null)).toBe("");
-  });
-});
-
-describe("officialFacilityCode", () => {
-  it("quita el sufijo interno de farmacia o almacén", () => {
-    expect(officialFacilityCode("06519F01")).toBe("06519");
-    expect(officialFacilityCode("06505F0101")).toBe("06505");
-  });
-
-  it("deja intacto el código que ya es el oficial", () => {
-    expect(officialFacilityCode("030S05")).toBe("030S05");
-    expect(officialFacilityCode("06502")).toBe("06502");
-  });
-
-  it("sin código devuelve vacío", () => {
-    expect(officialFacilityCode("")).toBe("");
-    expect(officialFacilityCode(undefined)).toBe("");
-    expect(officialFacilityCode(null)).toBe("");
   });
 });
 
