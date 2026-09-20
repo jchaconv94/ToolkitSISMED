@@ -796,9 +796,20 @@ const getItemExpiration = (
   return null;
 };
 
+/**
+ * Código de almacén de una hoja, leído de su propio stock.
+ *
+ * El encabezado llega tal cual lo escribió quien hizo la hoja: `processSheet_` del backend
+ * solo lo recorta, no lo normaliza. Así que buscar la propiedad `ALMCOD` exacta dejaba sin
+ * código a las hojas que la escriben `Almcod`, `ALM COD` o `ALM_COD` —el dato estaba, pero
+ * la aplicación no lo encontraba y la tarjeta salía sin su código. Se lee con el mismo
+ * criterio tolerante que ya se usa para las fechas.
+ */
+const readAlmCode = (row: any): string => getRowFieldValue(row, "ALMCOD", "ALM_COD", "ALM COD");
+
 const getAlmCodeForSheet = (sheetId: string, sheetData: SIGData[]): string => {
-  const row = sheetData.find((r) => r.sourceId === sheetId && r.ALMCOD);
-  return row ? formatAlmCode(row.ALMCOD) : "";
+  const row = sheetData.find((r) => r.sourceId === sheetId && readAlmCode(r));
+  return row ? formatAlmCode(readAlmCode(row)) : "";
 };
 
 const getExpirationStats = (records: SIGData[]) => {
@@ -3169,7 +3180,7 @@ export const SheetSearchModule: React.FC = () => {
     if (!sheetInfo) return;
 
     const dataToExport = filteredData.map((r) => ({
-      ALMCOD: r.ALMCOD || "",
+      ALMCOD: readAlmCode(r),
       DESC_ALM: r.DESC_ALM || sheetInfo.name || "",
       ID_Producto: r.ID_Producto || "",
       CODIGO_SIG: r.CODIGO_SIG || r.SIGA || "",
@@ -3207,7 +3218,7 @@ export const SheetSearchModule: React.FC = () => {
     if (!sheetInfo) return;
 
     const dataToExport = modalStockData.map((r) => ({
-      ALMCOD: r.ALMCOD || "",
+      ALMCOD: readAlmCode(r),
       DESC_ALM: r.DESC_ALM || sheetInfo.name || "",
       ID_Producto: r.ID_Producto || "",
       CODIGO_SIG: r.CODIGO_SIG || r.SIGA || "",
@@ -3396,7 +3407,7 @@ export const SheetSearchModule: React.FC = () => {
       const ungetInfo = sheetInfo ? scriptUrls[sheetInfo.urlIndex] : null;
       return {
         UNGET: ungetInfo ? ungetInfo.name : "N/A",
-        ALMCOD: r.ALMCOD || "",
+        ALMCOD: readAlmCode(r),
         DESC_ALM: r.DESC_ALM || (sheetInfo ? sheetInfo.name : ""),
         ID_Producto: r.ID_Producto || "",
         CODIGO_SIG: r.CODIGO_SIG || r.SIGA || "",
@@ -7665,7 +7676,7 @@ function processSheet(sheet) {
                         "",
                       )}{" "}
                       <span className="text-gray-400 font-medium whitespace-nowrap">
-                        ({formatAlmCode(selectedRecord.ALMCOD)})
+                        ({formatAlmCode(readAlmCode(selectedRecord))})
                       </span>
                     </p>
                   </div>
