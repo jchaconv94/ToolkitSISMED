@@ -242,11 +242,15 @@ export const connectionsToRetire = <T extends { id: any; ungetId?: string | null
 
   return (mine || []).filter((fila) => {
     if (!fila) return false;
+    // Una fila que ya tiene UNGET se decide solo por su UNGET. Reconocerla además por la
+    // URL dejaría viva la fila anterior al mover una conexión de una UNGET a otra
+    // conservando el enlace, y el mismo libro acabaría colgando de las dos.
     const porUnget = String(fila.ungetId || "").trim();
-    if (porUnget && ungetsConservadas.has(porUnget)) return false;
+    if (porUnget) return !ungetsConservadas.has(porUnget);
+    // La URL solo reconoce una fila que todavía no tiene UNGET, que es el caso de la que se
+    // acaba de insertar en este mismo guardado.
     const porUrl = String(fila.url || "").trim();
-    if (porUrl && urlsConservadas.has(porUrl)) return false;
-    return true;
+    return !(porUrl && urlsConservadas.has(porUrl));
   });
 };
 

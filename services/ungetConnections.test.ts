@@ -242,6 +242,13 @@ describe("connectionsToRetire", () => {
     expect(connectionsToRetire([...mias, recienCreada], guardadas)).toEqual([]);
   });
 
+  it("retira la fila anterior al mover una conexión de UNGET conservando el enlace", () => {
+    // La URL no puede rescatar una fila que sí tiene UNGET: si lo hiciera, el mismo libro
+    // quedaría colgando de la UNGET vieja y de la nueva, y el stock de una se vería en la otra.
+    const guardadas = [{ ungetId: "u-9", url: "https://script.google.com/bellavista" }];
+    expect(connectionsToRetire(mias, guardadas).map((c) => c.id)).toEqual([1, 2]);
+  });
+
   it("sí retira una fila sin UNGET cuya URL ya no está en la lista", () => {
     const huerfana = { id: 4, ungetId: null, url: "https://script.google.com/vieja" };
     expect(connectionsToRetire([...mias, huerfana], mias).map((c) => c.id)).toEqual([4]);
