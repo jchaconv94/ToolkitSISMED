@@ -180,4 +180,66 @@ describe("fetchSheetsMetadataViaApi", () => {
     const [meta] = await fetchSheetsMetadataViaApi(ID, { apiKey: KEY });
     expect(meta).toMatchObject({ id: "7", name: "NUEVA-06599", lastUpdate: "", equipmentDate: "", rowCount: 0, codigoIpress: "06599" });
   });
+
+  it("si se agota la cuota al leer los valores, cae al CSV en vez de dejar la UNGET sin vía", async () => {
+    // Una UNGET que configuró su hoja y retiró su Web App no tenía ningún otro camino:
+    // la lectura directa necesita pestañas ya conocidas y en la primera carga no las hay.
+    // Las pestañas sí se obtuvieron, así que las cabeceras se leen por CSV, que no consume
+    // cuota.
+    const mock = vi.fn(async (input: any) => {
+      const url = String(input);
+      if (url.includes("values:batchGet")) {
+        return {
+          ok: false,
+          status: 429,
+          headers: { get: () => "application/json" },
+          text: async () => JSON.stringify({ error: { message: "Quota exceeded" } }),
+        };
+      }
+      if (url.includes("/v4/spreadsheets/")) {
+        return { ok: true, status: 200, headers: { get: () => "application/json" }, text: async () => JSON.stringify(tabsBody) };
+      }
+      const gid = new URL(url).searchParams.get("gid");
+      const almcod = gid === "121569872" ? "06502F01" : "06505F01";
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => "text/csv" },
+        text: async () => `ALMCOD,ULTIMA ACTUALIZACION,FECHA DEL EQUIPO\n${almcod},18/09/2026 09:30:00,18/09/2026 09:29:00\n`,
+      };
+    });
+    vi.stubGlobal("fetch", mock);
+
+    const metadata = await fetchSheetsMetadataViaApi(ID, { apiKey: KEY });
+    expect(metadata.map((m) => m.name)).toEqual([
+      "FARM - P.S. LIMON-06505",
+      "HOSP. BELLAVISTA-06502",
+    ]);
+    expect(metadata[1]).toMatchObject({
+      id: "121569872",
+      almcod: "06502F01",
+      codigoIpress: "06502",
+      lastUpdate: "18/09/2026 09:30:00",
+      spreadsheetId: ID,
+    });
+    // A la API solo la lista de pestañas y el intento de valores que falló; las cabeceras
+    // se leyeron por CSV, que no consume cuota.
+    const aLaApi = mock.mock.calls.filter((c) => String(c[0]).includes("sheets.googleapis.com"));
+    expect(aLaApi).toHaveLength(2);
+    const porCsv = mock.mock.calls.filter((c) => String(c[0]).includes("docs.google.com"));
+    expect(porCsv).toHaveLength(2);
+  });
+
+  it("si tampoco se pueden leer las cabeceras, el error sube para que quien llama pruebe otra vía", async () => {
+    const mock = vi.fn(async (input: any) => {
+      const url = String(input);
+      if (url.includes("/v4/spreadsheets/") && !url.includes("values:batchGet")) {
+        return { ok: true, status: 200, headers: { get: () => "application/json" }, text: async () => JSON.stringify(tabsBody) };
+      }
+      // 403 en el CSV: hoja no compartida. No se reintenta, así que la prueba no espera.
+      return { ok: false, status: 403, headers: { get: () => "text/html" }, text: async () => "" };
+    });
+    vi.stubGlobal("fetch", mock);
+    await expect(fetchSheetsMetadataViaApi(ID, { apiKey: KEY })).rejects.toThrow();
+  });
 });

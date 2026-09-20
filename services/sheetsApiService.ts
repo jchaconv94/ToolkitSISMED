@@ -14,7 +14,7 @@
  */
 
 import type { GasSheetMetadata } from "./gasConnectionService";
-import { readHeadMetadata } from "./sheetsDirectService";
+import { fetchSheetsMetadataDirect, readHeadMetadata } from "./sheetsDirectService";
 
 const API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 export const SHEETS_API_TIMEOUT_MS = 20_000;
@@ -252,10 +252,32 @@ export async function fetchSheetsMetadataViaApi(
     }
   });
 
-  const values = await batchGetRanges(spreadsheetId, ranges, {
-    apiKey: options.apiKey,
-    timeoutMs: options.timeoutMs,
-  });
+  let values: string[][][];
+  try {
+    values = await batchGetRanges(spreadsheetId, ranges, {
+      apiKey: options.apiKey,
+      timeoutMs: options.timeoutMs,
+    });
+  } catch (err: any) {
+    // La lista de pestañas ya se obtuvo; lo que falló es la lectura de valores, que es la
+    // parte que consume cuota. Leer las cabeceras por CSV no consume ninguna, así que una
+    // UNGET sin Web App sigue cargando en vez de quedarse sin ninguna vía. Este era el
+    // único camino de una UNGET que configuró su hoja y retiró su Apps Script.
+    console.warn(
+      "Google Sheets API no entregó los valores; se leen las cabeceras por CSV:",
+      err?.message || err,
+    );
+    return await fetchSheetsMetadataDirect(
+      tabs.map((tab) => ({
+        gid: tab.gid,
+        sheetName: tab.title,
+        spreadsheetId,
+        rowCount: known[tab.gid],
+        codigoIpress: facilityCodeFromSheetName(tab.title),
+      })),
+      { timeoutMs: options.timeoutMs },
+    );
+  }
 
   const heads = new Map<string, string[][]>();
   const counts = new Map<string, number>();

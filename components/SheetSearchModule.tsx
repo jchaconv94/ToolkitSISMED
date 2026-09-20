@@ -2579,10 +2579,21 @@ export const SheetSearchModule: React.FC = () => {
       // la procesamos automáticamente aquí para que no se pierda la configuración.
       const pendingUrl = newUrlInput.trim();
       if (pendingUrl) {
-        const pendingValue = newNameInput.trim() || `UNGET ${urlsToSave.length + 1}`;
-        const matching = allUngets.find(u => String(u.id) === pendingValue || u.name === pendingValue);
-        const pendingName = matching ? matching.name : pendingValue;
-        const pendingUngetId = matching ? matching.id : undefined;
+        // Misma exigencia que en "Añadir a Lista": sin UNGET registrada no hay conexión.
+        // El nombre de relleno («UNGET 3») no coincidía nunca con una UNGET real, así que
+        // por este atajo entraban conexiones que no colgaban de ninguna.
+        const pendingValue = newNameInput.trim();
+        const matching = pendingValue
+          ? allUngets.find(u => String(u.id) === pendingValue || u.name === pendingValue)
+          : undefined;
+        if (!matching) {
+          toast.error(
+            "Indique a qué UNGET pertenece esta conexión antes de guardar. Debe estar registrada en Administración → Establecimientos.",
+          );
+          return;
+        }
+        const pendingName = matching.name;
+        const pendingUngetId = matching.id;
 
         if (editingIndex !== null) {
           urlsToSave[editingIndex] = { url: pendingUrl, name: pendingName, ungetId: pendingUngetId, username: user.username };
@@ -2671,8 +2682,17 @@ export const SheetSearchModule: React.FC = () => {
     }
 
     const matching = allUngets.find(u => String(u.id) === val || u.name === val);
-    const name = matching ? matching.name : val;
-    const ungetId = matching ? matching.id : undefined;
+    // Sin UNGET registrada no hay conexión posible: al guardarla sin identificador la fila
+    // se insertaba y se retiraba en la misma operación, y la pantalla decía que todo fue
+    // bien. Mejor no dejar llegar hasta ahí.
+    if (!matching) {
+      toast.error(
+        `No se pudo identificar la UNGET "${val}" entre las registradas en Establecimientos. Actualice la página; si el problema sigue, regístrela antes de configurar su conexión.`,
+      );
+      return;
+    }
+    const name = matching.name;
+    const ungetId = matching.id;
 
     if (editingIndex !== null) {
       // Caso edición
