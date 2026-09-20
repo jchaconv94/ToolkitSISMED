@@ -6,6 +6,7 @@ import {
   batchGetRanges,
   facilityCodeFromSheetName,
   fetchSheetsMetadataViaApi,
+  isFacilitySheet,
   listSheetTabs,
 } from "./sheetsApiService";
 
@@ -54,6 +55,35 @@ describe("a1Range / facilityCodeFromSheetName", () => {
     expect(facilityCodeFromSheetName("ALM. ANEXO BELLAVISTA - SAN MARTIN-030S05")).toBe("030S05");
     expect(facilityCodeFromSheetName("SAL SISMED", "06502F01")).toBe("06502");
     expect(facilityCodeFromSheetName("HOJA", "")).toBe("");
+  });
+});
+
+describe("isFacilitySheet", () => {
+  it("descarta la pestaña suelta que Google crea sola", () => {
+    // Caso real del 20/09/2026: el libro de San Martín tenía una `Sheet3` vacía y salía en
+    // Consulta Stock como un establecimiento más, con «Sin datos» y «0 items».
+    expect(isFacilitySheet({ name: "Sheet3", rowCount: 0 })).toBe(false);
+    expect(isFacilitySheet({ name: "Hoja 1", rowCount: 0 })).toBe(false);
+    expect(isFacilitySheet({ name: "copia de trabajo", rowCount: 0 })).toBe(false);
+  });
+
+  it("conserva un establecimiento por el código de su nombre, aunque esté sin stock", () => {
+    expect(isFacilitySheet({ name: "HOSP. BELLAVISTA-06502", rowCount: 0 })).toBe(true);
+    expect(isFacilitySheet({ name: "ALM. ANEXO BELLAVISTA - SAN MARTIN-030S05", rowCount: 0 })).toBe(true);
+  });
+
+  it("conserva una pestaña con ALMCOD aunque su nombre no lleve código", () => {
+    expect(isFacilitySheet({ name: "SAL SISMED", almcod: "06502F01", rowCount: 0 })).toBe(true);
+  });
+
+  it("conserva una pestaña con filas aunque no tenga ni código ni ALMCOD", () => {
+    expect(isFacilitySheet({ name: "SIN NOMBRE", rowCount: 40 })).toBe(true);
+  });
+
+  it("sin saber cuántas filas tiene, no se oculta", () => {
+    // La lectura directa no siempre trae el conteo; ante la duda, se muestra.
+    expect(isFacilitySheet({ name: "Sheet3" })).toBe(true);
+    expect(isFacilitySheet({})).toBe(true);
   });
 });
 
