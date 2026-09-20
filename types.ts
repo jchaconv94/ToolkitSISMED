@@ -781,6 +781,8 @@ export interface SheetSource {
   sheetName?: string;
   /** Cantidad de filas reportada por getMetadata; permite mostrar el conteo sin descargar el stock. */
   rowCount?: number;
+  /** ALMCOD de la cabecera, informado por getMetadata: permite mostrar el código sin descargar el stock. */
+  almcod?: string;
   /** Código estable de IPRESS usado como llave preferente del historial en Supabase. */
   facilityCode?: string;
   /** ID del libro de Google Sheets (lo informa getMetadata); permite leer la pestaña directamente. */
