@@ -4,6 +4,8 @@ import { api } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
 import { CustomSelect } from "./ui/CustomSelect";
+import { assignmentSheetExists, listUngetSheets } from "../services/ungetSheetCatalog";
+import { findConnectionForAssignment } from "../services/assignedSheetReader";
 
 const SearchableSelect = ({ label, value, onChange, options, disabled, loading, placeholder }: any) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -193,6 +195,9 @@ export const AdminStockAssignmentModule: React.FC = () => {
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  /** Conexión elegida: de ella sale la UNGET que acota los establecimientos ofrecidos. */
+  const conexionSeleccionada = ungetConfigs.find((c: any) => c.url === selectedConnectionUrl);
+
   const [visibleColumns, setVisibleColumns] = useState<string[]>(
     AVAILABLE_COLUMNS.filter(c => c.defaultState).map(c => c.key)
   );
@@ -297,26 +302,12 @@ export const AdminStockAssignmentModule: React.FC = () => {
     setLoadingSheets(true);
     toast.info("Leyendo hojas de la conexión...", { duration: 2000 });
     try {
-      let finalUrl = url;
-      try {
-        const u = new URL(url);
-        u.searchParams.set("action", "getSheets");
-        finalUrl = u.toString();
-      } catch (e) {}
-
-      const response = await fetch(finalUrl);
-      if (!response.ok) throw new Error("HTTP Error");
-      const json = await response.json();
-      
-      if (Array.isArray(json)) {
-        setAvailableSheets(json.map(s => ({ id: s.id, name: s.name })));
-        toast.success(`Se encontraron ${json.length} hojas (establecimientos).`);
-      } else {
-        toast.error("Formato de respuesta inválido desde Apps Script");
-      }
-    } catch(e) {
+      const sheets = await listUngetSheets(ungetConfigs.find((c: any) => c.url === url));
+      setAvailableSheets(sheets);
+      toast.success(`Se encontraron ${sheets.length} hojas (establecimientos).`);
+    } catch (e: any) {
       console.error(e);
-      toast.error("Error al obtener los establecimientos (hojas)");
+      toast.error(e?.message || "No se pudieron leer las hojas de esta conexión.");
     } finally {
       setLoadingSheets(false);
     }
@@ -340,29 +331,31 @@ export const AdminStockAssignmentModule: React.FC = () => {
   const handleEditAssignment = (assig: any) => {
     setEditingId(assig.id);
     setSelectedFacilityCode(assig.facilityCode);
-    setSelectedConnectionUrl(assig.sheetUrl);
     setVisibleColumns(assig.visibleColumns || []);
-    
-    // Simulate loading sheets for the selected URL so the user can see the sheet selected
-    setLoadingSheets(true);
-    let finalUrl = assig.sheetUrl;
-    try {
-      const u = new URL(assig.sheetUrl);
-      u.searchParams.set("action", "getSheets");
-      finalUrl = u.toString();
-    } catch (e) {}
 
-    fetch(finalUrl)
-      .then(res => res.json())
-      .then(json => {
-         if (Array.isArray(json)) {
-           setAvailableSheets(json.map(s => ({ id: s.id, name: s.name })));
-           setSelectedSheetName(assig.sheetName);
-         }
+    // La conexión vigente de la UNGET, no la URL que quedó guardada en la asignación: esa
+    // cambia cuando la UNGET vuelve a desplegar su Web App o pasa a leer su hoja directa,
+    // y entonces la edición leía de una dirección que ya no sirve.
+    const conexion = findConnectionForAssignment(assig, ungetConfigs);
+    setSelectedConnectionUrl(conexion?.url || assig.sheetUrl);
+
+    setLoadingSheets(true);
+    listUngetSheets(conexion || { url: assig.sheetUrl })
+      .then((sheets) => {
+        setAvailableSheets(sheets);
+        setSelectedSheetName(assig.sheetName);
+        if (!assignmentSheetExists(assig.sheetName, sheets)) {
+          // Aviso, no error: la asignación existe pero apunta al vacío, así que ese
+          // establecimiento no ve su stock y nadie se entera hasta que alguien lo mira.
+          toast.warning(
+            `La pestaña "${assig.sheetName}" ya no existe en el libro de esta UNGET. Elija la pestaña correcta para que el establecimiento vuelva a ver su stock.`,
+            { duration: 10000 },
+          );
+        }
       })
-      .catch(err => {
-         console.error(err);
-         toast.error("Error al cargar las hojas de esta conexión.");
+      .catch((err: any) => {
+        console.error(err);
+        toast.error(err?.message || "No se pudieron leer las hojas de esta conexión.");
       })
       .finally(() => setLoadingSheets(false));
   };
@@ -373,9 +366,27 @@ export const AdminStockAssignmentModule: React.FC = () => {
     if (!selectedSheetName) return toast.error("Seleccione una hoja");
     if (visibleColumns.length === 0) return toast.error("Seleccione al menos una columna visible");
 
+    const conexion = ungetConfigs.find((c: any) => c.url === selectedConnectionUrl);
+
+    // La comprobación que de verdad protege: el desplegable ya filtra, pero el estado puede
+    // quedar desparejado si se elige el establecimiento antes que la conexión.
+    const ungetDeLaConexion = String(conexion?.ungetId || "").trim();
+    const establecimiento = facilities.find((f: any) => f.code === selectedFacilityCode);
+    if (ungetDeLaConexion && establecimiento && String(establecimiento.ungetId || "") !== ungetDeLaConexion) {
+      return toast.error(
+        `"${establecimiento.name}" no pertenece a la UNGET de esta conexión. Elija una hoja de su propia UNGET, o corrija el establecimiento en Administración → Establecimientos.`,
+      );
+    }
+
+    // Una asignación a una pestaña que no está en el libro nace rota y no avisa a nadie.
+    if (availableSheets.length > 0 && !assignmentSheetExists(selectedSheetName, availableSheets)) {
+      return toast.error(
+        `La pestaña "${selectedSheetName}" no existe en el libro de esta UNGET. Vuelva a elegirla de la lista.`,
+      );
+    }
+
     setIsSaving(true);
     try {
-      const conexion = ungetConfigs.find((c: any) => c.url === selectedConnectionUrl);
       const data = {
         adminUsername: currentUser?.username,
         facilityCode: selectedFacilityCode,
@@ -460,11 +471,19 @@ export const AdminStockAssignmentModule: React.FC = () => {
                   placeholder="-- Seleccionar --"
                   options={(() => {
                     const level = getJurisdictionLevel();
+                    // La conexión elegida manda: solo se ofrecen los establecimientos de esa
+                    // UNGET. Antes el desplegable se filtraba únicamente por la jurisdicción
+                    // de quien asigna, así que un administrador podía colgar una IPRESS de
+                    // Tocache de una hoja de Bellavista, y ese usuario acababa viendo el
+                    // stock de otro establecimiento.
+                    const ungetDeLaConexion = String(conexionSeleccionada?.ungetId || "").trim();
                     return facilities
                       .filter(f => {
                         // Excluir si ya está asignado (a menos que estemos editando ese mismo)
                         const isAssigned = activeAssignments.some(a => a.facilityCode === f.code) && f.code !== selectedFacilityCode;
                         if (isAssigned) return false;
+
+                        if (ungetDeLaConexion && String(f.ungetId || "") !== ungetDeLaConexion) return false;
 
                         // Filtrar por ámbito/nivel de jurisdicción del usuario
                         if (level === 'GLOBAL') return true;
