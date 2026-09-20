@@ -14,6 +14,7 @@
  */
 
 import type { GasSheetMetadata } from "./gasConnectionService";
+import { facilityCodeOf } from "./facilityCodes";
 import { fetchSheetsMetadataDirect, readHeadMetadata } from "./sheetsDirectService";
 
 const API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
@@ -216,27 +217,6 @@ export const facilityCodeFromSheetName = (sheetName: string, almcod?: string): s
 };
 
 /**
- * Código oficial de un establecimiento, quitando el sufijo interno de farmacia o almacén.
- *
- *   06519F01    -> 06519      (sufijo de farmacia)
- *   06505F0101  -> 06505
- *   030S05      -> 030S05     (ya es el oficial)
- *
- * Hace falta porque las dos mitades del sistema escriben el mismo establecimiento de forma
- * distinta: la pestaña lleva el código oficial en su nombre (`C.S. NUEVO LIMA-06519`) y el
- * registro puede llevar el interno (`06519F01`). Devuelve "" si no hay código.
- */
-export const officialFacilityCode = (code?: string | null): string => {
-  const c = String(code || "").trim();
-  if (!c) return "";
-  if (c.length >= 8) {
-    if (c.substring(5, 8).toUpperCase() === "F01") return c.substring(0, 5);
-    return c.substring(0, c.length - 2);
-  }
-  return c;
-};
-
-/**
  * Establecimiento registrado que corresponde a un código leído de una pestaña.
  *
  * Primero busca la coincidencia exacta. Si no la hay, admite que el registro lleve el
@@ -255,7 +235,7 @@ export const findFacilityByCode = <T extends { code?: string | null }>(
   const exacto = lista.find((f) => String(f?.code || "").trim().toUpperCase() === buscado);
   if (exacto) return exacto;
 
-  const porOficial = lista.filter((f) => officialFacilityCode(f?.code).toUpperCase() === buscado);
+  const porOficial = lista.filter((f) => facilityCodeOf(f?.code).toUpperCase() === buscado);
   return porOficial.length === 1 ? porOficial[0] : null;
 };
 

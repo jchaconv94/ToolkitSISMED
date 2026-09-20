@@ -87,9 +87,9 @@ import {
   hasSheetsApiKey,
   isFacilitySheet,
   listSheetTabs,
-  officialFacilityCode,
   type KnownRowCounts,
 } from "../services/sheetsApiService";
+import { sheetOwnerCodeOf } from "../services/facilityCodes";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -763,8 +763,15 @@ const formatDate = (dateValue: any): string => {
   return str;
 };
 
-/** Código oficial para mostrar. La regla vive en `officialFacilityCode`, junto a la que lo empareja con el registro. */
-const formatAlmCode = (code: string | undefined): string => officialFacilityCode(code) || "-";
+/**
+ * Código para mostrar en la tarjeta de una hoja.
+ *
+ * Se usa el de la IPRESS, no el de la farmacia: todas las farmacias de una IPRESS comparten
+ * pestaña, y el ALMCOD de la primera fila puede ser el de un puesto comunal. Si no se
+ * reconoce el código se muestra tal cual, que es más útil que un guion.
+ */
+const formatAlmCode = (code: string | undefined): string =>
+  sheetOwnerCodeOf(code) || String(code || "").trim() || "-";
 
 const getItemExpiration = (
   item: SIGData,
