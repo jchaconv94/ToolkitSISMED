@@ -11,49 +11,14 @@
     <meta http-equiv="Expires" content="0" />
 
     <title>Toolkit SISMED Web</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!--
+      Los estilos ya no se cargan de un CDN: Tailwind se compila con la aplicación y entra
+      en el paquete, junto con los estilos propios (ver index.css, que importa index.tsx).
+      Antes venían de cdn.tailwindcss.com, que la propia documentación de Tailwind
+      desaconseja en producción: compilaba el CSS en el navegador en cada carga y dejaba
+      todo el aspecto de la aplicación a merced de que ese CDN respondiera.
+    -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <style>
-      body {
-        font-family: 'Inter', sans-serif;
-        background-color: #f3f4f6;
-      }
-      
-      /* Global Scrollbar */
-      ::-webkit-scrollbar {
-        width: 10px;
-        height: 10px;
-      }
-      ::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      ::-webkit-scrollbar-thumb {
-        background-color: rgba(0, 0, 0, 0.03);
-        border-radius: 100px;
-        border: 3px solid transparent;
-        background-clip: content-box;
-      }
-      *:hover::-webkit-scrollbar-thumb {
-        background-color: rgba(0, 0, 0, 0.12);
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background-color: rgba(0, 0, 0, 0.25) !important;
-      }
-      
-      /* Firefox support */
-      * {
-        scrollbar-width: thin;
-        scrollbar-color: rgba(0, 0, 0, 0.08) transparent;
-      }
-      
-      .hide-scrollbar::-webkit-scrollbar {
-        display: none;
-      }
-      .hide-scrollbar {
-        -ms-overflow-style: none;  /* IE and Edge */
-        scrollbar-width: none;  /* Firefox */
-      }
-    </style>
 
   <script type="importmap">
 {
@@ -72,7 +37,8 @@
   }
 }
 </script>
-  <script type="module" crossorigin src="/ToolkitSISMED/assets/index-aGY_xjuk.js"></script>
+  <script type="module" crossorigin src="/ToolkitSISMED/assets/index-ASULHfA2.js"></script>
+  <link rel="stylesheet" crossorigin href="/ToolkitSISMED/assets/index-gDHifIkS.css">
 </head>
   <body>
     <div id="root"></div>
