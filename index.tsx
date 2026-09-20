@@ -1,6 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+// Hoja de estilos de la aplicación (Tailwind + estilos propios). Va en la compilación,
+// no en un CDN: ver index.css.
+import './index.css';
 
 // Manejo de errores de carga de chunks (módulos dinámicos) después de un nuevo despliegue
 window.addEventListener('vite:preloadError', (event) => {
