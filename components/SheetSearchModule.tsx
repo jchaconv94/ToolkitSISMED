@@ -83,6 +83,7 @@ import { INTENT_OPEN_STOCK_CONNECTIONS, takeNavigationIntent } from "../services
 import {
   fetchSheetsMetadataViaApi,
   hasSheetsApiKey,
+  isFacilitySheet,
   listSheetTabs,
   type KnownRowCounts,
 } from "../services/sheetsApiService";
@@ -301,7 +302,9 @@ const mergeMetadataIntoSources = (
   const merged: SheetSource[] = [];
   const changedSheetNames: string[] = [];
 
-  metadataList.forEach((meta) => {
+  // Las pestañas que no son establecimientos (la `Sheet3` que crea Google, una copia de
+  // trabajo) no llegan a ser tarjetas: ver `isFacilitySheet`.
+  metadataList.filter(isFacilitySheet).forEach((meta) => {
     const newId = `${ctx.urlIndex}_${meta.id}`;
     const existing =
       currentSources.find((s) => s.id === newId) ||

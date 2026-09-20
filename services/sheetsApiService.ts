@@ -215,6 +215,36 @@ export const facilityCodeFromSheetName = (sheetName: string, almcod?: string): s
   return code.length >= 5 ? code.substring(0, 5) : code;
 };
 
+/**
+ * Si una pestaña corresponde a un establecimiento.
+ *
+ * El libro de una UNGET puede tener pestañas que no son establecimientos: la `Sheet3` que
+ * Google crea sola, una copia de trabajo, una hoja de pruebas. Hasta ahora todas salían en
+ * Consulta Stock como una tarjeta más, con «Sin datos» y «0 items», y había que saber de
+ * antemano cuáles ignorar.
+ *
+ * Se descarta una pestaña solo cuando fallan **las tres** señales a la vez: no lleva código
+ * de establecimiento en el nombre, no tiene `ALMCOD` en su cabecera y se sabe con certeza
+ * que no tiene filas. Con que cumpla una, se conserva.
+ *
+ * El orden importa: un establecimiento real con el stock vacío tiene el código en el nombre
+ * y sigue apareciendo, que es justo lo que debe pasar. Y si no se sabe cuántas filas tiene
+ * —la lectura directa no siempre lo trae— tampoco se oculta: sin certeza, se muestra.
+ */
+export const isFacilitySheet = (meta: {
+  name?: string;
+  almcod?: string;
+  codigoIpress?: string;
+  rowCount?: number;
+}): boolean => {
+  const codigo =
+    String(meta?.codigoIpress || "").trim() || facilityCodeFromSheetName(meta?.name || "");
+  if (codigo) return true;
+  if (String(meta?.almcod || "").trim()) return true;
+  if (meta?.rowCount === undefined) return true;
+  return meta.rowCount > 0;
+};
+
 /** Conteo de filas ya conocido por pestaña, para no volver a pedirlo en cada sincronización. */
 export type KnownRowCounts = Record<string, number | undefined>;
 
