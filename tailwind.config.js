@@ -22,5 +22,10 @@ export default {
   theme: {
     extend: {},
   },
-  plugins: [],
+
+  // `animate-in`, `fade-in`, `zoom-in-*` y `slide-in-from-*` se usan en toda la interfaz
+  // (más de quinientas veces), pero venían de un plugin que nunca estuvo instalado: ni en
+  // package.json ni cargado por el CDN. Eran clases muertas. Con esto las animaciones que
+  // ya estaban escritas funcionan por fin.
+  plugins: [require("tailwindcss-animate")],
 };
