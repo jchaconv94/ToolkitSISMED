@@ -4,10 +4,13 @@ import {
   __resetSheetsApiCache,
   a1Range,
   batchGetRanges,
+  describeSheetName,
   facilityCodeFromSheetName,
   fetchSheetsMetadataViaApi,
+  findFacilityByCode,
   isFacilitySheet,
   listSheetTabs,
+  officialFacilityCode,
 } from "./sheetsApiService";
 
 const ID = "1vic6MeMiA5Jk4_UWx8nI462yXe8irgxAoMncJiekOOA";
@@ -55,6 +58,86 @@ describe("a1Range / facilityCodeFromSheetName", () => {
     expect(facilityCodeFromSheetName("ALM. ANEXO BELLAVISTA - SAN MARTIN-030S05")).toBe("030S05");
     expect(facilityCodeFromSheetName("SAL SISMED", "06502F01")).toBe("06502");
     expect(facilityCodeFromSheetName("HOJA", "")).toBe("");
+  });
+});
+
+describe("describeSheetName", () => {
+  it("quita el código del final y el prefijo FARM", () => {
+    expect(describeSheetName("C.S. NUEVO LIMA-06519")).toBe("C.S. NUEVO LIMA");
+    expect(describeSheetName("FARM - P.S. LIMON-06505")).toBe("P.S. LIMON");
+    expect(describeSheetName("ALM. ANEXO BELLAVISTA - SAN MARTIN-030S05")).toBe(
+      "ALM. ANEXO BELLAVISTA - SAN MARTIN",
+    );
+  });
+
+  it("respeta los guiones propios del nombre oficial", () => {
+    // Recortando por el último guion, como se hacía antes, este se quedaba a medias.
+    expect(describeSheetName("P.S. NUEVO TARAPOTO - ANEXO")).toBe("P.S. NUEVO TARAPOTO - ANEXO");
+    expect(describeSheetName("C.S. Nuevo Lima")).toBe("C.S. Nuevo Lima");
+  });
+
+  it("no deja el nombre vacío", () => {
+    expect(describeSheetName("-06519")).toBe("-06519");
+    expect(describeSheetName("")).toBe("");
+    expect(describeSheetName(null)).toBe("");
+  });
+});
+
+describe("officialFacilityCode", () => {
+  it("quita el sufijo interno de farmacia o almacén", () => {
+    expect(officialFacilityCode("06519F01")).toBe("06519");
+    expect(officialFacilityCode("06505F0101")).toBe("06505");
+  });
+
+  it("deja intacto el código que ya es el oficial", () => {
+    expect(officialFacilityCode("030S05")).toBe("030S05");
+    expect(officialFacilityCode("06502")).toBe("06502");
+  });
+
+  it("sin código devuelve vacío", () => {
+    expect(officialFacilityCode("")).toBe("");
+    expect(officialFacilityCode(undefined)).toBe("");
+    expect(officialFacilityCode(null)).toBe("");
+  });
+});
+
+describe("findFacilityByCode", () => {
+  const establecimientos = [
+    { code: "06502", name: "Hospital Bellavista", ungetId: "u-b" },
+    { code: "06519F01", name: "C.S. Nuevo Lima", ungetId: "u-b" },
+    { code: "030S05", name: "Almacén Bellavista", ungetId: "u-b" },
+  ];
+
+  it("encuentra por coincidencia exacta", () => {
+    expect(findFacilityByCode("06502", establecimientos)?.name).toBe("Hospital Bellavista");
+    expect(findFacilityByCode("030S05", establecimientos)?.name).toBe("Almacén Bellavista");
+  });
+
+  it("admite que el registro lleve el sufijo interno y la pestaña no", () => {
+    // La pestaña se llama `C.S. NUEVO LIMA-06519`, pero está registrado como `06519F01`.
+    expect(findFacilityByCode("06519", establecimientos)?.name).toBe("C.S. Nuevo Lima");
+  });
+
+  it("no elige ninguno si dos se reducen al mismo código oficial", () => {
+    // Mostrar el nombre equivocado es peor que no mostrar ninguno.
+    // `06519F01` y `06519F0101` se reducen los dos a `06519`.
+    const ambiguos = [
+      { code: "06519F01", name: "Farmacia" },
+      { code: "06519F0101", name: "Almacén" },
+    ];
+    expect(findFacilityByCode("06519", ambiguos)).toBeNull();
+  });
+
+  it("la coincidencia exacta gana a la del sufijo", () => {
+    const mezcla = [{ code: "06519F01", name: "Con sufijo" }, { code: "06519", name: "Exacto" }];
+    expect(findFacilityByCode("06519", mezcla)?.name).toBe("Exacto");
+  });
+
+  it("no inventa emparejamientos", () => {
+    expect(findFacilityByCode("99999", establecimientos)).toBeNull();
+    expect(findFacilityByCode("", establecimientos)).toBeNull();
+    expect(findFacilityByCode("06502", null)).toBeNull();
+    expect(findFacilityByCode("06502", [null as any])).toBeNull();
   });
 });
 
