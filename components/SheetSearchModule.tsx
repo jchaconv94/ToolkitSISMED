@@ -2671,8 +2671,17 @@ export const SheetSearchModule: React.FC = () => {
     }
 
     const matching = allUngets.find(u => String(u.id) === val || u.name === val);
-    const name = matching ? matching.name : val;
-    const ungetId = matching ? matching.id : undefined;
+    // Sin UNGET registrada no hay conexión posible: al guardarla sin identificador la fila
+    // se insertaba y se retiraba en la misma operación, y la pantalla decía que todo fue
+    // bien. Mejor no dejar llegar hasta ahí.
+    if (!matching) {
+      toast.error(
+        `No se pudo identificar la UNGET "${val}" entre las registradas en Establecimientos. Actualice la página; si el problema sigue, regístrela antes de configurar su conexión.`,
+      );
+      return;
+    }
+    const name = matching.name;
+    const ungetId = matching.id;
 
     if (editingIndex !== null) {
       // Caso edición

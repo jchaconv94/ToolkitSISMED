@@ -116,11 +116,30 @@ const fetchSheetCsvByName = async (
   try {
     const res = await fetch(url, { method: "GET", credentials: "omit", signal: controller.signal });
     if (!res.ok) throw new Error(`La hoja respondió HTTP ${res.status}`);
+    // Una hoja privada o una pestaña inexistente responden 200 con una página HTML. Sin
+    // esta comprobación ese HTML se parseaba como CSV y sus restos se mostraban como si
+    // fueran stock.
+    const contentType = res.headers?.get("content-type") || "";
+    if (!contentType.includes("text/csv")) {
+      throw new Error(
+        "Google no devolvió la hoja en formato CSV. Compruebe que esté compartida como \"Cualquiera con el enlace: Lector\" y que la pestaña exista.",
+      );
+    }
     return await res.text();
   } finally {
     clearTimeout(timer);
   }
 };
+
+/**
+ * Si la respuesta corresponde de verdad a la pestaña pedida.
+ *
+ * La señal de éxito es que haya encabezados, no que haya filas: una IPRESS puede tener el
+ * stock vacío, y eso es un resultado válido. Confundir «cero filas» con «no se pudo leer»
+ * hacía que un establecimiento sin stock informara que su UNGET no tiene conexión.
+ */
+const tieneEncabezados = (rows: string[][]): boolean =>
+  rows.length > 0 && rows[0].some((header) => String(header ?? "").trim() !== "");
 
 /**
  * Filas de la hoja asignada. Prefiere leer el libro directamente; si la UNGET no tiene hoja
@@ -140,17 +159,14 @@ export async function readAssignedSheetRows(
         const [values] = await batchGetRanges(spreadsheetId, [a1Range(assignment.sheetName, "A:AZ")], {
           timeoutMs,
         });
-        const filas = csvRowsToObjects(values || []);
-        if (filas.length > 0) return filas;
+        if (tieneEncabezados(values || [])) return csvRowsToObjects(values);
       } catch {
         // Sin cuota o sin permiso: queda el CSV, que no consume cuota.
       }
     }
     try {
-      const filas = csvRowsToObjects(
-        parseCsv(await fetchSheetCsvByName(spreadsheetId, assignment.sheetName, timeoutMs)),
-      );
-      if (filas.length > 0) return filas;
+      const filas = parseCsv(await fetchSheetCsvByName(spreadsheetId, assignment.sheetName, timeoutMs));
+      if (tieneEncabezados(filas)) return csvRowsToObjects(filas);
     } catch {
       // Si la hoja no se deja leer, todavía puede quedar la Web App.
     }

@@ -169,3 +169,21 @@ Los cinco pasos están aplicados.
 La migración del paso 4 se ejecutó el 20/09/2026: las 5 asignaciones existentes quedaron ancladas a su UNGET (Bellavista 4, Tocache 1) y ninguna estaba huérfana, porque se hizo mientras las URL todavía coincidían.
 
 Queda fuera del modelo, como trabajo de operación: cada informático debe configurar el enlace de su hoja de cálculo —compartida como «Cualquiera con el enlace: Lector»— para que su UNGET deje de leer por Apps Script. La columna «Conexión» de Establecimientos es lo que permite ver de un vistazo a quién le falta.
+
+## 9. Auditoría del camino de conexión (20/09/2026)
+
+Con el modelo cerrado se revisó el código que lee el stock, buscando fallos que aparecieran al migrar las UNGET restantes a lectura directa. Cuatro hallazgos, los cuatro corregidos con prueba de regresión.
+
+**9.1 Una UNGET sin Web App podía quedarse sin ninguna vía.** La cadena era API de Sheets → CSV directo → Apps Script. El eslabón del medio (`toDirectSheetRefs`) devuelve `null` si no hay pestañas ya conocidas, y en la primera carga no las hay; el tercero no existe cuando la conexión es `sheets://<id>`. Así que toda la carga dependía de la API, cuya cuota se comparte entre UNGET: cuantas más migraran, más probable el fallo.
+
+Ahora, si la lista de pestañas se obtuvo pero la lectura de valores falla —que es la parte que consume cuota—, `fetchSheetsMetadataViaApi` lee las cabeceras por CSV, que no consume ninguna.
+
+**9.2 Guardar una conexión sin UNGET la insertaba y la borraba a la vez.** La limpieza final de `saveUngetConfigs` retiraba toda fila propia sin `unget_id`, incluida la recién insertada. La pantalla informaba de que se había guardado. Corregido en dos sitios: el formulario ya no acepta una UNGET que no esté registrada en Establecimientos, y la regla de qué se retira vive ahora en `connectionsToRetire`, que reconoce la conexión por UNGET **y** por URL.
+
+**9.3 Un establecimiento con stock vacío decía «sin conexión».** `readAssignedSheetRows` tomaba «cero filas» por «no se pudo leer» y caía al Web App; sin Web App, informaba de que la UNGET no tenía conexión utilizable. La señal de éxito es ahora que la respuesta traiga encabezados, no que traiga filas.
+
+**9.4 Una página HTML con 200 se mostraba como stock.** La lectura por nombre de pestaña no comprobaba el tipo de contenido, así que el aviso de permisos de una hoja privada se parseaba como CSV, línea a línea, y acababa en la tabla de existencias. Ahora se exige `text/csv`.
+
+También se retiró `saveMultipleUngetConfigs`, código muerto que conservaba el patrón de borrar por usuario y reinsertar, incompatible con el índice único.
+
+Pendiente de comprobar contra datos reales (requiere acceso a Supabase y a las hojas): que ninguna asignación apunte a una pestaña renombrada, y que no queden conexiones con `unget_id` nulo.

@@ -222,6 +222,35 @@ export const buildUngetConnectionStatus = (
 };
 
 /**
+ * Cuáles de las conexiones propias hay que retirar al guardar la lista.
+ *
+ * Se reconoce una conexión por su UNGET y también por su URL. Mirar solo `unget_id`
+ * descartaba cualquier fila propia que no lo tuviera, incluida la que se acababa de
+ * insertar en ese mismo guardado: la conexión se creaba y se borraba en la misma
+ * operación, y la pantalla informaba de que se había guardado correctamente.
+ */
+export const connectionsToRetire = <T extends { id: any; ungetId?: string | null; url?: string | null }>(
+  mine: T[] | null | undefined,
+  saved: Array<{ ungetId?: string | null; url?: string | null }> | null | undefined,
+): T[] => {
+  const ungetsConservadas = new Set(
+    (saved || []).map((c) => String(c?.ungetId || "").trim()).filter(Boolean),
+  );
+  const urlsConservadas = new Set(
+    (saved || []).map((c) => String(c?.url || "").trim()).filter(Boolean),
+  );
+
+  return (mine || []).filter((fila) => {
+    if (!fila) return false;
+    const porUnget = String(fila.ungetId || "").trim();
+    if (porUnget && ungetsConservadas.has(porUnget)) return false;
+    const porUrl = String(fila.url || "").trim();
+    if (porUrl && urlsConservadas.has(porUrl)) return false;
+    return true;
+  });
+};
+
+/**
  * Si una asignación IPRESS ↔ hoja pertenece a esta conexión.
  *
  * Se compara por UNGET, no por URL: la URL de una conexión cambia al configurar su hoja o

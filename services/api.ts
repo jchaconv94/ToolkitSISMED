@@ -1,5 +1,6 @@
 import { User, UserRole, Personnel, HealthFacility, RoleConfig, SystemConfig, Unget, Diresa, Ogess, Microred } from "../types";
 import { SESSION_TOKEN_KEY, supabase } from "./supabaseClient";
+import { connectionsToRetire } from "./ungetConnections";
 import bcrypt from "bcryptjs";
 
 // MOCK DATA (Respaldo en caso de error de conexión/sin supabase)
@@ -1162,14 +1163,14 @@ export const api = {
                 }
 
                 // Se retiran solo las conexiones propias que el usuario quitó de la lista.
-                const conservadas = new Set(ungetIds);
                 const { data: mias } = await supabase
                     .from('unget_configs')
-                    .select('id,unget_id')
+                    .select('id,unget_id,url')
                     .eq('username', username);
-                const aRetirar = (mias || [])
-                    .filter((fila: any) => !fila.unget_id || !conservadas.has(String(fila.unget_id)))
-                    .map((fila: any) => fila.id);
+                const aRetirar = connectionsToRetire(
+                    (mias || []).map((fila: any) => ({ id: fila.id, ungetId: fila.unget_id, url: fila.url })),
+                    configs.map((c: any) => ({ ungetId: c.ungetId || c.id, url: c.url }))
+                ).map((fila) => fila.id);
                 if (aRetirar.length > 0) {
                     await supabase.from('unget_configs').delete().in('id', aRetirar);
                 }
@@ -1249,39 +1250,10 @@ export const api = {
         }
     },
 
-    saveMultipleUngetConfigs: async (configsToSave: any[], usernamesToClear: string[]): Promise<{ success: boolean; message?: string }> => {
-        try {
-            if (supabase) {
-                const savedSheets = await api.getSavedSpreadsheetIds(usernamesToClear);
-                for (const u of usernamesToClear) {
-                    await supabase.from('unget_configs').delete().eq('username', u);
-                }
-                for (const c of configsToSave) {
-                    const payload: Record<string, any> = { username: c.username, unget_name: c.name, url: c.url };
-                    if (c.ungetId) payload.unget_id = c.ungetId;
-                    const spreadsheetId = c.spreadsheetId || savedSheets[c.url];
-                    if (spreadsheetId) payload.spreadsheet_id = spreadsheetId;
-                    await api.insertUngetConfigRow(payload);
-                }
-            }
-            // En localstorage
-            for (const u of usernamesToClear) {
-                localStorage.removeItem(`aura_sig_ungets_${u}`);
-            }
-            const grouped: Record<string, any[]> = {};
-            for (const c of configsToSave) {
-                const u = c.username || 'unknown';
-                if (!grouped[u]) grouped[u] = [];
-                grouped[u].push({ name: c.name, url: c.url, username: u });
-            }
-            for (const u in grouped) {
-                localStorage.setItem(`aura_sig_ungets_${u}`, JSON.stringify(grouped[u]));
-            }
-            return { success: true };
-        } catch(e: any) {
-            return { success: false, message: e.message };
-        }
-    },
+    // Aquí vivía `saveMultipleUngetConfigs`, que borraba por usuario y volvía a insertar.
+    // Ese patrón choca con el índice único de `unget_id` y le quita la conexión a su
+    // informático; es justo lo que se corrigió en `saveUngetConfigs`. No lo llamaba nadie,
+    // así que se retira en vez de dejarlo como trampa para el próximo que lo encuentre.
 
     // --- STOCK ASSIGNMENTS (ADMIN TO USER) ---
     getAllStockAssignments: async (): Promise<any[]> => {

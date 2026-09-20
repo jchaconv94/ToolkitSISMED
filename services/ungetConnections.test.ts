@@ -3,6 +3,7 @@ import {
   assignmentBelongsToConnection,
   buildUngetConnectionStatus,
   cachedSourcesStillMatch,
+  connectionsToRetire,
   describeConnectionMode,
   isVirtualSheetUrl,
   normalizeUngetName,
@@ -216,6 +217,48 @@ describe("cachedSourcesStillMatch", () => {
   it("sin caché previa no hay nada que reutilizar", () => {
     expect(cachedSourcesStillMatch(null, [huallaga])).toBe(false);
     expect(cachedSourcesStillMatch([], [])).toBe(true);
+  });
+});
+
+describe("connectionsToRetire", () => {
+  const mias = [
+    { id: 1, ungetId: "u-1", url: "https://script.google.com/bellavista" },
+    { id: 2, ungetId: "u-2", url: "sheets://LIBRO_TOCACHE" },
+  ];
+
+  it("no retira nada cuando se guardan las mismas conexiones", () => {
+    expect(connectionsToRetire(mias, mias)).toEqual([]);
+  });
+
+  it("retira la que el usuario quitó de la lista", () => {
+    expect(connectionsToRetire(mias, [mias[0]]).map((c) => c.id)).toEqual([2]);
+  });
+
+  it("no retira la conexión recién creada que todavía no tiene UNGET", () => {
+    // Era el fallo: la fila se insertaba sin `unget_id` y este mismo guardado la borraba,
+    // mientras la pantalla decía que se había guardado.
+    const recienCreada = { id: 3, ungetId: null, url: "sheets://LIBRO_NUEVO" };
+    const guardadas = [...mias, { ungetId: undefined, url: "sheets://LIBRO_NUEVO" }];
+    expect(connectionsToRetire([...mias, recienCreada], guardadas)).toEqual([]);
+  });
+
+  it("sí retira una fila sin UNGET cuya URL ya no está en la lista", () => {
+    const huerfana = { id: 4, ungetId: null, url: "https://script.google.com/vieja" };
+    expect(connectionsToRetire([...mias, huerfana], mias).map((c) => c.id)).toEqual([4]);
+  });
+
+  it("reconoce la conexión aunque haya cambiado de URL, por su UNGET", () => {
+    const guardadas = [{ ungetId: "u-1", url: "sheets://LIBRO_BELLAVISTA" }, mias[1]];
+    expect(connectionsToRetire(mias, guardadas)).toEqual([]);
+  });
+
+  it("guardar una lista vacía retira todas las propias", () => {
+    expect(connectionsToRetire(mias, []).map((c) => c.id)).toEqual([1, 2]);
+  });
+
+  it("no se cae con listas nulas ni con huecos", () => {
+    expect(connectionsToRetire(null, null)).toEqual([]);
+    expect(connectionsToRetire([null as any, mias[0]], [])).toEqual([mias[0]]);
   });
 });
 
