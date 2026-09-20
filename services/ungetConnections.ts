@@ -130,6 +130,13 @@ export const cachedSourcesStillMatch = (
 /** Cómo lee su stock una UNGET, para mostrarlo en la lista de conexiones. */
 export type UngetConnectionMode = "directa" | "apps-script" | "sin-hoja";
 
+/**
+ * `sheets://<id>` no es una dirección que se pueda pedir: es la marca de que la conexión
+ * lee el libro directamente, sin Web App.
+ */
+export const isVirtualSheetUrl = (url?: string | null): boolean =>
+  String(url || "").startsWith("sheets://");
+
 export const describeConnectionMode = (
   connection: UngetConnection,
   isVirtualUrl: (url?: string) => boolean,
@@ -137,6 +144,81 @@ export const describeConnectionMode = (
   if (connection?.spreadsheetId) return "directa";
   const url = String(connection?.url || "").trim();
   return url && !isVirtualUrl(url) ? "apps-script" : "sin-hoja";
+};
+
+/** Estado de conexión de una UNGET registrada, incluyendo «nadie la ha configurado». */
+export type UngetConnectionState = UngetConnectionMode | "sin-conexion";
+
+export interface UngetConnectionStatus {
+  state: UngetConnectionState;
+  /** Quién editó la conexión por última vez. Vacío mientras no haya conexión. */
+  maintainer?: string;
+  connection?: UngetConnection;
+}
+
+/**
+ * Estado de conexión de cada UNGET **registrada en Establecimientos**, por identificador.
+ *
+ * Es la vista que faltaba: hasta ahora el estado solo se veía desde Consulta Stock, que
+ * parte de las conexiones, así que una UNGET sin conexión sencillamente no aparecía. Aquí
+ * se parte de las UNGET, de modo que las que nadie configuró quedan a la vista.
+ *
+ * El emparejamiento admite las dos identidades que conviven en `unget_configs`: el
+ * identificador oficial y, mientras haya filas sin él, el nombre normalizado. Cuando varias
+ * filas apuntan a la misma UNGET se conserva una sola, con el mismo criterio que usa la
+ * lista de conexiones (`pickOneConnectionPerUnget`): manda la que tiene hoja de cálculo.
+ */
+export const buildUngetConnectionStatus = (
+  ungets: Array<{ id?: string | null; name?: string | null }> | null | undefined,
+  connections: UngetConnection[] | null | undefined,
+  context: { currentUsername?: string; ungetIdByUsername?: Record<string, string | undefined> } = {},
+): Map<string, UngetConnectionStatus> => {
+  const porClave = new Map<string, UngetConnection[]>();
+  for (const connection of connections || []) {
+    if (!connection) continue;
+    for (const clave of ungetConnectionKeys(connection)) {
+      const lista = porClave.get(clave) || [];
+      lista.push(connection);
+      porClave.set(clave, lista);
+    }
+  }
+
+  const estados = new Map<string, UngetConnectionStatus>();
+  for (const unget of ungets || []) {
+    const id = String(unget?.id || "").trim();
+    if (!id) continue;
+
+    const claves = [`id:${id}`];
+    const nombre = normalizeUngetName(unget?.name);
+    if (nombre) claves.push(`nombre:${nombre}`);
+
+    const candidatas: UngetConnection[] = [];
+    for (const clave of claves) {
+      for (const connection of porClave.get(clave) || []) {
+        if (!candidatas.includes(connection)) candidatas.push(connection);
+      }
+    }
+
+    // Se les fija el identificador de esta UNGET para que todas compartan clave y quede
+    // una sola; así una fila sin `unget_id` también puede ganar por tener hoja.
+    const elegida = pickOneConnectionPerUnget(
+      candidatas.map((connection) => ({ ...connection, ungetId: id, __original: connection })),
+      context,
+    )[0]?.__original as UngetConnection | undefined;
+
+    if (!elegida) {
+      estados.set(id, { state: "sin-conexion" });
+      continue;
+    }
+
+    estados.set(id, {
+      state: describeConnectionMode(elegida, isVirtualSheetUrl),
+      maintainer: String(elegida.username || "").trim() || undefined,
+      connection: elegida,
+    });
+  }
+
+  return estados;
 };
 
 /**
