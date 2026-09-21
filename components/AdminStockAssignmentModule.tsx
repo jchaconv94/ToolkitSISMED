@@ -619,14 +619,18 @@ export const AdminStockAssignmentModule: React.FC = () => {
                 </div>
               </Paso>
 
-              <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+              {/* Dos columnas de familias, no de casillas: lo que alargaba el recuadro era que
+                  cada familia ocupara una banda entera para dos o tres casillas. Con
+                  `columns-2` el navegador reparte las familias y equilibra la altura solo;
+                  `break-inside-avoid` impide que una familia se parta entre columnas. */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 md:columns-2 md:gap-4">
                 {STOCK_COLUMN_GROUPS.map(grupo => {
                   const columnas = STOCK_COLUMNS.filter(c => c.group === grupo);
                   if (columnas.length === 0) return null;
                   return (
-                    <div key={grupo}>
-                      <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-400">{grupo}</p>
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    <div key={grupo} className="mb-3.5 break-inside-avoid last:mb-0">
+                      <p className="mb-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">{grupo}</p>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         {columnas.map(col => {
                           const marcada = visibleColumns.includes(col.key);
                           return (
@@ -634,7 +638,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
                               key={col.key}
                               type="button"
                               onClick={() => handleToggleColumn(col.key)}
-                              className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-all ${
+                              className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-all ${
                                 marcada
                                   ? "border-teal-500/60 bg-teal-50 shadow-sm"
                                   : "border-slate-200 bg-white hover:border-slate-300"
