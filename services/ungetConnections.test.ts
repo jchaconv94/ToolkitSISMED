@@ -7,6 +7,7 @@ import {
   connectionOwner,
   connectionsToRetire,
   describeConnectionMode,
+  isConnectionOrphaned,
   isVirtualSheetUrl,
   normalizeUngetName,
   pickOneConnectionPerUnget,
@@ -292,6 +293,37 @@ describe("canEditConnection", () => {
     expect(canEditConnection({ name: "PICOTA", username: "inf" }, undefined)).toBe(false);
     expect(connectionOwner(null)).toBe("");
     expect(connectionOwner({ name: "PICOTA", username: " inf " })).toBe("inf");
+  });
+});
+
+describe("conexiones sin responsable", () => {
+  const activas = new Set(["inf.bellavista", "admin"]);
+  const deQuienSeFue = { name: "PICOTA", username: "inf.picota" };
+
+  it("la conexión de una cuenta que ya no está activa queda sin responsable", () => {
+    expect(isConnectionOrphaned(deQuienSeFue, activas)).toBe(true);
+    expect(canEditConnection(deQuienSeFue, "admin", activas)).toBe(true);
+    // Y el nuevo informático de esa UNGET la adopta igual, sin pasar por el admin.
+    expect(canEditConnection(deQuienSeFue, "inf.bellavista", activas)).toBe(true);
+  });
+
+  it("mientras su cuenta siga activa, la conexión sigue siendo suya", () => {
+    const viva = { name: "BELLAVISTA", username: "inf.bellavista" };
+    expect(isConnectionOrphaned(viva, activas)).toBe(false);
+    expect(canEditConnection(viva, "admin", activas)).toBe(false);
+  });
+
+  it("sin censo de cuentas no se declara huérfana a ninguna", () => {
+    // Si la lista de usuarios no llegó, lo seguro es no abrir nada: lo contrario
+    // convertiría un fallo de red en permiso para editar todas las conexiones.
+    expect(isConnectionOrphaned(deQuienSeFue, undefined)).toBe(false);
+    expect(isConnectionOrphaned(deQuienSeFue, new Set())).toBe(false);
+    expect(canEditConnection(deQuienSeFue, "admin", new Set())).toBe(false);
+  });
+
+  it("una fila sin dueño está libre, no huérfana", () => {
+    expect(isConnectionOrphaned({ name: "PICOTA" }, activas)).toBe(false);
+    expect(canEditConnection({ name: "PICOTA" }, "admin", activas)).toBe(true);
   });
 });
 

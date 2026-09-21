@@ -1114,7 +1114,25 @@ export const api = {
         if (error) throw error;
     },
 
-    saveUngetConfigs: async (username: string, configs: any[]): Promise<{ success: boolean; message?: string }> => {
+    /**
+     * `orphanOwners` son las cuentas que ya no están (borradas o desactivadas). Sus
+     * conexiones quedaron sin responsable, así que este guardado puede adoptarlas —pasando
+     * el `username` a quien guarda— y retirarlas. `visibleUngetIds` acota esa adopción a
+     * las UNGET que el usuario tenía a la vista, para que su envío no decida nada sobre
+     * las que no ve. Sin estas dos listas el comportamiento es el de siempre: solo se
+     * tocan las filas propias.
+     */
+    saveUngetConfigs: async (
+        username: string,
+        configs: any[],
+        options: { orphanOwners?: string[]; visibleUngetIds?: string[] } = {},
+    ): Promise<{ success: boolean; message?: string }> => {
+        const orphanOwners = (options.orphanOwners || [])
+            .map((u) => String(u || '').trim())
+            .filter(Boolean);
+        const visibleUngetIds = (options.visibleUngetIds || [])
+            .map((u) => String(u || '').trim())
+            .filter(Boolean);
         const formatName = (name: string): string => {
             if (!name) return "";
             return name.replace(/MARICAL C\.?/gi, "MARISCAL CACERES").replace(/\bMARICAL\b/gi, "MARISCAL");
@@ -1155,7 +1173,14 @@ export const api = {
 
                     const existente = ungetId ? existentesPorUnget.get(ungetId) : null;
                     if (existente) {
-                        // No se cambia `username`: sigue siendo de su informático.
+                        // Normalmente no se cambia `username`: sigue siendo de su
+                        // informático. La excepción es la conexión sin responsable —su
+                        // cuenta ya no existe o está desactivada—, que la adopta quien la
+                        // guarda; si no, se quedaría bloqueada para siempre.
+                        const dueno = String(existente.username || '').trim();
+                        if (dueno !== username && (!dueno || orphanOwners.includes(dueno))) {
+                            datos.username = username;
+                        }
                         await supabase.from('unget_configs').update(datos).eq('id', existente.id);
                     } else {
                         await api.insertUngetConfigRow({ ...datos, username });
@@ -1163,10 +1188,28 @@ export const api = {
                 }
 
                 // Se retiran solo las conexiones propias que el usuario quitó de la lista.
-                const { data: mias } = await supabase
+                const { data: propias } = await supabase
                     .from('unget_configs')
                     .select('id,unget_id,url')
                     .eq('username', username);
+
+                // Y las que se quedaron sin responsable, **solo dentro de las UNGET que
+                // este usuario tenía a la vista**. Sin ese límite, un informático de UNGET
+                // —que solo ve las conexiones de su jurisdicción— borraría al guardar las
+                // conexiones huérfanas de todas las demás, que no están en su envío.
+                let huerfanas: any[] = [];
+                if (visibleUngetIds.length > 0) {
+                    const { data } = await supabase
+                        .from('unget_configs')
+                        .select('id,unget_id,url,username')
+                        .in('unget_id', visibleUngetIds);
+                    huerfanas = (data || []).filter((fila: any) => {
+                        const dueno = String(fila.username || '').trim();
+                        return dueno !== username && (!dueno || orphanOwners.includes(dueno));
+                    });
+                }
+
+                const mias = [...(propias || []), ...huerfanas];
                 const aRetirar = connectionsToRetire(
                     (mias || []).map((fila: any) => ({ id: fila.id, ungetId: fila.unget_id, url: fila.url })),
                     configs.map((c: any) => ({ ungetId: c.ungetId || c.id, url: c.url }))

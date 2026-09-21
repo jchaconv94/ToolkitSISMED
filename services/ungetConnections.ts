@@ -135,6 +135,24 @@ export const connectionOwner = (connection: UngetConnection | null | undefined):
   String(connection?.username || "").trim();
 
 /**
+ * La conexión se quedó sin responsable: la cuenta que la mantiene ya no existe o está
+ * desactivada. Es lo que pasa cuando el informático de una UNGET deja el puesto.
+ *
+ * `activeOwners` es el censo de cuentas activas. **Si no se pasa, o llega vacío, nada se
+ * considera huérfano**: una lista de usuarios que no se pudo leer no debe traducirse en
+ * que todas las conexiones queden abiertas.
+ */
+export const isConnectionOrphaned = (
+  connection: UngetConnection | null | undefined,
+  activeOwners?: Set<string> | null,
+): boolean => {
+  const owner = connectionOwner(connection);
+  if (!owner) return false; // Ya no es de nadie: libre, no huérfana.
+  if (!activeOwners || activeOwners.size === 0) return false;
+  return !activeOwners.has(owner);
+};
+
+/**
  * Si este usuario puede modificar o retirar la conexión.
  *
  * `unget_configs` guarda una fila por UNGET y esa fila pertenece a su informático:
@@ -143,17 +161,20 @@ export const connectionOwner = (connection: UngetConnection | null | undefined):
  * dueño pulsaba «eliminar», la tarjeta desaparecía del estado local, salía «Eliminado
  * correctamente» y a la siguiente carga volvía, porque la fila jamás se tocó.
  *
- * La regla es la que ya aplicaban por su cuenta los filtros de guardado repartidos por el
- * módulo; aquí se le pone nombre para que la interfaz pueda preguntar antes de ofrecer el
- * botón, en vez de ofrecerlo y fingir que funcionó.
+ * Tres casos la dejan editable: es propia, no tiene dueño, o su dueño ya no está. Sin el
+ * último, la conexión de un informático que deja el puesto se quedaba bloqueada para
+ * siempre, porque su cuenta desactivada seguía figurando como responsable y nadie más
+ * podía tocarla.
  */
 export const canEditConnection = (
   connection: UngetConnection | null | undefined,
   username?: string | null,
+  activeOwners?: Set<string> | null,
 ): boolean => {
   const owner = connectionOwner(connection);
   if (!owner) return true;
-  return owner === String(username || "").trim();
+  if (owner === String(username || "").trim()) return true;
+  return isConnectionOrphaned(connection, activeOwners);
 };
 
 /** Cómo lee su stock una UNGET, para mostrarlo en la lista de conexiones. */

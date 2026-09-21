@@ -79,6 +79,7 @@ import {
   cachedSourcesStillMatch,
   canEditConnection,
   connectionOwner,
+  isConnectionOrphaned,
   normalizeUngetName,
   pickOneConnectionPerUnget,
   ungetConnectionKeys,
@@ -995,6 +996,41 @@ export const SheetSearchModule: React.FC = () => {
     [],
   );
 
+  /**
+   * Censo de cuentas que siguen activas. Decide qué conexiones se quedaron sin
+   * responsable: las de un informático borrado o desactivado, que si no nadie podría
+   * volver a tocar. Mientras la lista de usuarios no haya llegado, está vacío y entonces
+   * `isConnectionOrphaned` no declara huérfano a nadie.
+   */
+  const cuentasActivas = useMemo(
+    () =>
+      new Set(
+        (allUsersList || [])
+          .filter((u: any) => u?.username && u.isActive !== false)
+          .map((u: any) => String(u.username)),
+      ),
+    [allUsersList],
+  );
+
+  /**
+   * Lo que el guardado necesita para poder adoptar una conexión sin responsable: de quién
+   * era, y sobre qué UNGET puede decidir este usuario. Lo segundo importa: sin ese límite,
+   * el envío de un informático de UNGET —que solo ve su jurisdicción— retiraría las
+   * huérfanas de todas las demás.
+   */
+  const opcionesDeAdopcion = useMemo(() => {
+    const duenosAusentes = new Set<string>();
+    (scriptUrls || []).forEach((config) => {
+      if (isConnectionOrphaned(config, cuentasActivas)) duenosAusentes.add(connectionOwner(config));
+    });
+    return {
+      orphanOwners: Array.from(duenosAusentes),
+      visibleUngetIds: Array.from(
+        new Set((scriptUrls || []).map((c) => String(c?.ungetId || "").trim()).filter(Boolean)),
+      ),
+    };
+  }, [scriptUrls, cuentasActivas]);
+
   // UI states
   const [isLoading, setIsLoading] = useState(false);
   const [isSilentSyncing, setIsSilentSyncing] = useState(false);
@@ -1017,7 +1053,7 @@ export const SheetSearchModule: React.FC = () => {
    * sirve para lo único que sí funciona desde aquí: probar el enlace y ver por qué esa
    * UNGET no conecta. Guardar queda fuera, porque el envío no incluye filas ajenas.
    */
-  const quickFixEsAjena = !!quickFixConfig && !canEditConnection(quickFixConfig, user?.username);
+  const quickFixEsAjena = !!quickFixConfig && !canEditConnection(quickFixConfig, user?.username, cuentasActivas);
   const [isTestingGasUrl, setIsTestingGasUrl] = useState(false);
   const [gasTestResult, setGasTestResult] = useState<{
     success: boolean;
@@ -2681,7 +2717,7 @@ export const SheetSearchModule: React.FC = () => {
       urlsToSave = alignConfigsWithOfficialUngets(urlsToSave, allUngets);
       setTempUrls(urlsToSave);
 
-      const result = await api.saveUngetConfigs(user.username, urlsToSave);
+      const result = await api.saveUngetConfigs(user.username, urlsToSave, opcionesDeAdopcion);
 
       if (result.success) {
         // Actualizar localmente allJurisdictionConfigs en tiempo real para mantener la concordancia
@@ -2820,7 +2856,7 @@ export const SheetSearchModule: React.FC = () => {
   const handleEditUrl = (index: number, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const config = tempUrls[index];
-    if (!canEditConnection(config, user?.username)) {
+    if (!canEditConnection(config, user?.username, cuentasActivas)) {
       toast.error(`Esta conexión la mantiene ${connectionOwner(config)}. Solo esa cuenta puede editarla.`);
       return;
     }
@@ -2840,7 +2876,7 @@ export const SheetSearchModule: React.FC = () => {
     // El botón ya no se ofrece en conexiones ajenas; esto es el cierre de la regla, para
     // que no vuelva a existir un camino que diga «Eliminado correctamente» sin borrar nada.
     const config = scriptUrls[index];
-    if (!canEditConnection(config, user.username)) {
+    if (!canEditConnection(config, user.username, cuentasActivas)) {
       toast.error(
         `Esta conexión la mantiene ${connectionOwner(config)}. Solo esa cuenta puede retirarla.`,
       );
@@ -2855,12 +2891,15 @@ export const SheetSearchModule: React.FC = () => {
           const updated = scriptUrls.filter((_, idx) => idx !== index);
           setIsLoading(true);
           try {
-            const myOwnUpdated = updated.filter(
-              (u) => (!u.username || u.username === user.username),
+            // Las que este usuario puede mantener: las suyas y las que se quedaron sin
+            // responsable. Las ajenas siguen fuera del envío, para no tocarlas.
+            const myOwnUpdated = updated.filter((u) =>
+              canEditConnection(u, user.username, cuentasActivas),
             );
             const result = await api.saveUngetConfigs(
               user.username,
               myOwnUpdated,
+              opcionesDeAdopcion,
             );
 
             if (result.success) {
@@ -2925,7 +2964,7 @@ export const SheetSearchModule: React.FC = () => {
     if (!quickFixConfig || !user) return;
     // Guardar una conexión ajena no llegaba a la base: el filtro de más abajo la deja
     // fuera del envío. Decía «actualizado con éxito» y el enlace se perdía.
-    if (!canEditConnection(quickFixConfig, user.username)) {
+    if (!canEditConnection(quickFixConfig, user.username, cuentasActivas)) {
       toast.error(
         `Esta conexión la mantiene ${connectionOwner(quickFixConfig)}. Solo esa cuenta puede cambiar su enlace.`,
       );
@@ -2938,16 +2977,29 @@ export const SheetSearchModule: React.FC = () => {
     }
     setIsSavingGasUrl(true);
     try {
+      // Al guardar, una conexión sin responsable pasa a ser de quien la guarda —es lo que
+      // hace `saveUngetConfigs`—, así que el estado local refleja ya ese relevo; si no, la
+      // tarjeta seguiría diciendo «Sin responsable» hasta la siguiente carga.
       const updatedScriptUrls = scriptUrls.map((c) =>
-        c.url === quickFixConfig.url ? { ...c, url: cleanUrl } : c
+        c.url === quickFixConfig.url
+          ? {
+              ...c,
+              url: cleanUrl,
+              username: isConnectionOrphaned(c, cuentasActivas) ? user.username : c.username,
+            }
+          : c,
       );
       setScriptUrls(updatedScriptUrls);
 
       const myConfigsToSave = updatedScriptUrls
-        .filter((u) => !u.username || u.username === user.username)
+        .filter((u) => canEditConnection(u, user.username, cuentasActivas))
         .map((c) => ({ ...c, username: user.username }));
 
-      const res = await api.saveUngetConfigs(user.username, myConfigsToSave);
+      const res = await api.saveUngetConfigs(
+        user.username,
+        myConfigsToSave,
+        opcionesDeAdopcion,
+      );
       if (res.success) {
         toast.success(`Enlace de ${quickFixConfig.name} actualizado con éxito.`);
         setConnectionErrors((prev) => {
@@ -3226,7 +3278,7 @@ export const SheetSearchModule: React.FC = () => {
     const config = tempUrls[indexToRemove];
     // Quitarla de la lista no la borraba de la base —`saveUngetConfigs` solo retira filas
     // propias—, así que desaparecía de la pantalla hasta la siguiente carga.
-    if (!canEditConnection(config, user?.username)) {
+    if (!canEditConnection(config, user?.username, cuentasActivas)) {
       toast.error(`Esta conexión la mantiene ${connectionOwner(config)}. Solo esa cuenta puede retirarla.`);
       return;
     }
@@ -4876,7 +4928,7 @@ function processSheet(sheet) {
                             tempUrls.map((config, idx) => {
                             // Misma regla que en las tarjetas: la conexión de otra cuenta
                             // se ve, con su etiqueta de quién la mantiene, pero no se toca.
-                            const esConexionPropia = canEditConnection(config, user?.username);
+                            const esConexionPropia = canEditConnection(config, user?.username, cuentasActivas);
                             return (
                               <div
                                 key={idx}
@@ -4949,13 +5001,20 @@ function processSheet(sheet) {
                                       {getGasErrorLabel(connectionErrors[config.url]).label}
                                     </div>
                                   )}
-                                  {config.username &&
+                                  {isConnectionOrphaned(config, cuentasActivas) ? (
+                                    <div className="text-[8px] font-extrabold text-amber-800 bg-amber-50 border border-amber-200/70 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5">
+                                      <AlertCircle className="h-2 w-2 text-amber-500 shrink-0" />
+                                      Sin responsable ({config.username} ya no está activo)
+                                    </div>
+                                  ) : (
+                                    config.username &&
                                     config.username !== user?.username && (
                                       <div className="text-[8px] font-extrabold text-teal-700 bg-teal-50 border border-teal-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5">
                                         <CheckCircle2 className="h-2 w-2 text-teal-500" />
                                         Heredado de la Jurisdicción ({config.username})
                                       </div>
-                                    )}
+                                    )
+                                  )}
                                 </div>
                                 {esConexionPropia ? (
                                 <div className="flex items-center gap-1 shrink-0">
@@ -5792,7 +5851,9 @@ function processSheet(sheet) {
                         // La conexión es de su informático: aquí solo se puede mirar y
                         // probar. Ofrecer «eliminar» era engañar, porque el guardado nunca
                         // retira filas ajenas y la tarjeta reaparecía a la siguiente carga.
-                        const esConexionPropia = canEditConnection(config, user?.username);
+                        // La excepción es la conexión sin responsable: esa sí se adopta.
+                        const sinResponsable = isConnectionOrphaned(config, cuentasActivas);
+                        const esConexionPropia = canEditConnection(config, user?.username, cuentasActivas);
 
                         return (
                           <div
@@ -5861,6 +5922,14 @@ function processSheet(sheet) {
                                   {isSupabaseVirtual && (
                                     <span className="text-[7.5px] font-extrabold bg-teal-100 text-teal-800 px-1 py-0.2 rounded uppercase">
                                       Virtual
+                                    </span>
+                                  )}
+                                  {sinResponsable && (
+                                    <span
+                                      className="text-[7.5px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200/70 px-1 py-0.2 rounded uppercase"
+                                      title={`${connectionOwner(config)} ya no está activo. Al guardar esta conexión pasará a su nombre.`}
+                                    >
+                                      Sin responsable
                                     </span>
                                   )}
                                 </div>
