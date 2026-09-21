@@ -121,3 +121,44 @@ export const sheetOwnerCodeOf = (raw?: string | null): string => {
   const parsed = parseFacilityCode(raw);
   return parsed.ipressCode || parsed.facilityCode;
 };
+
+/**
+ * Tipos de establecimiento que se pueden registrar.
+ *
+ * Vivían escritos a mano en dos desplegables de `AdminOrganizationModule`, así que agregar
+ * uno significaba acordarse de los dos sitios. La lista está aquí, junto a la regla de
+ * códigos, porque el código de un establecimiento y su tipo dicen lo mismo: los que llevan
+ * `F02` en adelante son puestos comunales.
+ *
+ * `PUESTO_COMUNAL` se agregó el 2026-09-21. Antes esos establecimientos se registraban como
+ * `PUESTO` y se marcaban a mano con la categoría `P.C.`, que era un apaño para poder
+ * localizarlos después; ver `supabase/SUPABASE_MIGRACION_TIPO_PUESTO_COMUNAL.sql`.
+ */
+export const FACILITY_TYPES = [
+  { value: "HOSPITAL", label: "HOSPITAL" },
+  { value: "CENTRO", label: "CENTRO DE SALUD" },
+  { value: "PUESTO", label: "PUESTO DE SALUD" },
+  { value: "PUESTO_COMUNAL", label: "PUESTO COMUNAL" },
+  { value: "ALM", label: "ALMACÉN" },
+] as const;
+
+/** Etiqueta de un tipo. Los registros antiguos pueden traer un valor que ya no está. */
+export const facilityTypeLabel = (type?: string | null): string => {
+  const valor = String(type || "").trim().toUpperCase();
+  if (!valor) return "";
+  return FACILITY_TYPES.find((t) => t.value === valor)?.label || valor;
+};
+
+/**
+ * Tipo que le corresponde a un código, cuando el propio código lo dice.
+ *
+ * Solo se pronuncia sobre lo que es inequívoco: `06528F02` es un puesto comunal y `030S05`
+ * un almacén. Un código de IPRESS a secas no distingue entre hospital, centro y puesto de
+ * salud, así que devuelve `""` y decide quien registra.
+ */
+export const suggestedFacilityType = (code?: string | null): string => {
+  const { kind } = parseFacilityCode(code);
+  if (kind === "puesto-comunal") return "PUESTO_COMUNAL";
+  if (kind === "almacen") return "ALM";
+  return "";
+};
