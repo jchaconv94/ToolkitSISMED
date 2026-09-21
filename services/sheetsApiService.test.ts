@@ -114,6 +114,16 @@ describe("findFacilityByCode", () => {
     expect(findFacilityByCode("06519", mezcla)?.name).toBe("Exacto");
   });
 
+  it("resuelve el almacén cuyo nombre de pestaña lleva dos guiones", () => {
+    // `ALM. ANEXO BELLAVISTA - SAN MARTIN-030S05`: el primer guion es parte del nombre y
+    // el último separa el código. La tarjeta mostraba el nombre crudo de la pestaña
+    // porque ese camino no llegaba a consultar el registro.
+    const pestana = "ALM. ANEXO BELLAVISTA - SAN MARTIN-030S05";
+    const codigo = facilityCodeFromSheetName(pestana);
+    expect(codigo).toBe("030S05");
+    expect(findFacilityByCode(codigo, establecimientos)?.name).toBe("Almacén Bellavista");
+  });
+
   it("no inventa emparejamientos", () => {
     expect(findFacilityByCode("99999", establecimientos)).toBeNull();
     expect(findFacilityByCode("", establecimientos)).toBeNull();
