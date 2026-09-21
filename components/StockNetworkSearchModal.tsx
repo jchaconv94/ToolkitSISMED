@@ -221,9 +221,15 @@ export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = (
                             </div>
                           </td>
                           <td className="px-3 py-3 align-middle">
-                            <span className="text-sm font-bold text-white">
-                              {etiqueta.name || "—"}
-                            </span>
+                            {/* Sin nombre se dice por qué: un guion no distingue «no lo
+                                encontré» de «no está dado de alta en Establecimientos». */}
+                            {etiqueta.name ? (
+                              <span className="text-sm font-bold text-white">{etiqueta.name}</span>
+                            ) : (
+                              <span className="text-sm font-semibold italic text-slate-500">
+                                Sin registrar
+                              </span>
+                            )}
                             {etiqueta.unregistered && (
                               <span className="ml-2 rounded-md border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-amber-300">
                                 Puesto sin registrar
