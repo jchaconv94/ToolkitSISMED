@@ -177,6 +177,38 @@ export const canEditConnection = (
   return isConnectionOrphaned(connection, activeOwners);
 };
 
+/**
+ * Si al guardar hay que pasar la conexión al nombre de quien guarda.
+ *
+ * Hacen falta las dos condiciones, y la primera es la que se olvida: quien guarda tiene
+ * que **estar reclamando esa conexión**, que es lo que la pantalla marca al editarla. El
+ * envío del modal de conexiones lleva la lista entera, así que sin esa condición dar de
+ * alta la hoja de una UNGET dejaba al que guardaba como responsable, sin decirle nada, de
+ * todas las conexiones sin dueño que hubiera a la vista.
+ *
+ * La segunda es que la conexión no tenga responsable: sin dueño, o con un dueño que ya no
+ * está. La de un informático en activo no se toca nunca.
+ */
+export const shouldAdoptConnection = (params: {
+  /** `username` de la fila que ya existe en la base. */
+  existingOwner?: string | null;
+  /** `username` que trae la conexión en el envío. */
+  claimedBy?: string | null;
+  /** Quién está guardando. */
+  saver?: string | null;
+  /** Cuentas que ya no están: borradas o desactivadas. */
+  orphanOwners?: string[] | null;
+}): boolean => {
+  const saver = String(params.saver || "").trim();
+  if (!saver) return false;
+  if (String(params.claimedBy || "").trim() !== saver) return false;
+
+  const owner = String(params.existingOwner || "").trim();
+  if (owner === saver) return false; // Ya es suya.
+  if (!owner) return true; // Sin dueño.
+  return (params.orphanOwners || []).includes(owner);
+};
+
 /** Cómo lee su stock una UNGET, para mostrarlo en la lista de conexiones. */
 export type UngetConnectionMode = "directa" | "apps-script" | "sin-hoja";
 

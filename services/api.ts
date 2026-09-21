@@ -1,6 +1,6 @@
 import { User, UserRole, Personnel, HealthFacility, RoleConfig, SystemConfig, Unget, Diresa, Ogess, Microred } from "../types";
 import { SESSION_TOKEN_KEY, supabase } from "./supabaseClient";
-import { connectionsToRetire } from "./ungetConnections";
+import { connectionsToRetire, shouldAdoptConnection } from "./ungetConnections";
 import bcrypt from "bcryptjs";
 
 // MOCK DATA (Respaldo en caso de error de conexión/sin supabase)
@@ -1174,11 +1174,18 @@ export const api = {
                     const existente = ungetId ? existentesPorUnget.get(ungetId) : null;
                     if (existente) {
                         // Normalmente no se cambia `username`: sigue siendo de su
-                        // informático. La excepción es la conexión sin responsable —su
-                        // cuenta ya no existe o está desactivada—, que la adopta quien la
-                        // guarda; si no, se quedaría bloqueada para siempre.
-                        const dueno = String(existente.username || '').trim();
-                        if (dueno !== username && (!dueno || orphanOwners.includes(dueno))) {
+                        // informático. La excepción es la conexión sin responsable, que la
+                        // adopta quien la reclama; si no, quedaría bloqueada para siempre.
+                        // La regla, y por qué hacen falta las dos condiciones, en
+                        // `shouldAdoptConnection`.
+                        if (
+                            shouldAdoptConnection({
+                                existingOwner: existente.username,
+                                claimedBy: c.username,
+                                saver: username,
+                                orphanOwners,
+                            })
+                        ) {
                             datos.username = username;
                         }
                         await supabase.from('unget_configs').update(datos).eq('id', existente.id);

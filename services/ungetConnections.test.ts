@@ -11,6 +11,7 @@ import {
   isVirtualSheetUrl,
   normalizeUngetName,
   pickOneConnectionPerUnget,
+  shouldAdoptConnection,
   ungetConnectionKey,
   ungetConnectionKeys,
 } from "./ungetConnections";
@@ -324,6 +325,56 @@ describe("conexiones sin responsable", () => {
   it("una fila sin dueño está libre, no huérfana", () => {
     expect(isConnectionOrphaned({ name: "PICOTA" }, activas)).toBe(false);
     expect(canEditConnection({ name: "PICOTA" }, "admin", activas)).toBe(true);
+  });
+});
+
+describe("shouldAdoptConnection", () => {
+  const ausentes = ["inf.picota"];
+
+  it("la adopta quien la reclama, si su dueño ya no está", () => {
+    expect(
+      shouldAdoptConnection({
+        existingOwner: "inf.picota",
+        claimedBy: "inf.nuevo",
+        saver: "inf.nuevo",
+        orphanOwners: ausentes,
+      }),
+    ).toBe(true);
+  });
+
+  it("no adopta lo que solo viaja en el envío", () => {
+    // El modal manda la lista entera. Dar de alta una hoja no puede dejarte de
+    // responsable, y sin decirte nada, de las demás conexiones sin dueño.
+    expect(
+      shouldAdoptConnection({
+        existingOwner: "inf.picota",
+        claimedBy: "inf.picota",
+        saver: "inf.nuevo",
+        orphanOwners: ausentes,
+      }),
+    ).toBe(false);
+  });
+
+  it("la conexión de un informático en activo no se toca ni reclamándola", () => {
+    expect(
+      shouldAdoptConnection({
+        existingOwner: "inf.bellavista",
+        claimedBy: "admin",
+        saver: "admin",
+        orphanOwners: ausentes,
+      }),
+    ).toBe(false);
+  });
+
+  it("una fila sin dueño la toma quien la reclama", () => {
+    expect(shouldAdoptConnection({ existingOwner: null, claimedBy: "admin", saver: "admin" })).toBe(true);
+  });
+
+  it("no hace nada si ya es suya o si no hay quien guarde", () => {
+    expect(
+      shouldAdoptConnection({ existingOwner: "admin", claimedBy: "admin", saver: "admin" }),
+    ).toBe(false);
+    expect(shouldAdoptConnection({ existingOwner: null, claimedBy: "", saver: "" })).toBe(false);
   });
 });
 
