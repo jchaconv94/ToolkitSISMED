@@ -17,6 +17,7 @@ import {
   Minus,
   Trash2,
   Lock,
+  ArrowLeft,
   Building2,
   ChevronRight,
   MapPin,
@@ -3077,11 +3078,58 @@ export const SheetSearchModule: React.FC = () => {
     }
   };
 
+  /**
+   * Cada paso hacia dentro deja una entrada en el historial del navegador, para que su
+   * flecha de atrás retroceda **un nivel** en vez de salir del módulo.
+   *
+   * La dirección no cambia: solo se guarda el nivel en el estado de la entrada. Cambiar la
+   * ruta obligaría a tocar la tabla de `services/appRoutes.ts`, que tiene una prueba que
+   * exige una ruta por módulo, y a cambio solo daría enlaces profundos que nadie pidió.
+   * El oyente de `popstate` de `App.tsx` no estorba: como la ruta es la misma, deja el
+   * módulo donde está.
+   */
+  const recordarNivelEnHistorial = (
+    nivel: "sheets" | "data",
+    ungetIndex: number | null,
+    sourceId: string,
+  ) => {
+    try {
+      window.history.pushState(
+        { ...(window.history.state || {}), stockNivel: nivel, stockUnget: ungetIndex, stockSource: sourceId },
+        "",
+        window.location.pathname + window.location.search,
+      );
+    } catch {
+      // Sin historial disponible se navega igual; solo se pierde la flecha del navegador.
+    }
+  };
+
+  useEffect(() => {
+    const alRetroceder = (evento: PopStateEvent) => {
+      const estado = (evento.state || {}) as {
+        stockNivel?: "ungets" | "sheets" | "data";
+        stockUnget?: number | null;
+        stockSource?: string;
+      };
+      // Una entrada sin nivel es la del propio módulo: se vuelve a su primera pantalla.
+      setViewLevel(estado.stockNivel || "ungets");
+      setSelectedUngetIndex(
+        typeof estado.stockUnget === "number" ? estado.stockUnget : null,
+      );
+      setSelectedSourceId(estado.stockSource || "");
+      setSearchTerm("");
+      setSheetSearchTerm("");
+    };
+    window.addEventListener("popstate", alRetroceder);
+    return () => window.removeEventListener("popstate", alRetroceder);
+  }, []);
+
   const handleSelectUnget = (index: number) => {
     setSelectedUngetIndex(index);
     setViewLevel("sheets");
     setSelectedSourceId("");
     setSearchTerm("");
+    recordarNivelEnHistorial("sheets", index, "");
   };
 
   /**
@@ -3336,18 +3384,76 @@ export const SheetSearchModule: React.FC = () => {
       setSelectedSourceId(sourceId);
       setViewLevel("data");
       setSearchTerm("");
+      recordarNivelEnHistorial("data", selectedUngetIndex, sourceId);
     }
   };
 
-  const goBack = () => {
+  /**
+   * A dónde lleva volver desde donde se está, o `null` si ya no se puede subir más.
+   *
+   * Desde una hoja se vuelve a los establecimientos de su UNGET; desde ahí, al panel
+   * regional —salvo que no haya panel, porque el usuario solo ve una UNGET y entonces
+   * arriba no hay nada—.
+   */
+  const destinoDeVolver = useMemo((): string | null => {
+    if (viewLevel === "data" && selectedUngetIndex !== null) {
+      return formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "los establecimientos");
+    }
+    if (viewLevel === "sheets" && hayPanelRegional) return "el panel regional";
+    return null;
+  }, [viewLevel, selectedUngetIndex, scriptUrls, hayPanelRegional]);
+
+  /** Sube un nivel y deja el buscador limpio, para no arrastrar lo escrito. */
+  const aplicarNivelAnterior = useCallback(() => {
+    setSearchTerm("");
+    setSheetSearchTerm("");
     if (viewLevel === "data") {
       setViewLevel("sheets");
       setSelectedSourceId("");
-    } else if (viewLevel === "sheets") {
+      return;
+    }
+    if (viewLevel === "sheets" && hayPanelRegional) {
       setViewLevel("ungets");
       setSelectedUngetIndex(null);
+      setSelectedSourceId("");
     }
-  };
+  }, [viewLevel, hayPanelRegional]);
+
+  /**
+   * Volver, ya sea por el botón o por la tecla Escape.
+   *
+   * Si el nivel actual llegó por una entrada del historial —que es lo normal, porque cada
+   * paso hacia dentro añade una—, se retrocede con el propio historial y el cambio lo
+   * aplica el oyente de `popstate`. Así el botón de la aplicación y la flecha del
+   * navegador no se desincronizan: sin esto, volver con el botón dejaba una entrada
+   * muerta y la siguiente pulsación de la flecha no hacía nada visible.
+   */
+  const volverUnNivel = useCallback(() => {
+    if (!destinoDeVolver) return;
+    if ((window.history.state as any)?.stockNivel) {
+      window.history.back();
+      return;
+    }
+    aplicarNivelAnterior();
+  }, [destinoDeVolver, aplicarNivelAnterior]);
+
+  /**
+   * Escape vuelve un nivel. Se ignora si hay un modal abierto o si el foco está escribiendo
+   * en un campo: ahí Escape significa «cierra esto» o «limpia lo que escribí», no «sal de
+   * la pantalla», y sacar a alguien de una hoja sin querer es justo lo que no se busca.
+   */
+  useEffect(() => {
+    const alPulsar = (evento: KeyboardEvent) => {
+      if (evento.key !== "Escape" || !destinoDeVolver) return;
+      if (isConfigOpen || quickFixConfig || conexionAEliminar || stockModalSourceId) return;
+      const activo = document.activeElement as HTMLElement | null;
+      const etiqueta = activo?.tagName?.toLowerCase();
+      if (etiqueta === "input" || etiqueta === "textarea" || activo?.isContentEditable) return;
+      volverUnNivel();
+    };
+    window.addEventListener("keydown", alPulsar);
+    return () => window.removeEventListener("keydown", alPulsar);
+  }, [destinoDeVolver, volverUnNivel, isConfigOpen, quickFixConfig, conexionAEliminar, stockModalSourceId]);
 
   const handleRemoveUrl = (indexToRemove: number) => {
     const config = tempUrls[indexToRemove];
@@ -4509,10 +4615,26 @@ function processSheet(sheet) {
         {/* Left Side: Title & KPIs underneath */}
         <div className="w-full xl:w-auto flex flex-col gap-3 sm:gap-4 overflow-hidden">
           {/* Title */}
-          <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 sm:gap-2.5">
-            <Database className="h-5 w-5 text-teal-600 shrink-0" />
-            <span className="truncate">Reporte de Stock detallado SISMED</span>
-          </h2>
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            {/* La ruta de arriba a la derecha es pequeña y no parece pulsable: la gente se
+                quedaba dentro de una hoja sin saber cómo salir. El botón va a la izquierda
+                del título, que es donde se mira, y dice a dónde lleva. */}
+            {destinoDeVolver && (
+              <button
+                type="button"
+                onClick={volverUnNivel}
+                title={`Volver a ${destinoDeVolver} (Esc)`}
+                aria-label={`Volver a ${destinoDeVolver}`}
+                className="group flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center shrink-0 rounded-xl border border-slate-200 bg-white text-slate-500 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] transition-all hover:border-teal-300 hover:text-teal-700 hover:shadow-md cursor-pointer"
+              >
+                <ArrowLeft className="h-4 w-4 sm:h-[18px] sm:w-[18px] transition-transform group-hover:-translate-x-0.5" />
+              </button>
+            )}
+            <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 sm:gap-2.5 min-w-0">
+              <Database className="h-5 w-5 text-teal-600 shrink-0" />
+              <span className="truncate">Reporte de Stock detallado SISMED</span>
+            </h2>
+          </div>
 
           {/* Connection KPIs (Cards) */}
           {(() => {
