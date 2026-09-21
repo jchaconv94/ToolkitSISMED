@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   assignmentBelongsToConnection,
+  canEditConnection,
   buildUngetConnectionStatus,
   cachedSourcesStillMatch,
+  connectionOwner,
   connectionsToRetire,
   describeConnectionMode,
   isVirtualSheetUrl,
@@ -266,6 +268,30 @@ describe("connectionsToRetire", () => {
   it("no se cae con listas nulas ni con huecos", () => {
     expect(connectionsToRetire(null, null)).toEqual([]);
     expect(connectionsToRetire([null as any, mias[0]], [])).toEqual([mias[0]]);
+  });
+});
+
+describe("canEditConnection", () => {
+  it("la conexión es de quien la mantiene", () => {
+    expect(canEditConnection({ name: "BELLAVISTA", username: "inf.bellavista" }, "inf.bellavista")).toBe(true);
+  });
+
+  it("nadie más la modifica, ni siquiera el admin", () => {
+    // Era el caso invisible: el admin pulsaba eliminar, la tarjeta se iba de la pantalla,
+    // salía «Eliminado correctamente» y a la siguiente carga volvía.
+    expect(canEditConnection({ name: "BELLAVISTA", username: "inf.bellavista" }, "admin")).toBe(false);
+  });
+
+  it("una fila sin dueño la adopta quien la guarde", () => {
+    expect(canEditConnection({ name: "PICOTA" }, "admin")).toBe(true);
+    expect(canEditConnection({ name: "PICOTA", username: "   " }, "admin")).toBe(true);
+  });
+
+  it("no se cae con datos incompletos", () => {
+    expect(canEditConnection(null, "admin")).toBe(true);
+    expect(canEditConnection({ name: "PICOTA", username: "inf" }, undefined)).toBe(false);
+    expect(connectionOwner(null)).toBe("");
+    expect(connectionOwner({ name: "PICOTA", username: " inf " })).toBe("inf");
   });
 });
 

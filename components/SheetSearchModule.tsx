@@ -16,6 +16,7 @@ import {
   Plus,
   Minus,
   Trash2,
+  Lock,
   Building2,
   ChevronRight,
   MapPin,
@@ -76,6 +77,8 @@ import { findLatestValidSync, getLastMovementDate } from "../services/stockSyncH
 import {
   assignmentBelongsToConnection,
   cachedSourcesStillMatch,
+  canEditConnection,
+  connectionOwner,
   normalizeUngetName,
   pickOneConnectionPerUnget,
   ungetConnectionKeys,
@@ -1009,6 +1012,12 @@ export const SheetSearchModule: React.FC = () => {
   const gasSheetListRefreshRef = useRef<Record<string, number>>({});
   const [quickFixConfig, setQuickFixConfig] = useState<UngetConfig | null>(null);
   const [quickFixUrlInput, setQuickFixUrlInput] = useState("");
+  /**
+   * La conexión abierta en el modal del engranaje es de otro usuario. Entonces el diálogo
+   * sirve para lo único que sí funciona desde aquí: probar el enlace y ver por qué esa
+   * UNGET no conecta. Guardar queda fuera, porque el envío no incluye filas ajenas.
+   */
+  const quickFixEsAjena = !!quickFixConfig && !canEditConnection(quickFixConfig, user?.username);
   const [isTestingGasUrl, setIsTestingGasUrl] = useState(false);
   const [gasTestResult, setGasTestResult] = useState<{
     success: boolean;
@@ -2811,6 +2820,10 @@ export const SheetSearchModule: React.FC = () => {
   const handleEditUrl = (index: number, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const config = tempUrls[index];
+    if (!canEditConnection(config, user?.username)) {
+      toast.error(`Esta conexión la mantiene ${connectionOwner(config)}. Solo esa cuenta puede editarla.`);
+      return;
+    }
     setEditingIndex(index);
     setNewUrlInput(isVirtualSheetUrl(config.url) ? "" : config.url);
     setNewNameInput(config.ungetId || config.name);
@@ -2820,34 +2833,22 @@ export const SheetSearchModule: React.FC = () => {
     setIsConfigOpen(true);
   };
 
-  const handleDirectEdit = (index: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!user) return;
-    const config = scriptUrls[index];
-
-    // Only edit my own URLs, or if I'm editing an old one without a set username it gets adopted
-    const visibleUrls = scriptUrls.filter(
-      (u) => (!u.username || u.username === user.username),
-    );
-    setTempUrls(visibleUrls);
-
-    const targetIdx = visibleUrls.findIndex(
-      (u) => u.url === config.url && (u.ungetId === config.ungetId || u.name === config.name),
-    );
-    setEditingIndex(targetIdx !== -1 ? targetIdx : null);
-    setNewUrlInput(isVirtualSheetUrl(config.url) ? "" : config.url);
-    setNewNameInput(config.ungetId || config.name);
-    setNewSpreadsheetInput(config.spreadsheetId || "");
-    setSpreadsheetCheck(null);
-    setIsConfigOpen(true);
-  };
-
   const handleDirectDelete = async (index: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!user) return;
 
+    // El botón ya no se ofrece en conexiones ajenas; esto es el cierre de la regla, para
+    // que no vuelva a existir un camino que diga «Eliminado correctamente» sin borrar nada.
+    const config = scriptUrls[index];
+    if (!canEditConnection(config, user.username)) {
+      toast.error(
+        `Esta conexión la mantiene ${connectionOwner(config)}. Solo esa cuenta puede retirarla.`,
+      );
+      return;
+    }
+
     toast("¿Eliminar esta conexión?", {
-      description: `Se borrará el acceso a "${scriptUrls[index].name}"`,
+      description: `Se borrará el acceso a "${config.name}"`,
       action: {
         label: "Eliminar",
         onClick: async () => {
@@ -2922,6 +2923,14 @@ export const SheetSearchModule: React.FC = () => {
 
   const handleSaveQuickFixUrl = async () => {
     if (!quickFixConfig || !user) return;
+    // Guardar una conexión ajena no llegaba a la base: el filtro de más abajo la deja
+    // fuera del envío. Decía «actualizado con éxito» y el enlace se perdía.
+    if (!canEditConnection(quickFixConfig, user.username)) {
+      toast.error(
+        `Esta conexión la mantiene ${connectionOwner(quickFixConfig)}. Solo esa cuenta puede cambiar su enlace.`,
+      );
+      return;
+    }
     const cleanUrl = quickFixUrlInput.trim();
     if (!cleanUrl) {
       toast.error("La URL no puede estar vacía.");
@@ -3214,6 +3223,13 @@ export const SheetSearchModule: React.FC = () => {
   };
 
   const handleRemoveUrl = (indexToRemove: number) => {
+    const config = tempUrls[indexToRemove];
+    // Quitarla de la lista no la borraba de la base —`saveUngetConfigs` solo retira filas
+    // propias—, así que desaparecía de la pantalla hasta la siguiente carga.
+    if (!canEditConnection(config, user?.username)) {
+      toast.error(`Esta conexión la mantiene ${connectionOwner(config)}. Solo esa cuenta puede retirarla.`);
+      return;
+    }
     setTempUrls(tempUrls.filter((_, idx) => idx !== indexToRemove));
   };
 
@@ -4857,7 +4873,11 @@ function processSheet(sheet) {
                         <div className="space-y-2.5 flex-1 min-h-0 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar">
                           {/* Map own URLs */}
                           {tempUrls.length > 0 ? (
-                            tempUrls.map((config, idx) => (
+                            tempUrls.map((config, idx) => {
+                            // Misma regla que en las tarjetas: la conexión de otra cuenta
+                            // se ve, con su etiqueta de quién la mantiene, pero no se toca.
+                            const esConexionPropia = canEditConnection(config, user?.username);
+                            return (
                               <div
                                 key={idx}
                                 className={`group relative flex gap-2 sm:gap-3 items-center border p-3 rounded-lg transition-all duration-200 shadow-sm ${
@@ -4937,6 +4957,7 @@ function processSheet(sheet) {
                                       </div>
                                     )}
                                 </div>
+                                {esConexionPropia ? (
                                 <div className="flex items-center gap-1 shrink-0">
                                   <button
                                     type="button"
@@ -4959,8 +4980,17 @@ function processSheet(sheet) {
                                     <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                                   </button>
                                 </div>
+                                ) : (
+                                  <div
+                                    className="shrink-0 p-1.5 sm:p-2 text-slate-300"
+                                    title={`Solo ${connectionOwner(config)} puede modificar esta conexión`}
+                                  >
+                                    <Lock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                  </div>
+                                )}
                               </div>
-                            ))
+                            );
+                            })
                           ) : (
                             <div className="py-8 sm:py-10 text-center bg-slate-50/80 rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center">
                               <div className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-100 flex items-center justify-center mb-3">
@@ -5021,7 +5051,7 @@ function processSheet(sheet) {
                 </div>
                 <div>
                   <h3 className="text-base sm:text-lg font-black text-slate-900 uppercase tracking-tight">
-                    Configurar Enlace Web App
+                    {quickFixEsAjena ? "Probar Enlace Web App" : "Configurar Enlace Web App"}
                   </h3>
                   <div className="text-xs font-bold text-teal-700 uppercase tracking-wide flex items-center gap-1.5 mt-0.5">
                     <Building2 className="h-3.5 w-3.5 text-teal-500" />
@@ -5040,6 +5070,22 @@ function processSheet(sheet) {
 
             {/* Body */}
             <div className="p-5 sm:p-6 space-y-4">
+              {quickFixEsAjena && (
+                <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3.5 text-xs leading-relaxed text-amber-900">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                  <div>
+                    <div className="font-extrabold uppercase tracking-tight text-[11px]">
+                      Conexión de otra cuenta
+                    </div>
+                    <div className="mt-0.5 font-medium">
+                      La mantiene <span className="font-black">{connectionOwner(quickFixConfig)}</span>, el
+                      informático de esta UNGET, y solo esa cuenta puede cambiar su enlace. Desde aquí
+                      sí puede probarla para saber por qué no conecta.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2">
                   URL de la Web App de Google Apps Script (*.exec)
@@ -5052,8 +5098,13 @@ function processSheet(sheet) {
                       setQuickFixUrlInput(e.target.value);
                       setGasTestResult(null);
                     }}
+                    readOnly={quickFixEsAjena}
                     placeholder="https://script.google.com/macros/s/.../exec"
-                    className="w-full bg-slate-50 border border-slate-300 focus:border-teal-500 focus:bg-white rounded-lg px-3.5 py-2.5 text-xs font-mono text-slate-800 placeholder-slate-400 outline-none transition-all shadow-inner"
+                    className={`w-full rounded-lg border px-3.5 py-2.5 text-xs font-mono outline-none transition-all shadow-inner ${
+                      quickFixEsAjena
+                        ? "bg-slate-100 border-slate-200 text-slate-500 cursor-default"
+                        : "bg-slate-50 border-slate-300 focus:border-teal-500 focus:bg-white text-slate-800 placeholder-slate-400"
+                    }`}
                   />
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1.5 font-medium leading-relaxed">
@@ -5115,8 +5166,9 @@ function processSheet(sheet) {
                 onClick={() => setQuickFixConfig(null)}
                 className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 rounded-lg transition-all"
               >
-                Cancelar
+                {quickFixEsAjena ? "Cerrar" : "Cancelar"}
               </button>
+              {!quickFixEsAjena && (
               <button
                 type="button"
                 onClick={handleSaveQuickFixUrl}
@@ -5126,6 +5178,7 @@ function processSheet(sheet) {
                 <Save className="h-4 w-4" />
                 {isSavingGasUrl ? "Guardando..." : "Guardar y Conectar"}
               </button>
+              )}
             </div>
           </div>
         </div>
@@ -5736,6 +5789,11 @@ function processSheet(sheet) {
                           }
                         }
 
+                        // La conexión es de su informático: aquí solo se puede mirar y
+                        // probar. Ofrecer «eliminar» era engañar, porque el guardado nunca
+                        // retira filas ajenas y la tarjeta reaparecía a la siguiente carga.
+                        const esConexionPropia = canEditConnection(config, user?.username);
+
                         return (
                           <div
                             key={idx}
@@ -5753,10 +5811,15 @@ function processSheet(sheet) {
                                   type="button"
                                   onClick={(e) => handleOpenQuickFix(config, e)}
                                   className="p-1.5 sm:p-2 bg-white/90 backdrop-blur-sm shadow-sm border border-gray-200 rounded-lg text-gray-600 hover:text-teal-700 hover:border-teal-300 transition-all cursor-pointer"
-                                  title="Configurar / Probar enlace Web App"
+                                  title={
+                                    esConexionPropia
+                                      ? "Configurar / Probar enlace Web App"
+                                      : `Probar el enlace (la mantiene ${connectionOwner(config)})`
+                                  }
                                 >
                                   <Settings className="h-4 w-4" />
                                 </button>
+                                {esConexionPropia && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -5769,6 +5832,7 @@ function processSheet(sheet) {
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </button>
+                                )}
                               </div>
                             )}
 
