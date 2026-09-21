@@ -105,6 +105,32 @@ export const ungetConnectionKeys = (connection: UngetConnection): string[] => {
 };
 
 /**
+ * La UNGET a la que pertenece una conexión, por identificador y, si falta, por nombre.
+ *
+ * Es la forma correcta de situar una conexión en el territorio. Hacerlo por su creador
+ * —de qué DIRESA u OGESS era la persona que la dio de alta— falla en cuanto esa cuenta
+ * desaparece: la conexión se sale del ámbito de todos menos del usuario global, y la
+ * pantalla vuelve a ofrecer esa UNGET como no configurada, con lo que acaban existiendo
+ * dos conexiones para la misma UNGET. La UNGET, en cambio, siempre sabe de qué DIRESA y
+ * de qué OGESS cuelga.
+ */
+export const findUngetForConnection = <T extends { id?: string | null; name?: string | null }>(
+  connection: UngetConnection | null | undefined,
+  ungets: T[] | null | undefined,
+): T | undefined => {
+  if (!connection) return undefined;
+  const claves = new Set(ungetConnectionKeys(connection));
+  if (claves.size === 0) return undefined;
+  return (ungets || []).find((unget) =>
+    unget
+      ? ungetConnectionKeys({ name: String(unget.name || ""), ungetId: unget.id ?? null }).some(
+          (clave) => claves.has(clave),
+        )
+      : false,
+  );
+};
+
+/**
  * Si la caché de establecimientos sigue sirviendo para esta lista de conexiones.
  *
  * Cada establecimiento se guarda apuntando a **la posición** de su UNGET en la lista

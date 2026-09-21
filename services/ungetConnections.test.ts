@@ -7,6 +7,7 @@ import {
   connectionOwner,
   connectionsToRetire,
   describeConnectionMode,
+  findUngetForConnection,
   isConnectionOrphaned,
   isVirtualSheetUrl,
   normalizeUngetName,
@@ -375,6 +376,40 @@ describe("shouldAdoptConnection", () => {
       shouldAdoptConnection({ existingOwner: "admin", claimedBy: "admin", saver: "admin" }),
     ).toBe(false);
     expect(shouldAdoptConnection({ existingOwner: null, claimedBy: "", saver: "" })).toBe(false);
+  });
+});
+
+describe("findUngetForConnection", () => {
+  const ungets = [
+    { id: "u-1", name: "Bellavista", diresaId: "d-1", ogessId: "o-1" },
+    { id: "u-2", name: "Mariscal Cáceres", diresaId: "d-1", ogessId: "o-2" },
+  ];
+
+  it("sitúa la conexión por el identificador de su UNGET", () => {
+    expect(findUngetForConnection({ name: "lo que sea", ungetId: "u-2" }, ungets)?.id).toBe("u-2");
+  });
+
+  it("y por el nombre mientras la fila no tenga identificador", () => {
+    expect(findUngetForConnection({ name: "BELLAVISTA" }, ungets)?.id).toBe("u-1");
+    expect(findUngetForConnection({ name: "MARICAL C." }, ungets)?.id).toBe("u-2");
+  });
+
+  it("no la sitúa en ningún sitio si su UNGET no está registrada", () => {
+    expect(findUngetForConnection({ name: "UNGET INVENTADA" }, ungets)).toBeUndefined();
+  });
+
+  it("el territorio no depende de quién la creara", () => {
+    // Es el caso que importa: la cuenta que la dio de alta ya no existe, y la
+    // conexión tiene que seguir colgando de la DIRESA y la OGESS de su UNGET.
+    const sinDueno = { name: "Bellavista", ungetId: "u-1", username: null as any };
+    expect(findUngetForConnection(sinDueno, ungets)?.diresaId).toBe("d-1");
+  });
+
+  it("no se cae con datos incompletos", () => {
+    expect(findUngetForConnection(null, ungets)).toBeUndefined();
+    expect(findUngetForConnection({ name: "" }, ungets)).toBeUndefined();
+    expect(findUngetForConnection({ name: "Bellavista" }, null)).toBeUndefined();
+    expect(findUngetForConnection({ name: "Bellavista" }, [null as any])).toBeUndefined();
   });
 });
 

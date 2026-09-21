@@ -79,6 +79,7 @@ import {
   cachedSourcesStillMatch,
   canEditConnection,
   connectionOwner,
+  findUngetForConnection,
   isConnectionOrphaned,
   normalizeUngetName,
   pickOneConnectionPerUnget,
@@ -1498,8 +1499,10 @@ export const SheetSearchModule: React.FC = () => {
     tempUrls
       .filter((_, idx) => idx !== editingIndex)
       .forEach((u) => ungetConnectionKeys(u).forEach((k) => configuradas.add(k)));
+    // Una conexión sin dueño —la cuenta que la creó ya no está— sigue ocupando su UNGET.
+    // Pedir `c.username` la dejaba fuera y la UNGET volvía a ofrecerse como libre.
     allJurisdictionConfigs
-      .filter((c) => c.username && c.username !== user?.username)
+      .filter((c) => !c.username || c.username !== user?.username)
       .forEach((c) => ungetConnectionKeys(c).forEach((k) => configuradas.add(k)));
 
     const yaConfigurada = (u: any) =>
@@ -1713,36 +1716,34 @@ export const SheetSearchModule: React.FC = () => {
           const allConfigs = alignConfigsWithOfficialUngets(allConfigsRaw, ungs);
 
           const jurisdictionConfigs = allConfigs.filter((config) => {
-            // Encontrar usuario creador
-            const creator = allUsers.find(
-              (u) => u.username === config.username,
-            );
-            if (!creator) {
-              return level === "GLOBAL";
-            }
-            const creatorDiresaId =
-              creator.personnelData?.diresaId ||
-              creator.facilityData?.diresaId ||
-              (creator as any).diresaId ||
-              (creator as any).personnel?.diresaId;
-            const creatorOgessId =
-              creator.personnelData?.ogessId ||
-              creator.facilityData?.ogessId ||
-              (creator as any).ogessId ||
-              (creator as any).personnel?.ogessId;
-            const creatorUngetId =
-              creator.personnelData?.ungetId ||
-              creator.facilityData?.ungetId ||
-              (creator as any).ungetId ||
-              (creator as any).personnel?.ungetId;
-
             if (level === "GLOBAL") return true;
+
+            // El territorio de una conexión es el de **su UNGET**, no el de quien la dio
+            // de alta. Situarla por su creador la sacaba del ámbito de todos en cuanto esa
+            // cuenta desaparecía, y entonces «Nueva conexión» volvía a ofrecer esa UNGET
+            // como libre: dos conexiones para la misma UNGET, que es justo lo que el
+            // modelo «una UNGET, una conexión» vino a evitar.
+            const suUnget = findUngetForConnection(config, ungs);
+            const creator = allUsers.find((u) => u.username === config.username);
+            const delCreador = (campo: "diresaId" | "ogessId" | "ungetId") =>
+              creator?.personnelData?.[campo] ||
+              creator?.facilityData?.[campo] ||
+              (creator as any)?.[campo] ||
+              (creator as any)?.personnel?.[campo];
+
+            // El creador solo se usa de respaldo, para una conexión cuya UNGET no se
+            // reconoce (nombre escrito a mano que no coincide con ninguna registrada).
+            const diresaId = suUnget ? (suUnget as any).diresaId : delCreador("diresaId");
+            const ogessId = suUnget ? (suUnget as any).ogessId : delCreador("ogessId");
+            const ungetId = suUnget ? (suUnget as any).id : delCreador("ungetId");
+            if (!suUnget && !creator) return false;
+
             if (level === "DIRESA" && userDiresaId)
-              return String(creatorDiresaId) === String(userDiresaId);
+              return String(diresaId) === String(userDiresaId);
             if (level === "OGESS" && userOgessId)
-              return String(creatorOgessId) === String(userOgessId);
+              return String(ogessId) === String(userOgessId);
             if (level === "UNGET" && userUngetId)
-              return String(creatorUngetId) === String(userUngetId);
+              return String(ungetId) === String(userUngetId);
             return false;
           });
 
