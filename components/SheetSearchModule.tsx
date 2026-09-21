@@ -3060,6 +3060,24 @@ export const SheetSearchModule: React.FC = () => {
   };
 
   /**
+   * Con una sola UNGET a la vista, el panel regional es una única tarjeta que hay que
+   * pulsar cada vez para llegar a lo de siempre. Es el caso de un usuario de UNGET o de
+   * un nivel inferior: solo ve la suya. Se entra directo a sus establecimientos.
+   *
+   * La condición es lo que hay en pantalla y no el rol: en cuanto se ve más de una
+   * conexión el panel vuelve a tener sentido y todo se comporta como antes.
+   */
+  const hayPanelRegional = scriptUrls.length > 1;
+
+  useEffect(() => {
+    if (hayPanelRegional) return;
+    if (scriptUrls.length !== 1) return;
+    if (viewLevel !== "ungets" || selectedUngetIndex !== null) return;
+    setSelectedUngetIndex(0);
+    setViewLevel("sheets");
+  }, [hayPanelRegional, scriptUrls.length, viewLevel, selectedUngetIndex]);
+
+  /**
    * Lee el stock de una IPRESS sin tocar el estado: lectura directa de Google Sheets y,
    * si no es posible, Apps Script. La usan tanto "Consultar stock" como la precarga.
    */
@@ -4586,6 +4604,9 @@ function processSheet(sheet) {
         <div className="flex flex-col gap-3 sm:gap-4 w-full xl:w-auto items-start xl:items-end justify-start overflow-hidden">
           {/* Navigation Tabs (Breadcrumbs) aligned to the right */}
           <div className="flex items-center text-[10px] sm:text-[12px] font-bold text-slate-500 overflow-x-auto hide-scrollbar shrink-0 uppercase tracking-widest gap-1 self-stretch xl:self-auto justify-start xl:justify-end pb-1 sm:pb-0">
+            {/* Con una sola UNGET a la vista no hay panel al que volver, así que la
+                migaja empieza directamente en su nombre. */}
+            {hayPanelRegional && (
             <button
               onClick={() => {
                 setViewLevel("ungets");
@@ -4605,10 +4626,13 @@ function processSheet(sheet) {
                 PANEL REGIONAL
               </span>
             </button>
+            )}
 
             {selectedUngetIndex !== null && (
               <>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-350 mx-0.5 sm:mx-1 shrink-0" />
+                {hayPanelRegional && (
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-350 mx-0.5 sm:mx-1 shrink-0" />
+                )}
                 <button
                   onClick={() => {
                     setViewLevel("sheets");
