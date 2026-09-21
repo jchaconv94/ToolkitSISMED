@@ -31,7 +31,7 @@ import { MaintenanceScreen } from './components/MaintenanceScreen';
 import { maintenanceMessage, shouldBlockForMaintenance } from './services/maintenanceMode';
 import { AdminPanel } from './components/AdminPanel';
 import { UserProfile } from './components/UserProfile';
-import { WelcomeModal } from './components/WelcomeModal';
+import { showWelcomeToast } from './components/WelcomeToast';
 import { RedistributionModule } from './components/RedistributionModule';
 import { SheetSearchModule } from './components/SheetSearchModule';
 import { AdminStockAssignmentModule } from './components/AdminStockAssignmentModule';
@@ -139,7 +139,6 @@ const AuthenticatedApp: React.FC = () => {
     const wasSidebarCollapsedRef = React.useRef(false);
 
     // Welcome Modal State
-    const [showWelcome, setShowWelcome] = useState(false);
 
     // Listen for advanced filters toggled event to collapse/restore sidebar menu
     useEffect(() => {
@@ -158,12 +157,13 @@ const AuthenticatedApp: React.FC = () => {
         };
     }, [isSidebarCollapsed]);
 
-    // Effect to trigger welcome modal ONCE per session
+    // El saludo de bienvenida, una vez por sesión. Es un aviso que se va solo, no un modal
+    // que haya que cerrar para empezar a trabajar.
     useEffect(() => {
         if (isAuthenticated && user && !isLoading) {
             const hasShown = sessionStorage.getItem(WELCOME_KEY);
             if (!hasShown) {
-                setShowWelcome(true);
+                showWelcomeToast(user);
                 sessionStorage.setItem(WELCOME_KEY, 'true');
             }
         }
@@ -379,9 +379,6 @@ const AuthenticatedApp: React.FC = () => {
                     hasPermission={hasPermission} 
                 />
 
-                <Suspense fallback={null}>
-                    {showWelcome && user && <WelcomeModal user={user} onClose={() => setShowWelcome(false)} />}
-                </Suspense>
             </div>
         </div>
     );
