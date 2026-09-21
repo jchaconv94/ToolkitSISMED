@@ -33,8 +33,14 @@ interface StockNetworkSearchModalProps {
   isCompleting?: boolean;
 }
 
+/**
+ * Cantidad sin separador de miles.
+ *
+ * `31,918` se lee como «treinta y uno coma…» en una pantalla donde el resto de saldos van
+ * sin agrupar, y la coma confunde con el decimal. Los saldos se escriben con sus cifras.
+ */
 const formatearCantidad = (valor: number): string =>
-  new Intl.NumberFormat("es-PE", { maximumFractionDigits: 2 }).format(valor);
+  new Intl.NumberFormat("es-PE", { maximumFractionDigits: 2, useGrouping: false }).format(valor);
 
 /**
  * Buscador de un producto en todas las hojas de la UNGET.
@@ -125,7 +131,7 @@ export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = (
         {/* Buscador, al centro */}
         <div className="shrink-0 px-6 pb-6 pt-10 sm:px-10 sm:pt-12">
           <p className="text-center text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">
-            Buscar en toda la red · {ungetName}
+            Búsqueda avanzada · {ungetName}
           </p>
           <div className="relative mx-auto mt-5 max-w-2xl">
             <Search className="pointer-events-none absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
