@@ -256,6 +256,62 @@ Los esquemas `supabase/SUPABASE_SCHEMA_V2.sql` a `supabase/SUPABASE_SCHEMA_V15.s
 
 ---
 
+## 7 bis. Conexiones de stock: de quién es cada una
+
+Reglas acordadas el 2026-09-21 tras una tanda de defectos (PR #53 a #57, y el arreglo del nombre de las tarjetas). Viven en
+`services/ungetConnections.ts`, con pruebas propias. **Antes de tocar `saveUngetConfigs` o
+los botones de las tarjetas de UNGET, lee esto.**
+
+**Una UNGET, una conexión, y es de su informático.** `unget_configs` guarda una fila por
+UNGET. `saveUngetConfigs` actualiza el resto de campos pero **no cambia el `username`**, y
+solo retira filas propias.
+
+**La interfaz no debe ofrecer lo que el guardado no puede cumplir.** Este fue el defecto
+caro: la pantalla ofrecía «eliminar» en conexiones ajenas, quitaba la tarjeta del estado
+local, decía «Eliminado correctamente» y a la siguiente carga volvía, porque la fila jamás
+se tocó. Lo mismo con el engranaje. Por eso:
+
+| Necesitas | Usa |
+|---|---|
+| ¿Puede este usuario modificarla o retirarla? | `canEditConnection(conexión, username, cuentasActivas)` |
+| ¿Se quedó sin responsable? | `isConnectionOrphaned(conexión, cuentasActivas)` |
+| ¿Hay que pasarla a nombre de quien guarda? | `shouldAdoptConnection({ existingOwner, claimedBy, saver, orphanOwners })` |
+| ¿De qué UNGET es, y por tanto de qué DIRESA y OGESS? | `findUngetForConnection(conexión, ungets)` |
+| Quién la mantiene | `connectionOwner(conexión)` |
+
+**Sin responsable** = su cuenta ya no existe o está desactivada. Entonces la adopta quien
+la reclame: el admin o el nuevo informático de esa UNGET. **Si el censo de cuentas activas
+no llegó, no se declara huérfana a ninguna**: un fallo de red no puede convertirse en
+permiso para editarlo todo.
+
+**Solo se adopta lo que se reclama**, es decir, lo que viene a nombre de quien guarda. El
+modal de conexiones manda la lista entera en cada guardado; sin esa condición, dar de alta
+una hoja te dejaba de responsable —sin decirte nada— de todas las huérfanas a la vista.
+
+**La adopción y la retirada se limitan a las UNGET que el usuario tiene a la vista**
+(`visibleUngetIds`). Sin ese límite, el guardado de un informático de UNGET —que solo ve
+su jurisdicción— retiraría las huérfanas de todas las demás, que no van en su envío.
+
+**El ámbito territorial de una conexión es el de su UNGET, nunca el de quien la creó.**
+Calcularlo desde el creador la sacaba del ámbito de todos en cuanto esa cuenta desaparecía,
+y entonces «Nueva conexión» volvía a ofrecer esa UNGET como libre: dos conexiones para la
+misma UNGET, justo lo que hubo que limpiar a mano el 18/09.
+
+**La clave ajena.** `unget_configs.username` referencia a `users.username` con
+`ON DELETE SET NULL` y `ON UPDATE CASCADE` desde
+`supabase/SUPABASE_MIGRACION_CONEXION_SIN_RESPONSABLE.sql` (aplicada el 2026-09-21). Antes
+era `ON DELETE CASCADE`: borrar al informático **borraba la conexión de su UNGET**, que se
+quedaba sin stock sin que nadie avisara; y renombrar una cuenta lo rechazaba la clave con
+un error que en pantalla no decía nada. La papelera de Administración → Usuarios existe y
+es la vía que produce ese caso; se decidió conservarla.
+
+**El nombre de una tarjeta de establecimiento** sale del registro, no de la pestaña, y se
+resuelve con `facilityForSheet` en `SheetSearchModule`. Hay **dos** caminos que construyen
+las tarjetas —la metadata y el payload de Apps Script—; la regla está en un solo sitio
+justamente porque cuando estaba repetida solo se actualizó uno.
+
+---
+
 ## 8. Convenciones de UI
 
 Referencia normativa: `docs/UX_PLAN_INMUNIZACIONES.md`. Resumen operativo:
@@ -419,6 +475,7 @@ Otros pendientes menores:
 1. **Leer primero** el `FASE_NN_*.md` más reciente en `docs/` y la sección correspondiente de `docs/INMUNIZACIONES_DISENO_FUNCIONAL.md` antes de tocar código.
 2. **Incrementos pequeños**, una fase por vez, con entregable verificable. No construir varias fases de golpe.
 3. **No romper farmacia/SISMED.** Los componentes de ese dominio (`SheetSearchModule`, `RedistributionModule`, `AdminOrganizationModule`, `IpressStockModule`…) son grandes y frágiles; no refactorizarlos de paso.
+   Y si tocas las **conexiones de stock** —las tarjetas de UNGET, sus botones o `saveUngetConfigs`—, lee antes la sección 7 bis: ahí están las reglas de propiedad, que ya costaron varios defectos.
 4. Al agregar una operación de escritura: validar scope, validar periodo bloqueado, no permitir negativos, registrar movimiento auditable, e implementar la **ruta Supabase y la ruta localStorage**.
 5. Cerrar cada fase con `npm run lint` + `npm run build` y un documento `FASE_NN_*.md` con: alcance implementado, reglas funcionales, archivos modificados, migración a ejecutar, validación técnica y pendiente posterior.
 6. Actualizar `docs/PLAN_IMPLEMENTACION_INMUNIZACIONES.md` (sección "Avance actual") en el mismo cierre.
