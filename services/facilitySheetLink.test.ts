@@ -182,6 +182,26 @@ describe("describePharmacyCode", () => {
   it("una IPRESS sin registrar no se marca: la marca es solo para las farmacias", () => {
     expect(describePharmacyCode("09999F0101", registro).unregistered).toBe(false);
   });
+
+  it("encuentra a la IPRESS aunque esté registrada con el sufijo de su farmacia", () => {
+    // 06520 salía con un guion en la búsqueda avanzada mientras su tarjeta sí mostraba el
+    // nombre: la tarjeta admite el sufijo y aquí se exigía el código exacto.
+    const conSufijo = [{ code: "06520F01", name: "C.S. BELLAVISTA" }];
+    expect(describePharmacyCode("06520F0101", conSufijo)).toEqual({
+      code: "06520",
+      name: "C.S. BELLAVISTA",
+      unregistered: false,
+    });
+  });
+
+  it("con dos registros que se reducen al mismo código no inventa un nombre", () => {
+    // Mostrar el nombre equivocado es peor que no mostrar ninguno.
+    const ambiguo = [
+      { code: "06520F01", name: "C.S. BELLAVISTA" },
+      { code: "06520F0101", name: "OTRO REGISTRO" },
+    ];
+    expect(describePharmacyCode("06520F0101", ambiguo).name).toBe("");
+  });
 });
 
 describe("showsPharmacyColumn", () => {

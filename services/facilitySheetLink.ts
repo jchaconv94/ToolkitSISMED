@@ -23,7 +23,7 @@
  */
 
 import { facilityCodeOf, parseFacilityCode, sheetOwnerCodeOf } from "./facilityCodes";
-import { facilityCodeFromSheetName } from "./sheetsApiService";
+import { facilityCodeFromSheetName, findFacilityByCode } from "./sheetsApiService";
 import type { UngetSheet } from "./ungetSheetCatalog";
 
 export type FacilitySheetLinkStatus =
@@ -172,6 +172,12 @@ export interface PharmacyLabel {
  * Se muestra el código **registrado**, no el ALMCOD crudo, porque es el que se busca y el
  * que aparece en Establecimientos: `06528F0101` se rotula `06528`, y `06528F0201` como
  * `06528F02`. Un ALMCOD que no se entiende se muestra tal cual, que dice más que un guion.
+ *
+ * El establecimiento se localiza con `findFacilityByCode`, la misma función con la que se
+ * nombran las tarjetas de Consulta Stock. Antes aquí se comparaba el código **exacto**, y
+ * eso dejaba sin nombre —un guion— a toda IPRESS registrada con el sufijo de farmacia
+ * (`06520F01` en vez de `06520`), que en la tarjeta sí salía con el suyo. Dos reglas para
+ * la misma pregunta daban dos respuestas distintas en la misma pantalla.
  */
 export const describePharmacyCode = (
   almcod: string | null | undefined,
@@ -180,10 +186,8 @@ export const describePharmacyCode = (
   const parsed = parseFacilityCode(almcod);
   const code = parsed.facilityCode || String(almcod || "").trim().toUpperCase();
   const registrado = parsed.facilityCode
-    ? (facilities || []).find(
-        (f) => String(f?.code || "").trim().toUpperCase() === parsed.facilityCode,
-      )
-    : undefined;
+    ? findFacilityByCode(parsed.facilityCode, facilities)
+    : null;
 
   return {
     code,
