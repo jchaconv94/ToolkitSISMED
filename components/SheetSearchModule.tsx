@@ -92,6 +92,7 @@ import {
 import { sheetOwnerCodeOf } from "../services/facilityCodes";
 import { describePharmacyCode, showsPharmacyColumn } from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
+import { CustomSelect } from "./ui/CustomSelect";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -4648,6 +4649,9 @@ function processSheet(sheet) {
 
                         <div className="space-y-4">
                           <div className="grid grid-cols-1 gap-4">
+                            {/* A quien es de una UNGET no se le pregunta cuál: el campo solo
+                                repetía su propio nombre y no se podía cambiar. */}
+                            {!isUngetRole && (
                             <div className="space-y-1">
                               <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
                                 UNGET
@@ -4663,40 +4667,32 @@ function processSheet(sheet) {
                                   disabled
                                   className="w-full text-xs sm:text-sm rounded-lg border border-gray-200 bg-gray-100 cursor-not-allowed shadow-sm py-2.5 px-3 font-bold text-gray-400"
                                 />
-                              ) : isUngetRole ? (
-                                <div className="bg-slate-50 border border-slate-200/60 rounded-lg px-3 py-2 flex flex-col justify-center min-h-[42px]">
-                                  <span className="text-[8px] font-bold text-teal-600 uppercase tracking-widest leading-none mb-1">
-                                    Autocompletado
-                                  </span>
-                                  <span className="text-xs sm:text-sm font-black text-slate-700 truncate">
-                                    {formatDisplayName(myUnget?.name || "SU UNGET")}
-                                  </span>
-                                </div>
                               ) : availableUngetsForConfig.length === 0 ? (
                                 <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200/50 rounded-lg px-3 py-2 font-bold min-h-[42px] leading-tight flex items-center justify-center">
                                   Todas las UNGETs de su jurisdicción ya están configuradas.
                                 </div>
                               ) : (
-                                <select
+                                /* El selector del kit: trae buscador en cuanto hay más de cinco
+                                   opciones, que es lo que hacía falta con tantas UNGET. */
+                                <CustomSelect
                                   value={newNameInput}
-                                  onChange={(e) => setNewNameInput(e.target.value)}
-                                  className="w-full text-xs sm:text-sm rounded-lg border border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2 px-3 font-bold text-gray-700 bg-white h-[42px] min-h-[42px]"
-                                >
-                                  <option value="">-- Seleccionar UNGET --</option>
-                                  {availableUngetsForConfig.map((unget: any) => {
+                                  onChange={setNewNameInput}
+                                  placeholder="Seleccionar UNGET..."
+                                  ariaLabel="UNGET de la conexión"
+                                  className="h-[42px] text-xs sm:text-sm"
+                                  options={availableUngetsForConfig.map((unget: any) => {
                                     const diresa = allDiresas.find(d => String(d.id) === String(unget.diresaId))?.name || "";
                                     const ogess = allOgess.find(o => String(o.id) === String(unget.ogessId))?.name || "";
-                                    const ungetSlug = unget.id ? `UNG-${unget.id.substring(0, 5).toUpperCase()}` : "";
                                     const locationTag = [diresa, ogess].filter(Boolean).join(" - ");
-                                    return (
-                                      <option key={unget.id} value={unget.id}>
-                                        {ungetSlug ? `[${ungetSlug}] ` : ""}{unget.name}{locationTag ? ` (${locationTag})` : ""}
-                                      </option>
-                                    );
+                                    return {
+                                      value: unget.id,
+                                      label: `${unget.name}${locationTag ? ` (${locationTag})` : ""}`,
+                                    };
                                   })}
-                                </select>
+                                />
                               )}
                             </div>
+                            )}
                             <div className="space-y-1">
                               <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
                                 Enlace de la hoja de cálculo
@@ -4842,13 +4838,17 @@ function processSheet(sheet) {
                   </div>
 
                   {/* ---------- ROW 2: CONNECTIONS & JURISDICTION ---------- */}
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8 items-stretch animate-in fade-in slide-in-from-bottom-4 duration-300">
-                    {/* Card: Lista de conexiones */}
-                    <div className="lg:col-span-12">
+                  <div className="lg:relative animate-in fade-in slide-in-from-bottom-4 duration-300">
+                    {/* Card: Lista de conexiones.
+
+                        En pantalla ancha va en posición absoluta a propósito: así no aporta
+                        altura a la fila, que queda marcada por el formulario de la izquierda,
+                        y la lista se desplaza por dentro en vez de alargar el modal. */}
+                    <div className="lg:absolute lg:inset-0">
                       <div
-                        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col h-full min-h-[320px]"
+                        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col h-full min-h-[320px] lg:min-h-0"
                       >
-                        <div className="flex flex-wrap gap-2 justify-between items-center mb-4">
+                        <div className="flex flex-wrap gap-2 justify-between items-center mb-4 shrink-0">
                           <h4 className="text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-widest">
                             CONEXIONES CONFIGURADAS (
                             {tempUrls.length})
@@ -4860,7 +4860,7 @@ function processSheet(sheet) {
                           ) : null}
                         </div>
 
-                        <div className="space-y-2.5 flex-1 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar">
+                        <div className="space-y-2.5 flex-1 min-h-0 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar">
                           {/* Map own URLs */}
                           {tempUrls.length > 0 ? (
                             tempUrls.map((config, idx) => (
