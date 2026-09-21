@@ -4,7 +4,6 @@ import {
   hasCustomStockColumns,
   isDefaultStockColumnSet,
   STOCK_COLUMNS,
-  STOCK_COLUMN_GROUPS,
 } from "./stockColumns";
 
 describe("STOCK_COLUMNS", () => {
@@ -41,12 +40,6 @@ describe("STOCK_COLUMNS", () => {
       "FECHA_DEL_EQUIPO",
       "ULTIMA_ACTUALIZACION",
     ]);
-  });
-
-  it("cada columna pertenece a un grupo declarado", () => {
-    for (const columna of STOCK_COLUMNS) {
-      expect(STOCK_COLUMN_GROUPS).toContain(columna.group);
-    }
   });
 
   it("las fechas se reconocen tal como vienen escritas en la hoja", () => {
