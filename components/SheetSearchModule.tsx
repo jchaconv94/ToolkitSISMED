@@ -4853,17 +4853,26 @@ function processSheet(sheet) {
             {/* Buscar un producto en todas las hojas de la UNGET, sin abrirlas una por una.
                 Solo con una UNGET abierta, que es cuando hay dónde buscar. */}
             {selectedUngetIndex !== null && (
+              /* Solo el icono, y al pasar el ratón se estira y dice cómo se llama. Ocupa lo
+                 que ocupa un icono en una barra donde los otros dos botones ya llevan texto,
+                 y el nombre sigue estando para quien lo necesite: también al tabular, que en
+                 una pantalla táctil es la única forma de que aparezca. */
               <button
                 type="button"
                 onClick={() => setIsNetworkSearchOpen(true)}
                 title="Buscar un producto en todos los establecimientos (Ctrl+K)"
-                className="group bg-slate-900 text-white px-3 py-2 sm:px-4 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:bg-slate-800 hover:shadow-lg hover:shadow-slate-900/25 transition-all flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm whitespace-nowrap shrink-0 cursor-pointer"
+                aria-label="Búsqueda avanzada"
+                aria-keyshortcuts="Control+K"
+                className="group bg-white border border-teal-200 text-teal-700 px-3 py-2 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:border-teal-400 hover:shadow-[0_0_18px_-4px_rgba(13,148,136,0.75)] focus-visible:border-teal-400 focus-visible:shadow-[0_0_18px_-4px_rgba(13,148,136,0.75)] focus-visible:outline-none transition-all duration-300 flex items-center shadow-sm whitespace-nowrap shrink-0 cursor-pointer"
               >
-                <Search className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-teal-300 transition-transform group-hover:scale-110" />
-                Búsqueda avanzada
-                <kbd className="hidden lg:inline rounded border border-white/15 bg-white/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-slate-300">
-                  Ctrl K
-                </kbd>
+                <Search className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-teal-600" />
+                {/* `max-w` porque un ancho automático no se puede animar. */}
+                <span className="flex max-w-0 items-center overflow-hidden opacity-0 transition-all duration-300 group-hover:max-w-[15rem] group-hover:opacity-100 group-focus-visible:max-w-[15rem] group-focus-visible:opacity-100">
+                  <span className="pl-1.5 sm:pl-2">Búsqueda avanzada</span>
+                  <kbd className="hidden lg:inline ml-2 rounded border border-teal-200 bg-teal-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-teal-600">
+                    Ctrl K
+                  </kbd>
+                </span>
               </button>
             )}
             {canManageConfigs && (
