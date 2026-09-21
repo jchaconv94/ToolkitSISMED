@@ -4624,13 +4624,10 @@ function processSheet(sheet) {
                 type="button"
                 onClick={volverUnNivel}
                 title={`Volver a ${destinoDeVolver} (Esc)`}
-                className="group flex items-center gap-1.5 sm:gap-2 shrink-0 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 sm:px-3 sm:py-2 text-[11px] sm:text-xs font-black uppercase tracking-wide text-slate-600 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] transition-all hover:border-teal-300 hover:text-teal-700 hover:shadow-md cursor-pointer"
+                aria-label={`Volver a ${destinoDeVolver}`}
+                className="group flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center shrink-0 rounded-xl border border-slate-200 bg-white text-slate-500 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] transition-all hover:border-teal-300 hover:text-teal-700 hover:shadow-md cursor-pointer"
               >
-                <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-slate-400 transition-transform group-hover:-translate-x-0.5 group-hover:text-teal-600" />
-                <span className="hidden sm:inline max-w-[180px] truncate normal-case">
-                  Volver a {destinoDeVolver}
-                </span>
-                <span className="sm:hidden">Volver</span>
+                <ArrowLeft className="h-4 w-4 sm:h-[18px] sm:w-[18px] transition-transform group-hover:-translate-x-0.5" />
               </button>
             )}
             <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 sm:gap-2.5 min-w-0">
