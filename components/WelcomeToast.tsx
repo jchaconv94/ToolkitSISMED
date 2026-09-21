@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Building2, Layers, ShieldCheck } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { User } from "../types";
 import { api } from "../services/api";
 
@@ -201,33 +201,21 @@ const WelcomeToastContent: React.FC<{ user: User }> = ({ user }) => {
   const nombre = user.personnelData?.firstName || user.username;
 
   return (
-    <div className="w-[320px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-      <div className="flex items-center gap-3 bg-slate-900 px-4 py-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-500/15 text-teal-400">
-          <Layers className="h-5 w-5" />
+    /* Pegado al borde derecho, como si asomara desde fuera de la pantalla. Sonner deja un
+       margen de 24 px (16 en móvil, por debajo de 600 px), así que se desplaza justo eso
+       para quedar a ras; y solo se redondea el lado izquierdo, que es el que se ve. */
+    <div className="w-full translate-x-4 min-[600px]:translate-x-6 overflow-hidden rounded-l-2xl rounded-r-none border-y border-l border-emerald-400/40 bg-gradient-to-r from-emerald-600 to-emerald-500 shadow-lg shadow-emerald-900/20">
+      <div className="flex items-center gap-3 px-4 py-3.5 pr-7">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20 text-white">
+          <CheckCircle2 className="h-5 w-5" />
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-black tracking-tight text-white">
-            {saludoPorHora()}, <span className="text-teal-400">{nombre}</span>
+            {saludoPorHora()}, {nombre}
           </p>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            Sesión iniciada
+          <p className="truncate text-[11px] font-semibold text-emerald-50">
+            {jurisdictionLabel}: <span className="font-black">{jurisdictionName}</span> · Rol {user.role}
           </p>
-        </div>
-      </div>
-
-      <div className="space-y-1.5 px-4 py-3">
-        <div className="flex items-center gap-2 text-xs">
-          <Building2 className="h-3.5 w-3.5 shrink-0 text-teal-600" />
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            {jurisdictionLabel}
-          </span>
-          <span className="ml-auto truncate font-black text-slate-800">{jurisdictionName}</span>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-teal-600" />
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Rol</span>
-          <span className="ml-auto truncate font-black text-slate-800">{user.role}</span>
         </div>
       </div>
     </div>
