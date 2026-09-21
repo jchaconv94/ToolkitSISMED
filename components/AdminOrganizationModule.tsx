@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { CustomSelect } from './ui/CustomSelect';
 import { buildUngetConnectionStatus, pickOneConnectionPerUnget, type UngetConnectionState } from '../services/ungetConnections';
 import { isLinkedToSheet, resolveFacilitySheet } from '../services/facilitySheetLink';
+import { FACILITY_TYPES, facilityTypeLabel, suggestedFacilityType } from '../services/facilityCodes';
 import { listUngetSheets, type UngetSheet } from '../services/ungetSheetCatalog';
 import { INTENT_OPEN_STOCK_CONNECTIONS, navigateToModule } from '../services/appRoutes';
 
@@ -238,6 +239,25 @@ export const AdminOrganizationModule: React.FC = () => {
     }, [facilityForm.ungetId, linkUngetConfigs]);
 
     /**
+     * Tipo que el propio código declara: `06528F02` es un puesto comunal y `030S05` un
+     * almacén. Sirve de aviso —y de valor inicial cuando todavía no se eligió ninguno—
+     * para que un puesto comunal no vuelva a registrarse como «puesto de salud», que es lo
+     * que obligaba a marcarlos a mano con la categoría `P.C.`.
+     */
+    const tipoSugeridoPorCodigo = useMemo(
+        () => suggestedFacilityType(facilityForm.code),
+        [facilityForm.code],
+    );
+
+    useEffect(() => {
+        // Solo cuando no hay tipo elegido: nunca se pisa lo que alguien puso a mano. Y solo
+        // al cambiar lo que el código sugiere, no cada vez que se toca el tipo: si no,
+        // vaciar el desplegable lo devolvería solo y no habría forma de corregirlo.
+        if (!tipoSugeridoPorCodigo) return;
+        setFacilityForm(form => (form.type ? form : { ...form, type: tipoSugeridoPorCodigo }));
+    }, [tipoSugeridoPorCodigo]);
+
+    /**
      * La hoja del establecimiento no se elige: se deduce de su código. Ver
      * `services/facilitySheetLink.ts`.
      */
@@ -317,9 +337,13 @@ export const AdminOrganizationModule: React.FC = () => {
 
     // Facility step validations
     const isFacilityStep1Valid = useMemo(() => {
-        return !!facilityForm.code?.trim() && 
-               !!facilityForm.name?.trim() && 
-               !!facilityForm.category?.trim() && 
+        // Un puesto comunal no tiene categoría de IPRESS: es una farmacia de la suya, y
+        // las categorías (I-1, I-2, …) califican al establecimiento entero. Exigírsela
+        // obligaría a inventar una, que es justo lo que llevó a usar `P.C.` como categoría.
+        const necesitaCategoria = facilityForm.type !== 'PUESTO_COMUNAL';
+        return !!facilityForm.code?.trim() &&
+               !!facilityForm.name?.trim() &&
+               (!necesitaCategoria || !!facilityForm.category?.trim()) &&
                !!facilityForm.type;
     }, [facilityForm.code, facilityForm.name, facilityForm.category, facilityForm.type]);
 
@@ -1192,6 +1216,9 @@ export const AdminOrganizationModule: React.FC = () => {
         if (t === 'HOSPITAL') return 'bg-rose-50 text-rose-700 border border-rose-200 font-extrabold';
         if (t === 'CENTRO') return 'bg-blue-50 text-blue-700 border border-blue-200 font-bold';
         if (t === 'PUESTO') return 'bg-teal-50 text-teal-700 border border-teal-200 font-bold';
+        // El puesto comunal no es un establecimiento del mismo orden: es una farmacia de su
+        // IPRESS, así que se distingue en vez de confundirse con el puesto de salud.
+        if (t === 'PUESTO_COMUNAL') return 'bg-cyan-50 text-cyan-700 border border-cyan-200 font-bold';
         return 'bg-violet-50 text-violet-700 border border-violet-200 font-medium';
     };
 
@@ -2061,10 +2088,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                         <th className="p-4">
                                                             {renderHeaderFilter("Tipo", filterType, [
                                                                 { value: '', label: 'Todos' },
-                                                                { value: 'HOSPITAL', label: 'HOSPITAL' },
-                                                                { value: 'CENTRO', label: 'CENTRO DE SALUD' },
-                                                                { value: 'PUESTO', label: 'PUESTO DE SALUD' },
-                                                                { value: 'ALM', label: 'ALMACÉN' }
+                                                                ...FACILITY_TYPES.map(t => ({ value: t.value, label: t.label }))
                                                             ], setFilterType, "ipress-type")}
                                                         </th>
                                                         <th className="p-4">
@@ -2108,7 +2132,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                             </td>
                                                             <td className="p-4">
                                                                 <span className={`px-2 py-0.5 rounded-lg text-[10px] uppercase border ${getTypeStyle(f.type)}`}>
-                                                                    {f.type || '-'}
+                                                                    {facilityTypeLabel(f.type) || '-'}
                                                                 </span>
                                                             </td>
                                                             <td className="p-4 text-slate-600 font-semibold">{getMicroredName(f.microredId)}</td>
@@ -2316,7 +2340,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     {selectedDetailItem.type && (
                                         <div className="py-2 flex justify-between items-center text-xs font-bold">
                                             <span className="text-slate-400 text-[11px]">Tipo</span>
-                                            <span className="bg-slate-800 text-slate-300 font-black px-2 py-0.5 rounded-lg text-[10px]">{selectedDetailItem.type}</span>
+                                            <span className="bg-slate-800 text-slate-300 font-black px-2 py-0.5 rounded-lg text-[10px]">{facilityTypeLabel(selectedDetailItem.type)}</span>
                                         </div>
                                     )}
                                 </div>
@@ -3577,14 +3601,16 @@ export const AdminOrganizationModule: React.FC = () => {
 
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 <div>
-                                                    <label className="block text-xs font-bold text-gray-700 mb-1">Categoría *</label>
-                                                    <input 
-                                                        required 
-                                                        type="text" 
-                                                        placeholder="Ej. I-3, I-4, II-1" 
-                                                        className="w-full border border-gray-200 p-2.5 rounded-lg text-sm bg-white text-gray-800 focus:ring-2 focus:ring-teal-500 outline-none" 
-                                                        value={facilityForm.category || ''} 
-                                                        onChange={e => setFacilityForm({...facilityForm, category: e.target.value})} 
+                                                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                                                        Categoría {facilityForm.type === 'PUESTO_COMUNAL' ? '' : '*'}
+                                                    </label>
+                                                    <input
+                                                        required={facilityForm.type !== 'PUESTO_COMUNAL'}
+                                                        type="text"
+                                                        placeholder={facilityForm.type === 'PUESTO_COMUNAL' ? 'No aplica a un puesto comunal' : 'Ej. I-3, I-4, II-1'}
+                                                        className="w-full border border-gray-200 p-2.5 rounded-lg text-sm bg-white text-gray-800 focus:ring-2 focus:ring-teal-500 outline-none"
+                                                        value={facilityForm.category || ''}
+                                                        onChange={e => setFacilityForm({...facilityForm, category: e.target.value})}
                                                     />
                                                 </div>
                                                 <div>
@@ -3595,13 +3621,17 @@ export const AdminOrganizationModule: React.FC = () => {
                                                         placeholder="Seleccione tipo..."
                                                         options={[
                                                             { value: '', label: 'Seleccione tipo...' },
-                                                            { value: 'HOSPITAL', label: 'HOSPITAL' },
-                                                            { value: 'CENTRO', label: 'CENTRO DE SALUD' },
-                                                            { value: 'PUESTO', label: 'PUESTO DE SALUD' },
-                                                            { value: 'ALM', label: 'ALMACÉN' }
+                                                            ...FACILITY_TYPES.map(t => ({ value: t.value, label: t.label }))
                                                         ]}
                                                         className="w-full border border-gray-200 rounded-lg text-sm bg-white text-gray-800"
                                                     />
+                                                    {tipoSugeridoPorCodigo && (
+                                                        <p className={`mt-1 text-[10px] font-bold ${facilityForm.type === tipoSugeridoPorCodigo ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                                            {facilityForm.type === tipoSugeridoPorCodigo
+                                                                ? `El código ${facilityForm.code} corresponde a ${facilityTypeLabel(tipoSugeridoPorCodigo)}.`
+                                                                : `El código ${facilityForm.code} es de un ${facilityTypeLabel(tipoSugeridoPorCodigo)}. Compruebe el tipo antes de guardar.`}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>

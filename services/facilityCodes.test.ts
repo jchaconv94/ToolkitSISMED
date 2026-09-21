@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { facilityCodeOf, parseFacilityCode, sheetOwnerCodeOf } from "./facilityCodes";
+import {
+  facilityCodeOf,
+  facilityTypeLabel,
+  parseFacilityCode,
+  sheetOwnerCodeOf,
+  suggestedFacilityType,
+} from "./facilityCodes";
 
 describe("parseFacilityCode", () => {
   it("reconoce el ALMCOD detallado de la farmacia principal como la propia IPRESS", () => {
@@ -102,5 +108,35 @@ describe("sheetOwnerCodeOf", () => {
 
   it("sin código reconocible no inventa uno", () => {
     expect(sheetOwnerCodeOf("030S0")).toBe("");
+  });
+});
+
+describe("suggestedFacilityType", () => {
+  it("un código con F02 en adelante es un puesto comunal, y el código solo ya lo dice", () => {
+    expect(suggestedFacilityType("06528F02")).toBe("PUESTO_COMUNAL");
+    expect(suggestedFacilityType("06528F1001")).toBe("PUESTO_COMUNAL");
+  });
+
+  it("seis caracteres son un almacén", () => {
+    expect(suggestedFacilityType("030S05")).toBe("ALM");
+  });
+
+  it("no se pronuncia sobre una IPRESS: hospital, centro y puesto se escriben igual", () => {
+    expect(suggestedFacilityType("06528")).toBe("");
+    expect(suggestedFacilityType("06528F0101")).toBe("");
+    expect(suggestedFacilityType("")).toBe("");
+  });
+});
+
+describe("facilityTypeLabel", () => {
+  it("traduce el valor guardado a lo que se lee en pantalla", () => {
+    expect(facilityTypeLabel("PUESTO_COMUNAL")).toBe("PUESTO COMUNAL");
+    expect(facilityTypeLabel("CENTRO")).toBe("CENTRO DE SALUD");
+  });
+
+  it("un valor que ya no está en la lista se muestra tal cual, no se pierde", () => {
+    expect(facilityTypeLabel("LO_QUE_SEA")).toBe("LO_QUE_SEA");
+    expect(facilityTypeLabel("")).toBe("");
+    expect(facilityTypeLabel(null)).toBe("");
   });
 });
