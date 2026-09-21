@@ -102,6 +102,7 @@ import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import { CustomSelect } from "./ui/CustomSelect";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { StockNetworkSearchModal } from "./StockNetworkSearchModal";
+import { readStockField } from "../services/stockNetworkSearch";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -391,19 +392,13 @@ const mergeMetadataIntoSources = (
 /** Hojas por petición al refrescar stock ya guardado; lotes pequeños fallan menos en Apps Script. */
 const CHANGED_SHEETS_BATCH_SIZE = 5;
 
-const getRowFieldValue = (row: any, ...fieldPatterns: string[]): string => {
-  if (!row || typeof row !== "object") return "";
-  for (const pattern of fieldPatterns) {
-    if (row[pattern]) return String(row[pattern]);
-  }
-  const keys = Object.keys(row);
-  for (const pattern of fieldPatterns) {
-    const patNorm = pattern.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    const matchingKey = keys.find((k) => k.toUpperCase().replace(/[^A-Z0-9]/g, "") === patNorm);
-    if (matchingKey && row[matchingKey]) return String(row[matchingKey]);
-  }
-  return "";
-};
+/**
+ * Lectura tolerante de una columna de la hoja.
+ *
+ * Vive en `services/stockNetworkSearch.ts`, que es donde la necesita el buscador en red.
+ * Aquí se conserva el nombre de siempre para no reescribir sus decenas de usos.
+ */
+const getRowFieldValue = readStockField;
 
 const formatFullDate = (val?: any): string => {
   if (!val) return "Sin fecha";
