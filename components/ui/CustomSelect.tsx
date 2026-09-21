@@ -106,7 +106,12 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     const dropdownContent = isOpen && !disabled && (
         <div 
             ref={menuRef}
-            className="bg-white border border-slate-200 rounded-2xl shadow-xl z-[200000] py-1 flex flex-col fixed overflow-hidden animate-in fade-in-50 zoom-in-95 duration-100"
+            /* El menú va al final de `body`, así que su z-index compite con el de los
+               modales de la aplicación, que llegan hasta 2147483646. Con un valor menor
+               el desplegable se abre pero queda pintado por debajo del diálogo que lo
+               contiene y parece que no pasa nada. Un menú anclado a su disparador
+               siempre debe quedar encima de lo que lo abrió: tope de la pila. */
+            className="bg-white border border-slate-200 rounded-2xl shadow-xl z-[2147483647] py-1 flex flex-col fixed overflow-hidden animate-in fade-in-50 zoom-in-95 duration-100"
             style={dynamicStyles}
         >
             {isSearchable && (
