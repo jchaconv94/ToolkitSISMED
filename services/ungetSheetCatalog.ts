@@ -50,7 +50,20 @@ const toSheets = (metadata: GasSheetMetadata[]): UngetSheet[] =>
 
 export async function listUngetSheets(
   connection: UngetSheetSource | null | undefined,
-  options: { force?: boolean; apiKey?: string } = {},
+  options: {
+    force?: boolean;
+    apiKey?: string;
+    /**
+     * Contar las filas de cada pestaña. Cuesta pedir su columna A entera, y quien solo
+     * quiere emparejar pestañas con establecimientos por su código no lo necesita: de
+     * `UngetSheet` solo salen el nombre, el código y el ALMCOD.
+     *
+     * Sin conteo, `isFacilitySheet` conserva una pestaña que no tiene código ni `ALMCOD`
+     * en vez de descartarla. Es inocuo para el vínculo: una pestaña así no coincide con
+     * ningún establecimiento y nunca se empareja.
+     */
+    withRowCounts?: boolean;
+  } = {},
 ): Promise<UngetSheet[]> {
   const spreadsheetId = String(connection?.spreadsheetId || "").trim();
   const url = String(connection?.url || "").trim();
@@ -60,7 +73,11 @@ export async function listUngetSheets(
   if (spreadsheetId && apiKey) {
     try {
       return toSheets(
-        await fetchSheetsMetadataViaApi(spreadsheetId, { apiKey, force: options.force }),
+        await fetchSheetsMetadataViaApi(spreadsheetId, {
+          apiKey,
+          force: options.force,
+          skipRowCounts: options.withRowCounts === false,
+        }),
       );
     } catch (error) {
       lastError = error;

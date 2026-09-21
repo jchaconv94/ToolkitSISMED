@@ -10,6 +10,11 @@ import { buildUngetConnectionStatus, pickOneConnectionPerUnget, type UngetConnec
 import { isLinkedToSheet, resolveFacilitySheet } from '../services/facilitySheetLink';
 import { FACILITY_TYPES, facilityTypeLabel, suggestedFacilityType } from '../services/facilityCodes';
 import { listUngetSheets, type UngetSheet } from '../services/ungetSheetCatalog';
+import {
+    DEFAULT_STOCK_COLUMN_KEYS,
+    isDefaultStockColumnSet,
+    STOCK_COLUMNS,
+} from '../services/stockColumns';
 import { INTENT_OPEN_STOCK_CONNECTIONS, navigateToModule } from '../services/appRoutes';
 
 /**
@@ -67,21 +72,6 @@ const CONNECTION_STATE_UI_UNKNOWN: Record<'loading' | 'error', typeof CONNECTION
     }
 };
 
-const AVAILABLE_COLUMNS = [
-  { key: "ALMCOD", label: "Código Almacén", defaultState: false },
-  { key: "DESC_ALM", label: "Almacén", defaultState: true },
-  { key: "Id_Producto", label: "Código SISMED", defaultState: true },
-  { key: "CODIGO_SIG", label: "Código SIGA", defaultState: true },
-  { key: "Nombre", label: "Descripción / Nombre", defaultState: true },
-  { key: "Lote", label: "Lote", defaultState: true },
-  { key: "Fec_Vencim", label: "Fec. Vencimiento", defaultState: true },
-  { key: "Reg_Sanitario", label: "Reg. Sanitario", defaultState: true },
-  { key: "DESC_TIPSUM", label: "Tipo de Suministro", defaultState: true },
-  { key: "DESC_FFINAN", label: "Fuente Financiamiento", defaultState: true },
-  { key: "Saldo", label: "Stock / Saldo", defaultState: true },
-  { key: "Precio_Det", label: "Precio Detalle", defaultState: false },
-  { key: "Precio_Cab", label: "Precio Paquete", defaultState: false },
-];
 
 export const AdminOrganizationModule: React.FC = () => {
     const { user, hasPermission } = useAuth();
@@ -275,7 +265,7 @@ export const AdminOrganizationModule: React.FC = () => {
 
         let vigente = true;
         setLinkLoadingSheets(true);
-        listUngetSheets(linkConnection)
+        listUngetSheets(linkConnection, { withRowCounts: false })
             .then(sheets => { if (vigente) setLinkAvailableSheets(sheets); })
             .catch((err: any) => {
                 console.error("No se pudieron leer las hojas de la UNGET:", err);
@@ -1076,7 +1066,7 @@ export const AdminOrganizationModule: React.FC = () => {
         setLinkAvailableSheets([]);
         setLinkSheetsError("");
         setLinkHadPreferences(false);
-        setLinkVisibleColumns(AVAILABLE_COLUMNS.filter(c => c.defaultState).map(c => c.key));
+        setLinkVisibleColumns(DEFAULT_STOCK_COLUMN_KEYS);
 
         try {
             // Todas las conexiones, no solo las propias: la UNGET del establecimiento puede
@@ -1116,10 +1106,7 @@ export const AdminOrganizationModule: React.FC = () => {
 
             // 2. Columnas visibles del stock. El vínculo con la hoja no se guarda: se deduce
             // del código en cada lectura (services/facilitySheetLink.ts).
-            const columnasPorOmision = AVAILABLE_COLUMNS.filter(c => c.defaultState).map(c => c.key);
-            const sonLasPorOmision =
-                linkVisibleColumns.length === columnasPorOmision.length &&
-                columnasPorOmision.every(key => linkVisibleColumns.includes(key));
+            const sonLasPorOmision = isDefaultStockColumnSet(linkVisibleColumns);
 
             // Solo se escribe cuando hay algo que recordar: una elección distinta de la
             // predeterminada, o una fila que ya existía y hay que mantener al día.
@@ -3882,7 +3869,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             <p className="text-[11px] text-slate-500">Marque las columnas que deben visualizarse en el reporte consolidado de stock.</p>
                                             
                                             <div className="bg-white p-4 rounded-xl border border-gray-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[220px] overflow-y-auto">
-                                                {AVAILABLE_COLUMNS.map(col => (
+                                                {STOCK_COLUMNS.map(col => (
                                                     <div 
                                                         key={col.key} 
                                                         onClick={() => {

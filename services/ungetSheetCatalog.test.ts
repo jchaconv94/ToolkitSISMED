@@ -88,3 +88,72 @@ describe("listUngetSheets", () => {
     await expect(listUngetSheets(null, { apiKey: "" })).rejects.toThrow(/no tiene hoja/i);
   });
 });
+
+describe("listUngetSheets sin conteo de filas", () => {
+  /** Igual que la lectura por API de arriba, pero registrando los rangos pedidos. */
+  const stubLibro = (rangos: string[]) =>
+    stubFetch((url) => {
+      if (url.includes("values:batchGet")) {
+        const pedidos = Array.from(new URL(url).searchParams.getAll("ranges"));
+        rangos.push(...pedidos);
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: (): string => "application/json" },
+          text: async () =>
+            JSON.stringify({ valueRanges: pedidos.map(() => ({ values: [["ALMCOD"], ["06502F0101"]] })) }),
+        };
+      }
+      if (url.includes("sheets.googleapis.com")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: (): string => "application/json" },
+          text: async () =>
+            JSON.stringify({
+              sheets: [
+                { properties: { sheetId: 10, title: "HOSP. BELLAVISTA-06502", index: 0 } },
+                { properties: { sheetId: 11, title: "C.S. NUEVO LIMA-06519", index: 1 } },
+              ],
+            }),
+        };
+      }
+      throw new Error(`URL inesperada: ${url}`);
+    });
+
+  it("no pide la columna A de cada pestaña, que es lo caro de la llamada", async () => {
+    // Contar filas obliga a descargar `A:A` entera de cada pestaña —miles de lotes— para un
+    // dato que el vínculo por código no usa.
+    const rangos: string[] = [];
+    stubLibro(rangos);
+
+    await listUngetSheets(
+      { url: `sheets://${LIBRO}`, spreadsheetId: LIBRO },
+      { force: true, apiKey: "AIza-clave-de-prueba", withRowCounts: false },
+    );
+
+    expect(rangos.some((rango) => rango.includes("A:A"))).toBe(false);
+    expect(rangos).toHaveLength(2); // solo la cabecera de cada pestaña
+  });
+
+  it("por omisión sí las cuenta, para no cambiarle el comportamiento a Consulta Stock", async () => {
+    const rangos: string[] = [];
+    stubLibro(rangos);
+
+    await listUngetSheets(
+      { url: `sheets://${LIBRO}`, spreadsheetId: LIBRO },
+      { force: true, apiKey: "AIza-clave-de-prueba" },
+    );
+
+    expect(rangos.filter((rango) => rango.includes("A:A"))).toHaveLength(2);
+  });
+
+  it("sigue reconociendo el código de cada pestaña sin el conteo", async () => {
+    stubLibro([]);
+    const sheets = await listUngetSheets(
+      { url: `sheets://${LIBRO}`, spreadsheetId: LIBRO },
+      { force: true, apiKey: "AIza-clave-de-prueba", withRowCounts: false },
+    );
+    expect(sheets.map((s) => s.codigoIpress)).toEqual(["06502", "06519"]);
+  });
+});
