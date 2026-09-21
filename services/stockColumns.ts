@@ -15,6 +15,24 @@
  * nombres y no solo por su clave.
  */
 
+/** Familias en las que se agrupan las columnas al elegirlas. */
+export type StockColumnGroup =
+  | "Almacén"
+  | "Producto"
+  | "Lote y saldo"
+  | "Clasificación"
+  | "Precios"
+  | "Actualización";
+
+export const STOCK_COLUMN_GROUPS: StockColumnGroup[] = [
+  "Almacén",
+  "Producto",
+  "Lote y saldo",
+  "Clasificación",
+  "Precios",
+  "Actualización",
+];
+
 export interface StockColumn {
   /** Clave con la que se guarda en `facility_stock_assignments.visible_columns`. */
   key: string;
@@ -23,24 +41,28 @@ export interface StockColumn {
   aliases: string[];
   /** Si se muestra cuando el establecimiento no tiene columnas propias elegidas. */
   defaultState: boolean;
+  /** Para presentarlas por familias en vez de como una lista de quince casillas. */
+  group: StockColumnGroup;
   numeric?: boolean;
   currency?: boolean;
 }
 
 export const STOCK_COLUMNS: StockColumn[] = [
-  { key: "ALMCOD", label: "Código almacén", aliases: ["ALMCOD", "almcod"], defaultState: false },
-  { key: "DESC_ALM", label: "Almacén", aliases: ["DESC_ALM", "desc_alm"], defaultState: true },
-  { key: "Id_Producto", label: "Código SISMED", aliases: ["Id_Producto", "ID_Producto", "id_producto", "medcod"], defaultState: true },
-  { key: "CODIGO_SIG", label: "Código SIGA", aliases: ["CODIGO_SIG", "codigo_sig"], defaultState: true },
-  { key: "Nombre", label: "Descripción / Nombre", aliases: ["Nombre", "NOMBRE", "xnom"], defaultState: true },
-  { key: "Lote", label: "Lote", aliases: ["Lote", "LOTE", "lote"], defaultState: true },
-  { key: "Fec_Vencim", label: "Fec. vencimiento", aliases: ["Fec_Vencim", "FEC_VENCIM", "fecha"], defaultState: true },
-  { key: "Reg_Sanitario", label: "Reg. sanitario", aliases: ["Reg_Sanitario", "REG_SANITARIO", "medregsan"], defaultState: true },
-  { key: "DESC_TIPSUM", label: "Tipo de suministro", aliases: ["DESC_TIPSUM", "tipsum_des", "TIPSUM"], defaultState: true },
-  { key: "DESC_FFINAN", label: "Fuente financiamiento", aliases: ["DESC_FFINAN", "ffinan_des", "FFINAN"], defaultState: true },
-  { key: "Saldo", label: "Stock / Saldo", aliases: ["Saldo", "SALDO", "saldo"], defaultState: true, numeric: true },
-  { key: "Precio_Det", label: "Precio detalle", aliases: ["Precio_Det", "PRECIO_DET", "precio_det"], defaultState: false, numeric: true, currency: true },
-  { key: "Precio_Cab", label: "Precio paquete", aliases: ["Precio_Cab", "PRECIO_CAB", "preciocab"], defaultState: false, numeric: true, currency: true },
+  { key: "ALMCOD", label: "Código almacén", aliases: ["ALMCOD", "almcod"], defaultState: false, group: "Almacén" },
+  { key: "DESC_ALM", label: "Almacén", aliases: ["DESC_ALM", "desc_alm"], defaultState: true, group: "Almacén" },
+  { key: "Id_Producto", label: "Código SISMED", aliases: ["Id_Producto", "ID_Producto", "id_producto", "medcod"], defaultState: true, group: "Producto" },
+  { key: "CODIGO_SIG", label: "Código SIGA", aliases: ["CODIGO_SIG", "codigo_sig"], defaultState: true, group: "Producto" },
+  { key: "Nombre", label: "Descripción / Nombre", aliases: ["Nombre", "NOMBRE", "xnom"], defaultState: true, group: "Producto" },
+  { key: "Lote", label: "Lote", aliases: ["Lote", "LOTE", "lote"], defaultState: true, group: "Lote y saldo" },
+  { key: "Fec_Vencim", label: "Fec. vencimiento", aliases: ["Fec_Vencim", "FEC_VENCIM", "fecha"], defaultState: true, group: "Lote y saldo" },
+  { key: "Reg_Sanitario", label: "Reg. sanitario", aliases: ["Reg_Sanitario", "REG_SANITARIO", "medregsan"], defaultState: true, group: "Producto" },
+  { key: "DESC_TIPSUM", label: "Tipo de suministro", aliases: ["DESC_TIPSUM", "tipsum_des", "TIPSUM"], defaultState: true, group: "Clasificación" },
+  { key: "DESC_FFINAN", label: "Fuente financiamiento", aliases: ["DESC_FFINAN", "ffinan_des", "FFINAN"], defaultState: true, group: "Clasificación" },
+  { key: "Saldo", label: "Stock / Saldo", aliases: ["Saldo", "SALDO", "saldo"], defaultState: true, numeric: true, group: "Lote y saldo" },
+  { key: "Precio_Det", label: "Precio detalle", aliases: ["Precio_Det", "PRECIO_DET", "precio_det"], defaultState: false, numeric: true, currency: true, group: "Precios" },
+  { key: "Precio_Cab", label: "Precio paquete", aliases: ["Precio_Cab", "PRECIO_CAB", "preciocab"], defaultState: false, numeric: true, currency: true, group: "Precios" },
+  { key: "FECHA_DEL_EQUIPO", label: "Fecha del equipo", aliases: ["FECHA_DEL_EQUIPO", "FECHA DEL EQUIPO", "Fecha_Del_Equipo"], defaultState: false, group: "Actualización" },
+  { key: "ULTIMA_ACTUALIZACION", label: "Última actualización", aliases: ["ULTIMA_ACTUALIZACION", "ULTIMA ACTUALIZACION", "ULTIMA ACTUALIZACIÓN", "Ultima_Actualizacion"], defaultState: false, group: "Actualización" },
 ];
 
 /** Las que ve un establecimiento que no tiene columnas propias elegidas. */

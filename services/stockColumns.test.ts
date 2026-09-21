@@ -4,6 +4,7 @@ import {
   hasCustomStockColumns,
   isDefaultStockColumnSet,
   STOCK_COLUMNS,
+  STOCK_COLUMN_GROUPS,
 } from "./stockColumns";
 
 describe("STOCK_COLUMNS", () => {
@@ -18,6 +19,52 @@ describe("STOCK_COLUMNS", () => {
     for (const columna of STOCK_COLUMNS) {
       expect(columna.aliases).toContain(columna.key);
     }
+  });
+
+  it("están las diecisiete columnas que publica la hoja", () => {
+    // El encabezado real de una hoja SISMED. TIPSUM y FFINAN no llevan casilla propia: sus
+    // códigos ya se muestran dentro de «Tipo de suministro» y «Fuente financiamiento».
+    expect(STOCK_COLUMNS.map((c) => c.key)).toEqual([
+      "ALMCOD",
+      "DESC_ALM",
+      "Id_Producto",
+      "CODIGO_SIG",
+      "Nombre",
+      "Lote",
+      "Fec_Vencim",
+      "Reg_Sanitario",
+      "DESC_TIPSUM",
+      "DESC_FFINAN",
+      "Saldo",
+      "Precio_Det",
+      "Precio_Cab",
+      "FECHA_DEL_EQUIPO",
+      "ULTIMA_ACTUALIZACION",
+    ]);
+  });
+
+  it("cada columna pertenece a un grupo declarado", () => {
+    for (const columna of STOCK_COLUMNS) {
+      expect(STOCK_COLUMN_GROUPS).toContain(columna.group);
+    }
+  });
+
+  it("las fechas se reconocen tal como vienen escritas en la hoja", () => {
+    // El encabezado llega con espacios («FECHA DEL EQUIPO») y la tilde de «ACTUALIZACIÓN»
+    // aparece o no según quién hiciera la hoja. Si un alias falla, la columna sale vacía
+    // sin que nada avise.
+    const equipo = STOCK_COLUMNS.find((c) => c.key === "FECHA_DEL_EQUIPO");
+    expect(equipo?.aliases).toContain("FECHA DEL EQUIPO");
+    const actualizacion = STOCK_COLUMNS.find((c) => c.key === "ULTIMA_ACTUALIZACION");
+    expect(actualizacion?.aliases).toEqual(
+      expect.arrayContaining(["ULTIMA ACTUALIZACION", "ULTIMA ACTUALIZACIÓN"]),
+    );
+  });
+
+  it("las dos columnas nuevas no se activan solas", () => {
+    // Son datos de control, no de stock: quien las quiera, las marca.
+    expect(DEFAULT_STOCK_COLUMN_KEYS).not.toContain("FECHA_DEL_EQUIPO");
+    expect(DEFAULT_STOCK_COLUMN_KEYS).not.toContain("ULTIMA_ACTUALIZACION");
   });
 
   it("las de omisión son las que trae marcadas el catálogo", () => {

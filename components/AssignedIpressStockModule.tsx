@@ -433,6 +433,8 @@ export const AssignedIpressStockModule: React.FC = () => {
                       <TableHeader>Lote / Venc.</TableHeader>
                       <TableHeader>Tipo Sum.</TableHeader>
                       <TableHeader>F. Finan.</TableHeader>
+                      {canShow("FECHA_DEL_EQUIPO") && <TableHeader>Fecha del equipo</TableHeader>}
+                      {canShow("ULTIMA_ACTUALIZACION") && <TableHeader>Última actualización</TableHeader>}
                     </tr>
                   </thead>
                   <tbody className="block bg-slate-50 p-3 sm:table-row-group sm:divide-y sm:divide-slate-100 sm:bg-white sm:p-0">
@@ -457,6 +459,12 @@ export const AssignedIpressStockModule: React.FC = () => {
                             <div className="font-mono text-slate-500"><div><strong className="text-slate-400">Lote:</strong> {canShow("Lote") ? String(row.Lote || "—") : "—"}</div><div><strong className="text-slate-400">Vence:</strong> {canShow("Fec_Vencim") ? formatStockDate(row.Fec_Vencim) : "—"}</div></div>
                             <div className="flex gap-1.5"><TypeBadge tone="indigo" value={canShow("DESC_TIPSUM") ? String(row.TIPSUM || row.DESC_TIPSUM || "—") : "—"} title={String(row.DESC_TIPSUM || "")} /><TypeBadge tone="amber" value={canShow("DESC_FFINAN") ? String(row.FFINAN || row.DESC_FFINAN || "—") : "—"} title={String(row.DESC_FFINAN || "")} /></div>
                           </div>
+                          {(canShow("FECHA_DEL_EQUIPO") || canShow("ULTIMA_ACTUALIZACION")) && (
+                            <div className="mt-2 border-t border-slate-100 pt-2 text-[10px] text-slate-400">
+                              {canShow("FECHA_DEL_EQUIPO") && <div><strong className="text-slate-500">Equipo:</strong> {String(row.FECHA_DEL_EQUIPO || "—")}</div>}
+                              {canShow("ULTIMA_ACTUALIZACION") && <div><strong className="text-slate-500">Actualizado:</strong> {String(row.ULTIMA_ACTUALIZACION || "—")}</div>}
+                            </div>
+                          )}
                         </td>
                         {showsPharmacy && (
                           <td className="hidden whitespace-nowrap px-4 py-3 align-top sm:table-cell">
@@ -469,6 +477,8 @@ export const AssignedIpressStockModule: React.FC = () => {
                         <td className="hidden whitespace-nowrap px-4 py-3 text-sm text-slate-500 sm:table-cell"><span className="font-mono text-slate-700">{canShow("Lote") ? String(row.Lote || "—") : "—"}</span><div className="mt-0.5 text-[10px]">Vence: {canShow("Fec_Vencim") ? formatStockDate(row.Fec_Vencim) : "—"}</div></td>
                         <td className="hidden whitespace-nowrap px-4 py-3 sm:table-cell"><TypeBadge tone="indigo" value={canShow("DESC_TIPSUM") ? String(row.TIPSUM || row.DESC_TIPSUM || "—") : "—"} title={String(row.DESC_TIPSUM || "")} /></td>
                         <td className="hidden whitespace-nowrap px-4 py-3 sm:table-cell"><TypeBadge tone="amber" value={canShow("DESC_FFINAN") ? String(row.FFINAN || row.DESC_FFINAN || "—") : "—"} title={String(row.DESC_FFINAN || "")} /></td>
+                        {canShow("FECHA_DEL_EQUIPO") && <td className="hidden whitespace-nowrap px-4 py-3 text-sm text-slate-500 sm:table-cell">{String(row.FECHA_DEL_EQUIPO || "—")}</td>}
+                        {canShow("ULTIMA_ACTUALIZACION") && <td className="hidden whitespace-nowrap px-4 py-3 text-sm text-slate-500 sm:table-cell">{String(row.ULTIMA_ACTUALIZACION || "—")}</td>}
                       </tr>
                     ))}
                   </tbody>

@@ -1,5 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Search, Plus, Shield, FileSpreadsheet, Check, Save, ChevronDown, RotateCcw, Link2, Link2Off } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  FileSpreadsheet,
+  Link2,
+  Link2Off,
+  RotateCcw,
+  Save,
+  Search,
+  SlidersHorizontal,
+  Sparkles,
+  Table2,
+} from "lucide-react";
 import { api } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
@@ -10,9 +22,29 @@ import {
   hasCustomStockColumns,
   isDefaultStockColumnSet,
   STOCK_COLUMNS,
+  STOCK_COLUMN_GROUPS,
 } from "../services/stockColumns";
 
-const SearchableSelect = ({ label, value, onChange, options, disabled, loading, placeholder }: any) => {
+interface OpcionDeSelector {
+  value: string;
+  label: string;
+  /** Distintivo al margen del nombre. Se pinta como chip y solo dentro de la lista. */
+  hint?: string;
+}
+
+const SearchableSelect = ({
+  value,
+  onChange,
+  options,
+  disabled,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: OpcionDeSelector[];
+  disabled?: boolean;
+  placeholder: string;
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -21,57 +53,72 @@ const SearchableSelect = ({ label, value, onChange, options, disabled, loading, 
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setIsOpen(false);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const filteredOptions = options.filter((o: any) => o.label.toLowerCase().includes(searchQuery.toLowerCase()));
-  const selectedOption = options.find((o: any) => o.value === value);
+  const consulta = searchQuery.trim().toLocaleLowerCase("es");
+  const filteredOptions = options.filter(o =>
+    `${o.label} ${o.hint || ""}`.toLocaleLowerCase("es").includes(consulta),
+  );
+  const selectedOption = options.find(o => o.value === value);
 
   return (
     <div className="relative" ref={dropdownRef}>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-      <div 
-        className={`w-full min-h-10 px-3 py-2 border border-gray-300 rounded-md bg-white flex justify-between items-center cursor-pointer ${disabled ? 'bg-gray-100 opacity-50 cursor-not-allowed' : 'hover:border-blue-400'}`}
+      <div
+        className={`flex h-11 w-full items-center justify-between rounded-xl border px-3.5 text-sm transition-colors ${
+          disabled
+            ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
+            : `cursor-pointer bg-white ${isOpen ? "border-teal-500 ring-4 ring-teal-100" : "border-slate-200 hover:border-slate-300"}`
+        }`}
         onClick={() => !disabled && setIsOpen(!isOpen)}
       >
-        <span className="truncate flex-1 text-sm">{loading ? 'Cargando...' : selectedOption ? selectedOption.label : placeholder}</span>
-        <ChevronDown className="w-4 h-4 text-gray-400 ml-2 flex-shrink-0" />
+        <span className={`truncate ${selectedOption ? "font-semibold text-slate-800" : "text-slate-400"}`}>
+          {selectedOption ? selectedOption.label : placeholder}
+        </span>
+        <ChevronDown className={`ml-2 h-4 w-4 shrink-0 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </div>
-      
+
       {isOpen && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg flex flex-col" style={{ maxHeight: '300px' }}>
-          <div className="p-2 border-b border-gray-100 shrink-0">
-             <div className="relative">
-                 <Search className="w-4 h-4 absolute left-2.5 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                 <input
-                   type="text"
-                   autoFocus
-                   placeholder="Buscar..."
-                   className="w-full pl-8 pr-2 py-1.5 text-sm border-b border-transparent focus:border-blue-500 focus:outline-none bg-gray-50 rounded"
-                   value={searchQuery}
-                   onChange={(e) => setSearchQuery(e.target.value)}
-                   onClick={(e) => e.stopPropagation()}
-                 />
-             </div>
+        <div className="absolute z-50 mt-1.5 flex w-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl" style={{ maxHeight: "320px" }}>
+          <div className="shrink-0 border-b border-slate-100 p-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                autoFocus
+                placeholder="Buscar..."
+                className="w-full rounded-lg bg-slate-50 py-2 pl-8 pr-2 text-sm outline-none placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onClick={e => e.stopPropagation()}
+              />
+            </div>
           </div>
-          <div className="overflow-auto flex-1 p-1">
+          <div className="flex-1 overflow-auto p-1.5">
             {filteredOptions.length === 0 ? (
-               <div className="p-3 text-sm text-gray-500 text-center">No se encontraron resultados</div>
+              <div className="p-4 text-center text-sm text-slate-400">No se encontraron resultados</div>
             ) : (
-               filteredOptions.map((opt: any) => (
-                 <div
-                   key={opt.value}
-                   className={`px-3 py-2 text-sm rounded cursor-pointer hover:bg-blue-50 ${opt.value === value ? 'bg-blue-100 font-medium text-blue-700' : 'text-gray-700'}`}
-                   onClick={() => {
-                     onChange(opt.value);
-                     setIsOpen(false);
-                     setSearchQuery("");
-                   }}
-                 >
-                   {opt.label}
-                 </div>
-               ))
+              filteredOptions.map(opt => (
+                <div
+                  key={opt.value}
+                  className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
+                    opt.value === value ? "bg-teal-50 font-semibold text-teal-800" : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                  onClick={() => {
+                    onChange(opt.value);
+                    setIsOpen(false);
+                    setSearchQuery("");
+                  }}
+                >
+                  <span className="truncate">{opt.label}</span>
+                  {opt.hint && (
+                    <span className="shrink-0 rounded-md border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
+                      {opt.hint}
+                    </span>
+                  )}
+                </div>
+              ))
             )}
           </div>
         </div>
@@ -80,8 +127,18 @@ const SearchableSelect = ({ label, value, onChange, options, disabled, loading, 
   );
 };
 
-/** Marca que lleva en el desplegable un establecimiento con columnas propias elegidas. */
-const MARCA_COLUMNAS_PROPIAS = " — columnas propias";
+/** Rótulo numerado de cada paso, para que el orden se lea de un vistazo. */
+const Paso = ({ numero, titulo, children }: { numero: number; titulo: string; children?: React.ReactNode }) => (
+  <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="flex items-center gap-2">
+      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-900 text-[10px] font-black text-white">
+        {numero}
+      </span>
+      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">{titulo}</span>
+    </div>
+    {children}
+  </div>
+);
 
 const normalizeName = (name: string): string => {
   if (!name) return "";
@@ -90,7 +147,7 @@ const normalizeName = (name: string): string => {
     .replace(/[̀-ͯ]/g, "")
     .toUpperCase()
     .replace(/\b(UNGET|UNGETS|OGESS|DIRESA|IPRESS)\b/g, "");
-    
+
   n = n.replace(/\bMARICAL\b/g, "MARISCAL");
   n = n.replace(/\bMARISCAL\s+C\.?/g, "MARISCAL CACERES");
 
@@ -101,17 +158,13 @@ const alignConfigsWithOfficialUngets = (configs: any[], ungs: any[]): any[] => {
   if (!ungs || ungs.length === 0) return configs;
   return configs.map(config => {
     const configNorm = normalizeName(config.name);
-    const matching = ungs.find(u => 
+    const matching = ungs.find(u =>
       (config.ungetId && String(u.id) === String(config.ungetId)) ||
-      u.name === config.name || 
+      u.name === config.name ||
       normalizeName(u.name) === configNorm
     );
     if (matching) {
-      return {
-        ...config,
-        ungetId: matching.id,
-        name: matching.name
-      };
+      return { ...config, ungetId: matching.id, name: matching.name };
     }
     return config;
   });
@@ -175,7 +228,8 @@ export const AdminStockAssignmentModule: React.FC = () => {
    * Sustituye al panel «Establecimientos configurados», que en el modelo anterior listaba
    * asignaciones de hoja. Hoy no hay nada que asignar —la hoja se deduce del código— y lo
    * único que distingue a un establecimiento de otro son sus columnas, así que la marca
-   * vive donde de verdad se usa: en el desplegable donde ya se busca.
+   * vive donde de verdad se usa: en el desplegable donde ya se busca. Va como chip y solo
+   * dentro de la lista: pegada al nombre ensuciaba el campo una vez elegido.
    */
   const conColumnasPropias = useMemo(() => {
     const codigos = new Set<string>();
@@ -191,6 +245,8 @@ export const AdminStockAssignmentModule: React.FC = () => {
     () => assignments.find(a => a.facilityCode === selectedFacilityCode) || null,
     [assignments, selectedFacilityCode],
   );
+
+  const tieneColumnasPropias = hasCustomStockColumns(filaDelEstablecimiento?.visibleColumns);
 
   /**
    * Al elegir un establecimiento se cargan las columnas que ya tuviera guardadas.
@@ -250,19 +306,19 @@ export const AdminStockAssignmentModule: React.FC = () => {
               api.getAllUngetConfigs(),
               api.getUsers()
             ]);
-            
+
             configs = allConfigs.filter(config => {
               if (config.username === currentUser.username) return true;
               if (level === 'GLOBAL') return true;
-              
+
               const creator = allUsers.find(u => u.username === config.username);
               if (!creator) return false;
-              
+
               const creatorDiresaId = creator.personnelData?.diresaId || creator.facilityData?.diresaId || (creator as any).diresaId;
               const creatorOgessId = creator.personnelData?.ogessId || creator.facilityData?.ogessId || (creator as any).ogessId;
               const creatorUngetId = creator.personnelData?.ungetId || creator.facilityData?.ungetId || (creator as any).ungetId;
               const creatorMicroredId = creator.personnelData?.microredId || creator.facilityData?.microredId || (creator as any).microredId;
-              
+
               if (level === 'DIRESA' && userDiresaId) return creatorDiresaId === userDiresaId;
               if (level === 'OGESS' && userOgessId) return creatorOgessId === userOgessId;
               if (level === 'UNGET' && userUngetId) return creatorUngetId === userUngetId;
@@ -300,8 +356,8 @@ export const AdminStockAssignmentModule: React.FC = () => {
   const handleConnectionChange = async (url: string) => {
     setSelectedConnectionUrl(url);
     setAvailableSheets([]);
-    // El establecimiento elegido pertenecía a la UNGET anterior: dejarlo puesto
-    // mostraría un vínculo que no es el suyo.
+    // El establecimiento elegido pertenecía a la UNGET anterior: dejarlo puesto mostraría
+    // un vínculo que no es el suyo.
     setSelectedFacilityCode("");
     setVisibleColumns(DEFAULT_STOCK_COLUMN_KEYS);
     if (!url) return;
@@ -324,7 +380,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
   };
 
   const handleToggleColumn = (key: string) => {
-    setVisibleColumns(prev => 
+    setVisibleColumns(prev =>
       prev.includes(key) ? prev.filter(c => c !== key) : [...prev, key]
     );
   };
@@ -387,7 +443,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
     }
   };
 
-  const opcionesDeEstablecimiento = useMemo(() => {
+  const opcionesDeEstablecimiento = useMemo<OpcionDeSelector[]>(() => {
     const level = getJurisdictionLevel();
     // La conexión elegida manda: solo se ofrecen los establecimientos de esa UNGET. Antes
     // el desplegable se filtraba únicamente por la jurisdicción de quien asigna, así que un
@@ -417,151 +473,230 @@ export const AdminStockAssignmentModule: React.FC = () => {
       })
       .map(f => ({
         value: f.code,
-        // La marca va en la etiqueta a propósito: el buscador del desplegable filtra por
-        // ella, así que escribir «propias» los deja a todos a la vista.
-        label: `${f.name} (${f.code})${conColumnasPropias.has(f.code) ? MARCA_COLUMNAS_PROPIAS : ""}`,
+        label: `${f.name} (${f.code})`,
+        hint: conColumnasPropias.has(f.code) ? "propias" : undefined,
       }));
   }, [facilities, conexionSeleccionada, conColumnasPropias, roles, currentUser]);
 
   if (isLoading) {
-    return <div className="p-8 text-center text-gray-500">Cargando módulo...</div>;
+    return (
+      <div className="flex justify-center rounded-2xl border border-slate-200 bg-white py-20 shadow-sm">
+        <div className="h-9 w-9 animate-spin rounded-full border-2 border-teal-500 border-t-transparent" />
+      </div>
+    );
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-            <Shield className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Columnas visibles del stock por establecimiento</h2>
-            <p className="text-sm text-gray-500">La hoja de cada establecimiento se reconoce sola por su código. Aquí se decide qué columnas podrá consultar en “Stock SISMED”.</p>
-          </div>
-        </div>
+  const sinConexiones = ungetConfigs.length === 0;
 
-        {ungetConfigs.length === 0 ? (
-          <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-lg flex items-start gap-3">
-            <Shield className="w-5 h-5 flex-shrink-0 mt-0.5" />
+  return (
+    <div className="space-y-5 animate-in fade-in duration-300">
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="rounded-2xl bg-teal-50 p-3 text-teal-700"><SlidersHorizontal className="h-6 w-6" /></div>
             <div>
-              <p className="font-medium">No tiene configuraciones de stock disponibles</p>
-              <p className="text-sm mt-1">Primero debe ir al módulo "Consulta Stock" y guardar URLs de conexiones. Estas URLs luego aparecerán aquí para poder asignarlas a otros usuarios.</p>
+              <h2 className="text-xl font-black text-slate-900">Columnas visibles del stock</h2>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">
+                La hoja de cada establecimiento se reconoce sola por su código. Aquí solo se decide
+                qué columnas podrá consultar en “Stock SISMED”.
+              </p>
             </div>
           </div>
-        ) : (
-          <div className="space-y-4 mt-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <SearchableSelect
-                label="1. UNGET / Conexión"
-                value={selectedConnectionUrl}
-                onChange={handleConnectionChange}
-                placeholder="-- Seleccionar Conexión --"
-                options={ungetConfigs.map(c => ({ value: c.url, label: c.name }))}
-              />
+          {selectedFacilityCode && (
+            <div className="flex shrink-0 items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-4 py-2.5">
+              <Table2 className="h-4 w-4 text-teal-600" />
+              <span className="text-sm font-black text-slate-900">{visibleColumns.length}</span>
+              <span className="text-xs font-bold text-slate-500">de {STOCK_COLUMNS.length} columnas</span>
+            </div>
+          )}
+        </div>
+      </section>
 
-              {/* Sin `loading`: los establecimientos ya están en memoria desde que se abrió
-                  el módulo. Lo que tarda es leer las hojas, y eso lo informa el paso 3. */}
-              <SearchableSelect
-                label="2. Establecimiento de Salud"
-                value={selectedFacilityCode}
-                onChange={setSelectedFacilityCode}
-                placeholder="-- Seleccionar --"
-                disabled={!selectedConnectionUrl}
-                options={opcionesDeEstablecimiento}
-              />
+      {sinConexiones ? (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
+          <Sparkles className="mx-auto h-9 w-9 text-amber-600" />
+          <h3 className="mt-3 font-black text-amber-950">No hay conexiones de stock disponibles</h3>
+          <p className="mx-auto mt-1 max-w-xl text-sm leading-6 text-amber-800">
+            Primero vaya a “Consulta Stock” y guarde la conexión de su UNGET. En cuanto exista,
+            aparecerá aquí para poder elegir sus establecimientos.
+          </p>
+        </section>
+      ) : (
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="space-y-5 p-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Paso numero={1} titulo="UNGET / Conexión" />
+                <SearchableSelect
+                  value={selectedConnectionUrl}
+                  onChange={handleConnectionChange}
+                  placeholder="Seleccionar conexión..."
+                  options={ungetConfigs.map(c => ({ value: c.url, label: c.name }))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Paso numero={2} titulo="Establecimiento de salud" />
+                {/* Sin indicador de carga: los establecimientos ya están en memoria desde
+                    que se abrió el módulo. Lo que tarda es leer las hojas, y eso lo
+                    informa el paso 3. */}
+                <SearchableSelect
+                  value={selectedFacilityCode}
+                  onChange={setSelectedFacilityCode}
+                  placeholder={selectedConnectionUrl ? "Seleccionar establecimiento..." : "Elija antes una conexión"}
+                  disabled={!selectedConnectionUrl}
+                  options={opcionesDeEstablecimiento}
+                />
+              </div>
             </div>
 
             {/* La hoja no se elige: se deduce del código del establecimiento. */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">3. Hoja vinculada (automática)</label>
+            <div className="space-y-2">
+              <Paso numero={3} titulo="Hoja vinculada">
+                <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  Automática
+                </span>
+              </Paso>
               {!selectedFacilityCode ? (
-                <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-3.5 text-sm text-slate-500">
                   Elija una conexión y un establecimiento: su hoja se reconoce sola por el código.
                 </div>
               ) : loadingSheets ? (
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500 animate-pulse">
+                <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm font-semibold text-slate-500">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-teal-500 border-t-transparent" />
                   Leyendo las hojas de la conexión...
                 </div>
               ) : (
                 <div
-                  className={`rounded-lg border px-4 py-3 text-sm flex items-start gap-2.5 ${
+                  className={`flex items-start gap-2.5 rounded-xl border px-4 py-3.5 text-sm ${
                     isLinkedToSheet(vinculo)
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                      : "border-amber-200 bg-amber-50 text-amber-800"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : "border-amber-200 bg-amber-50 text-amber-900"
                   }`}
                 >
                   {isLinkedToSheet(vinculo)
-                    ? <Link2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    : <Link2Off className="w-4 h-4 mt-0.5 flex-shrink-0" />}
-                  <div>
+                    ? <Link2 className="mt-0.5 h-4 w-4 shrink-0" />
+                    : <Link2Off className="mt-0.5 h-4 w-4 shrink-0" />}
+                  <div className="min-w-0">
                     {vinculo?.sheet && (
-                      <p className="font-semibold flex items-center gap-1.5">
-                        <FileSpreadsheet className="w-3.5 h-3.5" />
-                        {vinculo.sheet.name}
+                      <p className="flex items-center gap-1.5 font-black">
+                        <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{vinculo.sheet.name}</span>
                       </p>
                     )}
-                    <p className={vinculo?.sheet ? "text-xs mt-0.5" : ""}>{vinculo?.message}</p>
+                    <p className={vinculo?.sheet ? "mt-0.5 text-xs leading-relaxed" : "leading-relaxed"}>{vinculo?.message}</p>
                   </div>
                 </div>
               )}
             </div>
 
-            <div>
-              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
-                <label className="block text-sm font-medium text-gray-700">4. Columnas visibles para el establecimiento</label>
-                {selectedFacilityCode && (
-                  <span className="text-xs text-gray-500">
-                    {hasCustomStockColumns(filaDelEstablecimiento?.visibleColumns)
-                      ? "Este establecimiento tiene columnas propias elegidas."
-                      : "Este establecimiento usa las columnas por omisión."}
-                  </span>
-                )}
-              </div>
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                {STOCK_COLUMNS.map(col => (
-                  <div 
-                    key={col.key} 
-                    onClick={() => handleToggleColumn(col.key)}
-                    className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border border-gray-200 hover:bg-gray-100 transition-colors select-none"
+            <div className="space-y-2">
+              <Paso numero={4} titulo="Columnas que verá el establecimiento">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleColumns(STOCK_COLUMNS.map(c => c.key))}
+                    className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
                   >
-                    <div className={`w-5 h-5 shrink-0 rounded flex items-center justify-center border ${visibleColumns.includes(col.key) ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-300'}`}>
-                      {visibleColumns.includes(col.key) && <Check className="w-3.5 h-3.5 text-white" />}
+                    Todas
+                  </button>
+                  <span className="text-slate-200">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleColumns(DEFAULT_STOCK_COLUMN_KEYS)}
+                    className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                  >
+                    Por omisión
+                  </button>
+                  <span className="text-slate-200">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleColumns([])}
+                    className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                  >
+                    Ninguna
+                  </button>
+                </div>
+              </Paso>
+
+              <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                {STOCK_COLUMN_GROUPS.map(grupo => {
+                  const columnas = STOCK_COLUMNS.filter(c => c.group === grupo);
+                  if (columnas.length === 0) return null;
+                  return (
+                    <div key={grupo}>
+                      <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-400">{grupo}</p>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                        {columnas.map(col => {
+                          const marcada = visibleColumns.includes(col.key);
+                          return (
+                            <button
+                              key={col.key}
+                              type="button"
+                              onClick={() => handleToggleColumn(col.key)}
+                              className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-all ${
+                                marcada
+                                  ? "border-teal-500/60 bg-teal-50 shadow-sm"
+                                  : "border-slate-200 bg-white hover:border-slate-300"
+                              }`}
+                            >
+                              <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md border transition-colors ${
+                                marcada ? "border-teal-600 bg-teal-600" : "border-slate-300 bg-white"
+                              }`}>
+                                {marcada && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
+                              </span>
+                              <span className={`truncate text-[13px] font-bold ${marcada ? "text-teal-900" : "text-slate-600"}`}>
+                                {col.label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <span className="text-sm font-medium text-gray-700">{col.label}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
+          </div>
 
-            <div className="pt-2 flex flex-wrap items-center gap-3">
-              <button
-                onClick={() => guardarColumnas(visibleColumns)}
-                disabled={isSaving || !selectedFacilityCode || !selectedConnectionUrl || visibleColumns.length === 0}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium transition-colors cursor-pointer"
-              >
-                {isSaving ? (
-                   <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                ) : (
-                   filaDelEstablecimiento ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />
-                )}
-                {isSaving ? "Guardando..." : "Guardar Columnas"}
-              </button>
-
-              {hasCustomStockColumns(filaDelEstablecimiento?.visibleColumns) && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-4">
+            <p className={`text-xs ${visibleColumns.length === 0 ? "font-bold text-amber-600" : "text-slate-500"}`}>
+              {visibleColumns.length === 0
+                ? "Deje al menos una columna visible para poder guardar."
+                : !selectedFacilityCode
+                ? "Elija un establecimiento para guardar sus columnas."
+                : tieneColumnasPropias
+                  ? "Este establecimiento tiene columnas propias elegidas."
+                  : "Este establecimiento usa las columnas por omisión."}
+            </p>
+            <div className="flex flex-wrap items-center gap-2.5">
+              {tieneColumnasPropias && (
                 <button
+                  type="button"
                   onClick={() => guardarColumnas(DEFAULT_STOCK_COLUMN_KEYS)}
                   disabled={isSaving}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 font-medium transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
                   title="Deja este establecimiento con las mismas columnas que ve cualquier otro"
                 >
-                  <RotateCcw className="w-4 h-4" />
+                  <RotateCcw className="h-4 w-4" />
                   Restablecer por omisión
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => guardarColumnas(visibleColumns)}
+                disabled={isSaving || !selectedFacilityCode || !selectedConnectionUrl || visibleColumns.length === 0}
+                className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isSaving
+                  ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  : <Save className="h-4 w-4" />}
+                {isSaving ? "Guardando..." : "Guardar columnas"}
+              </button>
             </div>
           </div>
-        )}
-      </div>
+        </section>
+      )}
     </div>
   );
 };
