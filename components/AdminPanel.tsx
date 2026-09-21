@@ -1623,7 +1623,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                                     type="checkbox" 
                                                                     checked={currentRole.allowedModules.includes(module.id)}
                                                                     onChange={(e) => handleRoleModuleChange(currentRole.role, module.id, e.target.checked)}
-                                                                    className="mt-0.5 shrink-0 rounded text-teal-600 focus:ring-teal-500 border-gray-300"
+                                                                    className="mt-0.5 shrink-0 rounded text-teal-600 focus:ring-teal-500 border border-gray-300"
                                                                 />
                                                                 <div className="flex flex-col">
                                                                     <span className={`text-sm font-bold ${currentRole.allowedModules.includes(module.id) ? 'text-teal-900' : 'text-gray-800'}`}>{module.label}</span>
@@ -1782,7 +1782,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                     type="checkbox"
                                     checked={!!tempConfig.maintenanceMode}
                                     onChange={(e) => setTempConfig({ ...tempConfig, maintenanceMode: e.target.checked })}
-                                    className="mt-0.5 h-5 w-5 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                                    className="mt-0.5 h-5 w-5 rounded border border-gray-300 text-amber-600 focus:ring-amber-500"
                                 />
                                 <span>
                                     <span className="block text-sm font-bold text-gray-800">

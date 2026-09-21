@@ -370,7 +370,7 @@ export const ImmunizationCatalogModule: React.FC = () => {
                     type="checkbox"
                     checked={form.isActive}
                     onChange={e => setForm({ ...form, isActive: e.target.checked })}
-                    className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                    className="h-4 w-4 rounded border border-slate-300 text-teal-600 focus:ring-teal-500"
                   />
                   Producto Activo
                 </label>

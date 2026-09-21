@@ -365,7 +365,7 @@ export const ImmunizationCatalogImportModal: React.FC<ImmunizationCatalogImportM
                         filteredRows.filter(r => r.status !== "INVALID").every(r => r.selected)
                       }
                       onChange={e => handleSelectAllFiltered(e.target.checked)}
-                      className="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4"
+                      className="rounded border border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4"
                       disabled={filteredRows.every(r => r.status === "INVALID")}
                     />
                   </th>
@@ -404,7 +404,7 @@ export const ImmunizationCatalogImportModal: React.FC<ImmunizationCatalogImportM
                             checked={Boolean(row.selected)}
                             disabled={isInvalid}
                             onChange={() => handleToggleRow(originalIndex)}
-                            className="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4 disabled:opacity-30"
+                            className="rounded border border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4 disabled:opacity-30"
                           />
                         </td>
                         <td className="px-3 py-2.5 text-center font-mono text-slate-400 font-bold">

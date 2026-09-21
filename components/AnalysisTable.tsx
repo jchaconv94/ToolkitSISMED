@@ -511,7 +511,7 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                             <label key={opt.value} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer text-xs text-gray-600">
                                 <input 
                                     type="checkbox" 
-                                    className="h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500 bg-white accent-teal-600 cursor-pointer shadow-sm"
+                                    className="h-4 w-4 rounded border border-gray-300 text-teal-600 focus:ring-teal-500 bg-white accent-teal-600 cursor-pointer shadow-sm"
                                     style={{ colorScheme: 'light' }}
                                     checked={activeFilters[field]?.includes(opt.value) || false}
                                     onChange={() => handleFilterToggle(field, opt.value)}

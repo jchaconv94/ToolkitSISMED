@@ -54,7 +54,7 @@ export const ReportOptionsModal: React.FC<ReportOptionsModalProps> = ({
                 <div className="mt-0.5">
                   <input 
                       type="checkbox" 
-                      className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
+                      className="w-4 h-4 text-teal-600 rounded border border-gray-300 focus:ring-teal-500"
                       checked={excludeVaccines}
                       onChange={(e) => setExcludeVaccines(e.target.checked)}
                   />
@@ -78,7 +78,7 @@ export const ReportOptionsModal: React.FC<ReportOptionsModalProps> = ({
               <div className="mt-0.5">
                  <input 
                     type="checkbox" 
-                    className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
+                    className="w-4 h-4 text-teal-600 rounded border border-gray-300 focus:ring-teal-500"
                     checked={excludeNoSupply}
                     onChange={(e) => setExcludeNoSupply(e.target.checked)}
                  />

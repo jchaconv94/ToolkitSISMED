@@ -293,7 +293,7 @@ export const ImmunizationIncomeOriginsModule: React.FC<ImmunizationIncomeOrigins
                 <input value={formName} onChange={event => setFormName(event.target.value)} disabled={saving} className={inputClassName} placeholder="Ej. CENARES, OGESS Alto Mayo, transferencia regional..." autoFocus />
               </label>
               <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <input type="checkbox" checked={formActive} onChange={event => setFormActive(event.target.checked)} disabled={saving} className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500" />
+                <input type="checkbox" checked={formActive} onChange={event => setFormActive(event.target.checked)} disabled={saving} className="h-4 w-4 rounded border border-slate-300 text-teal-600 focus:ring-teal-500" />
                 <span>
                   <span className="block text-sm font-black text-slate-800">Origen activo</span>
                   <span className="block text-xs text-slate-500">Si está inactivo, no se mostrará al registrar ingresos.</span>

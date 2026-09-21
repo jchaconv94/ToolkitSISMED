@@ -1651,7 +1651,7 @@ function ReceptionModal({
                 checked={hasIncident}
                 disabled={hasDifference || isSaving}
                 onChange={event => setForceIncident(event.target.checked)}
-                className="mt-1 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 disabled:opacity-70"
+                className="mt-1 h-4 w-4 rounded border border-slate-300 text-amber-600 focus:ring-amber-500 disabled:opacity-70"
               />
               <span>
                 <span className={`block text-sm font-black ${hasIncident ? "text-amber-950" : "text-slate-800"}`}>Registrar incidencia de recepcion</span>

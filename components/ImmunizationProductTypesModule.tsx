@@ -438,7 +438,7 @@ export const ImmunizationProductTypesModule: React.FC<ImmunizationProductTypesMo
                   checked={formActive}
                   onChange={e => setFormActive(e.target.checked)}
                   disabled={saving}
-                  className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                  className="h-4 w-4 rounded border border-slate-300 text-teal-600 focus:ring-teal-500"
                 />
                 <label htmlFor="formActiveCheck" className="text-xs font-bold text-slate-700 cursor-pointer">
                   Tipo activo (disponible en selector de productos)
