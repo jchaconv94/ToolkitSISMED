@@ -127,6 +127,35 @@ export const cachedSourcesStillMatch = (
   });
 };
 
+/**
+ * Quién mantiene la conexión. Vacío significa que la fila es anterior al reparto por
+ * usuario y la adopta quien la guarde.
+ */
+export const connectionOwner = (connection: UngetConnection | null | undefined): string =>
+  String(connection?.username || "").trim();
+
+/**
+ * Si este usuario puede modificar o retirar la conexión.
+ *
+ * `unget_configs` guarda una fila por UNGET y esa fila pertenece a su informático:
+ * `saveUngetConfigs` actualiza el resto de campos pero **nunca cambia el `username`**, y
+ * solo retira filas propias. La consecuencia era invisible en pantalla: quien no era el
+ * dueño pulsaba «eliminar», la tarjeta desaparecía del estado local, salía «Eliminado
+ * correctamente» y a la siguiente carga volvía, porque la fila jamás se tocó.
+ *
+ * La regla es la que ya aplicaban por su cuenta los filtros de guardado repartidos por el
+ * módulo; aquí se le pone nombre para que la interfaz pueda preguntar antes de ofrecer el
+ * botón, en vez de ofrecerlo y fingir que funcionó.
+ */
+export const canEditConnection = (
+  connection: UngetConnection | null | undefined,
+  username?: string | null,
+): boolean => {
+  const owner = connectionOwner(connection);
+  if (!owner) return true;
+  return owner === String(username || "").trim();
+};
+
 /** Cómo lee su stock una UNGET, para mostrarlo en la lista de conexiones. */
 export type UngetConnectionMode = "directa" | "apps-script" | "sin-hoja";
 
