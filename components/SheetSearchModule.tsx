@@ -101,6 +101,7 @@ import { describePharmacyCode, showsPharmacyColumn } from "../services/facilityS
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import { CustomSelect } from "./ui/CustomSelect";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
+import { StockNetworkSearchModal } from "./StockNetworkSearchModal";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -3124,6 +3125,51 @@ export const SheetSearchModule: React.FC = () => {
     return () => window.removeEventListener("popstate", alRetroceder);
   }, []);
 
+  /**
+   * Buscador de un producto en todas las hojas de la UNGET abierta.
+   *
+   * Se alimenta de lo que ya está descargado —el prefetch trae las hojas en segundo plano—
+   * así que casi siempre responde sin pedir nada a Google. La cobertura se muestra en el
+   * propio diálogo para que nadie crea que vio toda la red cuando faltan hojas.
+   */
+  const [isNetworkSearchOpen, setIsNetworkSearchOpen] = useState(false);
+  /**
+   * Estado, no referencia: `prefetchRef` no provoca un render, así que el aviso de
+   * «Descargando…» se habría quedado congelado en el diálogo.
+   */
+  const [isCompletingSearch, setIsCompletingSearch] = useState(false);
+
+  const hojasDeLaUnget = useMemo(
+    () => (selectedUngetIndex === null ? [] : sources.filter((s) => s.urlIndex === selectedUngetIndex)),
+    [sources, selectedUngetIndex],
+  );
+
+  const filasDeLaUnget = useMemo(
+    () => hojasDeLaUnget.flatMap((hoja) => dataBySource.get(hoja.id) || []),
+    [hojasDeLaUnget, dataBySource],
+  );
+
+  const coberturaBusqueda = useMemo(
+    () => ({
+      cargadas: hojasDeLaUnget.filter((hoja) => (dataBySource.get(hoja.id)?.length || 0) > 0).length,
+      total: hojasDeLaUnget.length,
+    }),
+    [hojasDeLaUnget, dataBySource],
+  );
+
+  // Ctrl+K abre el buscador. Se anula el atajo del navegador solo cuando hay una UNGET
+  // abierta, que es cuando el buscador tiene dónde buscar.
+  useEffect(() => {
+    const alPulsar = (evento: KeyboardEvent) => {
+      if (!(evento.ctrlKey || evento.metaKey) || evento.key.toLowerCase() !== "k") return;
+      if (viewLevel === "ungets" || selectedUngetIndex === null) return;
+      evento.preventDefault();
+      setIsNetworkSearchOpen(true);
+    };
+    window.addEventListener("keydown", alPulsar);
+    return () => window.removeEventListener("keydown", alPulsar);
+  }, [viewLevel, selectedUngetIndex]);
+
   const handleSelectUnget = (index: number) => {
     setSelectedUngetIndex(index);
     setViewLevel("sheets");
@@ -4809,6 +4855,22 @@ function processSheet(sheet) {
 
           {/* Action Buttons underneath breadcrumbs */}
           <div className="flex items-center gap-2 sm:gap-2.5 w-full md:w-auto overflow-x-auto pb-1 sm:pb-0 hide-scrollbar justify-start xl:justify-end shrink-0">
+            {/* Buscar un producto en todas las hojas de la UNGET, sin abrirlas una por una.
+                Solo con una UNGET abierta, que es cuando hay dónde buscar. */}
+            {selectedUngetIndex !== null && (
+              <button
+                type="button"
+                onClick={() => setIsNetworkSearchOpen(true)}
+                title="Buscar un producto en todos los establecimientos (Ctrl+K)"
+                className="bg-white border border-slate-200 text-slate-700 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:bg-slate-50 hover:border-teal-300 hover:text-teal-700 transition-all flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Search className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-teal-600" />
+                Buscar en la red
+                <kbd className="hidden lg:inline rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-slate-400">
+                  Ctrl K
+                </kbd>
+              </button>
+            )}
             {canManageConfigs && (
               <button
                 onClick={() => {
@@ -5286,6 +5348,28 @@ function processSheet(sheet) {
           </div>
         </div>
       )}
+
+      {/* BUSCADOR EN TODA LA RED DE LA UNGET */}
+      <StockNetworkSearchModal
+        isOpen={isNetworkSearchOpen}
+        onClose={() => setIsNetworkSearchOpen(false)}
+        ungetName={formatDisplayName(
+          (selectedUngetIndex !== null && scriptUrls[selectedUngetIndex]?.name) || "la UNGET",
+        )}
+        rows={filasDeLaUnget}
+        facilities={allFacilities}
+        sheetsLoaded={coberturaBusqueda.cargadas}
+        sheetsTotal={coberturaBusqueda.total}
+        onCompleteSearch={async () => {
+          setIsCompletingSearch(true);
+          try {
+            await prefetchPendingSheets();
+          } finally {
+            setIsCompletingSearch(false);
+          }
+        }}
+        isCompleting={isCompletingSearch}
+      />
 
       {/* CONFIRMACIÓN DE ELIMINAR UNA CONEXIÓN
           Retirar la conexión de una UNGET deja a sus establecimientos sin stock hasta que
