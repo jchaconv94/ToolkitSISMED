@@ -3420,13 +3420,17 @@ export const SheetSearchModule: React.FC = () => {
   }, [viewLevel, hayPanelRegional]);
 
   /**
-   * Volver, ya sea por el botón o por la tecla Escape.
+   * Volver un nivel, desde el botón o desde la flecha del navegador.
    *
    * Si el nivel actual llegó por una entrada del historial —que es lo normal, porque cada
    * paso hacia dentro añade una—, se retrocede con el propio historial y el cambio lo
    * aplica el oyente de `popstate`. Así el botón de la aplicación y la flecha del
    * navegador no se desincronizan: sin esto, volver con el botón dejaba una entrada
    * muerta y la siguiente pulsación de la flecha no hacía nada visible.
+   *
+   * No hay atajo de teclado. Lo hubo un rato y se quitó: este módulo tiene varios diálogos
+   * y basta con que uno quede fuera de la lista de excepciones para que Escape navegue por
+   * detrás de él, que es lo que pasó con el detalle de un producto.
    */
   const volverUnNivel = useCallback(() => {
     if (!destinoDeVolver) return;
@@ -3436,24 +3440,6 @@ export const SheetSearchModule: React.FC = () => {
     }
     aplicarNivelAnterior();
   }, [destinoDeVolver, aplicarNivelAnterior]);
-
-  /**
-   * Escape vuelve un nivel. Se ignora si hay un modal abierto o si el foco está escribiendo
-   * en un campo: ahí Escape significa «cierra esto» o «limpia lo que escribí», no «sal de
-   * la pantalla», y sacar a alguien de una hoja sin querer es justo lo que no se busca.
-   */
-  useEffect(() => {
-    const alPulsar = (evento: KeyboardEvent) => {
-      if (evento.key !== "Escape" || !destinoDeVolver) return;
-      if (isConfigOpen || quickFixConfig || conexionAEliminar || stockModalSourceId) return;
-      const activo = document.activeElement as HTMLElement | null;
-      const etiqueta = activo?.tagName?.toLowerCase();
-      if (etiqueta === "input" || etiqueta === "textarea" || activo?.isContentEditable) return;
-      volverUnNivel();
-    };
-    window.addEventListener("keydown", alPulsar);
-    return () => window.removeEventListener("keydown", alPulsar);
-  }, [destinoDeVolver, volverUnNivel, isConfigOpen, quickFixConfig, conexionAEliminar, stockModalSourceId]);
 
   const handleRemoveUrl = (indexToRemove: number) => {
     const config = tempUrls[indexToRemove];
@@ -4623,7 +4609,7 @@ function processSheet(sheet) {
               <button
                 type="button"
                 onClick={volverUnNivel}
-                title={`Volver a ${destinoDeVolver} (Esc)`}
+                title={`Volver a ${destinoDeVolver}`}
                 aria-label={`Volver a ${destinoDeVolver}`}
                 className="group flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center shrink-0 rounded-xl border border-slate-200 bg-white text-slate-500 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] transition-all hover:border-teal-300 hover:text-teal-700 hover:shadow-md cursor-pointer"
               >
