@@ -4863,12 +4863,17 @@ function processSheet(sheet) {
                 title="Buscar un producto en todos los establecimientos (Ctrl+K)"
                 aria-label="Búsqueda avanzada"
                 aria-keyshortcuts="Control+K"
-                className="group bg-white border border-teal-200 text-teal-700 px-3 py-2 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:border-teal-400 hover:shadow-[0_0_18px_-4px_rgba(13,148,136,0.75)] focus-visible:border-teal-400 focus-visible:shadow-[0_0_18px_-4px_rgba(13,148,136,0.75)] focus-visible:outline-none transition-all duration-300 flex items-center shadow-sm whitespace-nowrap shrink-0 cursor-pointer"
+                className="group bg-white border border-teal-200 text-teal-700 h-[34px] sm:h-[42px] rounded-full font-bold text-xs sm:text-sm hover:border-teal-400 hover:bg-teal-50 focus-visible:border-teal-500 focus-visible:bg-teal-50 focus-visible:outline-none transition-all duration-300 flex items-center overflow-hidden shadow-sm whitespace-nowrap shrink-0 cursor-pointer"
               >
-                <Search className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-teal-600" />
-                {/* `max-w` porque un ancho automático no se puede animar. */}
-                <span className="flex max-w-0 items-center overflow-hidden opacity-0 transition-all duration-300 group-hover:max-w-[15rem] group-hover:opacity-100 group-focus-visible:max-w-[15rem] group-focus-visible:opacity-100">
-                  <span className="pl-1.5 sm:pl-2">Búsqueda avanzada</span>
+                {/* El icono ocupa una caja tan ancha como alta, para que en reposo el botón
+                    sea un círculo y no un óvalo. Nada de relleno horizontal en el botón. */}
+                <span className="flex h-full w-8 shrink-0 items-center justify-center sm:w-10">
+                  <Search className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-teal-600" />
+                </span>
+                {/* `max-w` porque un ancho automático no se puede animar. Con `border-box`
+                    el relleno se recoge con él, así que en reposo no ocupa nada. */}
+                <span className="flex max-w-0 items-center overflow-hidden pr-0 opacity-0 transition-all duration-300 group-hover:max-w-[15rem] group-hover:pr-4 group-hover:opacity-100 group-focus-visible:max-w-[15rem] group-focus-visible:pr-4 group-focus-visible:opacity-100">
+                  Búsqueda avanzada
                   <kbd className="hidden lg:inline ml-2 rounded border border-teal-200 bg-teal-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-teal-600">
                     Ctrl K
                   </kbd>
