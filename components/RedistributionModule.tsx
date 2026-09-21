@@ -3573,7 +3573,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                         type="number"
                                         value={quickTransferQty}
                                         onChange={(e) => setQuickTransferQty(e.target.value)}
-                                        className="w-48 bg-transparent text-6xl font-bold text-center text-white border-b-2 border-gray-700 focus:border-indigo-500 outline-none pb-2 transition-all placeholder-gray-800 font-mono group-hover:border-gray-600"
+                                        className="w-48 bg-transparent text-6xl font-bold text-center text-white border-b-2 border border-gray-700 focus:border-indigo-500 outline-none pb-2 transition-all placeholder-gray-800 font-mono group-hover:border-gray-600"
                                         placeholder="0"
                                         autoFocus
                                         min="1"
@@ -3866,7 +3866,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                         type="checkbox"
                                         checked={autoReviewEnabled}
                                         onChange={(e) => setAutoReviewEnabled(e.target.checked)}
-                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        className="rounded border border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                     />
                                     No volver a preguntar (marcar automáticamente al avanzar)
                                 </label>

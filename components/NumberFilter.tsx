@@ -225,7 +225,7 @@ export const NumberFilter = ({
                                     type="checkbox"
                                     checked={allSelected && tempState.type === 'list'}
                                     onChange={() => { }}
-                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                    className="rounded border border-slate-300 text-indigo-600 focus:ring-indigo-500"
                                 />
                                 <span>(Seleccionar todo)</span>
                             </div>
@@ -242,7 +242,7 @@ export const NumberFilter = ({
                                                 type="checkbox"
                                                 checked={isSelected}
                                                 onChange={() => { }}
-                                                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                                className="rounded border border-slate-300 text-indigo-600 focus:ring-indigo-500"
                                             />
                                             <span className="truncate">{option.label}</span>
                                         </div>

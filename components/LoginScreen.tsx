@@ -176,7 +176,7 @@ export const LoginScreen: React.FC = () => {
                             type="checkbox"
                             checked={rememberMe}
                             onChange={(e) => setRememberMe(e.target.checked)}
-                            className="h-4 w-4 text-teal-600 focus:ring-teal-500/50 border-gray-300 rounded transition-colors cursor-pointer"
+                            className="h-4 w-4 text-teal-600 focus:ring-teal-500/50 border border-gray-300 rounded transition-colors cursor-pointer"
                         />
                         <label htmlFor="remember-me" className="ml-2 block text-xs font-semibold text-gray-700 cursor-pointer select-none">
                             Recordar mis credenciales

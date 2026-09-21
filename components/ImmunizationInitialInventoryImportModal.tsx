@@ -463,7 +463,7 @@ export const ImmunizationInitialInventoryImportModal: React.FC<
                           .every(r => r.selected)
                       }
                       onChange={e => handleSelectAllFiltered(e.target.checked)}
-                      className="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-3.5 w-3.5 cursor-pointer"
+                      className="rounded border border-slate-300 text-teal-600 focus:ring-teal-500 h-3.5 w-3.5 cursor-pointer"
                       disabled={filteredRows.every(r => r.status === "INVALID")}
                     />
                   </th>
@@ -513,7 +513,7 @@ export const ImmunizationInitialInventoryImportModal: React.FC<
                             checked={Boolean(row.selected)}
                             disabled={isInvalid}
                             onChange={() => handleToggleRow(originalIndex)}
-                            className="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4 disabled:opacity-30 cursor-pointer"
+                            className="rounded border border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4 disabled:opacity-30 cursor-pointer"
                           />
                         </td>
 

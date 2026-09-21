@@ -4661,7 +4661,7 @@ function processSheet(sheet) {
                                     return matching ? matching.name : newNameInput;
                                   })()}
                                   disabled
-                                  className="w-full text-xs sm:text-sm rounded-lg border-gray-200 bg-gray-100 cursor-not-allowed shadow-sm py-2.5 px-3 font-bold text-gray-400"
+                                  className="w-full text-xs sm:text-sm rounded-lg border border-gray-200 bg-gray-100 cursor-not-allowed shadow-sm py-2.5 px-3 font-bold text-gray-400"
                                 />
                               ) : isUngetRole ? (
                                 <div className="bg-slate-50 border border-slate-200/60 rounded-lg px-3 py-2 flex flex-col justify-center min-h-[42px]">
@@ -4680,7 +4680,7 @@ function processSheet(sheet) {
                                 <select
                                   value={newNameInput}
                                   onChange={(e) => setNewNameInput(e.target.value)}
-                                  className="w-full text-xs sm:text-sm rounded-lg border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2 px-3 font-bold text-gray-700 bg-white h-[42px] min-h-[42px]"
+                                  className="w-full text-xs sm:text-sm rounded-lg border border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2 px-3 font-bold text-gray-700 bg-white h-[42px] min-h-[42px]"
                                 >
                                   <option value="">-- Seleccionar UNGET --</option>
                                   {availableUngetsForConfig.map((unget: any) => {
@@ -4710,7 +4710,7 @@ function processSheet(sheet) {
                                     setNewSpreadsheetInput(e.target.value);
                                     setSpreadsheetCheck(null);
                                   }}
-                                  className="flex-1 min-w-0 text-[10px] sm:text-xs rounded-lg border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2.5 px-3 font-mono bg-white"
+                                  className="flex-1 min-w-0 text-[10px] sm:text-xs rounded-lg border border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2.5 px-3 font-mono bg-white"
                                 />
                                 <button
                                   type="button"
@@ -4785,7 +4785,7 @@ function processSheet(sheet) {
                                     value={newUrlInput}
                                     onChange={(e) => setNewUrlInput(e.target.value)}
                                     onKeyDown={(e) => e.key === "Enter" && handleAddUrl()}
-                                    className="w-full text-[10px] sm:text-xs rounded-lg border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2.5 px-3 font-mono bg-white"
+                                    className="w-full text-[10px] sm:text-xs rounded-lg border border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2.5 px-3 font-mono bg-white"
                                   />
                                   <div className="flex flex-wrap items-center justify-between gap-2">
                                     <p className="text-[9px] text-slate-400 font-medium">
