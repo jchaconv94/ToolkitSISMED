@@ -4585,18 +4585,18 @@ function processSheet(sheet) {
 
       {isConfigOpen && canManageConfigs && (
         <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-white/20">
+          <div className="bg-white w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col">
             {/* Header Modal */}
-            <div className="p-5 sm:p-6 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0 z-10">
+            <div className="px-5 py-4 sm:px-6 sm:py-5 flex items-center justify-between bg-slate-900 sticky top-0 z-10">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-teal-50 rounded-lg flex items-center justify-center text-teal-600">
+                <div className="w-10 h-10 bg-teal-500/15 rounded-xl flex items-center justify-center text-teal-400 shadow-inner">
                   <Settings className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="font-black text-gray-900 text-base sm:text-lg uppercase tracking-tight">
+                  <h3 className="font-black text-white text-base sm:text-lg uppercase tracking-tight">
                     Conexiones de stock
                   </h3>
-                  <p className="text-[10px] sm:text-xs text-gray-500 font-medium tracking-tight mt-0.5">
+                  <p className="text-[10px] sm:text-xs text-slate-400 font-medium tracking-tight mt-0.5">
                     Vincule la hoja de cálculo de su UNGET
                   </p>
                 </div>
@@ -4608,13 +4608,13 @@ function processSheet(sheet) {
                   setNewUrlInput("");
                   setNewNameInput("");
                 }}
-                className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-400 hover:text-gray-900"
+                className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white"
               >
                 <X className="h-5 w-5 sm:h-6 sm:w-6" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-50/40">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100/70">
               {(() => {
                 const role = user?.role || "";
                 const r = role.toUpperCase();
@@ -4629,12 +4629,15 @@ function processSheet(sheet) {
 
 
                 return (
-                  <div className="space-y-6 lg:space-y-8 max-w-7xl mx-auto">
+                  <div className="grid grid-cols-1 items-stretch gap-5 lg:grid-cols-2 max-w-7xl mx-auto">
+                    {/* Dos columnas: a la izquierda se da de alta la conexión y a la derecha se
+                        ven las que ya hay, en vez de una debajo de la otra con la mitad del
+                        ancho en blanco. */}
                     {/* ---------- ROW 1: EQUAL HEIGHTS HEADER PANEL ---------- */}
                     <div className="font-sans">
                       {/* Tarjeta: añadir o editar una conexión */}
                       <div>
-                        <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm h-full flex flex-col justify-between">
+                        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm h-full flex flex-col justify-between">
                           <div>
                         <h4 className="text-xs sm:text-sm font-black text-gray-800 mb-4 sm:mb-5 flex items-center gap-2 uppercase tracking-tight">
                           <Plus
@@ -4644,7 +4647,7 @@ function processSheet(sheet) {
                         </h4>
 
                         <div className="space-y-4">
-                          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] gap-4">
+                          <div className="grid grid-cols-1 gap-4">
                             <div className="space-y-1">
                               <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
                                 UNGET
@@ -4749,7 +4752,7 @@ function processSheet(sheet) {
                               )}
                             </div>
                             {/* La Web App es respaldo: se pliega para no confundir a quien configura por primera vez. */}
-                            <div className="md:col-start-2 rounded-lg border border-slate-300 bg-slate-50 overflow-hidden">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
                               <button
                                 type="button"
                                 onClick={() => setIsWebAppSectionOpen(!isWebAppSectionOpen)}
@@ -4843,11 +4846,7 @@ function processSheet(sheet) {
                     {/* Card: Lista de conexiones */}
                     <div className="lg:col-span-12">
                       <div
-                        className={`bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm flex flex-col h-full ${
-                          isAdminOrRegional
-                            ? "min-h-[300px]"
-                            : "h-auto max-h-[350px]"
-                        }`}
+                        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col h-full min-h-[320px]"
                       >
                         <div className="flex flex-wrap gap-2 justify-between items-center mb-4">
                           <h4 className="text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-widest">
@@ -4861,7 +4860,7 @@ function processSheet(sheet) {
                           ) : null}
                         </div>
 
-                        <div className="space-y-2.5 flex-1 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar max-h-[258px]">
+                        <div className="space-y-2.5 flex-1 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar">
                           {/* Map own URLs */}
                           {tempUrls.length > 0 ? (
                             tempUrls.map((config, idx) => (
@@ -4992,7 +4991,7 @@ function processSheet(sheet) {
             </div>
 
             {/* Footer Modal */}
-            <div className="p-4 sm:p-6 border-t border-gray-100 bg-gray-50 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 sticky bottom-0 z-10">
+            <div className="px-5 py-4 sm:px-6 border-t border-slate-200 bg-white flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 sticky bottom-0 z-10">
               <button
                 onClick={() => {
                   setIsConfigOpen(false);
