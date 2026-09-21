@@ -65,6 +65,14 @@ const SuspenseFallback = () => (
 const STORAGE_KEY = 'aura_data_v1';
 const REVIEW_KEY = 'aura_reviews_v1';
 const ADDITIONAL_ITEMS_KEY = 'aura_additional_v1';
+/**
+ * Marca de que ya se felicitó por este análisis.
+ *
+ * Tiene que sobrevivir a salir y volver a entrar al módulo: al volver, el análisis se
+ * recupera de `localStorage` y la revisión aparece completa desde el primer render, así
+ * que sin esta marca el modal de «¡Auditoría Completada!» salía cada vez.
+ */
+const SUCCESS_SHOWN_KEY = 'aura_success_shown_v1';
 const WELCOME_KEY = 'aura_welcome_shown_session'; // Clave de sesión
 
 const formatCorteDate = (dateStr: string): string => {
@@ -410,6 +418,10 @@ const AnalysisModule: React.FC = () => {
     return userFacilityCode ? `${ADDITIONAL_ITEMS_KEY}_${userFacilityCode}` : ADDITIONAL_ITEMS_KEY;
   }, [userFacilityCode]);
 
+  const currentSuccessKey = useMemo(() => {
+    return userFacilityCode ? `${SUCCESS_SHOWN_KEY}_${userFacilityCode}` : SUCCESS_SHOWN_KEY;
+  }, [userFacilityCode]);
+
   // Initialize state from LocalStorage if available for the active facility
   const [result, setResult] = useState<AuraAnalysisResult | null>(() => {
     try {
@@ -711,13 +723,19 @@ const AnalysisModule: React.FC = () => {
 
       setQuickFilter('ALL');
       setShowSuccessModal(false);
+      // Análisis nuevo: vuelve a haber una felicitación pendiente.
+      try {
+        localStorage.removeItem(currentSuccessKey);
+      } catch {}
     } catch (err: any) {
       console.error(err);
       setError("Error al procesar los datos matemáticos. Verifique que su archivo no esté corrupto.");
     } finally {
       setLoading(false);
     }
-  }, []);
+    // `currentSuccessKey` va en las dependencias: cambia con el establecimiento activo, y
+    // sin él este callback borraría la marca del establecimiento anterior.
+  }, [currentSuccessKey]);
 
   const handleReset = useCallback(() => {
     setResult(null);
@@ -735,8 +753,11 @@ const AnalysisModule: React.FC = () => {
     localStorage.removeItem(ADDITIONAL_ITEMS_KEY);
 
     setShowSuccessModal(false);
+    try {
+      localStorage.removeItem(currentSuccessKey);
+    } catch {}
     setInputData([]); // Clear input data on reset
-  }, [handleToggleFullScreen]);
+  }, [handleToggleFullScreen, currentSuccessKey]);
 
   // UPDATED HANDLER: Now accepts CPA Mode and Excluded Indices
   const handleMedicationUpdate = useCallback((id: string, newQuantity: number, mode?: 'ADJUSTED' | 'SIMPLE', excludedIndices?: number[]) => {
@@ -1039,26 +1060,26 @@ const AnalysisModule: React.FC = () => {
       };
   }, [result, reviewedIds, dashboardViewMode, calculateHorizonMetrics]);
 
-  const prevIsReviewCompleteRef = useRef<boolean>(false);
-  const hasShownSuccessModalRef = useRef<boolean>(false);
-
-  // Reset completion modal state when a new analysis result is loaded
+  /**
+   * La felicitación se da **una vez por análisis**, al terminar de validarlo.
+   *
+   * Antes la marca vivía en un `useRef` que se reiniciaba cada vez que cambiaba `result`.
+   * Eso incluye volver a entrar al módulo: el análisis se recupera de `localStorage`, la
+   * revisión ya está completa desde el primer render y el modal salía otra vez. Ahora la
+   * marca se guarda con el análisis y solo se borra donde de verdad empieza uno nuevo
+   * —`handleAnalyze` y `handleReset`—, que es lo que el usuario entiende por «terminar el
+   * análisis».
+   */
   useEffect(() => {
-    prevIsReviewCompleteRef.current = false;
-    hasShownSuccessModalRef.current = false;
-  }, [result]);
-
-  useEffect(() => {
-    if (isReviewComplete && totalToReview > 0) {
-      if (!prevIsReviewCompleteRef.current && !hasShownSuccessModalRef.current) {
-        setShowSuccessModal(true);
-        hasShownSuccessModalRef.current = true;
-      }
-    } else if (!isReviewComplete) {
-      hasShownSuccessModalRef.current = false;
+    if (!isReviewComplete || totalToReview === 0) return;
+    try {
+      if (localStorage.getItem(currentSuccessKey)) return;
+      localStorage.setItem(currentSuccessKey, '1');
+    } catch {
+      // Sin `localStorage` se felicita igualmente: molesta menos que no avisar nunca.
     }
-    prevIsReviewCompleteRef.current = isReviewComplete;
-  }, [isReviewComplete, totalToReview]);
+    setShowSuccessModal(true);
+  }, [isReviewComplete, totalToReview, currentSuccessKey]);
 
   const handleDownloadClick = () => {
       if (isReviewComplete) {
