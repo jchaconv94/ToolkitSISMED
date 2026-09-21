@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildProductIndex,
   countPharmaciesInResults,
+  exactProductMatch,
   normalizeStockText,
   parseStockAmount,
   searchNetworkStock,
+  searchNetworkStockByProduct,
   stockRowMatches,
+  suggestProducts,
 } from "./stockNetworkSearch";
 
 /** Como llegan las filas de la hoja de cálculo. */
@@ -160,5 +164,112 @@ describe("searchNetworkStock", () => {
     expect(searchNetworkStock([null as any, fila({})], "jeringa")).toHaveLength(1);
     expect(searchNetworkStock([fila({})], "")).toEqual([]);
     expect(countPharmaciesInResults(null)).toBe(0);
+  });
+});
+
+describe("buildProductIndex", () => {
+  const filas = [
+    fila({ ALMCOD: "06505F0101", Lote: "A", Saldo: "10" }),
+    fila({ ALMCOD: "06505F0101", Lote: "B", Saldo: "5" }),
+    fila({ ALMCOD: "06519F0101", Lote: "C", Saldo: "20" }),
+    fila({ ID_Producto: "22222", Nombre: "PARACETAMOL 500 mg", Saldo: "7" }),
+  ];
+
+  it("deja un producto por código, con su alcance y su saldo", () => {
+    const indice = buildProductIndex(filas);
+    expect(indice).toHaveLength(2);
+
+    const jeringa = indice.find((p) => p.codigoSismed === "11369")!;
+    expect(jeringa.total).toBe(35);
+    expect(jeringa.establecimientos).toBe(2);
+  });
+
+  it("un producto sin código SISMED se identifica por su nombre", () => {
+    const [producto] = buildProductIndex([fila({ ID_Producto: "", Nombre: "AGUA ESTERIL" })]);
+    expect(producto.key).toBe("AGUA ESTERIL");
+  });
+
+  it("no se cae con listas vacías ni con huecos", () => {
+    expect(buildProductIndex(null)).toEqual([]);
+    expect(buildProductIndex([null as any, fila({})])).toHaveLength(1);
+    // Una fila sin producto ni código no identifica nada: no entra al catálogo.
+    expect(buildProductIndex([fila({ ID_Producto: "", Nombre: "" })])).toEqual([]);
+  });
+});
+
+describe("suggestProducts", () => {
+  // Los SIGA se escriben aquí a mano: el de la fila de muestra contiene «500» y haría
+  // coincidir al suero con «paracetamol 500» por su código, no por su nombre.
+  const indice = buildProductIndex([
+    fila({ ID_Producto: "1", CODIGO_SIG: "111", Nombre: "PARACETAMOL 500 mg TABLETA", Saldo: "10" }),
+    fila({ ID_Producto: "2", CODIGO_SIG: "222", Nombre: "SUERO ORAL CON PARACETAMOL", Saldo: "99" }),
+    fila({ ID_Producto: "3", CODIGO_SIG: "333", Nombre: "IBUPROFENO 400 mg", Saldo: "50" }),
+  ]);
+
+  it("ofrece lo que empieza por lo escrito antes que lo que solo lo contiene", () => {
+    // Quien escribe «paracetamol» no quiere leer primero el suero, aunque tenga más saldo.
+    expect(suggestProducts(indice, "paracetamol").map((p) => p.codigoSismed)).toEqual(["1", "2"]);
+  });
+
+  it("con varias palabras tienen que estar todas", () => {
+    expect(suggestProducts(indice, "paracetamol 500").map((p) => p.codigoSismed)).toEqual(["1"]);
+  });
+
+  it("el código escrito entero manda sobre el nombre", () => {
+    expect(suggestProducts(indice, "3")[0].codigoSismed).toBe("3");
+  });
+
+  it("sin término no se sugiere nada, y se respeta el límite", () => {
+    expect(suggestProducts(indice, "")).toEqual([]);
+    expect(suggestProducts(indice, "   ")).toEqual([]);
+    expect(suggestProducts(null, "paracetamol")).toEqual([]);
+    expect(suggestProducts(indice, "a", 1)).toHaveLength(1);
+  });
+});
+
+describe("exactProductMatch", () => {
+  const indice = buildProductIndex([
+    fila({ ID_Producto: "11369", CODIGO_SIG: "495700350055" }),
+    fila({ ID_Producto: "113690", CODIGO_SIG: "495700350056", Nombre: "OTRA JERINGA" }),
+  ]);
+
+  it("reconoce el código SISMED y el SIGA escritos enteros", () => {
+    expect(exactProductMatch(indice, "11369")?.codigoSismed).toBe("11369");
+    expect(exactProductMatch(indice, "495700350055")?.codigoSismed).toBe("11369");
+  });
+
+  it("un código a medias no elige nada: para eso está la lista", () => {
+    // `1136` es prefijo de dos productos; adivinar mostraría el stock de otro producto.
+    expect(exactProductMatch(indice, "1136")).toBeNull();
+    expect(exactProductMatch(indice, "")).toBeNull();
+    expect(exactProductMatch(null, "11369")).toBeNull();
+  });
+
+  it("el nombre del producto no cuenta como código completo", () => {
+    expect(exactProductMatch(indice, "OTRA JERINGA")).toBeNull();
+  });
+});
+
+describe("searchNetworkStockByProduct", () => {
+  const filas = [
+    fila({ ALMCOD: "06505F0101", Saldo: "10" }),
+    fila({ ALMCOD: "06519F0101", Saldo: "20" }),
+    fila({ ID_Producto: "22222", Nombre: "PARACETAMOL", ALMCOD: "06505F0101", Saldo: "99" }),
+  ];
+
+  it("trae solo el producto elegido, consolidado por farmacia", () => {
+    const resultado = searchNetworkStockByProduct(filas, "11369");
+    expect(resultado.map((r) => r.almcod)).toEqual(["06519F0101", "06505F0101"]);
+    expect(resultado.map((r) => r.total)).toEqual([20, 10]);
+  });
+
+  it("un código que contiene al elegido no se cuela", () => {
+    // El texto libre sí busca dentro de los códigos; elegir un producto es exacto.
+    expect(searchNetworkStockByProduct(filas, "1136")).toEqual([]);
+  });
+
+  it("sin producto no devuelve nada", () => {
+    expect(searchNetworkStockByProduct(filas, "")).toEqual([]);
+    expect(searchNetworkStockByProduct(null, "11369")).toEqual([]);
   });
 });

@@ -98,22 +98,26 @@ export const stockRowMatches = (row: any, term: string): boolean => {
 };
 
 /**
- * Filas consolidadas que responden a la búsqueda.
+ * Identidad de un producto dentro de la red: su código SISMED, o su nombre cuando la hoja
+ * no lo trae. Es lo que agrupa los lotes y lo que se elige en la lista de sugerencias.
+ */
+const productKeyOf = (row: any): string => leerSismed(row).trim() || leerProducto(row).trim();
+
+/**
+ * Filas consolidadas de las que cumplen un criterio.
  *
  * Se agrupa por código de farmacia + producto, y dentro quedan los lotes, ordenados por
  * vencimiento para que el que caduca antes se lea primero. Las filas salen de mayor a menor
  * saldo: quien busca dónde hay stock quiere ver primero dónde hay más.
  */
-export const searchNetworkStock = (
+const consolidar = (
   rows: any[] | null | undefined,
-  term: string,
+  acepta: (row: any) => boolean,
 ): StockNetworkRow[] => {
-  if (!normalizeStockText(term)) return [];
-
   const porClave = new Map<string, StockNetworkRow>();
 
   for (const row of rows || []) {
-    if (!row || !stockRowMatches(row, term)) continue;
+    if (!row || !acepta(row)) continue;
 
     const almcod = readStockField(row, "ALMCOD", "ALM_COD", "ALM COD").trim().toUpperCase();
     const codigoSismed = leerSismed(row).trim();
@@ -160,6 +164,31 @@ export const searchNetworkStock = (
   );
 };
 
+/** Filas consolidadas que responden a un texto libre. */
+export const searchNetworkStock = (
+  rows: any[] | null | undefined,
+  term: string,
+): StockNetworkRow[] => {
+  if (!normalizeStockText(term)) return [];
+  return consolidar(rows, (row) => stockRowMatches(row, term));
+};
+
+/**
+ * Filas consolidadas de **un** producto, el que se eligió en la lista de sugerencias.
+ *
+ * Es la consulta normal del buscador: se escribe para encontrar el producto y se consulta
+ * una sola vez, cuando ya se sabe cuál es. Recorrer las filas por cada tecla era lo que
+ * trababa el campo.
+ */
+export const searchNetworkStockByProduct = (
+  rows: any[] | null | undefined,
+  productKey: string,
+): StockNetworkRow[] => {
+  const clave = String(productKey || "").trim();
+  if (!clave) return [];
+  return consolidar(rows, (row) => productKeyOf(row) === clave);
+};
+
 /**
  * Compara dos vencimientos escritos como texto.
  *
@@ -176,6 +205,132 @@ const ordenarPorVencimiento = (a: string, b: string): number => {
     return `${tres}${dos.padStart(2, "0")}${uno.padStart(2, "0")}`;
   };
   return aComparable(a).localeCompare(aComparable(b));
+};
+
+/** Un producto de la red, tal como se ofrece en la lista de sugerencias. */
+export interface StockProduct {
+  /** Su código SISMED, o el nombre cuando la hoja no trae código. */
+  key: string;
+  codigoSismed: string;
+  codigoSiga: string;
+  producto: string;
+  /** En cuántas farmacias aparece. */
+  establecimientos: number;
+  /** Saldo sumado en toda la red. */
+  total: number;
+  /**
+   * Texto comparable del producto, calculado **una sola vez**. Es lo que permite sugerir
+   * mientras se escribe sin volver a normalizar miles de filas en cada tecla.
+   */
+  buscable: string;
+}
+
+/**
+ * Catálogo de los productos que hay en la red, a partir de las filas descargadas.
+ *
+ * Se construye una vez por cada carga de stock, no por cada tecla. Un libro de UNGET son
+ * decenas de miles de filas pero unos pocos miles de productos distintos, así que sugerir
+ * sobre este índice es inmediato mientras que filtrar las filas se notaba en el teclado.
+ */
+export const buildProductIndex = (rows: any[] | null | undefined): StockProduct[] => {
+  const porClave = new Map<string, { producto: StockProduct; farmacias: Set<string> }>();
+
+  for (const row of rows || []) {
+    if (!row) continue;
+    const key = productKeyOf(row);
+    if (!key) continue;
+
+    let entrada = porClave.get(key);
+    if (!entrada) {
+      const codigoSismed = leerSismed(row).trim();
+      const codigoSiga = leerSiga(row).trim();
+      const producto = leerProducto(row).trim();
+      entrada = {
+        producto: {
+          key,
+          codigoSismed,
+          codigoSiga,
+          producto,
+          establecimientos: 0,
+          total: 0,
+          buscable: normalizeStockText(`${producto} ${codigoSismed} ${codigoSiga}`),
+        },
+        farmacias: new Set<string>(),
+      };
+      porClave.set(key, entrada);
+    }
+
+    entrada.producto.total += parseStockAmount(readStockField(row, "Saldo", "SALDO"));
+    const almcod = readStockField(row, "ALMCOD", "ALM_COD", "ALM COD").trim().toUpperCase();
+    if (almcod) entrada.farmacias.add(almcod);
+  }
+
+  return Array.from(porClave.values())
+    .map(({ producto, farmacias }) => ({ ...producto, establecimientos: farmacias.size }))
+    .sort((a, b) => a.producto.localeCompare(b.producto));
+};
+
+/**
+ * Qué tan bien responde un producto a lo escrito.
+ *
+ * Un código escrito entero manda sobre todo lo demás, y un nombre que empieza por lo
+ * escrito sobre uno que solo lo contiene: quien escribe «PARACETAMOL» no quiere ver
+ * primero «SUERO … CON PARACETAMOL».
+ */
+const puntuacion = (producto: StockProduct, buscado: string): number => {
+  const sismed = normalizeStockText(producto.codigoSismed);
+  const siga = normalizeStockText(producto.codigoSiga);
+  if (sismed === buscado || siga === buscado) return 3;
+  if (sismed.startsWith(buscado) || siga.startsWith(buscado)) return 2;
+  if (normalizeStockText(producto.producto).startsWith(buscado)) return 1;
+  return 0;
+};
+
+/**
+ * Productos que se ofrecen mientras se escribe.
+ *
+ * Con varias palabras tienen que estar todas, igual que en la búsqueda: quien escribe
+ * «paracetamol 500» no quiere todos los paracetamoles.
+ */
+export const suggestProducts = (
+  index: StockProduct[] | null | undefined,
+  term: string,
+  limite = 8,
+): StockProduct[] => {
+  const buscado = normalizeStockText(term);
+  if (!buscado) return [];
+  const palabras = buscado.split(" ").filter(Boolean);
+
+  return (index || [])
+    .filter((producto) => palabras.every((palabra) => producto.buscable.includes(palabra)))
+    .sort(
+      (a, b) =>
+        puntuacion(b, buscado) - puntuacion(a, buscado) ||
+        b.total - a.total ||
+        a.producto.localeCompare(b.producto),
+    )
+    .slice(0, Math.max(0, limite));
+};
+
+/**
+ * El producto cuyo código es **exactamente** lo escrito.
+ *
+ * Es el otro camino a los resultados: quien pega o termina de escribir un código completo
+ * no tiene por qué bajar a la lista a elegir lo único que hay. Si dos productos
+ * respondieran al mismo código no se elige ninguno: se sigue ofreciendo la lista.
+ */
+export const exactProductMatch = (
+  index: StockProduct[] | null | undefined,
+  term: string,
+): StockProduct | null => {
+  const buscado = normalizeStockText(term);
+  if (!buscado) return null;
+  const coinciden = (index || []).filter(
+    (producto) =>
+      normalizeStockText(producto.codigoSismed) === buscado ||
+      normalizeStockText(producto.codigoSiga) === buscado,
+  );
+  return coinciden.length === 1 ? coinciden[0] : null;
 };
 
 /** Cuántos establecimientos distintos aparecen en un resultado. */

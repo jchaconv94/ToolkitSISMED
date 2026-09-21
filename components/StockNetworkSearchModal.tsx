@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   ChevronRight,
+  CornerDownLeft,
   Loader2,
   MapPin,
   Package,
@@ -10,9 +11,14 @@ import {
   X,
 } from "lucide-react";
 import {
+  buildProductIndex,
   countPharmaciesInResults,
+  exactProductMatch,
   searchNetworkStock,
+  searchNetworkStockByProduct,
+  suggestProducts,
   type StockNetworkRow,
+  type StockProduct,
 } from "../services/stockNetworkSearch";
 import { describePharmacyCode } from "../services/facilitySheetLink";
 
@@ -45,9 +51,15 @@ const formatearCantidad = (valor: number): string =>
 /**
  * Buscador de un producto en todas las hojas de la UNGET.
  *
- * El resultado se consolida por código de farmacia: una fila por establecimiento y
- * producto, con el total de sus lotes. Un puesto comunal aparece como fila propia y con su
- * nombre, porque su stock es suyo y no del establecimiento del que cuelga.
+ * **Primero se elige el producto, después se consulta.** Mientras se escribe solo se
+ * ofrecen productos —una lista corta, sacada de un catálogo que se arma una vez— y los
+ * resultados aparecen cuando ya se sabe cuál es: al elegirlo de la lista, al escribir su
+ * código entero o al pulsar Intro. Buscar en cada tecla recorría las decenas de miles de
+ * filas de la UNGET y el campo se trababa al teclear.
+ *
+ * El resultado se consolida por código de farmacia: una fila por establecimiento, con el
+ * total de sus lotes. Un puesto comunal aparece como fila propia y con su nombre, porque
+ * su stock es suyo y no del establecimiento del que cuelga.
  */
 export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = ({
   isOpen,
@@ -61,6 +73,11 @@ export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = (
   isCompleting = false,
 }) => {
   const [term, setTerm] = useState("");
+  /** El producto que se está consultando. Sin él no hay resultados que mostrar. */
+  const [elegido, setElegido] = useState<StockProduct | null>(null);
+  /** Lo buscado con Intro sin elegir producto: puede traer varios productos a la vez. */
+  const [consultaLibre, setConsultaLibre] = useState("");
+  const [resaltada, setResaltada] = useState(0);
   const [expandida, setExpandida] = useState<string | null>(null);
   const campoRef = useRef<HTMLInputElement>(null);
 
@@ -84,23 +101,85 @@ export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = (
   useEffect(() => {
     if (!isOpen) {
       setTerm("");
+      setElegido(null);
+      setConsultaLibre("");
+      setResaltada(0);
       setExpandida(null);
     }
   }, [isOpen]);
 
-  const resultados: StockNetworkRow[] = useMemo(
-    () => searchNetworkStock(rows, term),
-    [rows, term],
+  /**
+   * Catálogo de productos de la UNGET. Se arma una vez por cada carga de stock, no por
+   * cada tecla, y solo con el diálogo abierto: es lo que permite sugerir al instante.
+   */
+  const indice = useMemo(() => (isOpen ? buildProductIndex(rows) : []), [isOpen, rows]);
+
+  // Lo escrito va al campo de inmediato; sugerir puede ir un paso por detrás sin que se
+  // note. Es lo que evita que el teclado espere a la lista.
+  const termDiferido = useDeferredValue(term);
+
+  const sugerencias = useMemo(
+    () => (elegido ? [] : suggestProducts(indice, termDiferido)),
+    [elegido, indice, termDiferido],
   );
+
+  const resultados: StockNetworkRow[] = useMemo(() => {
+    if (elegido) return searchNetworkStockByProduct(rows, elegido.key);
+    if (consultaLibre) return searchNetworkStock(rows, consultaLibre);
+    return [];
+  }, [consultaLibre, elegido, rows]);
 
   const totalUnidades = useMemo(
     () => resultados.reduce((suma, fila) => suma + fila.total, 0),
     [resultados],
   );
 
+  const elegir = (producto: StockProduct) => {
+    setElegido(producto);
+    setTerm(producto.producto || producto.codigoSismed);
+    setConsultaLibre("");
+    setExpandida(null);
+  };
+
+  const alEscribir = (valor: string) => {
+    setTerm(valor);
+    setConsultaLibre("");
+    setExpandida(null);
+    setResaltada(0);
+    // Un código escrito entero no necesita que se baje a la lista a confirmarlo.
+    setElegido(exactProductMatch(indice, valor));
+  };
+
+  const limpiar = () => {
+    setTerm("");
+    setElegido(null);
+    setConsultaLibre("");
+    setResaltada(0);
+    setExpandida(null);
+    campoRef.current?.focus();
+  };
+
+  const alPulsarTecla = (evento: React.KeyboardEvent<HTMLInputElement>) => {
+    if (evento.key === "ArrowDown" || evento.key === "ArrowUp") {
+      if (sugerencias.length === 0) return;
+      evento.preventDefault();
+      const paso = evento.key === "ArrowDown" ? 1 : -1;
+      setResaltada((previa) => (previa + paso + sugerencias.length) % sugerencias.length);
+      return;
+    }
+    if (evento.key === "Enter") {
+      evento.preventDefault();
+      const destacada = sugerencias[resaltada];
+      if (destacada) elegir(destacada);
+      // Sin sugerencias, Intro busca lo escrito tal cual: puede traer varios productos.
+      else if (term.trim()) setConsultaLibre(term);
+    }
+  };
+
   if (!isOpen) return null;
 
-  const buscando = term.trim().length > 0;
+  const escribiendo = term.trim().length > 0;
+  const hayConsulta = Boolean(elegido || consultaLibre);
   const faltanHojas = sheetsTotal > 0 && sheetsLoaded < sheetsTotal;
 
   return createPortal(
@@ -139,14 +218,44 @@ export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = (
               ref={campoRef}
               type="text"
               value={term}
-              onChange={(evento) => {
-                setTerm(evento.target.value);
-                setExpandida(null);
-              }}
+              onChange={(evento) => alEscribir(evento.target.value)}
+              onKeyDown={alPulsarTecla}
               placeholder="Nombre del producto o código SISMED…"
-              className="w-full rounded-2xl border border-white/10 bg-white/5 py-4 pl-14 pr-5 text-base font-semibold text-white placeholder-slate-500 outline-none transition-all focus:border-teal-400/60 focus:bg-white/10 focus:ring-4 focus:ring-teal-400/10"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full rounded-2xl border border-white/10 bg-white/5 py-4 pl-14 pr-12 text-base font-semibold text-white placeholder-slate-500 outline-none transition-all focus:border-teal-400/60 focus:bg-white/10 focus:ring-4 focus:ring-teal-400/10"
             />
+            {escribiendo && (
+              <button
+                type="button"
+                onClick={limpiar}
+                aria-label="Limpiar"
+                className="absolute right-4 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-white/5 hover:text-slate-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
+
+          {/* El producto que se está consultando, para que no se pierda de vista cuál es. */}
+          {elegido && (
+            <div className="mx-auto mt-3 flex max-w-2xl flex-wrap items-center justify-center gap-2 text-[11px]">
+              <span className="inline-flex items-center gap-2 rounded-full border border-teal-400/30 bg-teal-400/10 px-3 py-1 font-bold text-teal-200">
+                <Package className="h-3 w-3" />
+                {elegido.producto || elegido.key}
+                {elegido.codigoSismed && (
+                  <span className="font-mono text-teal-400/70">{elegido.codigoSismed}</span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={limpiar}
+                className="font-bold uppercase tracking-wide text-slate-500 transition-colors hover:text-slate-300"
+              >
+                Buscar otro
+              </button>
+            </div>
+          )}
 
           {/* Cobertura: nunca hacer creer que se vio todo cuando faltan hojas. */}
           {faltanHojas && (
@@ -172,10 +281,53 @@ export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = (
 
         {/* Resultados */}
         <div className="min-h-0 flex-1 overflow-y-auto border-t border-white/5 px-4 pb-6 sm:px-8">
-          {!buscando ? (
-            <p className="py-16 text-center text-sm text-slate-500">
-              Escriba para buscar en las hojas de {ungetName}.
-            </p>
+          {!hayConsulta ? (
+            !escribiendo ? (
+              <p className="py-16 text-center text-sm text-slate-500">
+                Escriba un producto o un código SISMED y elíjalo de la lista.
+              </p>
+            ) : sugerencias.length === 0 ? (
+              <p className="py-16 text-center text-sm text-slate-500">
+                Ningún producto de {ungetName} responde a{" "}
+                <span className="font-bold text-slate-300">{term}</span>
+                {faltanHojas ? ", en los establecimientos consultados." : "."}
+              </p>
+            ) : (
+              /* Sugerencias: se elige el producto y solo entonces se consulta la red. */
+              <ul className="mx-auto max-w-3xl py-3">
+                {sugerencias.map((producto, indice) => (
+                  <li key={producto.key}>
+                    <button
+                      type="button"
+                      onClick={() => elegir(producto)}
+                      onMouseEnter={() => setResaltada(indice)}
+                      className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors ${
+                        indice === resaltada ? "bg-teal-400/10" : "hover:bg-white/5"
+                      }`}
+                    >
+                      <Package
+                        className={`h-4 w-4 shrink-0 ${
+                          indice === resaltada ? "text-teal-400" : "text-slate-600"
+                        }`}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-slate-100">
+                          {producto.producto || producto.key}
+                        </span>
+                        <span className="mt-0.5 block font-mono text-[10px] text-slate-500">
+                          {producto.codigoSismed}
+                          {` · ${producto.establecimientos} establecimiento${producto.establecimientos === 1 ? "" : "s"}`}
+                          {` · ${formatearCantidad(producto.total)} en total`}
+                        </span>
+                      </span>
+                      {indice === resaltada && (
+                        <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-slate-600" />
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )
           ) : resultados.length === 0 ? (
             <p className="py-16 text-center text-sm text-slate-500">
               Sin coincidencias para <span className="font-bold text-slate-300">{term}</span>
@@ -310,8 +462,17 @@ export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = (
             Consolidado por establecimiento
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <Package className="h-3 w-3" />
-            Pulse una fila para ver sus lotes
+            {hayConsulta ? (
+              <>
+                <Package className="h-3 w-3" />
+                Pulse una fila para ver sus lotes
+              </>
+            ) : (
+              <>
+                <CornerDownLeft className="h-3 w-3" />
+                Flechas para elegir · Intro para consultar
+              </>
+            )}
           </span>
         </div>
       </section>
