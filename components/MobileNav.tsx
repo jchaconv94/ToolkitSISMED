@@ -79,7 +79,7 @@ const GRUPOS: Grupo[] = [
       { module: 'ADMIN_FACILITIES', label: 'Establecimientos', icon: icono(Building2) },
       { module: 'ADMIN_CATALOGS', label: 'Regímenes y Profesiones', icon: icono(Briefcase) },
       { module: 'ADMIN_PARAMS', label: 'Parámetros del Sistema', icon: icono(Sliders) },
-      { module: 'ADMIN_STOCK_ASSIGN', label: 'Asignar Stock', icon: icono(ShieldCheck) },
+      { module: 'ADMIN_STOCK_ASSIGN', label: 'Columnas de Stock', icon: icono(ShieldCheck) },
       { module: 'ADMIN_SYNC_DEVICES', label: 'Dispositivos Sync', icon: icono(RefreshCw) },
       { module: 'ADMIN_MIGRATION', label: 'Migración (Supabase)', icon: icono(Database) }
     ]

@@ -2,11 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { HealthFacility, Unget, Diresa, Ogess, Microred } from '../types';
-import { Building2, Plus, Edit, Trash2, MapPin, Search, ChevronLeft, ChevronRight, Save, X, Network, Globe, Filter, FilterX, Info, Copy, Check, Hash, Phone, Mail, Activity, ShieldAlert, ShieldCheck, FileSpreadsheet, Zap, PlugZap, Settings2 } from 'lucide-react';
+import { Building2, Plus, Edit, Trash2, MapPin, Search, ChevronLeft, ChevronRight, Save, X, Network, Globe, Filter, FilterX, Info, Copy, Check, Hash, Phone, Mail, Activity, ShieldAlert, ShieldCheck, FileSpreadsheet, Zap, PlugZap, Settings2, Link2, Link2Off } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { CustomSelect } from './ui/CustomSelect';
-import { buildUngetConnectionStatus, type UngetConnectionState } from '../services/ungetConnections';
+import { buildUngetConnectionStatus, pickOneConnectionPerUnget, type UngetConnectionState } from '../services/ungetConnections';
+import { isLinkedToSheet, resolveFacilitySheet } from '../services/facilitySheetLink';
+import { listUngetSheets, type UngetSheet } from '../services/ungetSheetCatalog';
 import { INTENT_OPEN_STOCK_CONNECTIONS, navigateToModule } from '../services/appRoutes';
 
 /**
@@ -218,12 +220,50 @@ export const AdminOrganizationModule: React.FC = () => {
     // Quick Spreadsheet Linking states
     const [linkFacilityCode, setLinkFacilityCode] = useState("");
     const [linkFacilityName, setLinkFacilityName] = useState("");
-    const [linkConnectionUrl, setLinkConnectionUrl] = useState("");
-    const [linkAvailableSheets, setLinkAvailableSheets] = useState<{ id: string; name: string }[]>([]);
-    const [linkSheetName, setLinkSheetName] = useState("");
+    const [linkAvailableSheets, setLinkAvailableSheets] = useState<UngetSheet[]>([]);
+    const [linkSheetsError, setLinkSheetsError] = useState("");
     const [linkLoadingSheets, setLinkLoadingSheets] = useState(false);
     const [linkUngetConfigs, setLinkUngetConfigs] = useState<any[]>([]);
     const [linkVisibleColumns, setLinkVisibleColumns] = useState<string[]>([]);
+    /** Si este establecimiento ya tenía columnas guardadas, para no crear filas de más. */
+    const [linkHadPreferences, setLinkHadPreferences] = useState(false);
+
+    /** Conexión de la UNGET a la que pertenece el establecimiento que se está registrando. */
+    const linkConnection = useMemo(() => {
+        const ungetId = String(facilityForm.ungetId || "").trim();
+        if (!ungetId) return null;
+        return pickOneConnectionPerUnget(linkUngetConfigs).find(
+            (c: any) => String(c.ungetId || "") === ungetId,
+        ) || null;
+    }, [facilityForm.ungetId, linkUngetConfigs]);
+
+    /**
+     * La hoja del establecimiento no se elige: se deduce de su código. Ver
+     * `services/facilitySheetLink.ts`.
+     */
+    const linkResolved = useMemo(
+        () => (facilityForm.code ? resolveFacilitySheet(facilityForm.code, linkAvailableSheets) : null),
+        [facilityForm.code, linkAvailableSheets],
+    );
+
+    // Las pestañas del libro de su UNGET, que es contra lo que se compara el código.
+    useEffect(() => {
+        if (!isFacilityModalOpen) return;
+        setLinkAvailableSheets([]);
+        setLinkSheetsError("");
+        if (!linkConnection) return;
+
+        let vigente = true;
+        setLinkLoadingSheets(true);
+        listUngetSheets(linkConnection)
+            .then(sheets => { if (vigente) setLinkAvailableSheets(sheets); })
+            .catch((err: any) => {
+                console.error("No se pudieron leer las hojas de la UNGET:", err);
+                if (vigente) setLinkSheetsError(err?.message || "No se pudieron leer las hojas de esta UNGET.");
+            })
+            .finally(() => { if (vigente) setLinkLoadingSheets(false); });
+        return () => { vigente = false; };
+    }, [isFacilityModalOpen, linkConnection]);
 
     const handleOpenLinkModal = async (code: string | undefined, name: string | undefined) => {
         if (!code) return;
@@ -238,49 +278,6 @@ export const AdminOrganizationModule: React.FC = () => {
         setFacilityModalStep(4);
         setIsFacilityModalOpen(true);
         prepareFacilityStep4(code, name);
-    };
-
-    const handleLinkConnectionChange = async (url: string) => {
-        setLinkConnectionUrl(url);
-        setLinkSheetName("");
-        setLinkAvailableSheets([]);
-        if (!url) return;
-
-        setLinkLoadingSheets(true);
-        toast.info("Leyendo hojas de la conexión...", { duration: 2000 });
-        try {
-            let finalUrl = url;
-            try {
-                const u = new URL(url);
-                u.searchParams.set("action", "getSheets");
-                finalUrl = u.toString();
-            } catch (e) {}
-
-            const response = await fetch(finalUrl);
-            if (!response.ok) throw new Error("HTTP Error");
-            const json = await response.json();
-            
-            let sheetsArray: any[] = [];
-            if (Array.isArray(json)) {
-                sheetsArray = json;
-            } else if (json && json.success && Array.isArray(json.sheets)) {
-                sheetsArray = json.sheets;
-            } else if (json && Array.isArray(json.sheets)) {
-                sheetsArray = json.sheets;
-            }
-
-            if (sheetsArray.length > 0) {
-                setLinkAvailableSheets(sheetsArray.map((s: any) => ({ id: s.id || s.name, name: s.name })));
-                toast.success(`Se encontraron ${sheetsArray.length} hojas.`);
-            } else {
-                toast.error("No se encontraron hojas o el formato es inválido");
-            }
-        } catch(e) {
-            console.error(e);
-            toast.error("Error al obtener las hojas de cálculo");
-        } finally {
-            setLinkLoadingSheets(false);
-        }
     };
 
     // DIRESA step validations
@@ -338,12 +335,8 @@ export const AdminOrganizationModule: React.FC = () => {
                !!facilityForm.province?.trim();
     }, [facilityForm.district, facilityForm.province]);
 
-    const isFacilityStep4Valid = useMemo(() => {
-        if (!linkConnectionUrl && !linkSheetName) {
-            return true;
-        }
-        return !!linkConnectionUrl && !!linkSheetName && linkVisibleColumns.length > 0;
-    }, [linkConnectionUrl, linkSheetName, linkVisibleColumns]);
+    // La hoja ya no se elige, así que el único requisito es que quede alguna columna visible.
+    const isFacilityStep4Valid = useMemo(() => linkVisibleColumns.length > 0, [linkVisibleColumns]);
 
     // Hierarchy Locks for non-ADMIN users
     const isSuperAdmin = user?.role === 'ADMIN';
@@ -1048,63 +1041,39 @@ export const AdminOrganizationModule: React.FC = () => {
         setFacilityForm(updatedForm);
     };
 
+    /**
+     * Prepara el paso 4. Ya no precarga ninguna elección de hoja: la hoja se deduce del
+     * código y las pestañas las trae el efecto de arriba en cuanto se conoce la UNGET. Aquí
+     * solo se recuperan las columnas que ya tuviera guardadas el establecimiento.
+     */
     const prepareFacilityStep4 = async (code: string | undefined, name: string | undefined) => {
         setLinkFacilityCode(code || "");
         setLinkFacilityName(name || "");
-        setLinkConnectionUrl("");
-        setLinkSheetName("");
         setLinkAvailableSheets([]);
+        setLinkSheetsError("");
+        setLinkHadPreferences(false);
         setLinkVisibleColumns(AVAILABLE_COLUMNS.filter(c => c.defaultState).map(c => c.key));
 
         try {
-            if (user?.username) {
-                const configs = await api.getUngetConfigs(user.username);
-                setLinkUngetConfigs(configs);
-            }
+            // Todas las conexiones, no solo las propias: la UNGET del establecimiento puede
+            // ser de otro informático y su libro es el que hay que mirar.
+            setLinkUngetConfigs(await api.getAllUngetConfigs());
         } catch (e) {
             console.error("Error loading configs:", e);
+            try {
+                if (user?.username) setLinkUngetConfigs(await api.getUngetConfigs(user.username));
+            } catch (err) {
+                console.error("Error loading own configs:", err);
+            }
         }
 
         if (code) {
             try {
                 const assignments = await api.getMyStockAssignments(code);
                 if (assignments && assignments.length > 0) {
-                    const assig = assignments[0];
-                    setLinkConnectionUrl(assig.sheetUrl || "");
-                    setLinkSheetName(assig.sheetName || "");
-                    setLinkVisibleColumns(assig.visibleColumns || AVAILABLE_COLUMNS.filter(c => c.defaultState).map(c => c.key));
-                    
-                    if (assig.sheetUrl) {
-                        setLinkLoadingSheets(true);
-                        try {
-                            let finalUrl = assig.sheetUrl;
-                            try {
-                                const u = new URL(assig.sheetUrl);
-                                u.searchParams.set("action", "getSheets");
-                                finalUrl = u.toString();
-                            } catch (e) {}
-
-                            const response = await fetch(finalUrl);
-                            if (response.ok) {
-                                const json = await response.json();
-                                let sheetsArray: any[] = [];
-                                if (Array.isArray(json)) {
-                                    sheetsArray = json;
-                                } else if (json && json.success && Array.isArray(json.sheets)) {
-                                    sheetsArray = json.sheets;
-                                } else if (json && Array.isArray(json.sheets)) {
-                                    sheetsArray = json.sheets;
-                                }
-                                
-                                if (sheetsArray.length > 0) {
-                                    setLinkAvailableSheets(sheetsArray.map((s: any) => ({ id: s.id || s.name, name: s.name })));
-                                }
-                            }
-                        } catch(e) {
-                            console.error("Error preloading sheet name list:", e);
-                        } finally {
-                            setLinkLoadingSheets(false);
-                        }
+                    setLinkHadPreferences(true);
+                    if (assignments[0].visibleColumns?.length) {
+                        setLinkVisibleColumns(assignments[0].visibleColumns);
                     }
                 }
             } catch(e) {
@@ -1121,54 +1090,30 @@ export const AdminOrganizationModule: React.FC = () => {
         if (res.success) { 
             const finalCode = (facilityForm.code || editingFacilityOriginalCode || "").trim();
 
-            // 2. Save Stock Assignment if we are on step 4 or if link details are filled
-            if (linkConnectionUrl && linkSheetName) {
-                if (linkVisibleColumns.length === 0) {
-                    toast.error("Debe seleccionar al menos una columna visible en el Paso 4");
-                    return;
-                }
-                
-                // Buscar si existe asignación previa con el código anterior o el nuevo
-                let existingAssigList = editingFacilityOriginalCode 
-                    ? await api.getMyStockAssignments(editingFacilityOriginalCode)
-                    : [];
-                
-                if ((!existingAssigList || existingAssigList.length === 0) && finalCode) {
-                    existingAssigList = await api.getMyStockAssignments(finalCode);
-                }
+            // 2. Columnas visibles del stock. El vínculo con la hoja no se guarda: se deduce
+            // del código en cada lectura (services/facilitySheetLink.ts).
+            const columnasPorOmision = AVAILABLE_COLUMNS.filter(c => c.defaultState).map(c => c.key);
+            const sonLasPorOmision =
+                linkVisibleColumns.length === columnasPorOmision.length &&
+                columnasPorOmision.every(key => linkVisibleColumns.includes(key));
 
-                const assigData = {
+            // Solo se escribe cuando hay algo que recordar: una elección distinta de la
+            // predeterminada, o una fila que ya existía y hay que mantener al día.
+            if (finalCode && linkVisibleColumns.length > 0 && (linkHadPreferences || !sonLasPorOmision)) {
+                const assigRes = await api.saveStockColumnPreferences({
                     adminUsername: user?.username || "",
                     facilityCode: finalCode,
-                    sheetName: linkSheetName,
-                    sheetUrl: linkConnectionUrl,
+                    // Informativos: quedan como referencia de la última hoja reconocida.
+                    sheetName: linkResolved?.sheet?.name || "",
+                    sheetUrl: linkConnection?.url || "",
+                    ungetId: facilityForm.ungetId || undefined,
                     visibleColumns: linkVisibleColumns
-                };
-
-                let assigRes;
-                if (existingAssigList && existingAssigList.length > 0) {
-                    // Update existing assignment by ID
-                    assigRes = await api.updateStockAssignment(existingAssigList[0].id, assigData);
-                } else {
-                    // Save new / upsert assignment
-                    assigRes = await api.saveStockAssignment(assigData);
-                }
+                });
 
                 if (!assigRes.success) {
-                    toast.error(`La IPRESS se guardó, pero hubo un problema con la vinculación del stock: ${assigRes.message}`);
+                    toast.error(`La IPRESS se guardó, pero hubo un problema con las columnas visibles del stock: ${assigRes.message}`);
                     return;
                 }
-            } else if (!linkConnectionUrl && !linkSheetName) {
-                // If they cleared it, we can delete any existing assignment to avoid ghost data
-                try {
-                    const lookupCode = editingFacilityOriginalCode || finalCode;
-                    if (lookupCode) {
-                        const existingAssigList = await api.getMyStockAssignments(lookupCode);
-                        if (existingAssigList && existingAssigList.length > 0) {
-                            await api.deleteStockAssignment(existingAssigList[0].id);
-                        }
-                    }
-                } catch(e) {}
             }
 
             // Immediate reactive update in memory
@@ -3854,37 +3799,50 @@ export const AdminOrganizationModule: React.FC = () => {
 
                                 {facilityModalStep === 4 && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-200">
-                                        <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100/80 space-y-4">
+                                        <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100/80 space-y-3">
                                             <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-1.5">
-                                                <div className="w-1.5 h-3 bg-teal-500 rounded-sm" /> Configuración de Conexión de Stock
+                                                <div className="w-1.5 h-3 bg-teal-500 rounded-sm" /> Hoja de Stock (vínculo automático)
                                             </h4>
-                                            
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                <div>
-                                                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Conexión / Archivo (Data)</label>
-                                                    <CustomSelect
-                                                        value={linkConnectionUrl}
-                                                        onChange={handleLinkConnectionChange}
-                                                        placeholder="-- Seleccionar Conexión --"
-                                                        options={linkUngetConfigs.map(c => ({ value: c.url, label: c.name }))}
-                                                    />
-                                                    <p className="text-[10px] text-slate-400 mt-1">Conexiones de Google Apps Script agregadas para su usuario.</p>
-                                                </div>
+                                            <p className="text-[11px] text-slate-500">
+                                                La hoja no se elige: se reconoce sola comparando el código del establecimiento con el
+                                                de las pestañas del libro de su UNGET.
+                                            </p>
 
-                                                <div>
-                                                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Establecimiento (Hoja / Pestaña)</label>
-                                                    <CustomSelect
-                                                        value={linkSheetName}
-                                                        onChange={setLinkSheetName}
-                                                        placeholder="-- Seleccionar Hoja --"
-                                                        disabled={!linkConnectionUrl || linkAvailableSheets.length === 0}
-                                                        options={linkAvailableSheets.map(s => ({ value: s.name, label: s.name }))}
-                                                    />
-                                                    {linkLoadingSheets && (
-                                                        <p className="text-[10px] text-teal-600 font-bold mt-1 animate-pulse">Obteniendo hojas de la conexión...</p>
-                                                    )}
+                                            {!facilityForm.ungetId ? (
+                                                <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-[11px] font-bold text-slate-500">
+                                                    Asigne una UNGET en el Paso 2 para poder reconocer su hoja.
                                                 </div>
-                                            </div>
+                                            ) : !linkConnection ? (
+                                                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[11px] font-bold text-amber-800">
+                                                    La UNGET de este establecimiento todavía no tiene una conexión configurada en Consulta Stock.
+                                                </div>
+                                            ) : linkLoadingSheets ? (
+                                                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-[11px] font-bold text-teal-600 animate-pulse">
+                                                    Leyendo las hojas del libro de su UNGET...
+                                                </div>
+                                            ) : linkSheetsError ? (
+                                                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[11px] font-bold text-amber-800">
+                                                    {linkSheetsError}
+                                                </div>
+                                            ) : (
+                                                <div className={`rounded-xl border px-4 py-3 flex items-start gap-2.5 ${
+                                                    isLinkedToSheet(linkResolved)
+                                                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                                        : "border-amber-200 bg-amber-50 text-amber-800"
+                                                }`}>
+                                                    {isLinkedToSheet(linkResolved)
+                                                        ? <Link2 className="h-4 w-4 mt-0.5 shrink-0" />
+                                                        : <Link2Off className="h-4 w-4 mt-0.5 shrink-0" />}
+                                                    <div>
+                                                        {linkResolved?.sheet && (
+                                                            <p className="text-xs font-black">{linkResolved.sheet.name}</p>
+                                                        )}
+                                                        <p className="text-[11px] font-bold leading-relaxed">
+                                                            {linkResolved?.message || "Escriba el código del establecimiento en el Paso 1 para reconocer su hoja."}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100/80 space-y-4">
@@ -3913,8 +3871,8 @@ export const AdminOrganizationModule: React.FC = () => {
                                                     </div>
                                                 ))}
                                             </div>
-                                            {linkConnectionUrl && linkVisibleColumns.length === 0 && (
-                                                <p className="text-[10px] text-red-500 font-bold">Debe seleccionar al menos una columna visible cuando una conexión está configurada.</p>
+                                            {linkVisibleColumns.length === 0 && (
+                                                <p className="text-[10px] text-red-500 font-bold">Debe dejar al menos una columna visible.</p>
                                             )}
                                         </div>
                                     </div>

@@ -164,7 +164,7 @@ export const AVAILABLE_MODULES: { id: AppModule; label: string; description: str
   { id: 'ADMIN_CATALOGS', label: 'Regímenes y Profesiones', description: 'Gestión de regímenes laborales y profesiones' },
   { id: 'ADMIN_PARAMS', label: 'Parámetros del Sistema', description: 'Configuraciones generales del sistema' },
   { id: 'ADMIN_MIGRATION', label: 'Migración (Supabase)', description: 'Herramientas de migración de datos' },
-  { id: 'ADMIN_STOCK_ASSIGN', label: 'Asignar Stock', description: 'Asignación de vistas de stock a usuarios IPRESS' },
+  { id: 'ADMIN_STOCK_ASSIGN', label: 'Columnas de Stock', description: 'Columnas visibles del stock de cada establecimiento' },
   { id: 'ADMIN_SYNC_DEVICES', label: 'Dispositivos Sync', description: 'Gestión de dispositivos autorizados de Sync SISMED 2.0' },
   { id: 'PROFILE', label: 'Perfil de Usuario', description: 'Configuración del perfil personal' }
   ,{ id: 'IMMUNIZATION_CATALOG', label: 'Catálogo Biológico', description: 'Catálogo maestro de vacunas, jeringas y diluyentes' },

@@ -22,6 +22,14 @@ import {
   findConnectionForAssignment,
   readAssignedSheetRows,
 } from "../services/assignedSheetReader";
+import {
+  isLinkedToSheet,
+  resolveFacilitySheet,
+  rowsBelongingToFacility,
+  type FacilitySheetLink,
+} from "../services/facilitySheetLink";
+import { listUngetSheets } from "../services/ungetSheetCatalog";
+import { pickOneConnectionPerUnget } from "../services/ungetConnections";
 import { StockAssignment } from "../types";
 
 type StockSource = "SYNC" | "SHEET";
@@ -140,9 +148,11 @@ export const AssignedIpressStockModule: React.FC = () => {
   const legacyUser = user as (typeof user & { facilityCode?: string });
   const facilityCode = user?.personnelData?.facilityCode || user?.facilityData?.code || legacyUser?.facilityCode;
   const facilityName = user?.facilityData?.name || facilityCode || "Mi establecimiento";
+  const ungetId = user?.personnelData?.ungetId || user?.facilityData?.ungetId || (legacyUser as any)?.ungetId;
 
   const [rows, setRows] = useState<StockRow[]>([]);
   const [assignment, setAssignment] = useState<StockAssignment | null>(null);
+  const [link, setLink] = useState<FacilitySheetLink | null>(null);
   const [source, setSource] = useState<StockSource | null>(null);
   const [lastUpdate, setLastUpdate] = useState("");
   const [loading, setLoading] = useState(true);
@@ -176,6 +186,7 @@ export const AssignedIpressStockModule: React.FC = () => {
       ]);
       const currentAssignment = (assignments[0] || null) as StockAssignment | null;
       setAssignment(currentAssignment);
+      setLink(null);
 
       if (nativeRows.length > 0) {
         setRows(nativeRows.map(row => normalizeRow(row as StockRow)));
@@ -189,28 +200,75 @@ export const AssignedIpressStockModule: React.FC = () => {
         return;
       }
 
-      if (!currentAssignment) {
+      // La conexión es la de **su** UNGET, no la que quedó guardada en la asignación: así el
+      // establecimiento encuentra su hoja aunque nadie le haya asignado nada.
+      const conexion =
+        pickOneConnectionPerUnget(conexiones).find(
+          c => ungetId && String(c.ungetId || "") === String(ungetId),
+        ) || findConnectionForAssignment(currentAssignment, conexiones);
+
+      if (!conexion && !currentAssignment) {
         setRows([]);
         setSource(null);
         setLastUpdate("");
-        setErrorMessage("Este establecimiento todavía no tiene stock sincronizado ni una hoja de cálculo asignada.");
+        setErrorMessage(
+          "Este establecimiento todavía no tiene stock sincronizado, y su UNGET no tiene una conexión configurada.",
+        );
         return;
       }
 
-      const conexion = findConnectionForAssignment(currentAssignment, conexiones);
-      const sheetRows = (await readAssignedSheetRows(currentAssignment, conexion)) as StockRow[];
-      if (sheetRows.length === 0) {
-        throw new Error(`No se encontró la hoja asignada “${currentAssignment.sheetName}” o no contiene registros.`);
+      // El vínculo se deduce del código: la pestaña cuyo código coincide con el del
+      // establecimiento. Ver services/facilitySheetLink.ts.
+      let vinculo: FacilitySheetLink | null = null;
+      try {
+        vinculo = resolveFacilitySheet(facilityCode, await listUngetSheets(conexion));
+      } catch (err) {
+        // Sin catálogo de pestañas no hay vínculo que deducir; queda la asignación guardada.
+        console.warn("No se pudieron listar las hojas de la UNGET:", err);
+      }
+      setLink(vinculo);
+
+      // La asignación guardada solo sirve de red cuando **no se pudo deducir nada**, es
+      // decir cuando no hubo forma de leer las pestañas. Si las pestañas se leyeron y
+      // ninguna es suya, la hoja guardada es justamente la que no hay que abrir: era de
+      // otro establecimiento, y leerla le enseñaría el stock ajeno como si fuera el propio.
+      const sheetName = vinculo
+        ? (isLinkedToSheet(vinculo) ? vinculo.sheet?.name || "" : "")
+        : currentAssignment?.sheetName || "";
+
+      if (!sheetName) {
+        setRows([]);
+        setSource(null);
+        setLastUpdate("");
+        setErrorMessage(
+          vinculo?.message ||
+            "Este establecimiento todavía no tiene stock sincronizado ni una hoja de cálculo que le corresponda.",
+        );
+        return;
       }
 
-      setRows(sheetRows.map(normalizeRow));
+      const sheetRows = (await readAssignedSheetRows(
+        { sheetName, sheetUrl: currentAssignment?.sheetUrl, ungetId: ungetId || currentAssignment?.ungetId },
+        conexion,
+      )) as StockRow[];
+      if (sheetRows.length === 0) {
+        throw new Error(`No se encontró la hoja “${sheetName}” o no contiene registros.`);
+      }
+
+      // La IPRESS ve su hoja entera —sus puestos comunales son suyos—; un puesto comunal
+      // solo las filas de su propio ALMCOD.
+      const propias = rowsBelongingToFacility(sheetRows, facilityCode, row =>
+        String(readValue(row, ["ALMCOD", "almcod"]) ?? ""),
+      );
+
+      setRows(propias.map(normalizeRow));
       setSource("SHEET");
-      const updateTimes = sheetRows
+      const updateTimes = propias
         .map(row => String(readValue(row, ["ULTIMA_ACTUALIZACION", "Ultima_Actualizacion", "FECHA_DEL_EQUIPO"])))
         .filter(Boolean)
         .sort();
       setLastUpdate(updateTimes.at(-1) || "");
-      if (showSuccess) toast.success("Hoja asignada actualizada");
+      if (showSuccess) toast.success("Hoja actualizada");
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo cargar el stock asignado.";
       setRows([]);
@@ -221,7 +279,7 @@ export const AssignedIpressStockModule: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [facilityCode]);
+  }, [facilityCode, ungetId]);
 
   useEffect(() => {
     void loadStock();
@@ -302,8 +360,13 @@ export const AssignedIpressStockModule: React.FC = () => {
           <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs">
             <span className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 font-black ${source === "SYNC" ? "bg-cyan-50 text-cyan-700" : "bg-violet-50 text-violet-700"}`}>
               {source === "SYNC" ? <Database className="h-4 w-4" /> : <FileSpreadsheet className="h-4 w-4" />}
-              {source === "SYNC" ? "Sincronización SISMED 2.0" : `Hoja asignada: ${assignment?.sheetName}`}
+              {source === "SYNC"
+                ? "Sincronización SISMED 2.0"
+                : `Hoja: ${link?.sheet?.name || assignment?.sheetName}`}
             </span>
+            {source === "SHEET" && link?.status === "dentro-de-su-ipress" && (
+              <span className="text-slate-500">Puesto comunal: su stock viene dentro de la hoja de su IPRESS, separado por su ALMCOD.</span>
+            )}
             {lastUpdate && <span className="text-slate-500">Última actualización: <strong className="text-slate-700">{lastUpdate}</strong></span>}
           </div>
         )}
@@ -316,7 +379,13 @@ export const AssignedIpressStockModule: React.FC = () => {
           <AlertTriangle className="mx-auto h-9 w-9 text-amber-600" />
           <h3 className="mt-3 font-black text-amber-950">Stock no disponible</h3>
           <p className="mx-auto mt-1 max-w-2xl text-sm leading-6 text-amber-800">{errorMessage}</p>
-          {facilityCode && <p className="mt-2 text-xs text-amber-700">El administrador puede revisar la vinculación desde Administración → Asignar Stock.</p>}
+          {facilityCode && (
+            <p className="mt-2 text-xs text-amber-700">
+              {link?.status === "codigo-no-reconocido"
+                ? "El administrador puede corregir el código en Administración → Establecimientos."
+                : "La hoja se reconoce por el código del establecimiento; pida a su UNGET que publique la pestaña con su código."}
+            </p>
+          )}
         </section>
       ) : (
         <>
