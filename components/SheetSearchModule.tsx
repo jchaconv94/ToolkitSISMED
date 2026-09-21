@@ -2991,9 +2991,16 @@ export const SheetSearchModule: React.FC = () => {
       );
       setScriptUrls(updatedScriptUrls);
 
+      // Solo la conexión que se está tocando va a nombre de quien guarda; las demás
+      // conservan el suyo. Marcarlas todas hacía que arreglar un enlace te dejara de
+      // responsable de cualquier otra conexión sin dueño que hubiera en la lista.
+      const esLaQueSeEdita = (c: UngetConfig) =>
+        quickFixConfig.ungetId
+          ? String(c.ungetId || "") === String(quickFixConfig.ungetId)
+          : c.url === cleanUrl;
       const myConfigsToSave = updatedScriptUrls
         .filter((u) => canEditConnection(u, user.username, cuentasActivas))
-        .map((c) => ({ ...c, username: user.username }));
+        .map((c) => (esLaQueSeEdita(c) ? { ...c, username: user.username } : c));
 
       const res = await api.saveUngetConfigs(
         user.username,
