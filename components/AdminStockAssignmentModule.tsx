@@ -522,32 +522,34 @@ export const AdminStockAssignmentModule: React.FC = () => {
           </p>
         </section>
       ) : (
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="space-y-5 p-5">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Paso numero={1} titulo="UNGET / Conexión" />
-                <SearchableSelect
-                  value={selectedConnectionUrl}
-                  onChange={handleConnectionChange}
-                  placeholder="Seleccionar conexión..."
-                  options={ungetConfigs.map(c => ({ value: c.url, label: c.name }))}
-                />
-              </div>
+        /* Dos paneles: a la izquierda a quién se le configura —la conexión, el
+           establecimiento y la hoja que le corresponde—, y a la derecha lo único que se
+           decide, que son sus columnas. Antes iba todo apilado y el recuadro de columnas
+           se llevaba una banda entera al final, con la mitad derecha en blanco. */
+        <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]">
+          <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="space-y-2">
+              <Paso numero={1} titulo="UNGET / Conexión" />
+              <SearchableSelect
+                value={selectedConnectionUrl}
+                onChange={handleConnectionChange}
+                placeholder="Seleccionar conexión..."
+                options={ungetConfigs.map(c => ({ value: c.url, label: c.name }))}
+              />
+            </div>
 
-              <div className="space-y-2">
-                <Paso numero={2} titulo="Establecimiento de salud" />
-                {/* Sin indicador de carga: los establecimientos ya están en memoria desde
-                    que se abrió el módulo. Lo que tarda es leer las hojas, y eso lo
-                    informa el paso 3. */}
-                <SearchableSelect
-                  value={selectedFacilityCode}
-                  onChange={setSelectedFacilityCode}
-                  placeholder={selectedConnectionUrl ? "Seleccionar establecimiento..." : "Elija antes una conexión"}
-                  disabled={!selectedConnectionUrl}
-                  options={opcionesDeEstablecimiento}
-                />
-              </div>
+            <div className="space-y-2">
+              <Paso numero={2} titulo="Establecimiento de salud" />
+              {/* Sin indicador de carga: los establecimientos ya están en memoria desde
+                  que se abrió el módulo. Lo que tarda es leer las hojas, y eso lo
+                  informa el paso 3. */}
+              <SearchableSelect
+                value={selectedFacilityCode}
+                onChange={setSelectedFacilityCode}
+                placeholder={selectedConnectionUrl ? "Seleccionar establecimiento..." : "Elija antes una conexión"}
+                disabled={!selectedConnectionUrl}
+                options={opcionesDeEstablecimiento}
+              />
             </div>
 
             {/* La hoja no se elige: se deduce del código del establecimiento. */}
@@ -589,8 +591,10 @@ export const AdminStockAssignmentModule: React.FC = () => {
                 </div>
               )}
             </div>
+          </section>
 
-            <div className="space-y-2">
+          <section className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex-1 space-y-2.5 p-5">
               <Paso numero={4} titulo="Columnas que verá el establecimiento">
                 <div className="flex items-center gap-1">
                   <button
@@ -619,18 +623,14 @@ export const AdminStockAssignmentModule: React.FC = () => {
                 </div>
               </Paso>
 
-              {/* Dos columnas de familias, no de casillas: lo que alargaba el recuadro era que
-                  cada familia ocupara una banda entera para dos o tres casillas. Con
-                  `columns-2` el navegador reparte las familias y equilibra la altura solo;
-                  `break-inside-avoid` impide que una familia se parta entre columnas. */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 md:columns-2 md:gap-4">
+              <div className="space-y-3.5 rounded-xl border border-slate-200 bg-slate-50/60 p-3.5">
                 {STOCK_COLUMN_GROUPS.map(grupo => {
                   const columnas = STOCK_COLUMNS.filter(c => c.group === grupo);
                   if (columnas.length === 0) return null;
                   return (
-                    <div key={grupo} className="mb-3.5 break-inside-avoid last:mb-0">
+                    <div key={grupo}>
                       <p className="mb-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">{grupo}</p>
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                         {columnas.map(col => {
                           const marcada = visibleColumns.includes(col.key);
                           return (
@@ -661,45 +661,45 @@ export const AdminStockAssignmentModule: React.FC = () => {
                 })}
               </div>
             </div>
-          </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-4">
-            <p className={`text-xs ${visibleColumns.length === 0 ? "font-bold text-amber-600" : "text-slate-500"}`}>
-              {visibleColumns.length === 0
-                ? "Deje al menos una columna visible para poder guardar."
-                : !selectedFacilityCode
-                ? "Elija un establecimiento para guardar sus columnas."
-                : tieneColumnasPropias
-                  ? "Este establecimiento tiene columnas propias elegidas."
-                  : "Este establecimiento usa las columnas por omisión."}
-            </p>
-            <div className="flex flex-wrap items-center gap-2.5">
-              {tieneColumnasPropias && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-4">
+              <p className={`text-xs ${visibleColumns.length === 0 ? "font-bold text-amber-600" : "text-slate-500"}`}>
+                {visibleColumns.length === 0
+                  ? "Deje al menos una columna visible para poder guardar."
+                  : !selectedFacilityCode
+                  ? "Elija un establecimiento para guardar sus columnas."
+                  : tieneColumnasPropias
+                    ? "Este establecimiento tiene columnas propias elegidas."
+                    : "Este establecimiento usa las columnas por omisión."}
+              </p>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {tieneColumnasPropias && (
+                  <button
+                    type="button"
+                    onClick={() => guardarColumnas(DEFAULT_STOCK_COLUMN_KEYS)}
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+                    title="Deja este establecimiento con las mismas columnas que ve cualquier otro"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Restablecer por omisión
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => guardarColumnas(DEFAULT_STOCK_COLUMN_KEYS)}
-                  disabled={isSaving}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
-                  title="Deja este establecimiento con las mismas columnas que ve cualquier otro"
+                  onClick={() => guardarColumnas(visibleColumns)}
+                  disabled={isSaving || !selectedFacilityCode || !selectedConnectionUrl || visibleColumns.length === 0}
+                  className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <RotateCcw className="h-4 w-4" />
-                  Restablecer por omisión
+                  {isSaving
+                    ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    : <Save className="h-4 w-4" />}
+                  {isSaving ? "Guardando..." : "Guardar columnas"}
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => guardarColumnas(visibleColumns)}
-                disabled={isSaving || !selectedFacilityCode || !selectedConnectionUrl || visibleColumns.length === 0}
-                className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {isSaving
-                  ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  : <Save className="h-4 w-4" />}
-                {isSaving ? "Guardando..." : "Guardar columnas"}
-              </button>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
       )}
     </div>
   );
