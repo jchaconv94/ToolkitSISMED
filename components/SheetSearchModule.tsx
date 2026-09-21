@@ -99,6 +99,7 @@ import { sheetOwnerCodeOf } from "../services/facilityCodes";
 import { describePharmacyCode, showsPharmacyColumn } from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import { CustomSelect } from "./ui/CustomSelect";
+import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -1049,6 +1050,12 @@ export const SheetSearchModule: React.FC = () => {
   const gasSheetListRefreshRef = useRef<Record<string, number>>({});
   const [quickFixConfig, setQuickFixConfig] = useState<UngetConfig | null>(null);
   const [quickFixUrlInput, setQuickFixUrlInput] = useState("");
+  /** Conexión cuya eliminación está esperando confirmación en el diálogo. */
+  const [conexionAEliminar, setConexionAEliminar] = useState<{
+    index: number;
+    config: UngetConfig;
+  } | null>(null);
+  const [isDeletingConnection, setIsDeletingConnection] = useState(false);
   /**
    * La conexión abierta en el modal del engranaje es de otro usuario. Entonces el diálogo
    * sirve para lo único que sí funciona desde aquí: probar el enlace y ver por qué esa
@@ -2884,45 +2891,62 @@ export const SheetSearchModule: React.FC = () => {
       return;
     }
 
-    toast("¿Eliminar esta conexión?", {
-      description: `Se borrará el acceso a "${config.name}"`,
-      action: {
-        label: "Eliminar",
-        onClick: async () => {
-          const updated = scriptUrls.filter((_, idx) => idx !== index);
-          setIsLoading(true);
-          try {
-            // Las que este usuario puede mantener: las suyas y las que se quedaron sin
-            // responsable. Las ajenas siguen fuera del envío, para no tocarlas.
-            const myOwnUpdated = updated.filter((u) =>
-              canEditConnection(u, user.username, cuentasActivas),
-            );
-            const result = await api.saveUngetConfigs(
-              user.username,
-              myOwnUpdated,
-              opcionesDeAdopcion,
-            );
+    setConexionAEliminar({ index, config });
+  };
 
-            if (result.success) {
-              setScriptUrls(updated);
-              if (selectedUngetIndex === index) {
-                setViewLevel("ungets");
-                setSelectedUngetIndex(null);
-              }
-              toast.success("Eliminado correctamente");
-            }
-          } catch (e) {
-            toast.error("Error al eliminar");
-          } finally {
-            setIsLoading(false);
-          }
-        },
-      },
-      cancel: {
-        label: "Cancelar",
-        onClick: () => {},
-      },
-    });
+  /**
+   * Retira la conexión ya confirmada en el diálogo.
+   *
+   * Se identifica por su UNGET y no por la posición que tenía al pulsar la papelera: entre
+   * una cosa y otra puede haber entrado una sincronización y haber reordenado la lista, y
+   * un índice viejo borraría la conexión equivocada.
+   */
+  const confirmarEliminarConexion = async () => {
+    if (!user || !conexionAEliminar) return;
+    const { config } = conexionAEliminar;
+    const posicion = scriptUrls.findIndex((c) =>
+      config.ungetId ? String(c.ungetId || "") === String(config.ungetId) : c.url === config.url,
+    );
+    if (posicion === -1) {
+      setConexionAEliminar(null);
+      toast.error("Esa conexión ya no está en la lista.");
+      return;
+    }
+
+    const updated = scriptUrls.filter((_, idx) => idx !== posicion);
+    setIsDeletingConnection(true);
+    setIsLoading(true);
+    try {
+      // Las que este usuario puede mantener: las suyas y las que se quedaron sin
+      // responsable. Las ajenas siguen fuera del envío, para no tocarlas.
+      const myOwnUpdated = updated.filter((u) =>
+        canEditConnection(u, user.username, cuentasActivas),
+      );
+      const result = await api.saveUngetConfigs(
+        user.username,
+        myOwnUpdated,
+        opcionesDeAdopcion,
+      );
+
+      if (result.success) {
+        setScriptUrls(updated);
+        if (selectedUngetIndex === posicion) {
+          setViewLevel("ungets");
+          setSelectedUngetIndex(null);
+        }
+        setConexionAEliminar(null);
+        toast.success(`Conexión de ${config.name} eliminada`);
+      } else {
+        // Antes este caso no decía nada: el guardado fallaba y el diálogo se cerraba
+        // igual, como si hubiera ido bien.
+        toast.error(result.message || "No se pudo eliminar la conexión.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Error al eliminar");
+    } finally {
+      setIsDeletingConnection(false);
+      setIsLoading(false);
+    }
   };
 
   const handleOpenQuickFix = (config: UngetConfig, e?: React.MouseEvent) => {
@@ -5105,6 +5129,28 @@ function processSheet(sheet) {
           </div>
         </div>
       )}
+
+      {/* CONFIRMACIÓN DE ELIMINAR UNA CONEXIÓN
+          Retirar la conexión de una UNGET deja a sus establecimientos sin stock hasta que
+          alguien la vuelva a configurar, así que va por el diálogo del kit y no por un
+          aviso flotante, que se cierra solo y se pulsa sin leer (AGENTS.md §8). */}
+      <ConfirmationDialog
+        isOpen={!!conexionAEliminar}
+        tone="danger"
+        title="¿Eliminar esta conexión?"
+        description={
+          conexionAEliminar
+            ? `Se retirará la hoja de cálculo de ${formatDisplayName(conexionAEliminar.config.name)}. Sus establecimientos dejarán de ver stock hasta que se configure otra vez.`
+            : ""
+        }
+        confirmLabel="Sí, eliminar"
+        cancelLabel="Cancelar"
+        isConfirming={isDeletingConnection}
+        onConfirm={confirmarEliminarConexion}
+        onCancel={() => {
+          if (!isDeletingConnection) setConexionAEliminar(null);
+        }}
+      />
 
       {/* MODAL RÁPIDO DE CORRECCIÓN / PRUEBA DE ENLACE DE UNGET */}
       {quickFixConfig && (
