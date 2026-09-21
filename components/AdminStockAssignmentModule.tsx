@@ -22,7 +22,6 @@ import {
   hasCustomStockColumns,
   isDefaultStockColumnSet,
   STOCK_COLUMNS,
-  STOCK_COLUMN_GROUPS,
 } from "../services/stockColumns";
 
 interface OpcionDeSelector {
@@ -623,40 +622,32 @@ export const AdminStockAssignmentModule: React.FC = () => {
                 </div>
               </Paso>
 
-              <div className="space-y-3.5 rounded-xl border border-slate-200 bg-slate-50/60 p-3.5">
-                {STOCK_COLUMN_GROUPS.map(grupo => {
-                  const columnas = STOCK_COLUMNS.filter(c => c.group === grupo);
-                  if (columnas.length === 0) return null;
+              {/* Una sola rejilla, en el orden de la hoja. Agruparlas por familias
+                  costaba seis rótulos y filas a medias —542 px frente a 386 px— para
+                  quince casillas que se leen de un vistazo. */}
+              <div className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 sm:grid-cols-2 xl:grid-cols-3">
+                {STOCK_COLUMNS.map(col => {
+                  const marcada = visibleColumns.includes(col.key);
                   return (
-                    <div key={grupo}>
-                      <p className="mb-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">{grupo}</p>
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                        {columnas.map(col => {
-                          const marcada = visibleColumns.includes(col.key);
-                          return (
-                            <button
-                              key={col.key}
-                              type="button"
-                              onClick={() => handleToggleColumn(col.key)}
-                              className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-all ${
-                                marcada
-                                  ? "border-teal-500/60 bg-teal-50 shadow-sm"
-                                  : "border-slate-200 bg-white hover:border-slate-300"
-                              }`}
-                            >
-                              <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md border transition-colors ${
-                                marcada ? "border-teal-600 bg-teal-600" : "border-slate-300 bg-white"
-                              }`}>
-                                {marcada && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
-                              </span>
-                              <span className={`truncate text-[13px] font-bold ${marcada ? "text-teal-900" : "text-slate-600"}`}>
-                                {col.label}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <button
+                      key={col.key}
+                      type="button"
+                      onClick={() => handleToggleColumn(col.key)}
+                      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-all ${
+                        marcada
+                          ? "border-teal-500/60 bg-teal-50 shadow-sm"
+                          : "border-slate-200 bg-white hover:border-slate-300"
+                      }`}
+                    >
+                      <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md border transition-colors ${
+                        marcada ? "border-teal-600 bg-teal-600" : "border-slate-300 bg-white"
+                      }`}>
+                        {marcada && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
+                      </span>
+                      <span className={`truncate text-[13px] font-bold ${marcada ? "text-teal-900" : "text-slate-600"}`}>
+                        {col.label}
+                      </span>
+                    </button>
                   );
                 })}
               </div>
