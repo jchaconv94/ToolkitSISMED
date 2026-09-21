@@ -300,6 +300,13 @@ export async function fetchSheetsMetadataViaApi(
     force?: boolean;
     knownRowCounts?: KnownRowCounts;
     timeoutMs?: number;
+    /**
+     * Saltarse el conteo de filas. Contar cuesta pedir la columna A **entera** de cada
+     * pestaña, que en un libro con miles de lotes es lo más caro de esta llamada. Quien
+     * solo necesita el nombre y el código de cada pestaña —el vínculo automático por
+     * código— no tiene por qué pagarlo.
+     */
+    skipRowCounts?: boolean;
   } = {},
 ): Promise<GasSheetMetadata[]> {
   const tabs = await listSheetTabs(spreadsheetId, {
@@ -315,7 +322,7 @@ export async function fetchSheetsMetadataViaApi(
   tabs.forEach((tab) => {
     ranges.push(a1Range(tab.title, "A1:AZ2"));
     rangeOwner.push({ gid: tab.gid, kind: "head" });
-    if (known[tab.gid] === undefined) {
+    if (!options.skipRowCounts && known[tab.gid] === undefined) {
       ranges.push(a1Range(tab.title, "A:A"));
       rangeOwner.push({ gid: tab.gid, kind: "count" });
     }

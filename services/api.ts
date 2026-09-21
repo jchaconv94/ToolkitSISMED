@@ -1277,27 +1277,6 @@ export const api = {
         return [];
     },
 
-    getStockAssignmentsByAdmin: async (adminUsername: string): Promise<any[]> => {
-        try {
-            if (supabase) {
-                const { data, error } = await supabase.from('facility_stock_assignments').select('*').eq('admin_username', adminUsername);
-                if (!error && data) {
-                    return data.map(d => ({
-                        id: d.id,
-                        adminUsername: d.admin_username,
-                        facilityCode: d.facility_code,
-                        sheetName: d.sheet_name,
-                        sheetUrl: d.sheet_url,
-                        ungetId: d.unget_id || undefined,
-                        visibleColumns: d.visible_columns || [],
-                        createdAt: d.created_at
-                    }));
-                }
-            }
-        } catch(e) {}
-        return [];
-    },
-
     getMyStockAssignments: async (facilityCode: string): Promise<any[]> => {
         try {
             if (supabase) {
@@ -1327,8 +1306,13 @@ export const api = {
      * que se decide a mano son las columnas, así que la fila se identifica por el
      * establecimiento y nada más: una fila por establecimiento, se cree o se actualice.
      *
-     * `sheet_name` y `sheet_url` se siguen escribiendo porque la tabla los exige y porque son
-     * la red de las asignaciones anteriores a este cambio, pero ya no deciden nada.
+     * `sheet_name` y `sheet_url` ya no deciden **este** vínculo, pero **no son adorno**:
+     * Consulta Stock empareja la pestaña con su asignación por `sheet_name` para ponerle a
+     * la tarjeta el nombre oficial del establecimiento (`SheetSearchModule`), y
+     * `IpressStockModule` lo usa de nombre cuando el establecimiento no está registrado.
+     * Por eso, si aquí llega vacío —el vínculo no se pudo deducir en ese momento— se
+     * **conserva el que ya tuviera la fila** en vez de borrarlo: guardar unas columnas no
+     * puede dejar sin nombre a una tarjeta de Consulta Stock.
      *
      * **Ya no se comprueba que una hoja pertenezca a un solo establecimiento**, y es a
      * propósito: un puesto comunal comparte la hoja de su IPRESS por diseño, y esa
@@ -1348,15 +1332,16 @@ export const api = {
             if (supabase) {
                 const { data: existing, error: errFac } = await supabase
                     .from('facility_stock_assignments')
-                    .select('id')
+                    .select('id, sheet_name, sheet_url')
                     .eq('facility_code', assignment.facilityCode)
                     .maybeSingle();
                 if (errFac) throw errFac;
 
                 const fila = {
                     admin_username: assignment.adminUsername,
-                    sheet_name: assignment.sheetName || '',
-                    sheet_url: assignment.sheetUrl || '',
+                    // Vacío significa «no se pudo deducir ahora», no «ya no hay hoja».
+                    sheet_name: assignment.sheetName || existing?.sheet_name || '',
+                    sheet_url: assignment.sheetUrl || existing?.sheet_url || '',
                     // La asignación pertenece a la UNGET: su URL puede cambiar.
                     unget_id: assignment.ungetId || null,
                     visible_columns: assignment.visibleColumns
@@ -1374,19 +1359,6 @@ export const api = {
                 const { error } = await supabase
                     .from('facility_stock_assignments')
                     .insert({ ...fila, facility_code: assignment.facilityCode });
-                if (error) throw error;
-                return { success: true };
-            }
-        } catch(e: any) {
-            return { success: false, message: e.message };
-        }
-        return { success: false, message: "No Supabase connected" };
-    },
-
-    deleteStockAssignment: async (id: string): Promise<{ success: boolean; message?: string }> => {
-        try {
-            if (supabase) {
-                const { error } = await supabase.from('facility_stock_assignments').delete().eq('id', id);
                 if (error) throw error;
                 return { success: true };
             }

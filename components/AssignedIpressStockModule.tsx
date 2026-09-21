@@ -32,49 +32,16 @@ import {
 } from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import { listUngetSheets } from "../services/ungetSheetCatalog";
+import {
+  DEFAULT_STOCK_COLUMN_KEYS,
+  STOCK_COLUMNS,
+} from "../services/stockColumns";
 import { pickOneConnectionPerUnget } from "../services/ungetConnections";
 import { StockAssignment } from "../types";
 
 type StockSource = "SYNC" | "SHEET";
 type ExpirationFilter = "ALL" | "EXPIRED" | "EXPIRING";
 type StockRow = Record<string, unknown>;
-
-interface StockColumn {
-  key: string;
-  label: string;
-  aliases: string[];
-  numeric?: boolean;
-  currency?: boolean;
-}
-
-const STOCK_COLUMNS: StockColumn[] = [
-  { key: "ALMCOD", label: "Código almacén", aliases: ["ALMCOD", "almcod"] },
-  { key: "DESC_ALM", label: "Almacén", aliases: ["DESC_ALM", "desc_alm"] },
-  { key: "Id_Producto", label: "Código SISMED", aliases: ["Id_Producto", "ID_Producto", "id_producto", "medcod"] },
-  { key: "CODIGO_SIG", label: "Código SIGA", aliases: ["CODIGO_SIG", "codigo_sig"] },
-  { key: "Nombre", label: "Descripción / Nombre", aliases: ["Nombre", "NOMBRE", "xnom"] },
-  { key: "Lote", label: "Lote", aliases: ["Lote", "LOTE", "lote"] },
-  { key: "Fec_Vencim", label: "Fec. vencimiento", aliases: ["Fec_Vencim", "FEC_VENCIM", "fecha"] },
-  { key: "Reg_Sanitario", label: "Reg. sanitario", aliases: ["Reg_Sanitario", "REG_SANITARIO", "medregsan"] },
-  { key: "DESC_TIPSUM", label: "Tipo de suministro", aliases: ["DESC_TIPSUM", "tipsum_des", "TIPSUM"] },
-  { key: "DESC_FFINAN", label: "Fuente financiamiento", aliases: ["DESC_FFINAN", "ffinan_des", "FFINAN"] },
-  { key: "Saldo", label: "Stock / Saldo", aliases: ["Saldo", "SALDO", "saldo"], numeric: true },
-  { key: "Precio_Det", label: "Precio detalle", aliases: ["Precio_Det", "PRECIO_DET", "precio_det"], numeric: true, currency: true },
-  { key: "Precio_Cab", label: "Precio paquete", aliases: ["Precio_Cab", "PRECIO_CAB", "preciocab"], numeric: true, currency: true }
-];
-
-const DEFAULT_VISIBLE_COLUMNS = [
-  "DESC_ALM",
-  "Id_Producto",
-  "CODIGO_SIG",
-  "Nombre",
-  "Lote",
-  "Fec_Vencim",
-  "Reg_Sanitario",
-  "DESC_TIPSUM",
-  "DESC_FFINAN",
-  "Saldo"
-];
 
 const EXPIRATION_FILTER_OPTIONS: Array<{ value: ExpirationFilter; label: string }> = [
   { value: "ALL", label: "Todos los registros" },
@@ -232,7 +199,7 @@ export const AssignedIpressStockModule: React.FC = () => {
       // establecimiento. Ver services/facilitySheetLink.ts.
       let vinculo: FacilitySheetLink | null = null;
       try {
-        vinculo = resolveFacilitySheet(facilityCode, await listUngetSheets(conexion));
+        vinculo = resolveFacilitySheet(facilityCode, await listUngetSheets(conexion, { withRowCounts: false }));
       } catch (err) {
         // Sin catálogo de pestañas no hay vínculo que deducir; queda la asignación guardada.
         console.warn("No se pudieron listar las hojas de la UNGET:", err);
@@ -301,12 +268,12 @@ export const AssignedIpressStockModule: React.FC = () => {
   }, [search, source, expirationFilter]);
 
   const visibleColumns = useMemo(() => {
-    const requested = assignment?.visibleColumns?.length ? assignment.visibleColumns : DEFAULT_VISIBLE_COLUMNS;
+    const requested = assignment?.visibleColumns?.length ? assignment.visibleColumns : DEFAULT_STOCK_COLUMN_KEYS;
     const requestedKeys = new Set(requested.map(normalizeKey));
     const selected = STOCK_COLUMNS.filter(column =>
       requestedKeys.has(normalizeKey(column.key)) || column.aliases.some(alias => requestedKeys.has(normalizeKey(alias)))
     );
-    return selected.length > 0 ? selected : STOCK_COLUMNS.filter(column => DEFAULT_VISIBLE_COLUMNS.includes(column.key));
+    return selected.length > 0 ? selected : STOCK_COLUMNS.filter(column => DEFAULT_STOCK_COLUMN_KEYS.includes(column.key));
   }, [assignment]);
 
   const filteredRows = useMemo(() => {
