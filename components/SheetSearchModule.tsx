@@ -25,6 +25,7 @@ import {
   Filter,
   ArrowRight,
   HelpCircle,
+  Share2,
   User,
   ChevronDown,
   LayoutGrid,
@@ -4733,19 +4734,12 @@ function processSheet(sheet) {
                                 Comparta la hoja como "Cualquiera con el enlace: Lector".{" "}
                                 <button
                                   type="button"
-                                  onClick={() => setIsShareHelpOpen(!isShareHelpOpen)}
+                                  onClick={() => setIsShareHelpOpen(true)}
                                   className="text-teal-600 font-black hover:underline"
                                 >
-                                  {isShareHelpOpen ? "Ocultar" : "Cómo se hace"}
+                                  Cómo se hace
                                 </button>
                               </p>
-                              {isShareHelpOpen && (
-                                <ol className="text-[9px] text-slate-500 font-medium bg-slate-50 border border-slate-200/70 rounded-lg p-3 space-y-1 list-decimal list-inside leading-relaxed">
-                                  <li>Abra su hoja en Google Sheets y pulse "Compartir".</li>
-                                  <li>En "Acceso general", elija "Cualquiera con el enlace" y déjelo como "Lector".</li>
-                                  <li>Pulse "Copiar enlace", péguelo aquí arriba y use "Probar".</li>
-                                </ol>
-                              )}
                             </div>
                             {/* La Web App es respaldo: se pliega para no confundir a quien configura por primera vez. */}
                             <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
@@ -5138,6 +5132,71 @@ function processSheet(sheet) {
       )}
 
       {/* INSTRUCTIONS MODAL */}
+      {/* Cómo compartir la hoja. Antes se desplegaba dentro del formulario y empujaba
+          todo hacia abajo, con los pasos en letra diminuta. */}
+      {isShareHelpOpen && (
+        <div
+          className="fixed inset-0 z-[10000000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => setIsShareHelpOpen(false)}
+        >
+          <div
+            className="bg-white w-full max-w-lg overflow-hidden rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 sm:px-6 flex items-center justify-between bg-slate-900">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-teal-500/15 rounded-xl flex items-center justify-center text-teal-400 shrink-0">
+                  <Share2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-white text-base uppercase tracking-tight">
+                    Compartir la hoja
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                    Tres pasos en Google Sheets
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsShareHelpOpen(false)}
+                className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <ol className="p-5 sm:p-6 space-y-3.5">
+              {[
+                <>Abra su hoja en Google Sheets y pulse <strong className="font-black text-slate-900">Compartir</strong>.</>,
+                <>En <strong className="font-black text-slate-900">Acceso general</strong>, elija <strong className="font-black text-slate-900">Cualquiera con el enlace</strong> y déjelo como <strong className="font-black text-slate-900">Lector</strong>.</>,
+                <>Pulse <strong className="font-black text-slate-900">Copiar enlace</strong>, péguelo en el campo y use <strong className="font-black text-slate-900">Probar</strong>.</>,
+              ].map((paso, i) => (
+                <li key={i} className="flex gap-3.5">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-teal-600 text-[11px] font-black text-white">
+                    {i + 1}
+                  </span>
+                  <span className="text-sm leading-relaxed text-slate-600 pt-0.5">{paso}</span>
+                </li>
+              ))}
+            </ol>
+
+            <div className="px-5 py-4 sm:px-6 border-t border-slate-200 bg-slate-50/70 flex items-center justify-between gap-3">
+              <p className="text-[11px] text-slate-500 leading-snug">
+                Con «Lector» nadie puede modificar su hoja: solo se lee el stock.
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsShareHelpOpen(false)}
+                className="shrink-0 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700"
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isInstructionModalOpen && (
         <div className="fixed inset-0 z-[10000000] flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-2xl overflow-hidden rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-white/20">
