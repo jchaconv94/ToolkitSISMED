@@ -1319,99 +1319,61 @@ export const api = {
         return [];
     },
 
-    saveStockAssignment: async (assignment: any): Promise<{ success: boolean; message?: string }> => {
+    /**
+     * Columnas que un establecimiento puede ver de su stock.
+     *
+     * Sustituye a `saveStockAssignment` / `updateStockAssignment`. Desde que el vínculo
+     * establecimiento ↔ hoja se deduce del código (`services/facilitySheetLink.ts`), lo único
+     * que se decide a mano son las columnas, así que la fila se identifica por el
+     * establecimiento y nada más: una fila por establecimiento, se cree o se actualice.
+     *
+     * `sheet_name` y `sheet_url` se siguen escribiendo porque la tabla los exige y porque son
+     * la red de las asignaciones anteriores a este cambio, pero ya no deciden nada.
+     *
+     * **Ya no se comprueba que una hoja pertenezca a un solo establecimiento**, y es a
+     * propósito: un puesto comunal comparte la hoja de su IPRESS por diseño, y esa
+     * comprobación lo habría rechazado. Que dos establecimientos reclamen la misma hoja es
+     * ahora imposible salvo por códigos repetidos, y eso lo detecta el propio vínculo como
+     * `ambigua` en vez de resolverlo mal.
+     */
+    saveStockColumnPreferences: async (assignment: {
+        adminUsername: string;
+        facilityCode: string;
+        sheetName?: string;
+        sheetUrl?: string;
+        ungetId?: string | null;
+        visibleColumns: string[];
+    }): Promise<{ success: boolean; message?: string }> => {
         try {
             if (supabase) {
-                // Validation: A health facility (establishment) cannot be assigned to two or more sheets at the same time
-                const { data: existingFacility, error: errFac } = await supabase
+                const { data: existing, error: errFac } = await supabase
                     .from('facility_stock_assignments')
-                    .select('id, facility_code, sheet_url, sheet_name')
+                    .select('id')
                     .eq('facility_code', assignment.facilityCode)
                     .maybeSingle();
                 if (errFac) throw errFac;
 
-                // Validation: A single sheet (sheetUrl + sheetName) cannot be assigned to multiple facilities at the same time
-                const { data: existingSheet, error: errSheet } = await supabase
-                    .from('facility_stock_assignments')
-                    .select('id, facility_code, sheet_name')
-                    .eq('sheet_url', assignment.sheetUrl)
-                    .eq('sheet_name', assignment.sheetName)
-                    .maybeSingle();
-                if (errSheet) throw errSheet;
-                
-                if (existingSheet && existingSheet.facility_code !== assignment.facilityCode) {
-                    return { success: false, message: `La hoja "${assignment.sheetName}" de esa conexión ya se encuentra vinculada a otro establecimiento (Código: ${existingSheet.facility_code}).` };
-                }
+                const fila = {
+                    admin_username: assignment.adminUsername,
+                    sheet_name: assignment.sheetName || '',
+                    sheet_url: assignment.sheetUrl || '',
+                    // La asignación pertenece a la UNGET: su URL puede cambiar.
+                    unget_id: assignment.ungetId || null,
+                    visible_columns: assignment.visibleColumns
+                };
 
-                if (existingFacility) {
-                    // Si ya existe vinculación para esta IPRESS, actualizarla
+                if (existing) {
                     const { error } = await supabase
                         .from('facility_stock_assignments')
-                        .update({
-                            admin_username: assignment.adminUsername,
-                            sheet_name: assignment.sheetName,
-                            sheet_url: assignment.sheetUrl,
-                            // La asignación pertenece a la UNGET: su URL puede cambiar.
-                            unget_id: assignment.ungetId || null,
-                            visible_columns: assignment.visibleColumns
-                        })
-                        .eq('id', existingFacility.id);
+                        .update(fila)
+                        .eq('id', existing.id);
                     if (error) throw error;
                     return { success: true };
                 }
 
-                const { error } = await supabase.from('facility_stock_assignments').insert({
-                    admin_username: assignment.adminUsername,
-                    facility_code: assignment.facilityCode,
-                    sheet_name: assignment.sheetName,
-                    sheet_url: assignment.sheetUrl,
-                    unget_id: assignment.ungetId || null,
-                    visible_columns: assignment.visibleColumns
-                });
-                if (error) throw error;
-                return { success: true };
-            }
-        } catch(e: any) {
-            return { success: false, message: e.message };
-        }
-        return { success: false, message: "No Supabase connected" };
-    },
-
-    updateStockAssignment: async (id: string, assignment: any): Promise<{ success: boolean; message?: string }> => {
-        try {
-            if (supabase) {
-                // Validation: A health facility (establishment) cannot be assigned to two or more sheets at the same time
-                const { data: existingFacility, error: errFac } = await supabase
+                const { error } = await supabase
                     .from('facility_stock_assignments')
-                    .select('id')
-                    .eq('facility_code', assignment.facilityCode)
-                    .neq('id', id)
-                    .maybeSingle();
-                if (errFac) throw errFac;
-                if (existingFacility) {
-                    return { success: false, message: `El establecimiento solicitado ya tiene otra hoja de cálculo vinculada.` };
-                }
-
-                // Validation: A single sheet (sheetUrl + sheetName) cannot be assigned to multiple facilities at the same time
-                const { data: existingSheet, error: errSheet } = await supabase
-                    .from('facility_stock_assignments')
-                    .select('id, facility_code')
-                    .eq('sheet_url', assignment.sheetUrl)
-                    .eq('sheet_name', assignment.sheetName)
-                    .neq('id', id)
-                    .maybeSingle();
-                if (errSheet) throw errSheet;
-                if (existingSheet) {
-                    return { success: false, message: `La hoja "${assignment.sheetName}" de esa conexión ya se encuentra vinculada a otro establecimiento (Código: ${existingSheet.facility_code}).` };
-                }
-
-                const { error } = await supabase.from('facility_stock_assignments').update({
-                    facility_code: assignment.facilityCode,
-                    sheet_name: assignment.sheetName,
-                    sheet_url: assignment.sheetUrl,
-                    unget_id: assignment.ungetId || null,
-                    visible_columns: assignment.visibleColumns
-                }).eq('id', id);
+                    .insert({ ...fila, facility_code: assignment.facilityCode });
                 if (error) throw error;
                 return { success: true };
             }

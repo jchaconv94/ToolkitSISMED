@@ -253,7 +253,7 @@ const AuthenticatedApp: React.FC = () => {
             case 'ADMIN_MIGRATION':
                 return { title: 'Migración (Supabase)', description: 'Herramientas de migración y verificación de datos', icon: <DatabaseBackup className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'ADMIN_STOCK_ASSIGN':
-                return { title: 'Asignar Stock a IPRESS', description: 'Asignación de vistas de stock a usuarios IPRESS', icon: <FileSpreadsheet className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
+                return { title: 'Columnas de Stock por Establecimiento', description: 'Columnas visibles del stock; la hoja se reconoce sola por el código', icon: <FileSpreadsheet className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'ADMIN_SYNC_DEVICES':
                 return { title: 'Dispositivos Sync', description: 'Gestión de dispositivos autorizados de Sync SISMED 2.0', icon: <Smartphone className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'PROFILE':

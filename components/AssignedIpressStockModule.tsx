@@ -22,6 +22,17 @@ import {
   findConnectionForAssignment,
   readAssignedSheetRows,
 } from "../services/assignedSheetReader";
+import {
+  describePharmacyCode,
+  isLinkedToSheet,
+  resolveFacilitySheet,
+  rowsBelongingToFacility,
+  showsPharmacyColumn,
+  type FacilitySheetLink,
+} from "../services/facilitySheetLink";
+import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
+import { listUngetSheets } from "../services/ungetSheetCatalog";
+import { pickOneConnectionPerUnget } from "../services/ungetConnections";
 import { StockAssignment } from "../types";
 
 type StockSource = "SYNC" | "SHEET";
@@ -140,9 +151,13 @@ export const AssignedIpressStockModule: React.FC = () => {
   const legacyUser = user as (typeof user & { facilityCode?: string });
   const facilityCode = user?.personnelData?.facilityCode || user?.facilityData?.code || legacyUser?.facilityCode;
   const facilityName = user?.facilityData?.name || facilityCode || "Mi establecimiento";
+  const ungetId = user?.personnelData?.ungetId || user?.facilityData?.ungetId || (legacyUser as any)?.ungetId;
 
   const [rows, setRows] = useState<StockRow[]>([]);
   const [assignment, setAssignment] = useState<StockAssignment | null>(null);
+  const [link, setLink] = useState<FacilitySheetLink | null>(null);
+  /** Solo para poner nombre a cada ALMCOD en la columna «Código IPRESS». */
+  const [facilities, setFacilities] = useState<Array<{ code?: string; name?: string }>>([]);
   const [source, setSource] = useState<StockSource | null>(null);
   const [lastUpdate, setLastUpdate] = useState("");
   const [loading, setLoading] = useState(true);
@@ -174,8 +189,15 @@ export const AssignedIpressStockModule: React.FC = () => {
         // creó la asignación, o puede que ya solo lea por hoja de cálculo.
         api.getAllUngetConfigs()
       ]);
+
+      // Los nombres de las farmacias son un adorno de la tabla: si no se pueden leer, la
+      // columna muestra solo el código en vez de impedir que se vea el stock.
+      api.getFacilities()
+        .then(lista => setFacilities(lista || []))
+        .catch(err => console.warn("No se pudo leer el registro de establecimientos:", err));
       const currentAssignment = (assignments[0] || null) as StockAssignment | null;
       setAssignment(currentAssignment);
+      setLink(null);
 
       if (nativeRows.length > 0) {
         setRows(nativeRows.map(row => normalizeRow(row as StockRow)));
@@ -189,28 +211,75 @@ export const AssignedIpressStockModule: React.FC = () => {
         return;
       }
 
-      if (!currentAssignment) {
+      // La conexión es la de **su** UNGET, no la que quedó guardada en la asignación: así el
+      // establecimiento encuentra su hoja aunque nadie le haya asignado nada.
+      const conexion =
+        pickOneConnectionPerUnget(conexiones).find(
+          c => ungetId && String(c.ungetId || "") === String(ungetId),
+        ) || findConnectionForAssignment(currentAssignment, conexiones);
+
+      if (!conexion && !currentAssignment) {
         setRows([]);
         setSource(null);
         setLastUpdate("");
-        setErrorMessage("Este establecimiento todavía no tiene stock sincronizado ni una hoja de cálculo asignada.");
+        setErrorMessage(
+          "Este establecimiento todavía no tiene stock sincronizado, y su UNGET no tiene una conexión configurada.",
+        );
         return;
       }
 
-      const conexion = findConnectionForAssignment(currentAssignment, conexiones);
-      const sheetRows = (await readAssignedSheetRows(currentAssignment, conexion)) as StockRow[];
-      if (sheetRows.length === 0) {
-        throw new Error(`No se encontró la hoja asignada “${currentAssignment.sheetName}” o no contiene registros.`);
+      // El vínculo se deduce del código: la pestaña cuyo código coincide con el del
+      // establecimiento. Ver services/facilitySheetLink.ts.
+      let vinculo: FacilitySheetLink | null = null;
+      try {
+        vinculo = resolveFacilitySheet(facilityCode, await listUngetSheets(conexion));
+      } catch (err) {
+        // Sin catálogo de pestañas no hay vínculo que deducir; queda la asignación guardada.
+        console.warn("No se pudieron listar las hojas de la UNGET:", err);
+      }
+      setLink(vinculo);
+
+      // La asignación guardada solo sirve de red cuando **no se pudo deducir nada**, es
+      // decir cuando no hubo forma de leer las pestañas. Si las pestañas se leyeron y
+      // ninguna es suya, la hoja guardada es justamente la que no hay que abrir: era de
+      // otro establecimiento, y leerla le enseñaría el stock ajeno como si fuera el propio.
+      const sheetName = vinculo
+        ? (isLinkedToSheet(vinculo) ? vinculo.sheet?.name || "" : "")
+        : currentAssignment?.sheetName || "";
+
+      if (!sheetName) {
+        setRows([]);
+        setSource(null);
+        setLastUpdate("");
+        setErrorMessage(
+          vinculo?.message ||
+            "Este establecimiento todavía no tiene stock sincronizado ni una hoja de cálculo que le corresponda.",
+        );
+        return;
       }
 
-      setRows(sheetRows.map(normalizeRow));
+      const sheetRows = (await readAssignedSheetRows(
+        { sheetName, sheetUrl: currentAssignment?.sheetUrl, ungetId: ungetId || currentAssignment?.ungetId },
+        conexion,
+      )) as StockRow[];
+      if (sheetRows.length === 0) {
+        throw new Error(`No se encontró la hoja “${sheetName}” o no contiene registros.`);
+      }
+
+      // La IPRESS ve su hoja entera —sus puestos comunales son suyos—; un puesto comunal
+      // solo las filas de su propio ALMCOD.
+      const propias = rowsBelongingToFacility(sheetRows, facilityCode, row =>
+        String(readValue(row, ["ALMCOD", "almcod"]) ?? ""),
+      );
+
+      setRows(propias.map(normalizeRow));
       setSource("SHEET");
-      const updateTimes = sheetRows
+      const updateTimes = propias
         .map(row => String(readValue(row, ["ULTIMA_ACTUALIZACION", "Ultima_Actualizacion", "FECHA_DEL_EQUIPO"])))
         .filter(Boolean)
         .sort();
       setLastUpdate(updateTimes.at(-1) || "");
-      if (showSuccess) toast.success("Hoja asignada actualizada");
+      if (showSuccess) toast.success("Hoja actualizada");
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo cargar el stock asignado.";
       setRows([]);
@@ -221,7 +290,7 @@ export const AssignedIpressStockModule: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [facilityCode]);
+  }, [facilityCode, ungetId]);
 
   useEffect(() => {
     void loadStock();
@@ -260,14 +329,29 @@ export const AssignedIpressStockModule: React.FC = () => {
   const allowedKeys = useMemo(() => new Set(visibleColumns.map(column => column.key)), [visibleColumns]);
   const canShow = (key: string) => allowedKeys.has(key);
 
+  /**
+   * La hoja de una IPRESS trae todas sus farmacias mezcladas, separadas solo por el ALMCOD.
+   * La columna «Código IPRESS» las distingue, y aparece solo cuando hay más de una: en el
+   * envío consolidado sería una constante repetida.
+   */
+  const showsPharmacy = useMemo(
+    () => showsPharmacyColumn(rows, row => String(row.ALMCOD ?? "")),
+    [rows],
+  );
+  const pharmacyLabelOf = (row: StockRow) => describePharmacyCode(String(row.ALMCOD ?? ""), facilities);
+
   const exportStock = () => {
     if (filteredRows.length === 0) {
       toast.info("No hay registros para exportar");
       return;
     }
-    const exportRows = filteredRows.map(row => Object.fromEntries(
-      visibleColumns.map(column => [column.label, row[column.key] ?? ""])
-    ));
+    const exportRows = filteredRows.map(row => Object.fromEntries([
+      // Igual que en pantalla: solo cuando hay más de una farmacia en la hoja.
+      ...(showsPharmacy
+        ? [["Código IPRESS", pharmacyLabelOf(row).code], ["Farmacia", pharmacyLabelOf(row).name]]
+        : []),
+      ...visibleColumns.map(column => [column.label, row[column.key] ?? ""])
+    ]));
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
     worksheet["!cols"] = visibleColumns.map(column => ({ wch: column.key === "Nombre" ? 48 : 18 }));
     const workbook = XLSX.utils.book_new();
@@ -302,8 +386,13 @@ export const AssignedIpressStockModule: React.FC = () => {
           <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs">
             <span className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 font-black ${source === "SYNC" ? "bg-cyan-50 text-cyan-700" : "bg-violet-50 text-violet-700"}`}>
               {source === "SYNC" ? <Database className="h-4 w-4" /> : <FileSpreadsheet className="h-4 w-4" />}
-              {source === "SYNC" ? "Sincronización SISMED 2.0" : `Hoja asignada: ${assignment?.sheetName}`}
+              {source === "SYNC"
+                ? "Sincronización SISMED 2.0"
+                : `Hoja: ${link?.sheet?.name || assignment?.sheetName}`}
             </span>
+            {source === "SHEET" && link?.status === "dentro-de-su-ipress" && (
+              <span className="text-slate-500">Puesto comunal: su stock viene dentro de la hoja de su IPRESS, separado por su ALMCOD.</span>
+            )}
             {lastUpdate && <span className="text-slate-500">Última actualización: <strong className="text-slate-700">{lastUpdate}</strong></span>}
           </div>
         )}
@@ -316,7 +405,13 @@ export const AssignedIpressStockModule: React.FC = () => {
           <AlertTriangle className="mx-auto h-9 w-9 text-amber-600" />
           <h3 className="mt-3 font-black text-amber-950">Stock no disponible</h3>
           <p className="mx-auto mt-1 max-w-2xl text-sm leading-6 text-amber-800">{errorMessage}</p>
-          {facilityCode && <p className="mt-2 text-xs text-amber-700">El administrador puede revisar la vinculación desde Administración → Asignar Stock.</p>}
+          {facilityCode && (
+            <p className="mt-2 text-xs text-amber-700">
+              {link?.status === "codigo-no-reconocido"
+                ? "El administrador puede corregir el código en Administración → Establecimientos."
+                : "La hoja se reconoce por el código del establecimiento; pida a su UNGET que publique la pestaña con su código."}
+            </p>
+          )}
         </section>
       ) : (
         <>
@@ -364,6 +459,7 @@ export const AssignedIpressStockModule: React.FC = () => {
                 <table className="block min-w-full text-left sm:table">
                   <thead className="sticky top-0 z-20 hidden bg-slate-50 shadow-sm sm:table-header-group">
                     <tr>
+                      {showsPharmacy && <TableHeader>Código IPRESS</TableHeader>}
                       <TableHeader>Cód. SISMED / SIGA</TableHeader>
                       <TableHeader className="min-w-[300px]">Descripción del producto</TableHeader>
                       <TableHeader align="right">Saldo</TableHeader>
@@ -376,6 +472,11 @@ export const AssignedIpressStockModule: React.FC = () => {
                     {visibleRows.map((row, index) => (
                       <tr key={`${String(row.Id_Producto)}-${String(row.Lote)}-${(page - 1) * pageSize + index}`} className="mb-3 block rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:bg-teal-50/40 sm:mb-0 sm:table-row sm:rounded-none sm:border-0 sm:p-0 sm:shadow-none">
                         <td className="block sm:hidden">
+                          {showsPharmacy && (
+                            <div className="mb-2 border-b border-slate-100 pb-2">
+                              <PharmacyCodeCell label={pharmacyLabelOf(row)} />
+                            </div>
+                          )}
                           <div className="mb-2 flex items-start justify-between">
                             <div className="flex flex-col">
                               <span className="mb-1 w-fit rounded border border-teal-100 bg-teal-50 px-2 py-0.5 text-xs font-black text-teal-700">{canShow("Id_Producto") ? String(row.Id_Producto || "—") : "—"}</span>
@@ -390,6 +491,11 @@ export const AssignedIpressStockModule: React.FC = () => {
                             <div className="flex gap-1.5"><TypeBadge tone="indigo" value={canShow("DESC_TIPSUM") ? String(row.TIPSUM || row.DESC_TIPSUM || "—") : "—"} title={String(row.DESC_TIPSUM || "")} /><TypeBadge tone="amber" value={canShow("DESC_FFINAN") ? String(row.FFINAN || row.DESC_FFINAN || "—") : "—"} title={String(row.DESC_FFINAN || "")} /></div>
                           </div>
                         </td>
+                        {showsPharmacy && (
+                          <td className="hidden whitespace-nowrap px-4 py-3 align-top sm:table-cell">
+                            <PharmacyCodeCell label={pharmacyLabelOf(row)} />
+                          </td>
+                        )}
                         <td className="hidden whitespace-nowrap px-4 py-3 font-mono text-sm text-slate-500 sm:table-cell"><div className="font-bold text-slate-700">{canShow("Id_Producto") ? String(row.Id_Producto || "—") : "—"}</div><div className="mt-0.5 text-[10px] text-slate-400">{canShow("CODIGO_SIG") ? String(row.CODIGO_SIG || "—") : "—"}</div></td>
                         <td className="hidden px-4 py-3 text-sm font-medium text-slate-900 sm:table-cell">{canShow("Nombre") ? String(row.Nombre || "—") : "—"}{canShow("Reg_Sanitario") && <div className="mt-0.5 max-w-sm truncate text-[10px] font-normal text-slate-400" title={String(row.Reg_Sanitario || "")}>RS: {String(row.Reg_Sanitario || "S/N")}</div>}</td>
                         <td className="hidden whitespace-nowrap px-4 py-3 text-right text-sm font-black text-slate-900 sm:table-cell">{canShow("Saldo") ? parseNumber(row.Saldo).toLocaleString("es-PE") : "—"}</td>

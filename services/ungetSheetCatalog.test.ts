@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { assignmentSheetExists, listUngetSheets } from "./ungetSheetCatalog";
+import { listUngetSheets } from "./ungetSheetCatalog";
 import { __resetSheetsApiCache } from "./sheetsApiService";
 
 const LIBRO = "1vic6MeMiA5Jk4_UWx8nI462yXe8irgxAoMncJiekOOA";
@@ -86,27 +86,5 @@ describe("listUngetSheets", () => {
       listUngetSheets({ url: `sheets://${LIBRO}` }, { apiKey: "" }),
     ).rejects.toThrow(/no tiene hoja/i);
     await expect(listUngetSheets(null, { apiKey: "" })).rejects.toThrow(/no tiene hoja/i);
-  });
-});
-
-describe("assignmentSheetExists", () => {
-  const sheets = [
-    { id: "10", name: "HOSP. BELLAVISTA-06502" },
-    { id: "11", name: "uchiza" },
-  ];
-
-  it("reconoce la pestaña que sigue en el libro", () => {
-    expect(assignmentSheetExists("uchiza", sheets)).toBe(true);
-  });
-
-  it("detecta la asignación que quedó apuntando al vacío", () => {
-    // Caso real de Tocache: la asignación apuntaba a `ALM SISMED-030S0`, que ya no existe.
-    expect(assignmentSheetExists("ALM SISMED-030S0", sheets)).toBe(false);
-  });
-
-  it("no da por buena una asignación sin pestaña", () => {
-    expect(assignmentSheetExists("", sheets)).toBe(false);
-    expect(assignmentSheetExists("uchiza", [])).toBe(false);
-    expect(assignmentSheetExists(null, null)).toBe(false);
   });
 });

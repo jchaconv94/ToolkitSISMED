@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Search, Plus, Trash2, Shield, FileSpreadsheet, Check, Edit2, Save, X, ChevronDown, AlertTriangle } from "lucide-react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { Search, Plus, Trash2, Shield, FileSpreadsheet, Check, Edit2, Save, X, ChevronDown, AlertTriangle, Link2, Link2Off } from "lucide-react";
 import { api } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
-import { CustomSelect } from "./ui/CustomSelect";
-import { assignmentSheetExists, listUngetSheets } from "../services/ungetSheetCatalog";
+import { listUngetSheets, type UngetSheet } from "../services/ungetSheetCatalog";
 import { findConnectionForAssignment } from "../services/assignedSheetReader";
+import { isLinkedToSheet, resolveFacilitySheet } from "../services/facilitySheetLink";
 
 const SearchableSelect = ({ label, value, onChange, options, disabled, loading, placeholder }: any) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -187,8 +187,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
   // Form State
   const [selectedFacilityCode, setSelectedFacilityCode] = useState("");
   const [selectedConnectionUrl, setSelectedConnectionUrl] = useState(""); // This is the Google App Script URL
-  const [availableSheets, setAvailableSheets] = useState<any[]>([]);
-  const [selectedSheetName, setSelectedSheetName] = useState("");
+  const [availableSheets, setAvailableSheets] = useState<UngetSheet[]>([]);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [assignmentsSearch, setAssignmentsSearch] = useState("");
@@ -197,6 +196,15 @@ export const AdminStockAssignmentModule: React.FC = () => {
 
   /** Conexión elegida: de ella sale la UNGET que acota los establecimientos ofrecidos. */
   const conexionSeleccionada = ungetConfigs.find((c: any) => c.url === selectedConnectionUrl);
+
+  /**
+   * La hoja ya no se elige: se deduce del código del establecimiento. Ver
+   * `services/facilitySheetLink.ts`. Esta pantalla solo decide las columnas visibles.
+   */
+  const vinculo = useMemo(
+    () => (selectedFacilityCode ? resolveFacilitySheet(selectedFacilityCode, availableSheets) : null),
+    [selectedFacilityCode, availableSheets],
+  );
 
   const [visibleColumns, setVisibleColumns] = useState<string[]>(
     AVAILABLE_COLUMNS.filter(c => c.defaultState).map(c => c.key)
@@ -295,7 +303,6 @@ export const AdminStockAssignmentModule: React.FC = () => {
 
   const handleConnectionChange = async (url: string) => {
     setSelectedConnectionUrl(url);
-    setSelectedSheetName("");
     setAvailableSheets([]);
     if (!url) return;
 
@@ -322,7 +329,6 @@ export const AdminStockAssignmentModule: React.FC = () => {
   const resetForm = () => {
     setSelectedFacilityCode("");
     setSelectedConnectionUrl("");
-    setSelectedSheetName("");
     setAvailableSheets([]);
     setEditingId(null);
     setVisibleColumns(AVAILABLE_COLUMNS.filter(c => c.defaultState).map(c => c.key));
@@ -341,18 +347,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
 
     setLoadingSheets(true);
     listUngetSheets(conexion || { url: assig.sheetUrl })
-      .then((sheets) => {
-        setAvailableSheets(sheets);
-        setSelectedSheetName(assig.sheetName);
-        if (!assignmentSheetExists(assig.sheetName, sheets)) {
-          // Aviso, no error: la asignación existe pero apunta al vacío, así que ese
-          // establecimiento no ve su stock y nadie se entera hasta que alguien lo mira.
-          toast.warning(
-            `La pestaña "${assig.sheetName}" ya no existe en el libro de esta UNGET. Elija la pestaña correcta para que el establecimiento vuelva a ver su stock.`,
-            { duration: 10000 },
-          );
-        }
-      })
+      .then(setAvailableSheets)
       .catch((err: any) => {
         console.error(err);
         toast.error(err?.message || "No se pudieron leer las hojas de esta conexión.");
@@ -363,7 +358,6 @@ export const AdminStockAssignmentModule: React.FC = () => {
   const handleSave = async () => {
     if (!selectedFacilityCode) return toast.error("Seleccione un establecimiento");
     if (!selectedConnectionUrl) return toast.error("Seleccione una conexión");
-    if (!selectedSheetName) return toast.error("Seleccione una hoja");
     if (visibleColumns.length === 0) return toast.error("Seleccione al menos una columna visible");
 
     const conexion = ungetConfigs.find((c: any) => c.url === selectedConnectionUrl);
@@ -374,38 +368,25 @@ export const AdminStockAssignmentModule: React.FC = () => {
     const establecimiento = facilities.find((f: any) => f.code === selectedFacilityCode);
     if (ungetDeLaConexion && establecimiento && String(establecimiento.ungetId || "") !== ungetDeLaConexion) {
       return toast.error(
-        `"${establecimiento.name}" no pertenece a la UNGET de esta conexión. Elija una hoja de su propia UNGET, o corrija el establecimiento en Administración → Establecimientos.`,
-      );
-    }
-
-    // Una asignación a una pestaña que no está en el libro nace rota y no avisa a nadie.
-    if (availableSheets.length > 0 && !assignmentSheetExists(selectedSheetName, availableSheets)) {
-      return toast.error(
-        `La pestaña "${selectedSheetName}" no existe en el libro de esta UNGET. Vuelva a elegirla de la lista.`,
+        `"${establecimiento.name}" no pertenece a la UNGET de esta conexión. Elija la conexión de su propia UNGET, o corrija el establecimiento en Administración → Establecimientos.`,
       );
     }
 
     setIsSaving(true);
     try {
-      const data = {
-        adminUsername: currentUser?.username,
+      const result = await api.saveStockColumnPreferences({
+        adminUsername: currentUser?.username || "",
         facilityCode: selectedFacilityCode,
-        sheetName: selectedSheetName,
+        // Informativos: el vínculo real se deduce del código en cada lectura.
+        sheetName: vinculo?.sheet?.name || "",
         sheetUrl: selectedConnectionUrl,
         // La asignación pertenece a la UNGET: su URL puede cambiar y no debe romperla.
         ungetId: conexion?.ungetId || undefined,
-        visibleColumns: visibleColumns
-      };
-
-      let result;
-      if (editingId) {
-        result = await api.updateStockAssignment(editingId, data);
-      } else {
-        result = await api.saveStockAssignment(data);
-      }
+        visibleColumns,
+      });
 
       if (result.success) {
-        toast.success(editingId ? "Asignación actualizada exitosamente" : "Asignación guardada exitosamente");
+        toast.success("Columnas visibles guardadas");
         resetForm();
         await loadData(true);
       } else {
@@ -447,8 +428,8 @@ export const AdminStockAssignmentModule: React.FC = () => {
             <Shield className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Asignar hoja de stock a IPRESS</h2>
-            <p className="text-sm text-gray-500">Vincule una hoja con un establecimiento y defina las columnas que podrá consultar en “Stock SISMED”.</p>
+            <h2 className="text-xl font-bold text-gray-900">Columnas visibles del stock por establecimiento</h2>
+            <p className="text-sm text-gray-500">La hoja de cada establecimiento se reconoce sola por su código. Aquí se decide qué columnas podrá consultar en “Stock SISMED”.</p>
           </div>
         </div>
 
@@ -463,12 +444,22 @@ export const AdminStockAssignmentModule: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 mt-6">
             <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <SearchableSelect
-                  label="1. Establecimiento de Salud"
+                  label="1. UNGET / Conexión"
+                  value={selectedConnectionUrl}
+                  onChange={handleConnectionChange}
+                  placeholder="-- Seleccionar Conexión --"
+                  options={ungetConfigs.map(c => ({ value: c.url, label: c.name }))}
+                />
+
+                <SearchableSelect
+                  label="2. Establecimiento de Salud"
                   value={selectedFacilityCode}
                   onChange={setSelectedFacilityCode}
                   placeholder="-- Seleccionar --"
+                  disabled={!selectedConnectionUrl}
+                  loading={loadingSheets}
                   options={(() => {
                     const level = getJurisdictionLevel();
                     // La conexión elegida manda: solo se ofrecen los establecimientos de esa
@@ -479,10 +470,6 @@ export const AdminStockAssignmentModule: React.FC = () => {
                     const ungetDeLaConexion = String(conexionSeleccionada?.ungetId || "").trim();
                     return facilities
                       .filter(f => {
-                        // Excluir si ya está asignado (a menos que estemos editando ese mismo)
-                        const isAssigned = activeAssignments.some(a => a.facilityCode === f.code) && f.code !== selectedFacilityCode;
-                        if (isAssigned) return false;
-
                         if (ungetDeLaConexion && String(f.ungetId || "") !== ungetDeLaConexion) return false;
 
                         // Filtrar por ámbito/nivel de jurisdicción del usuario
@@ -505,29 +492,41 @@ export const AdminStockAssignmentModule: React.FC = () => {
                       .map(f => ({ value: f.code, label: `${f.name} (${f.code})` }));
                   })()}
                 />
-                
-                <SearchableSelect
-                  label="2. Conexión / Archivo (Data)"
-                  value={selectedConnectionUrl}
-                  onChange={handleConnectionChange}
-                  placeholder="-- Seleccionar Conexión --"
-                  options={ungetConfigs.map(c => ({ value: c.url, label: c.name }))}
-                />
+              </div>
 
-                <SearchableSelect
-                  label="3. Establecimiento (Hoja)"
-                  value={selectedSheetName}
-                  onChange={setSelectedSheetName}
-                  placeholder="-- Seleccionar Hoja --"
-                  disabled={!selectedConnectionUrl || availableSheets.length === 0}
-                  loading={loadingSheets}
-                  options={availableSheets
-                    .filter(s => {
-                       const isAssigned = activeAssignments.some(a => a.sheetName === s.name && a.id !== editingId);
-                       return !isAssigned;
-                    })
-                    .map(s => ({ value: s.name, label: s.name }))}
-                />
+              {/* La hoja no se elige: se deduce del código del establecimiento. */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">3. Hoja vinculada (automática)</label>
+                {!selectedFacilityCode ? (
+                  <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+                    Elija una conexión y un establecimiento: su hoja se reconoce sola por el código.
+                  </div>
+                ) : loadingSheets ? (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500 animate-pulse">
+                    Leyendo las hojas de la conexión...
+                  </div>
+                ) : (
+                  <div
+                    className={`rounded-lg border px-4 py-3 text-sm flex items-start gap-2.5 ${
+                      isLinkedToSheet(vinculo)
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-amber-200 bg-amber-50 text-amber-800"
+                    }`}
+                  >
+                    {isLinkedToSheet(vinculo)
+                      ? <Link2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      : <Link2Off className="w-4 h-4 mt-0.5 flex-shrink-0" />}
+                    <div>
+                      {vinculo?.sheet && (
+                        <p className="font-semibold flex items-center gap-1.5">
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                          {vinculo.sheet.name}
+                        </p>
+                      )}
+                      <p className={vinculo?.sheet ? "text-xs mt-0.5" : ""}>{vinculo?.message}</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -551,7 +550,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
               <div className="pt-2 flex items-center gap-3">
                 <button
                   onClick={handleSave}
-                  disabled={isSaving || !selectedFacilityCode || !selectedConnectionUrl || !selectedSheetName || visibleColumns.length === 0}
+                  disabled={isSaving || !selectedFacilityCode || !selectedConnectionUrl || visibleColumns.length === 0}
                   className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium transition-colors cursor-pointer"
                 >
                   {isSaving ? (
@@ -559,7 +558,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
                   ) : (
                      editingId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />
                   )}
-                  {isSaving ? "Guardando..." : (editingId ? "Guardar Cambios" : "Asignar a Establecimiento")}
+                  {isSaving ? "Guardando..." : (editingId ? "Guardar Cambios" : "Guardar Columnas")}
                 </button>
                 {editingId && (
                   <button
@@ -578,7 +577,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
             <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 h-full flex flex-col">
               <h3 className="font-semibold text-gray-800 flex items-center gap-2 mb-3 shrink-0">
                 <Shield className="w-4 h-4 text-blue-600" />
-                Asignaciones Activas ({activeAssignments.length})
+                Establecimientos configurados ({activeAssignments.length})
               </h3>
               
               <div className="relative mb-3 shrink-0">
@@ -631,7 +630,8 @@ export const AdminStockAssignmentModule: React.FC = () => {
                         <p className="text-sm font-bold text-gray-900 mb-0.5">{facilityName}</p>
                         <p className="text-xs text-gray-500 mb-2 truncate pr-14 flex items-center gap-1">
                           <FileSpreadsheet className="w-3 h-3 flex-shrink-0" />
-                          {assig.sheetName}
+                          <span className="font-mono">{assig.facilityCode}</span>
+                          {assig.sheetName && <span className="truncate">· {assig.sheetName}</span>}
                         </p>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {assig.visibleColumns.slice(0, 3).map((col: string) => {
@@ -659,8 +659,8 @@ export const AdminStockAssignmentModule: React.FC = () => {
               <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mb-4 mx-auto">
                 <AlertTriangle className="w-6 h-6 text-red-600" />
               </div>
-              <h3 className="text-lg font-bold text-gray-900 text-center mb-2">¿Eliminar asignación?</h3>
-              <p className="text-sm text-gray-500 text-center mb-6">Esta acción no se puede deshacer. El establecimiento dejará de tener acceso a esta hoja.</p>
+              <h3 className="text-lg font-bold text-gray-900 text-center mb-2">¿Eliminar la configuración de columnas?</h3>
+              <p className="text-sm text-gray-500 text-center mb-6">El establecimiento seguirá viendo su hoja, porque el vínculo se deduce de su código, pero volverá a las columnas por omisión.</p>
               
               <div className="flex gap-3">
                 <button

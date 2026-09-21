@@ -90,6 +90,8 @@ import {
   type KnownRowCounts,
 } from "../services/sheetsApiService";
 import { sheetOwnerCodeOf } from "../services/facilityCodes";
+import { describePharmacyCode, showsPharmacyColumn } from "../services/facilitySheetLink";
+import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -3813,6 +3815,25 @@ function processSheet(sheet) {
     });
   }, [data, stockModalSearchTerm, stockModalSourceId]);
 
+  /**
+   * La columna «Código IPRESS» distingue las farmacias de una misma hoja: la principal es la
+   * IPRESS y de `F02` en adelante son puestos comunales, y sin ella el saldo de dos sitios
+   * distintos parece el de uno solo. Solo aparece cuando hay más de una farmacia a la vista:
+   * en el envío consolidado todas las filas traen el mismo ALMCOD, o ninguno.
+   */
+  const showsPharmacyInData = useMemo(
+    () => showsPharmacyColumn(filteredData, readAlmCode),
+    [filteredData],
+  );
+  const showsPharmacyInModal = useMemo(
+    () => showsPharmacyColumn(modalStockData, readAlmCode),
+    [modalStockData],
+  );
+  const pharmacyLabelOf = useCallback(
+    (row: SIGData) => describePharmacyCode(readAlmCode(row), allFacilities),
+    [allFacilities],
+  );
+
   const activeSheetData = useMemo(
     () =>
       selectedSourceId
@@ -7175,6 +7196,14 @@ function processSheet(sheet) {
                     <table className="min-w-full block sm:table">
                       <thead className="hidden sm:table-header-group sticky top-0 z-30 shadow-xs border-b border-slate-200">
                         <tr className="bg-slate-50">
+                          {showsPharmacyInData && (
+                            <th
+                              scope="col"
+                              className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
+                            >
+                              Código IPRESS
+                            </th>
+                          )}
                           <th
                             scope="col"
                             className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
@@ -7223,6 +7252,11 @@ function processSheet(sheet) {
                             >
                               {/* Mobile Card Layout */}
                               <td className="block sm:hidden">
+                                {showsPharmacyInData && (
+                                  <div className="mb-2 border-b border-gray-100 pb-2">
+                                    <PharmacyCodeCell label={pharmacyLabelOf(row)} />
+                                  </div>
+                                )}
                                 <div className="flex justify-between items-start mb-2">
                                   <div className="flex flex-col">
                                     <span className="text-xs font-black text-teal-700 bg-teal-50 px-2 py-0.5 rounded w-fit mb-1 border border-teal-100">
@@ -7281,6 +7315,11 @@ function processSheet(sheet) {
                               </td>
 
                               {/* Desktop Table Cells */}
+                              {showsPharmacyInData && (
+                                <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap align-top">
+                                  <PharmacyCodeCell label={pharmacyLabelOf(row)} />
+                                </td>
+                              )}
                               <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm text-gray-500 font-mono group-hover:text-teal-700">
                                 <div className="font-bold">
                                   {row.ID_Producto || "-"}
@@ -7332,7 +7371,7 @@ function processSheet(sheet) {
                         ) : (
                           <tr className="block sm:table-row">
                             <td
-                              colSpan={6}
+                              colSpan={showsPharmacyInData ? 7 : 6}
                               className="block sm:table-cell px-4 py-12 text-center text-sm text-gray-500"
                             >
                               No se encontraron coincidencias para su búsqueda.
@@ -7510,6 +7549,7 @@ function processSheet(sheet) {
 
             {/* Desktop Header */}
             <div className="hidden sm:flex flex-row items-center py-3 px-4 sm:px-8 bg-slate-100/80 border-b border-gray-200 gap-6 shrink-0 font-bold text-xs text-slate-500 uppercase tracking-wider">
+              {showsPharmacyInModal && <div className="shrink-0 w-32">Código IPRESS</div>}
               <div className="shrink-0 w-32">SISMED/SIGA</div>
               <div className="flex-1 min-w-0 text-left">
                 Descripción del Producto
@@ -7529,6 +7569,13 @@ function processSheet(sheet) {
                       onClick={() => setSelectedRecord(row)}
                       className="flex flex-col sm:flex-row sm:items-center py-4 px-4 sm:px-6 border-b border-gray-100 hover:bg-slate-50 transition-colors cursor-pointer gap-4 sm:gap-6"
                     >
+                      {/* Col 0: farmacia dentro de la hoja, solo si hay más de una */}
+                      {showsPharmacyInModal && (
+                        <div className="shrink-0 sm:w-32">
+                          <PharmacyCodeCell label={pharmacyLabelOf(row)} />
+                        </div>
+                      )}
+
                       {/* Col 1: IDs */}
                       <div className="flex flex-col shrink-0 sm:w-32">
                         <span className="font-bold text-gray-800 text-sm">

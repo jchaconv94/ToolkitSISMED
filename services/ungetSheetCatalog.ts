@@ -23,6 +23,13 @@ export interface UngetSheet {
   /** Identificador de la pestaña dentro del libro (gid). */
   id: string;
   name: string;
+  /**
+   * Código que el nombre de la pestaña declara (`C.S. NUEVO LIMA-06519` → `06519`). Puede
+   * venir cortado o no venir, y por eso no basta por sí solo.
+   */
+  codigoIpress?: string;
+  /** ALMCOD leído de la primera fila. Es el código fiable cuando el nombre no lo trae. */
+  almcod?: string;
 }
 
 export interface UngetSheetSource {
@@ -33,7 +40,12 @@ export interface UngetSheetSource {
 const toSheets = (metadata: GasSheetMetadata[]): UngetSheet[] =>
   (metadata || [])
     .filter(isFacilitySheet)
-    .map((meta) => ({ id: String(meta.id || ""), name: String(meta.name || "").trim() }))
+    .map((meta) => ({
+      id: String(meta.id || ""),
+      name: String(meta.name || "").trim(),
+      codigoIpress: String(meta.codigoIpress || "").trim() || undefined,
+      almcod: String(meta.almcod || "").trim() || undefined,
+    }))
     .filter((sheet) => sheet.name);
 
 export async function listUngetSheets(
@@ -65,13 +77,3 @@ export async function listUngetSheets(
     "Esta UNGET no tiene hoja de cálculo configurada ni Web App que consultar. Pida a su informático que configure la conexión en Consulta Stock.",
   );
 }
-
-/** Si una asignación sigue apuntando a una pestaña que existe en el libro. */
-export const assignmentSheetExists = (
-  sheetName: string | null | undefined,
-  sheets: UngetSheet[] | null | undefined,
-): boolean => {
-  const buscada = String(sheetName || "").trim();
-  if (!buscada) return false;
-  return (sheets || []).some((sheet) => sheet.name === buscada);
-};

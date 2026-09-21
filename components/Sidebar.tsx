@@ -545,7 +545,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       }`}
                     >
                       <ShieldCheck className="h-4 w-4 shrink-0" />
-                      Asignar Stock
+                      Columnas de Stock
                     </button>
                   )}
                   {hasPermission('ADMIN_SYNC_DEVICES') && (
