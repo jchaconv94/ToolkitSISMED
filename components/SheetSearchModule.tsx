@@ -137,6 +137,39 @@ const extractFacilityCodeFromSheetName = (name?: string): string => {
   return match?.[1]?.toUpperCase() || "";
 };
 
+/**
+ * Establecimiento registrado que corresponde a una pestaña, para poder mostrar su nombre
+ * oficial en vez del que alguien le puso a la hoja.
+ *
+ * Sin asignación se reconoce por el código de la pestaña (`C.S. NUEVO LIMA-06519`). Antes
+ * el único puente era la tabla de asignaciones, así que una pestaña sin fila ahí se
+ * quedaba con su nombre crudo: es lo que le pasaba a `ALM. ANEXO BELLAVISTA - SAN
+ * MARTIN-030S05`.
+ *
+ * La búsqueda se limita a los establecimientos de la UNGET de esta conexión: dos UNGET
+ * pueden tener códigos que se reduzcan al mismo oficial, y ponerle a una tarjeta el nombre
+ * del establecimiento de otra UNGET sería peor que dejarla como está.
+ *
+ * Vive aquí y no dentro de quien construye las tarjetas porque hay **dos** caminos que las
+ * construyen —la metadata y el payload de Apps Script— y cuando la regla estaba repetida
+ * solo se actualizó uno.
+ */
+const facilityForSheet = (params: {
+  facilityCode?: string | null;
+  assignment?: { facilityCode?: string | null } | null;
+  facilities: any[];
+  configUngetId?: string | null;
+}): any | null => {
+  const { facilityCode, assignment, facilities, configUngetId } = params;
+  if (assignment) {
+    return facilities.find((f) => f?.code === assignment.facilityCode) || null;
+  }
+  const candidatas = configUngetId
+    ? facilities.filter((f) => String(f?.ungetId || "") === String(configUngetId))
+    : facilities;
+  return findFacilityByCode(facilityCode, candidatas);
+};
+
 
 const getHistoryKeysForSource = (source: SheetSource): string[] =>
   Array.from(
@@ -221,19 +254,12 @@ const sourceFromMetadata = (
     existing?.facilityCode ||
     undefined;
 
-  // Sin asignación se reconoce el establecimiento por el código de la pestaña
-  // (`C.S. NUEVO LIMA-06519`). Antes el único puente era la tabla de asignaciones, así que
-  // casi todas las tarjetas mostraban el nombre crudo de la pestaña.
-  //
-  // La búsqueda se limita a los establecimientos de la UNGET de esta conexión: dos UNGET
-  // pueden tener códigos que se reduzcan al mismo oficial, y ponerle a una tarjeta el
-  // nombre del establecimiento de otra UNGET sería peor que dejarla como está.
-  const candidatas = ctx.configUngetId
-    ? ctx.facilities.filter((f) => String(f?.ungetId || "") === String(ctx.configUngetId))
-    : ctx.facilities;
-  const facility = assignment
-    ? ctx.facilities.find((f) => f.code === assignment.facilityCode)
-    : findFacilityByCode(facilityCode, candidatas);
+  const facility = facilityForSheet({
+    facilityCode,
+    assignment,
+    facilities: ctx.facilities,
+    configUngetId: ctx.configUngetId,
+  });
 
   const lastUpdate = (meta.lastUpdate || "").trim();
   const equipmentDate = (meta.equipmentDate || "").trim();
@@ -2397,21 +2423,20 @@ export const SheetSearchModule: React.FC = () => {
                 equipmentDateTime = parseDataDate(equipmentDateStr);
               }
 
-              let displayName = sheet.name;
-              if (allAssignments.length > 0 && allFacilities.length > 0) {
-                const matchingAssignment = allAssignments.find(
+              // Misma regla que la rama de metadata: manda el nombre registrado, buscado
+              // por código y dentro de la UNGET de la conexión. Esta rama se había
+              // quedado con el puente antiguo —solo la tabla de asignaciones—, así que
+              // una pestaña sin fila ahí conservaba el nombre que tuviera la hoja.
+              const facilityDeLaPestana = facilityForSheet({
+                facilityCode: extractFacilityCodeFromSheetName(sheet.name),
+                assignment: allAssignments.find(
                   (a) =>
                     assignmentBelongsToConnection(a, config) && a.sheetName === sheet.name,
-                );
-                if (matchingAssignment) {
-                  const matchingF = allFacilities.find(
-                    (f) => f.code === matchingAssignment.facilityCode,
-                  );
-                  if (matchingF) {
-                    displayName = matchingF.name;
-                  }
-                }
-              }
+                ),
+                facilities: allFacilities,
+                configUngetId: config?.ungetId,
+              });
+              const displayName = facilityDeLaPestana?.name || sheet.name;
 
               thisSources.push({
                 id: uniqueSourceId,
