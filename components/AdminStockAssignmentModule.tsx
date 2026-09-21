@@ -525,7 +525,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
            establecimiento y la hoja que le corresponde—, y a la derecha lo único que se
            decide, que son sus columnas. Antes iba todo apilado y el recuadro de columnas
            se llevaba una banda entera al final, con la mitad derecha en blanco. */
-        <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]">
           <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="space-y-2">
               <Paso numero={1} titulo="UNGET / Conexión" />
