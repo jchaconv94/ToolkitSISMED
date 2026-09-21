@@ -23,11 +23,14 @@ import {
   readAssignedSheetRows,
 } from "../services/assignedSheetReader";
 import {
+  describePharmacyCode,
   isLinkedToSheet,
   resolveFacilitySheet,
   rowsBelongingToFacility,
+  showsPharmacyColumn,
   type FacilitySheetLink,
 } from "../services/facilitySheetLink";
+import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import { listUngetSheets } from "../services/ungetSheetCatalog";
 import { pickOneConnectionPerUnget } from "../services/ungetConnections";
 import { StockAssignment } from "../types";
@@ -153,6 +156,8 @@ export const AssignedIpressStockModule: React.FC = () => {
   const [rows, setRows] = useState<StockRow[]>([]);
   const [assignment, setAssignment] = useState<StockAssignment | null>(null);
   const [link, setLink] = useState<FacilitySheetLink | null>(null);
+  /** Solo para poner nombre a cada ALMCOD en la columna «Código IPRESS». */
+  const [facilities, setFacilities] = useState<Array<{ code?: string; name?: string }>>([]);
   const [source, setSource] = useState<StockSource | null>(null);
   const [lastUpdate, setLastUpdate] = useState("");
   const [loading, setLoading] = useState(true);
@@ -184,6 +189,12 @@ export const AssignedIpressStockModule: React.FC = () => {
         // creó la asignación, o puede que ya solo lea por hoja de cálculo.
         api.getAllUngetConfigs()
       ]);
+
+      // Los nombres de las farmacias son un adorno de la tabla: si no se pueden leer, la
+      // columna muestra solo el código en vez de impedir que se vea el stock.
+      api.getFacilities()
+        .then(lista => setFacilities(lista || []))
+        .catch(err => console.warn("No se pudo leer el registro de establecimientos:", err));
       const currentAssignment = (assignments[0] || null) as StockAssignment | null;
       setAssignment(currentAssignment);
       setLink(null);
@@ -318,14 +329,29 @@ export const AssignedIpressStockModule: React.FC = () => {
   const allowedKeys = useMemo(() => new Set(visibleColumns.map(column => column.key)), [visibleColumns]);
   const canShow = (key: string) => allowedKeys.has(key);
 
+  /**
+   * La hoja de una IPRESS trae todas sus farmacias mezcladas, separadas solo por el ALMCOD.
+   * La columna «Código IPRESS» las distingue, y aparece solo cuando hay más de una: en el
+   * envío consolidado sería una constante repetida.
+   */
+  const showsPharmacy = useMemo(
+    () => showsPharmacyColumn(rows, row => String(row.ALMCOD ?? "")),
+    [rows],
+  );
+  const pharmacyLabelOf = (row: StockRow) => describePharmacyCode(String(row.ALMCOD ?? ""), facilities);
+
   const exportStock = () => {
     if (filteredRows.length === 0) {
       toast.info("No hay registros para exportar");
       return;
     }
-    const exportRows = filteredRows.map(row => Object.fromEntries(
-      visibleColumns.map(column => [column.label, row[column.key] ?? ""])
-    ));
+    const exportRows = filteredRows.map(row => Object.fromEntries([
+      // Igual que en pantalla: solo cuando hay más de una farmacia en la hoja.
+      ...(showsPharmacy
+        ? [["Código IPRESS", pharmacyLabelOf(row).code], ["Farmacia", pharmacyLabelOf(row).name]]
+        : []),
+      ...visibleColumns.map(column => [column.label, row[column.key] ?? ""])
+    ]));
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
     worksheet["!cols"] = visibleColumns.map(column => ({ wch: column.key === "Nombre" ? 48 : 18 }));
     const workbook = XLSX.utils.book_new();
@@ -433,6 +459,7 @@ export const AssignedIpressStockModule: React.FC = () => {
                 <table className="block min-w-full text-left sm:table">
                   <thead className="sticky top-0 z-20 hidden bg-slate-50 shadow-sm sm:table-header-group">
                     <tr>
+                      {showsPharmacy && <TableHeader>Código IPRESS</TableHeader>}
                       <TableHeader>Cód. SISMED / SIGA</TableHeader>
                       <TableHeader className="min-w-[300px]">Descripción del producto</TableHeader>
                       <TableHeader align="right">Saldo</TableHeader>
@@ -445,6 +472,11 @@ export const AssignedIpressStockModule: React.FC = () => {
                     {visibleRows.map((row, index) => (
                       <tr key={`${String(row.Id_Producto)}-${String(row.Lote)}-${(page - 1) * pageSize + index}`} className="mb-3 block rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:bg-teal-50/40 sm:mb-0 sm:table-row sm:rounded-none sm:border-0 sm:p-0 sm:shadow-none">
                         <td className="block sm:hidden">
+                          {showsPharmacy && (
+                            <div className="mb-2 border-b border-slate-100 pb-2">
+                              <PharmacyCodeCell label={pharmacyLabelOf(row)} />
+                            </div>
+                          )}
                           <div className="mb-2 flex items-start justify-between">
                             <div className="flex flex-col">
                               <span className="mb-1 w-fit rounded border border-teal-100 bg-teal-50 px-2 py-0.5 text-xs font-black text-teal-700">{canShow("Id_Producto") ? String(row.Id_Producto || "—") : "—"}</span>
@@ -459,6 +491,11 @@ export const AssignedIpressStockModule: React.FC = () => {
                             <div className="flex gap-1.5"><TypeBadge tone="indigo" value={canShow("DESC_TIPSUM") ? String(row.TIPSUM || row.DESC_TIPSUM || "—") : "—"} title={String(row.DESC_TIPSUM || "")} /><TypeBadge tone="amber" value={canShow("DESC_FFINAN") ? String(row.FFINAN || row.DESC_FFINAN || "—") : "—"} title={String(row.DESC_FFINAN || "")} /></div>
                           </div>
                         </td>
+                        {showsPharmacy && (
+                          <td className="hidden whitespace-nowrap px-4 py-3 align-top sm:table-cell">
+                            <PharmacyCodeCell label={pharmacyLabelOf(row)} />
+                          </td>
+                        )}
                         <td className="hidden whitespace-nowrap px-4 py-3 font-mono text-sm text-slate-500 sm:table-cell"><div className="font-bold text-slate-700">{canShow("Id_Producto") ? String(row.Id_Producto || "—") : "—"}</div><div className="mt-0.5 text-[10px] text-slate-400">{canShow("CODIGO_SIG") ? String(row.CODIGO_SIG || "—") : "—"}</div></td>
                         <td className="hidden px-4 py-3 text-sm font-medium text-slate-900 sm:table-cell">{canShow("Nombre") ? String(row.Nombre || "—") : "—"}{canShow("Reg_Sanitario") && <div className="mt-0.5 max-w-sm truncate text-[10px] font-normal text-slate-400" title={String(row.Reg_Sanitario || "")}>RS: {String(row.Reg_Sanitario || "S/N")}</div>}</td>
                         <td className="hidden whitespace-nowrap px-4 py-3 text-right text-sm font-black text-slate-900 sm:table-cell">{canShow("Saldo") ? parseNumber(row.Saldo).toLocaleString("es-PE") : "—"}</td>

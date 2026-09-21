@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  describePharmacyCode,
   isLinkedToSheet,
   linkedSheetName,
   resolveFacilitySheet,
   rowsBelongingToFacility,
   sheetOwnerCode,
+  showsPharmacyColumn,
 } from "./facilitySheetLink";
 import type { UngetSheet } from "./ungetSheetCatalog";
 
@@ -130,5 +132,76 @@ describe("rowsBelongingToFacility", () => {
 
   it("un código que no se entiende no recorta nada", () => {
     expect(rowsBelongingToFacility(filas, "030S0", almcod)).toHaveLength(4);
+  });
+});
+
+describe("describePharmacyCode", () => {
+  const registro = [
+    { code: "06528", name: "C.S. NUEVO LIMA" },
+    { code: "06528F02", name: "P.C. LOS OLIVOS" },
+    { code: "030S05", name: "ALMACÉN SISMED" },
+  ];
+
+  it("rotula la farmacia principal con la IPRESS", () => {
+    expect(describePharmacyCode("06528F0101", registro)).toEqual({
+      code: "06528",
+      name: "C.S. NUEVO LIMA",
+      unregistered: false,
+    });
+  });
+
+  it("rotula un puesto comunal con su propio nombre", () => {
+    expect(describePharmacyCode("06528F0201", registro)).toEqual({
+      code: "06528F02",
+      name: "P.C. LOS OLIVOS",
+      unregistered: false,
+    });
+  });
+
+  it("marca el puesto comunal que nadie dio de alta, en vez de esconderlo", () => {
+    // Es la señal de que falta registrarlo: el código existe en SISMED pero no aquí.
+    expect(describePharmacyCode("06528F0901", registro)).toEqual({
+      code: "06528F09",
+      name: "",
+      unregistered: true,
+    });
+  });
+
+  it("un almacén se rotula con sus seis caracteres", () => {
+    expect(describePharmacyCode("030S0501", registro).name).toBe("ALMACÉN SISMED");
+  });
+
+  it("un ALMCOD que no se entiende se muestra tal cual y no se marca", () => {
+    expect(describePharmacyCode("030S0", registro)).toEqual({
+      code: "030S0",
+      name: "",
+      unregistered: false,
+    });
+  });
+
+  it("una IPRESS sin registrar no se marca: la marca es solo para las farmacias", () => {
+    expect(describePharmacyCode("09999F0101", registro).unregistered).toBe(false);
+  });
+});
+
+describe("showsPharmacyColumn", () => {
+  const almcod = (row: { ALMCOD: string }) => row.ALMCOD;
+
+  it("se muestra cuando la hoja trae varias farmacias", () => {
+    expect(
+      showsPharmacyColumn([{ ALMCOD: "06528F0101" }, { ALMCOD: "06528F0201" }], almcod),
+    ).toBe(true);
+  });
+
+  it("se oculta cuando todas las filas son de la misma farmacia", () => {
+    // Sería una constante repetida ocupando ancho.
+    expect(
+      showsPharmacyColumn([{ ALMCOD: "06528F0101" }, { ALMCOD: "06528F0101" }], almcod),
+    ).toBe(false);
+  });
+
+  it("se oculta en el envío consolidado, que llega sin ALMCOD", () => {
+    expect(showsPharmacyColumn([{ ALMCOD: "" }, { ALMCOD: "" }], almcod)).toBe(false);
+    expect(showsPharmacyColumn([], almcod)).toBe(false);
   });
 });

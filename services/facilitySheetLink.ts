@@ -152,3 +152,61 @@ export const rowsBelongingToFacility = <T extends Record<string, any>>(
   if (!propio || parseFacilityCode(facilityCode).kind !== "puesto-comunal") return rows || [];
   return (rows || []).filter((row) => facilityCodeOf(almcodOf(row)) === propio);
 };
+
+/** Cómo se rotula el ALMCOD de una fila en la columna «Código IPRESS». */
+export interface PharmacyLabel {
+  /** Código del establecimiento al que pertenece la fila (`06528`, `06528F02`, `030S05`). */
+  code: string;
+  /** Su nombre registrado. Vacío si no está en Establecimientos. */
+  name: string;
+  /**
+   * Es una farmacia que SISMED numera pero que nadie registró como establecimiento. Se
+   * muestra igual, marcada: es la señal de que falta darla de alta.
+   */
+  unregistered: boolean;
+}
+
+/**
+ * Rótulo del ALMCOD de una fila: el código del establecimiento y su nombre.
+ *
+ * Se muestra el código **registrado**, no el ALMCOD crudo, porque es el que se busca y el
+ * que aparece en Establecimientos: `06528F0101` se rotula `06528`, y `06528F0201` como
+ * `06528F02`. Un ALMCOD que no se entiende se muestra tal cual, que dice más que un guion.
+ */
+export const describePharmacyCode = (
+  almcod: string | null | undefined,
+  facilities: Array<{ code?: string | null; name?: string | null }> | null | undefined,
+): PharmacyLabel => {
+  const parsed = parseFacilityCode(almcod);
+  const code = parsed.facilityCode || String(almcod || "").trim().toUpperCase();
+  const registrado = parsed.facilityCode
+    ? (facilities || []).find(
+        (f) => String(f?.code || "").trim().toUpperCase() === parsed.facilityCode,
+      )
+    : undefined;
+
+  return {
+    code,
+    name: String(registrado?.name || "").trim(),
+    unregistered: !registrado && parsed.kind === "puesto-comunal",
+  };
+};
+
+/**
+ * Si vale la pena mostrar la columna «Código IPRESS».
+ *
+ * Solo cuando las filas son de más de una farmacia. En el envío consolidado todas traen el
+ * mismo ALMCOD —o ninguno—, así que la columna sería una constante repetida ocupando ancho.
+ */
+export const showsPharmacyColumn = <T>(
+  rows: T[] | null | undefined,
+  almcodOf: (row: T) => string,
+): boolean => {
+  const vistos = new Set<string>();
+  for (const row of rows || []) {
+    const code = facilityCodeOf(almcodOf(row));
+    if (code) vistos.add(code);
+    if (vistos.size > 1) return true;
+  }
+  return false;
+};
