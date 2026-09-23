@@ -109,6 +109,11 @@ import { consolidateStockRows } from "../services/stockConsolidation";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { StockNetworkSearchModal } from "./StockNetworkSearchModal";
 import { SheetExportMenu } from "./SheetExportMenu";
+import {
+  StockExportModal,
+  type StockExportEstablishment,
+  type StockExportRequest,
+} from "./StockExportModal";
 import { readStockField } from "../services/stockNetworkSearch";
 import {
   DeficiencyCaptureModal,
@@ -1419,29 +1424,10 @@ export const SheetSearchModule: React.FC = () => {
     );
   };
 
-  // States for Export Options Modal
+  // Exportación de stock de varios establecimientos (ver StockExportModal)
   const [isExportOptionsModalOpen, setIsExportOptionsModalOpen] =
     useState(false);
-  const [exportCS, setExportCS] = useState(true);
-  const [exportPS, setExportPS] = useState(true);
-  const [exportALM, setExportALM] = useState(true);
-  const [exportHOSP, setExportHOSP] = useState(true);
-  const [exportOTRO, setExportOTRO] = useState(true);
-
-  const [exportEmerald, setExportEmerald] = useState(true);
-  const [exportAmber, setExportAmber] = useState(true);
-  const [exportRed, setExportRed] = useState(true);
-  const [exportGray, setExportGray] = useState(true);
-
-  const [exportDateUnit, setExportDateUnit] = useState<"hours" | "days">(
-    "hours",
-  );
-  const [exportDateValue, setExportDateValue] = useState<number>(0);
-  const [exportDateCondition, setExportDateCondition] = useState<
-    "with" | "without"
-  >("with");
-  const [exportHasPendingExpirations, setExportHasPendingExpirations] =
-    useState<boolean>(false);
+  const [exportInitialIds, setExportInitialIds] = useState<string[]>([]);
   const [exportScope, setExportScope] = useState<"single" | "all">("single");
   const [editingIndex, setEditingIndex] = useState<number | null>(null); // Nuevo: índice que se está editando
   const [tempUrls, setTempUrls] = useState<UngetConfig[]>([]);
@@ -3623,161 +3609,127 @@ export const SheetSearchModule: React.FC = () => {
     );
   };
 
-  const exportAllEstablishmentsToExcel = () => {
-    if (selectedUngetIndex === null) return;
-    setExportScope("single");
-    // Pre-populate modal filters with the currently active advanced sidebar filters
-    setExportCS(filter_CS);
-    setExportPS(filter_PS);
-    setExportALM(filter_ALM);
-    setExportHOSP(filter_HOSP);
-    setExportOTRO(filter_OTRO);
+  /**
+   * Hojas que dejan pasar los filtros de tipo, estado y antigüedad del panel lateral. Al
+   * abrir la exportación vienen marcadas estas, para que el Excel empiece siendo lo que se
+   * ve en pantalla; después se marca o desmarca cada establecimiento a mano.
+   */
+  const pasaFiltrosLaterales = (s: SheetSource) => {
+    const typeValue = getSheetType(s.name);
+    if (typeValue === "CS" && !filter_CS) return false;
+    if (typeValue === "PS" && !filter_PS) return false;
+    if (typeValue === "ALM" && !filter_ALM) return false;
+    if (typeValue === "HOSP" && !filter_HOSP) return false;
+    if (typeValue === "OTRO" && !filter_OTRO) return false;
 
-    setExportEmerald(filter_emerald);
-    setExportAmber(filter_amber);
-    setExportRed(filter_red);
-    setExportGray(filter_gray);
+    const colorValue = getUpdateStatus(s.lastUpdateTime).color;
+    if (colorValue === "bg-emerald-500" && !filter_emerald) return false;
+    if (colorValue === "bg-amber-500" && !filter_amber) return false;
+    if (colorValue === "bg-red-500" && !filter_red) return false;
+    if (colorValue === "bg-gray-400" && !filter_gray) return false;
 
-    setExportHasPendingExpirations(filterHasPendingExpirations);
-    setExportDateUnit(filterDateUnit);
-    setExportDateValue(filterDateValue);
-    setExportDateCondition(filterDateCondition);
+    if (filterDateValue > 0) {
+      const diffHours = s.lastUpdateTime
+        ? (new Date().getTime() - s.lastUpdateTime) / (1000 * 60 * 60)
+        : Infinity;
+      const maxHours = filterDateUnit === "hours" ? filterDateValue : filterDateValue * 24;
+      const isWithinLimit = diffHours <= maxHours;
+      if (filterDateCondition === "with" && !isWithinLimit) return false;
+      if (filterDateCondition === "without" && isWithinLimit) return false;
+    }
+    return true;
+  };
 
+  const sourcesToExport = (scope: "single" | "all") =>
+    sources.filter((s) => scope === "all" || s.urlIndex === selectedUngetIndex);
+
+  const openExportModal = (scope: "single" | "all") => {
+    setExportScope(scope);
+    setExportInitialIds(sourcesToExport(scope).filter(pasaFiltrosLaterales).map((s) => s.id));
     setIsExportOptionsModalOpen(true);
   };
 
-  const filteredExportSourcesCount = useMemo(() => {
-    if (exportScope === "single" && selectedUngetIndex === null) return 0;
-    return sources.filter((s) => {
-      if (exportScope === "single" && s.urlIndex !== selectedUngetIndex)
-        return false;
+  const exportAllEstablishmentsToExcel = () => {
+    if (selectedUngetIndex === null) return;
+    openExportModal("single");
+  };
 
-      // Type filter
-      const typeValue = getSheetType(s.name);
-      if (typeValue === "CS" && !exportCS) return false;
-      if (typeValue === "PS" && !exportPS) return false;
-      if (typeValue === "ALM" && !exportALM) return false;
-      if (typeValue === "HOSP" && !exportHOSP) return false;
-      if (typeValue === "OTRO" && !exportOTRO) return false;
+  const exportAllUngetsToExcel = () => {
+    if (data.length === 0) return;
+    openExportModal("all");
+  };
 
-      // Color status Filter
-      const colorValue = getUpdateStatus(s.lastUpdateTime).color;
-      if (colorValue === "bg-emerald-500" && !exportEmerald) return false;
-      if (colorValue === "bg-amber-500" && !exportAmber) return false;
-      if (colorValue === "bg-red-500" && !exportRed) return false;
-      if (colorValue === "bg-gray-400" && !exportGray) return false;
-
-      // Date limit filter
-      if (exportDateValue > 0) {
-        let diffHours = Infinity;
-        if (s.lastUpdateTime) {
-          const now = new Date().getTime();
-          const diffMs = now - s.lastUpdateTime;
-          diffHours = diffMs / (1000 * 60 * 60);
-        }
-
-        const maxHours =
-          exportDateUnit === "hours" ? exportDateValue : exportDateValue * 24;
-        const isWithinLimit = diffHours <= maxHours;
-
-        if (exportDateCondition === "with" && !isWithinLimit) return false;
-        if (exportDateCondition === "without" && isWithinLimit) return false;
-      }
-
-      return true;
-    }).length;
+  /** Los establecimientos que ofrece la exportación, con lo que la lista necesita mostrar. */
+  const exportEstablishments = useMemo<StockExportEstablishment[]>(() => {
+    if (!isExportOptionsModalOpen) return [];
+    return sources
+      .filter((s) => exportScope === "all" || s.urlIndex === selectedUngetIndex)
+      .map((s) => {
+        const estado = getUpdateStatus(s.lastUpdateTime);
+        const farmacias = pharmaciesInRows(rowsForSource(s.id), readAlmCode, allFacilities);
+        return {
+          id: s.id,
+          code: codeForSheet(s.id),
+          name: s.name,
+          tipo: getSheetType(s.name),
+          ungetName:
+            exportScope === "all"
+              ? formatDisplayName(scriptUrls[s.urlIndex]?.name || "")
+              : undefined,
+          estadoColor: estado.color,
+          estadoLabel: estado.label,
+          actualizado: estado.color === "bg-emerald-500",
+          puestosComunales: Math.max(0, farmacias.length - 1),
+        };
+      })
+      .sort(
+        (a, b) =>
+          (a.ungetName || "").localeCompare(b.ungetName || "") ||
+          (a.code || "~").localeCompare(b.code || "~"),
+      );
   }, [
+    isExportOptionsModalOpen,
+    exportScope,
     sources,
     selectedUngetIndex,
-    exportScope,
-    exportCS,
-    exportPS,
-    exportALM,
-    exportHOSP,
-    exportOTRO,
-    exportEmerald,
-    exportAmber,
-    exportRed,
-    exportGray,
-    exportDateUnit,
-    exportDateValue,
-    exportDateCondition,
+    rowsForSource,
+    allFacilities,
+    codeForSheet,
+    scriptUrls,
   ]);
 
-  const executeExportAllEstablishmentsToExcel = () => {
-    if (exportScope === "single" && selectedUngetIndex === null) return;
+  const executeExportAllEstablishmentsToExcel = ({
+    ids,
+    modo,
+    soloVencimientos,
+  }: StockExportRequest) => {
+    const elegidas = sources.filter((s) => ids.includes(s.id));
 
-    // Filter sources based on conditions configured in the export modal
-    const filteredSources = sources.filter((s) => {
-      if (exportScope === "single" && s.urlIndex !== selectedUngetIndex)
-        return false;
-
-      // Type filter
-      const typeValue = getSheetType(s.name);
-      if (typeValue === "CS" && !exportCS) return false;
-      if (typeValue === "PS" && !exportPS) return false;
-      if (typeValue === "ALM" && !exportALM) return false;
-      if (typeValue === "HOSP" && !exportHOSP) return false;
-      if (typeValue === "OTRO" && !exportOTRO) return false;
-
-      // Color status Filter
-      const colorValue = getUpdateStatus(s.lastUpdateTime).color;
-      if (colorValue === "bg-emerald-500" && !exportEmerald) return false;
-      if (colorValue === "bg-amber-500" && !exportAmber) return false;
-      if (colorValue === "bg-red-500" && !exportRed) return false;
-      if (colorValue === "bg-gray-400" && !exportGray) return false;
-
-      // Date limit filter
-      if (exportDateValue > 0) {
-        let diffHours = Infinity;
-        if (s.lastUpdateTime) {
-          const now = new Date().getTime();
-          const diffMs = now - s.lastUpdateTime;
-          diffHours = diffMs / (1000 * 60 * 60);
-        }
-
-        const maxHours =
-          exportDateUnit === "hours" ? exportDateValue : exportDateValue * 24;
-        const isWithinLimit = diffHours <= maxHours;
-
-        if (exportDateCondition === "with" && !isWithinLimit) return false;
-        if (exportDateCondition === "without" && isWithinLimit) return false;
+    // Una hoja por vez: la consolidación suma las farmacias de un mismo establecimiento y
+    // lo rotula con el nombre de su hoja.
+    const filas = elegidas.flatMap((sheetInfo) => {
+      let rows = rowsForSource(sheetInfo.id);
+      if (soloVencimientos) {
+        rows = rows.filter((r) => {
+          const { expiredCount, expiringThisMonthCount } = getExpirationStats([r]);
+          return expiredCount > 0 || expiringThisMonthCount > 0;
+        });
       }
-
-      return true;
+      const listas = modo === "consolidado" ? consolidateStockRows(rows, readAlmCode, sheetInfo.name) : rows;
+      return listas.map((r) => ({ r, sheetInfo }));
     });
 
-    const filteredSourceIds = new Set(filteredSources.map((s) => s.id));
-
-    // Filter data items belonging to the filtered sources
-    const ungetData = data.filter((r) => {
-      if (!r.sourceId || !filteredSourceIds.has(r.sourceId)) return false;
-
-      // Expiration filter
-      if (exportHasPendingExpirations) {
-        const { expiredCount, expiringThisMonthCount } = getExpirationStats([
-          r,
-        ]);
-        if (expiredCount === 0 && expiringThisMonthCount === 0) return false;
-      }
-
-      return true;
-    });
-
-    if (ungetData.length === 0) {
-      alert(
-        "No hay registros de stock que coincidan con los filtros seleccionados para exportar.",
-      );
+    if (filas.length === 0) {
+      toast.error("No hay stock que exportar con lo elegido.");
       return;
     }
 
-    const dataToExport = ungetData.map((r) => {
-      const sheetInfo = sources.find((s) => s.id === r.sourceId);
-      const ungetInfo = sheetInfo ? scriptUrls[sheetInfo.urlIndex] : null;
+    const dataToExport = filas.map(({ r, sheetInfo }) => {
+      const ungetInfo = scriptUrls[sheetInfo.urlIndex];
       return {
         UNGET: ungetInfo ? ungetInfo.name : "N/A",
         ALMCOD: readAlmCode(r),
-        DESC_ALM: r.DESC_ALM || (sheetInfo ? sheetInfo.name : ""),
+        DESC_ALM: r.DESC_ALM || sheetInfo.name || "",
         ID_Producto: r.ID_Producto || "",
         CODIGO_SIG: r.CODIGO_SIG || r.SIGA || "",
         Nombre: r.Nombre || r.DESC_ITEM || "",
@@ -3801,56 +3753,22 @@ export const SheetSearchModule: React.FC = () => {
       };
     });
 
-    const ungetName =
+    const ambito =
       exportScope === "single" && selectedUngetIndex !== null
         ? formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "UNGET")
         : "Regional";
     const ws = XLSX.utils.json_to_sheet(dataToExport);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Stock Consolidado");
-
-    if (exportScope === "single") {
-      XLSX.writeFile(
-        wb,
-        `Stock_Consolidado_${ungetName}_${new Date().toISOString().split("T")[0]}.xlsx`.replace(
-          /\s+/g,
-          "_",
-        ),
-      );
-    } else {
-      XLSX.writeFile(
-        wb,
-        `Stock_Consolidado_Regional_${new Date().toISOString().split("T")[0]}.xlsx`.replace(
-          /\s+/g,
-          "_",
-        ),
-      );
-    }
+    XLSX.utils.book_append_sheet(wb, ws, "Stock");
+    XLSX.writeFile(
+      wb,
+      `Stock_${ambito}_${modo === "consolidado" ? "CONSOLIDADO" : "POR_FARMACIA"}_${new Date().toISOString().split("T")[0]}.xlsx`.replace(
+        /\s+/g,
+        "_",
+      ),
+    );
 
     setIsExportOptionsModalOpen(false);
-  };
-
-  const exportAllUngetsToExcel = () => {
-    if (data.length === 0) return;
-    setExportScope("all");
-    // Pre-populate modal filters with the currently active advanced sidebar filters
-    setExportCS(filter_CS);
-    setExportPS(filter_PS);
-    setExportALM(filter_ALM);
-    setExportHOSP(filter_HOSP);
-    setExportOTRO(filter_OTRO);
-
-    setExportEmerald(filter_emerald);
-    setExportAmber(filter_amber);
-    setExportRed(filter_red);
-    setExportGray(filter_gray);
-
-    setExportHasPendingExpirations(filterHasPendingExpirations);
-    setExportDateUnit(filterDateUnit);
-    setExportDateValue(filterDateValue);
-    setExportDateCondition(filterDateCondition);
-
-    setIsExportOptionsModalOpen(true);
   };
 
   const copyScript = () => {
@@ -9819,520 +9737,19 @@ function processSheet(sheet) {
         </div>
       )}
 
-      {/* MODAL DE OPCIONES DE EXPORTACIÓN (CENTRADITO) */}
       {isExportOptionsModalOpen && (
-        <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/45 backdrop-blur-xs animate-in fade-in duration-200 p-4">
-          {/* Backdrop Click Dismiss */}
-          <div
-            className="absolute inset-0"
-            onClick={() => setIsExportOptionsModalOpen(false)}
-          />
-
-          {/* Modal Card */}
-          <div className="relative w-full max-w-lg bg-slate-50 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-slate-200 overflow-hidden">
-            {/* Header */}
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-white shadow-[0_2px_12px_rgba(0,0,0,0.03)] shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 bg-teal-50 rounded-2xl flex items-center justify-center text-teal-600 border border-teal-100 shadow-[0_4px_12px_rgba(13,148,136,0.08)]">
-                  <FileSpreadsheet className="h-5.5 w-5.5" />
-                </div>
-                <div>
-                  <h3 className="font-black text-slate-900 text-base tracking-tight uppercase">
-                    Exportación de Stock Detallado
-                  </h3>
-                  <p className="text-[10px] text-teal-600 font-extrabold tracking-widest uppercase">
-                    Consolidado:{" "}
-                    {exportScope === "single" && selectedUngetIndex !== null
-                      ? formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "UNGET")
-                      : "TODAS LAS UNGETs (REGIONAL)"}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsExportOptionsModalOpen(false)}
-                className="p-2 hover:bg-slate-100 active:scale-95 rounded-xl transition-all text-slate-400 hover:text-slate-900 border border-slate-100 hover:border-slate-200 bg-white shadow-sm"
-              >
-                <X className="h-4.5 w-4.5" />
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="p-6 space-y-6 overflow-y-auto max-h-[65vh]">
-              {/* Section: Establishment Type */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-3 bg-teal-500 rounded-full" />
-                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
-                      Tipo de Establecimiento
-                    </h4>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExportCS(true);
-                        setExportPS(true);
-                        setExportALM(true);
-                        setExportHOSP(true);
-                        setExportOTRO(true);
-                      }}
-                      className="text-teal-600 hover:text-teal-700 font-black hover:underline cursor-pointer active:scale-95 transition-all"
-                    >
-                      Todos
-                    </button>
-                    <span className="text-slate-300 select-none">|</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExportCS(false);
-                        setExportPS(false);
-                        setExportALM(false);
-                        setExportHOSP(false);
-                        setExportOTRO(false);
-                      }}
-                      className="text-slate-500 hover:text-slate-700 hover:underline cursor-pointer active:scale-95 transition-all"
-                    >
-                      Ninguno
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  {/* C.S. */}
-                  <label
-                    className={`group flex items-center justify-between p-3.5 rounded-2xl cursor-pointer transition-all border select-none ${
-                      exportCS
-                        ? "bg-teal-50/25 border-teal-500/35 text-slate-900 shadow-sm"
-                        : "bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50 hover:border-slate-300"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={exportCS}
-                      onChange={(e) => setExportCS(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <span
-                      className={`text-xs font-extrabold transition-colors ${exportCS ? "text-teal-950 font-extrabold" : "text-slate-705 font-semibold"}`}
-                    >
-                      Centro de Salud (C.S.)
-                    </span>
-                    <div
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                        exportCS
-                          ? "bg-teal-600 border-teal-600 text-white scale-100"
-                          : "border-slate-300 bg-white text-transparent group-hover:border-slate-400"
-                      }`}
-                    >
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </div>
-                  </label>
-
-                  {/* P.S. */}
-                  <label
-                    className={`group flex items-center justify-between p-3.5 rounded-2xl cursor-pointer transition-all border select-none ${
-                      exportPS
-                        ? "bg-teal-50/25 border-teal-500/35 text-slate-900 shadow-sm"
-                        : "bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50 hover:border-slate-300"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={exportPS}
-                      onChange={(e) => setExportPS(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <span
-                      className={`text-xs font-extrabold transition-colors ${exportPS ? "text-teal-950 font-extrabold" : "text-slate-705 font-semibold"}`}
-                    >
-                      Puesto de Salud (P.S.)
-                    </span>
-                    <div
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                        exportPS
-                          ? "bg-teal-600 border-teal-600 text-white scale-100"
-                          : "border-slate-300 bg-white text-transparent group-hover:border-slate-400"
-                      }`}
-                    >
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </div>
-                  </label>
-
-                  {/* ALM */}
-                  <label
-                    className={`group flex items-center justify-between p-3.5 rounded-2xl cursor-pointer transition-all border select-none ${
-                      exportALM
-                        ? "bg-teal-50/25 border-teal-500/35 text-slate-900 shadow-sm"
-                        : "bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50 hover:border-slate-300"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={exportALM}
-                      onChange={(e) => setExportALM(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <span
-                      className={`text-xs font-extrabold transition-colors ${exportALM ? "text-teal-950 font-extrabold" : "text-slate-705 font-semibold"}`}
-                    >
-                      Almacén (ALM)
-                    </span>
-                    <div
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                        exportALM
-                          ? "bg-teal-600 border-teal-600 text-white scale-100"
-                          : "border-slate-300 bg-white text-transparent group-hover:border-slate-400"
-                      }`}
-                    >
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </div>
-                  </label>
-
-                  {/* HOSP */}
-                  <label
-                    className={`group flex items-center justify-between p-3.5 rounded-2xl cursor-pointer transition-all border select-none ${
-                      exportHOSP
-                        ? "bg-teal-50/25 border-teal-500/35 text-slate-900 shadow-sm"
-                        : "bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50 hover:border-slate-300"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={exportHOSP}
-                      onChange={(e) => setExportHOSP(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <span
-                      className={`text-xs font-extrabold transition-colors ${exportHOSP ? "text-teal-950 font-extrabold" : "text-slate-705 font-semibold"}`}
-                    >
-                      Hospital (HOSP)
-                    </span>
-                    <div
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                        exportHOSP
-                          ? "bg-teal-600 border-teal-600 text-white scale-100"
-                          : "border-slate-300 bg-white text-transparent group-hover:border-slate-400"
-                      }`}
-                    >
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </div>
-                  </label>
-
-                  {/* OTRO */}
-                  <label
-                    className={`group flex items-center justify-between p-3.5 rounded-2xl cursor-pointer col-span-2 transition-all border select-none ${
-                      exportOTRO
-                        ? "bg-teal-50/25 border-teal-500/35 text-slate-900 shadow-sm"
-                        : "bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50 hover:border-slate-300"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={exportOTRO}
-                      onChange={(e) => setExportOTRO(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <span
-                      className={`text-xs font-extrabold transition-colors ${exportOTRO ? "text-teal-950 font-extrabold" : "text-slate-705 font-semibold"}`}
-                    >
-                      Otros / Sin Clasificar
-                    </span>
-                    <div
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                        exportOTRO
-                          ? "bg-teal-600 border-teal-600 text-white scale-100"
-                          : "border-slate-300 bg-white text-transparent group-hover:border-slate-400"
-                      }`}
-                    >
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {/* Section: Status Update (Color) */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-3 bg-teal-500 rounded-full" />
-                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
-                      Estado de Actualización
-                    </h4>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExportEmerald(true);
-                        setExportAmber(true);
-                        setExportRed(true);
-                        setExportGray(true);
-                      }}
-                      className="text-teal-600 hover:text-teal-700 font-black hover:underline cursor-pointer active:scale-95 transition-all"
-                    >
-                      Todos
-                    </button>
-                    <span className="text-slate-300 select-none">|</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExportEmerald(false);
-                        setExportAmber(false);
-                        setExportRed(false);
-                        setExportGray(false);
-                      }}
-                      className="text-slate-500 hover:text-slate-700 hover:underline cursor-pointer active:scale-95 transition-all"
-                    >
-                      Ninguno
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  {/* Emerald */}
-                  <label
-                    className={`group flex items-center justify-between p-3.5 rounded-2xl cursor-pointer transition-all border select-none ${
-                      exportEmerald
-                        ? "bg-teal-50/25 border-teal-500/35 text-slate-900 shadow-sm"
-                        : "bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50 hover:border-slate-300"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={exportEmerald}
-                      onChange={(e) => setExportEmerald(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <div className="flex items-center gap-2 font-extrabold text-xs">
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                      <span
-                        className={
-                          exportEmerald
-                            ? "text-slate-900 font-extrabold"
-                            : "text-slate-700 font-semibold"
-                        }
-                      >
-                        En Línea (&lt;1h)
-                      </span>
-                    </div>
-                    <div
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                        exportEmerald
-                          ? "bg-teal-600 border-teal-600 text-white scale-100"
-                          : "border-slate-300 bg-white text-transparent group-hover:border-slate-400"
-                      }`}
-                    >
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </div>
-                  </label>
-
-                  {/* Amber */}
-                  <label
-                    className={`group flex items-center justify-between p-3.5 rounded-2xl cursor-pointer transition-all border select-none ${
-                      exportAmber
-                        ? "bg-teal-50/25 border-teal-500/35 text-slate-900 shadow-sm"
-                        : "bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50 hover:border-slate-300"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={exportAmber}
-                      onChange={(e) => setExportAmber(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <div className="flex items-center gap-2 font-extrabold text-xs">
-                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
-                      <span
-                        className={
-                          exportAmber
-                            ? "text-slate-900 font-extrabold"
-                            : "text-slate-700 font-semibold"
-                        }
-                      >
-                        Desactualizados (&gt;1h)
-                      </span>
-                    </div>
-                    <div
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                        exportAmber
-                          ? "bg-teal-600 border-teal-600 text-white scale-100"
-                          : "border-slate-300 bg-white text-transparent group-hover:border-slate-400"
-                      }`}
-                    >
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </div>
-                  </label>
-
-                  {/* Red */}
-                  <label
-                    className={`group flex items-center justify-between p-3.5 rounded-2xl cursor-pointer transition-all border select-none ${
-                      exportRed
-                        ? "bg-teal-50/25 border-teal-500/35 text-slate-900 shadow-sm"
-                        : "bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50 hover:border-slate-300"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={exportRed}
-                      onChange={(e) => setExportRed(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <div className="flex items-center gap-2 font-extrabold text-xs">
-                      <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
-                      <span
-                        className={
-                          exportRed
-                            ? "text-slate-900 font-extrabold"
-                            : "text-slate-700 font-semibold"
-                        }
-                      >
-                        Fuera Línea (&gt;24h)
-                      </span>
-                    </div>
-                    <div
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                        exportRed
-                          ? "bg-teal-600 border-teal-600 text-white scale-100"
-                          : "border-slate-300 bg-white text-transparent group-hover:border-slate-400"
-                      }`}
-                    >
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </div>
-                  </label>
-
-                  {/* Gray */}
-                  <label
-                    className={`group flex items-center justify-between p-3.5 rounded-2xl cursor-pointer transition-all border select-none ${
-                      exportGray
-                        ? "bg-teal-50/25 border-teal-500/35 text-slate-900 shadow-sm"
-                        : "bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50 hover:border-slate-300"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={exportGray}
-                      onChange={(e) => setExportGray(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <div className="flex items-center gap-2 font-extrabold text-xs">
-                      <span className="w-2.5 h-2.5 rounded-full bg-slate-400 shrink-0" />
-                      <span
-                        className={
-                          exportGray
-                            ? "text-slate-900 font-extrabold"
-                            : "text-slate-700 font-semibold"
-                        }
-                      >
-                        Sin Datos
-                      </span>
-                    </div>
-                    <div
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                        exportGray
-                          ? "bg-teal-600 border-teal-600 text-white scale-100"
-                          : "border-slate-300 bg-white text-transparent group-hover:border-slate-400"
-                      }`}
-                    >
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {/* Section: Update Date Limit */}
-              {renderRangeFilter(
-                exportDateUnit,
-                setExportDateUnit,
-                exportDateValue,
-                setExportDateValue,
-                exportDateCondition,
-                setExportDateCondition,
-                "Antigüedad de Sincronización",
-                "ACT.",
-                "NO ACT.",
-                "ACTUALIZADOS",
-                "NO ACTUALIZADOS",
-              )}
-
-              {/* Section: Expirations filter */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-3 bg-teal-500 rounded-full" />
-                  <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
-                    Medicamentos y Filtros adicionales
-                  </h4>
-                </div>
-                <label
-                  className={`group flex items-center justify-between p-3.5 rounded-2xl cursor-pointer transition-all border select-none ${
-                    exportHasPendingExpirations
-                      ? "bg-red-50/25 border-red-200 text-slate-900 shadow-sm"
-                      : "bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50 hover:border-red-200/50 shadow-xs"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={exportHasPendingExpirations}
-                    onChange={(e) =>
-                      setExportHasPendingExpirations(e.target.checked)
-                    }
-                    className="sr-only"
-                  />
-                  <div className="flex items-center gap-2.5">
-                    <AlertTriangle
-                      className={`h-4.5 w-4.5 shrink-0 ${exportHasPendingExpirations ? "text-red-650 animate-pulse" : "text-slate-400"}`}
-                    />
-                    <span
-                      className={`text-xs font-bold leading-tight ${exportHasPendingExpirations ? "text-red-950 font-extrabold" : "text-slate-705 group-hover:text-red-700"}`}
-                    >
-                      Exportar únicamente medicamentos vencidos o por vencer
-                    </span>
-                  </div>
-                  <div
-                    className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                      exportHasPendingExpirations
-                        ? "bg-red-600 border-red-600 text-white scale-100"
-                        : "border-slate-300 bg-white text-transparent group-hover:border-slate-400"
-                    }`}
-                  >
-                    <Check className="h-3 w-3 stroke-[3]" />
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            {/* Footer Details & Buttons */}
-            <div className="px-6 py-5 border-t border-slate-100 bg-white/95 backdrop-blur-md flex flex-col sm:flex-row items-center sm:justify-between gap-4 sticky bottom-0 z-10 shrink-0 shadow-[0_-4px_15px_rgba(0,0,0,0.03)]">
-              <div className="text-center sm:text-left">
-                <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">
-                  Total Seleccionado
-                </p>
-                <p className="text-sm font-black text-teal-950 mt-1">
-                  {filteredExportSourcesCount}{" "}
-                  {filteredExportSourcesCount === 1
-                    ? "establecimiento"
-                    : "establecimientos"}
-                </p>
-              </div>
-
-              <div className="w-full sm:w-auto">
-                <button
-                  onClick={executeExportAllEstablishmentsToExcel}
-                  disabled={filteredExportSourcesCount === 0}
-                  className={`w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 text-white font-black text-[11px] uppercase tracking-widest rounded-xl shadow-lg transition-all active:scale-95 cursor-pointer ${
-                    filteredExportSourcesCount === 0
-                      ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none border border-slate-200"
-                      : "bg-teal-600 hover:bg-teal-700 shadow-teal-600/15 hover:shadow-teal-600/25 border border-teal-600/10"
-                  }`}
-                  type="button"
-                >
-                  <Download className="h-4.5 w-4.5 shrink-0" />
-                  <span>Exportar Excel</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <StockExportModal
+          titulo={
+            exportScope === "single" && selectedUngetIndex !== null
+              ? formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "UNGET")
+              : "Todas las UNGET (regional)"
+          }
+          establecimientos={exportEstablishments}
+          seleccionInicial={exportInitialIds}
+          soloVencimientosInicial={filterHasPendingExpirations}
+          onClose={() => setIsExportOptionsModalOpen(false)}
+          onExport={executeExportAllEstablishmentsToExcel}
+        />
       )}
 
       {/* MODAL DE REPORTE GENERAL */}
