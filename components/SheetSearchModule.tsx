@@ -4137,10 +4137,6 @@ function processSheet(sheet) {
         : [],
     [data, selectedSourceId],
   );
-  const activeSheetExpirationInfo = useMemo(
-    () => getExpirationStats(activeSheetData),
-    [activeSheetData],
-  );
 
   /**
    * Farmacias de la hoja abierta, para el filtro por establecimiento.
@@ -4159,6 +4155,29 @@ function processSheet(sheet) {
   useEffect(() => {
     setDataFilterPharmacy("all");
   }, [selectedSourceId]);
+
+  /**
+   * Vencidos y por vencer del establecimiento que se está viendo: la hoja entera con
+   * «Todos», o solo la farmacia elegida.
+   *
+   * Sigue únicamente al selector de establecimiento, no al buscador ni a los filtros
+   * avanzados: es el aviso de ese establecimiento, y no debe desaparecer mientras se escribe
+   * en el buscador. Antes contaba siempre la hoja entera, y con un puesto comunal elegido el
+   * botón decía «4 por vencer» mientras la tarjeta de arriba decía 3.
+   */
+  const activeSheetExpirationInfo = useMemo(
+    () =>
+      getExpirationStats(
+        activeSheetData.filter((row) => rowMatchesPharmacy(readAlmCode(row), dataFilterPharmacy)),
+      ),
+    [activeSheetData, dataFilterPharmacy],
+  );
+  const farmaciaElegida = useMemo(
+    () => farmaciasDeLaHoja.find((farmacia) => farmacia.code === dataFilterPharmacy) || null,
+    [farmaciasDeLaHoja, dataFilterPharmacy],
+  );
+  /** Con «Todos» en una hoja con puestos comunales, cada fila tiene que decir de quién es. */
+  const expirationShowsPharmacy = hojaConPuestosComunales && dataFilterPharmacy === "all";
   const filteredDataExpirationInfo = useMemo(
     () => getExpirationStats(filteredData),
     [filteredData],
@@ -8441,6 +8460,13 @@ function processSheet(sheet) {
                       ? "Atención urgente requerida"
                       : "Asegure la rotación de estos inventarios"}
                   </p>
+                  {farmaciaElegida && (
+                    <p className="mt-1 text-xs font-bold text-slate-600">
+                      {farmaciaElegida.name ||
+                        (farmaciaElegida.unregistered ? "Puesto sin registrar" : "Sin registrar")}{" "}
+                      <span className="font-mono text-slate-400">({farmaciaElegida.code})</span>
+                    </p>
+                  )}
                 </div>
               </div>
               <button
@@ -8455,6 +8481,14 @@ function processSheet(sheet) {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50/80 sticky top-0 z-10 backdrop-blur-sm">
                   <tr>
+                    {expirationShowsPharmacy && (
+                      <th
+                        scope="col"
+                        className="px-4 py-3 text-left text-xs font-black text-gray-500 uppercase tracking-wider whitespace-nowrap"
+                      >
+                        Establecimiento
+                      </th>
+                    )}
                     <th
                       scope="col"
                       className="px-4 py-3 text-left text-xs font-black text-gray-500 uppercase tracking-wider whitespace-nowrap"
@@ -8494,6 +8528,11 @@ function processSheet(sheet) {
                         setSelectedRecord(row);
                       }}
                     >
+                      {expirationShowsPharmacy && (
+                        <td className="px-4 py-3 whitespace-nowrap align-top">
+                          <PharmacyCodeCell label={pharmacyLabelOf(row)} />
+                        </td>
+                      )}
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex flex-col">
                           <span className="text-xs font-black text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded w-fit mb-1">
