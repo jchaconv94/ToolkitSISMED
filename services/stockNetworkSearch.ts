@@ -101,7 +101,8 @@ export const stockRowMatches = (row: any, term: string): boolean => {
  * Identidad de un producto dentro de la red: su código SISMED, o su nombre cuando la hoja
  * no lo trae. Es lo que agrupa los lotes y lo que se elige en la lista de sugerencias.
  */
-const productKeyOf = (row: any): string => leerSismed(row).trim() || leerProducto(row).trim();
+/** Clave de producto: su código SISMED, o el nombre cuando la hoja no trae código. */
+export const productKeyOf = (row: any): string => leerSismed(row).trim() || leerProducto(row).trim();
 
 /**
  * Filas consolidadas de las que cumplen un criterio.

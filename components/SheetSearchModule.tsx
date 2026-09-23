@@ -114,7 +114,11 @@ import {
   type StockExportEstablishment,
   type StockExportRequest,
 } from "./StockExportModal";
-import { readStockField } from "../services/stockNetworkSearch";
+import {
+  buildProductIndex,
+  productKeyOf,
+  readStockField,
+} from "../services/stockNetworkSearch";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -3698,17 +3702,31 @@ export const SheetSearchModule: React.FC = () => {
     scriptUrls,
   ]);
 
+  /** Productos del ámbito de la exportación, para el buscador de productos del modal. */
+  const exportProducts = useMemo(
+    () =>
+      isExportOptionsModalOpen
+        ? buildProductIndex(exportEstablishments.flatMap((e) => rowsForSource(e.id)))
+        : [],
+    [isExportOptionsModalOpen, exportEstablishments, rowsForSource],
+  );
+
   const executeExportAllEstablishmentsToExcel = ({
     ids,
     modo,
     soloVencimientos,
+    productos,
   }: StockExportRequest) => {
     const elegidas = sources.filter((s) => ids.includes(s.id));
+    const productosElegidos = new Set(productos);
 
     // Una hoja por vez: la consolidación suma las farmacias de un mismo establecimiento y
     // lo rotula con el nombre de su hoja.
     const filas = elegidas.flatMap((sheetInfo) => {
       let rows = rowsForSource(sheetInfo.id);
+      if (productosElegidos.size > 0) {
+        rows = rows.filter((r) => productosElegidos.has(productKeyOf(r)));
+      }
       if (soloVencimientos) {
         rows = rows.filter((r) => {
           const { expiredCount, expiringThisMonthCount } = getExpirationStats([r]);
@@ -9745,6 +9763,7 @@ function processSheet(sheet) {
               : "Todas las UNGET (regional)"
           }
           establecimientos={exportEstablishments}
+          productos={exportProducts}
           seleccionInicial={exportInitialIds}
           soloVencimientosInicial={filterHasPendingExpirations}
           onClose={() => setIsExportOptionsModalOpen(false)}
