@@ -11,13 +11,13 @@ const OPCIONES = [
   {
     modo: "consolidado" as const,
     titulo: "Consolidado",
-    detalle: "Farmacias y puestos comunales sumados por lote, como «Consolidar farmacias» del Toolkit",
+    detalle: "Sumar el stock de todas las farmacias",
     Icono: Layers,
   },
   {
     modo: "detallado" as const,
     titulo: "Por farmacia",
-    detalle: "Una fila por farmacia y lote, con el código de cada una",
+    detalle: "Stock de cada farmacia",
     Icono: Building2,
   },
 ];
