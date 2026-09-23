@@ -105,7 +105,11 @@ import {
 } from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import { CustomSelect } from "./ui/CustomSelect";
-import { consolidateStockRows } from "../services/stockConsolidation";
+import {
+  consolidateStockRows,
+  exportAlmcod,
+  exportDescAlm,
+} from "../services/stockConsolidation";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { StockNetworkSearchModal } from "./StockNetworkSearchModal";
 import { SheetExportMenu } from "./SheetExportMenu";
@@ -3519,7 +3523,7 @@ export const SheetSearchModule: React.FC = () => {
     };
     const filas =
       modo === "consolidado"
-        ? consolidateStockRows(filteredData, readAlmCode, sheetInfo.name)
+        ? consolidateStockRows(filteredData, readAlmCode)
         : hojaConPuestosComunales
           ? filteredData
               .map((row, i) => ({ row, i }))
@@ -3528,8 +3532,8 @@ export const SheetSearchModule: React.FC = () => {
           : filteredData;
 
     const dataToExport = filas.map((r) => ({
-      ALMCOD: readAlmCode(r),
-      DESC_ALM: r.DESC_ALM || sheetInfo.name || "",
+      ALMCOD: exportAlmcod(readAlmCode(r)),
+      DESC_ALM: exportDescAlm(r.DESC_ALM || sheetInfo.name || "", readAlmCode(r)),
       ID_Producto: r.ID_Producto || "",
       CODIGO_SIG: r.CODIGO_SIG || r.SIGA || "",
       Nombre: r.Nombre || r.DESC_ITEM || "",
@@ -3577,8 +3581,8 @@ export const SheetSearchModule: React.FC = () => {
     if (!sheetInfo) return;
 
     const dataToExport = modalStockData.map((r) => ({
-      ALMCOD: readAlmCode(r),
-      DESC_ALM: r.DESC_ALM || sheetInfo.name || "",
+      ALMCOD: exportAlmcod(readAlmCode(r)),
+      DESC_ALM: exportDescAlm(r.DESC_ALM || sheetInfo.name || "", readAlmCode(r)),
       ID_Producto: r.ID_Producto || "",
       CODIGO_SIG: r.CODIGO_SIG || r.SIGA || "",
       Nombre: r.Nombre || r.DESC_ITEM || "",
@@ -3733,7 +3737,7 @@ export const SheetSearchModule: React.FC = () => {
           return expiredCount > 0 || expiringThisMonthCount > 0;
         });
       }
-      const listas = modo === "consolidado" ? consolidateStockRows(rows, readAlmCode, sheetInfo.name) : rows;
+      const listas = modo === "consolidado" ? consolidateStockRows(rows, readAlmCode) : rows;
       return listas.map((r) => ({ r, sheetInfo }));
     });
 
@@ -3746,8 +3750,8 @@ export const SheetSearchModule: React.FC = () => {
       const ungetInfo = scriptUrls[sheetInfo.urlIndex];
       return {
         UNGET: ungetInfo ? ungetInfo.name : "N/A",
-        ALMCOD: readAlmCode(r),
-        DESC_ALM: r.DESC_ALM || sheetInfo.name || "",
+        ALMCOD: exportAlmcod(readAlmCode(r)),
+        DESC_ALM: exportDescAlm(r.DESC_ALM || sheetInfo.name || "", readAlmCode(r)),
         ID_Producto: r.ID_Producto || "",
         CODIGO_SIG: r.CODIGO_SIG || r.SIGA || "",
         Nombre: r.Nombre || r.DESC_ITEM || "",
