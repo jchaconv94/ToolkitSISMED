@@ -3,29 +3,20 @@
  *
  * Replica, fila por fila, lo que hace Sync SISMED en el ToolKit de escritorio cuando se
  * marca «Consolidar farmacias» (`toolskit/sismed_sync.py`, bloque «6. Consolidación»), para
- * que el Excel consolidado que se descarga de la web sea el mismo que habría llegado a la
- * hoja si la PC enviara consolidado:
+ * que el Excel consolidado de la web sume igual que la PC:
  *
  * - Se juntan las filas que coinciden en **IPRESS + producto + lote + vencimiento + fuente
  *   de financiamiento + tipo de suministro**. Lotes, vencimientos, financiamientos o tipos
  *   de suministro distintos nunca se mezclan.
  * - Los saldos se **suman**. De precio se toma **el mayor** del grupo.
  * - El resto de datos (nombre, SIGA, registro sanitario…) se toma de la primera fila.
- * - La fila queda a nombre de la farmacia principal: `06519F01`, o `030S0501` en un almacén.
+ * - La fila queda con el código de la IPRESS (`06519`) y su nombre, sin sufijo de farmacia:
+ *   a diferencia del escritorio, que la rotula `06519F01` y « (CONSOLIDADO)», el Excel de la
+ *   web muestra el establecimiento tal cual.
  */
 
 import { readStockField, parseStockAmount } from "./stockNetworkSearch";
 import { sheetOwnerCodeOf } from "./facilityCodes";
-
-/**
- * ALMCOD de la fila consolidada, igual que `_consolidated_almcod` del escritorio: un almacén
- * (seis caracteres con letras) lleva `01`; una IPRESS, `F01`.
- */
-export const consolidatedAlmcod = (facilityCode: string): string => {
-  const code = String(facilityCode || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
-  if (!code) return "";
-  return code.length === 6 && /[A-Z]/.test(code) ? `${code}01` : `${code}F01`;
-};
 
 const campo = (row: any, ...nombres: string[]) => readStockField(row, ...nombres).trim();
 
@@ -34,8 +25,8 @@ const campo = (row: any, ...nombres: string[]) => readStockField(row, ...nombres
  * Excel se arme igual en los dos modos. `Saldo`, `Precio_Det` y `Precio_Cab` salen como
  * número.
  *
- * `descripcion` es el nombre con el que se rotula la fila consolidada; se le añade
- * « (CONSOLIDADO)», como hace el escritorio.
+ * `descripcion` es el nombre con el que se rotula la fila consolidada. Si no se da, se usa el
+ * de la fila, sin la marca « (CONSOLIDADO)» con la que la envía el escritorio.
  */
 export const consolidateStockRows = (
   rows: any[] | null | undefined,
@@ -65,8 +56,8 @@ export const consolidateStockRows = (
       const nombre = descripcion || campo(row, "DESC_ALM").replace(/\s*\(CONSOLIDADO\)\s*$/i, "");
       grupos.set(clave, {
         ...row,
-        ALMCOD: consolidatedAlmcod(ipress),
-        DESC_ALM: nombre ? `${nombre} (CONSOLIDADO)` : "(CONSOLIDADO)",
+        ALMCOD: ipress,
+        DESC_ALM: nombre,
         Saldo: saldo,
         Precio_Det: precioDet,
         Precio_Cab: precioCab,
