@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { consolidateStockRows, consolidatedAlmcod } from "./stockConsolidation";
+import { consolidateStockRows } from "./stockConsolidation";
 
 /** Como llegan las filas de la hoja: todo en texto. */
 const fila = (over: Record<string, any>) => ({
@@ -19,18 +19,11 @@ const fila = (over: Record<string, any>) => ({
 });
 const almcod = (row: any) => row.ALMCOD;
 
-describe("consolidatedAlmcod", () => {
-  it("rotula como el escritorio: F01 para una IPRESS, 01 para un almacén", () => {
-    expect(consolidatedAlmcod("06519")).toBe("06519F01");
-    expect(consolidatedAlmcod("030S05")).toBe("030S0501");
-    expect(consolidatedAlmcod("")).toBe("");
-  });
-});
-
 describe("consolidateStockRows", () => {
-  it("da el mismo resultado que el ToolKit de escritorio con «Consolidar farmacias»", () => {
+  it("suma igual que el ToolKit de escritorio con «Consolidar farmacias»", () => {
     // Es el ejemplo que se corrió con la lógica de `sismed_sync.py` (v2.1.9): 7 filas
-    // detalladas dan 5 consolidadas, con estos saldos y precios.
+    // detalladas dan 5 consolidadas, con estos saldos y precios. El código sí difiere a
+    // propósito: la web deja el de la IPRESS (`06519`), no el `06519F01` del escritorio.
     const detallado = [
       fila({ ALMCOD: "06519F0101", Saldo: "300" }),
       fila({ ALMCOD: "06519F0201", Saldo: "80" }), // puesto comunal, mismo lote
@@ -51,11 +44,11 @@ describe("consolidateStockRows", () => {
     ]);
 
     expect(resultado).toEqual([
-      ["06519F01", "04695", "2091913", "DYT", 380, 0.5],
-      ["06519F01", "04695", "OTRO", "DYT", 20, 0.5],
-      ["06519F01", "04695", "2091913", "RO", 50, 0.5],
-      ["06519F01", "02752", "E02236", "DYT", 20, 0.9],
-      ["030S0501", "00200", "2092323", "DYT", 420, 0.5],
+      ["06519", "04695", "2091913", "DYT", 380, 0.5],
+      ["06519", "04695", "OTRO", "DYT", 20, 0.5],
+      ["06519", "04695", "2091913", "RO", 50, 0.5],
+      ["06519", "02752", "E02236", "DYT", 20, 0.9],
+      ["030S05", "00200", "2092323", "DYT", 420, 0.5],
     ]);
   });
 
@@ -81,12 +74,12 @@ describe("consolidateStockRows", () => {
     expect(total(consolidateStockRows(detallado, almcod))).toBe(1287);
   });
 
-  it("rotula la fila con el nombre dado, como hace el escritorio", () => {
-    const [r] = consolidateStockRows([fila({ Saldo: "1" })], almcod, "C.S. Nuevo Lima");
-    expect(r.DESC_ALM).toBe("C.S. Nuevo Lima (CONSOLIDADO)");
-    // Sin nombre dado, usa el de la fila, sin duplicar la marca si ya venía consolidada.
+  it("deja el código de 5 dígitos y el nombre sin «(CONSOLIDADO)»", () => {
+    const [r] = consolidateStockRows([fila({ ALMCOD: "06519F0201", Saldo: "1" })], almcod, "C.S. Nuevo Lima");
+    expect(r).toMatchObject({ ALMCOD: "06519", DESC_ALM: "C.S. Nuevo Lima" });
+    // Sin nombre dado, usa el de la fila, sin la marca con la que la envía el escritorio.
     const [s] = consolidateStockRows([fila({ DESC_ALM: "C.S. X (CONSOLIDADO)", Saldo: "1" })], almcod);
-    expect(s.DESC_ALM).toBe("C.S. X (CONSOLIDADO)");
+    expect(s.DESC_ALM).toBe("C.S. X");
   });
 
   it("conserva los demás datos de la primera fila del grupo", () => {
