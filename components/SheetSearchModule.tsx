@@ -19,6 +19,7 @@ import {
   Lock,
   ArrowLeft,
   Building2,
+  Layers,
   ChevronRight,
   MapPin,
   Clock,
@@ -105,6 +106,7 @@ import {
 } from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import { CustomSelect } from "./ui/CustomSelect";
+import { consolidateStockRows } from "../services/stockConsolidation";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { StockNetworkSearchModal } from "./StockNetworkSearchModal";
 import { readStockField } from "../services/stockNetworkSearch";
@@ -1250,6 +1252,8 @@ export const SheetSearchModule: React.FC = () => {
    * (`06519`, `06519F02`). Solo se ofrece en las hojas que traen puestos comunales.
    */
   const [dataFilterPharmacy, setDataFilterPharmacy] = useState<string>("all");
+  /** Menú de «Exportar Stock» con sus dos modos, en las hojas con puestos comunales. */
+  const [isSheetExportMenuOpen, setIsSheetExportMenuOpen] = useState(false);
   const [isMonthDropdownOpen, setIsMonthDropdownOpen] = useState(false);
   const [isYearDropdownOpen, setIsYearDropdownOpen] = useState(false);
   const [reportSort, setReportSort] = useState<{
@@ -3503,12 +3507,38 @@ export const SheetSearchModule: React.FC = () => {
     setTempUrls(tempUrls.filter((_, idx) => idx !== indexToRemove));
   };
 
-  const exportCurrentSheetToExcel = () => {
+  /**
+   * Excel de la hoja abierta.
+   *
+   * - `"detallado"`: una fila por farmacia y lote, tal como está en la hoja. En una hoja con
+   *   puestos comunales es la opción «Por farmacia», y se ordena por farmacia: la IPRESS
+   *   primero y luego cada puesto.
+   * - `"consolidado"`: las farmacias de la IPRESS sumadas con la misma regla que el ToolKit
+   *   de escritorio (`services/stockConsolidation.ts`).
+   *
+   * Los dos parten de lo filtrado en pantalla: el buscador y los filtros avanzados aplican.
+   */
+  const exportCurrentSheetToExcel = (modo: "detallado" | "consolidado" = "detallado") => {
     if (!selectedSourceId) return;
     const sheetInfo = sources.find((s) => s.id === selectedSourceId);
     if (!sheetInfo) return;
 
-    const dataToExport = filteredData.map((r) => ({
+    const ordenFarmacia = new Map(farmaciasDeLaHoja.map((f, i) => [f.code, i]));
+    const posicion = (row: SIGData) => {
+      const codigo = pharmacyLabelOf(row).code;
+      return ordenFarmacia.has(codigo) ? (ordenFarmacia.get(codigo) as number) : ordenFarmacia.size;
+    };
+    const filas =
+      modo === "consolidado"
+        ? consolidateStockRows(filteredData, readAlmCode, sheetInfo.name)
+        : hojaConPuestosComunales
+          ? filteredData
+              .map((row, i) => ({ row, i }))
+              .sort((a, b) => posicion(a.row) - posicion(b.row) || a.i - b.i)
+              .map(({ row }) => row)
+          : filteredData;
+
+    const dataToExport = filas.map((r) => ({
       ALMCOD: readAlmCode(r),
       DESC_ALM: r.DESC_ALM || sheetInfo.name || "",
       ID_Producto: r.ID_Producto || "",
@@ -3533,9 +3563,16 @@ export const SheetSearchModule: React.FC = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Stock");
     // Con un establecimiento elegido el archivo solo trae el suyo: que el nombre lo diga,
-    // o un puesto comunal se guardaría como si fuera el stock de toda la IPRESS.
+    // o un puesto comunal se guardaría como si fuera el stock de toda la IPRESS. Y en una
+    // hoja con puestos comunales, el nombre dice también cómo se armó.
     const alcance =
-      dataFilterPharmacy !== "all" ? `${sheetInfo.name}_${dataFilterPharmacy}` : sheetInfo.name;
+      dataFilterPharmacy !== "all"
+        ? `${sheetInfo.name}_${dataFilterPharmacy}`
+        : modo === "consolidado"
+          ? `${sheetInfo.name}_CONSOLIDADO`
+          : hojaConPuestosComunales
+            ? `${sheetInfo.name}_POR_FARMACIA`
+            : sheetInfo.name;
     XLSX.writeFile(
       wb,
       `Stock_${alcance}_${new Date().toISOString().split("T")[0]}.xlsx`.replace(
@@ -6000,13 +6037,80 @@ function processSheet(sheet) {
                       </span>
                     </button>
                   )}
-                  <button
-                    onClick={exportCurrentSheetToExcel}
-                    className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
-                  >
-                    <Download className="h-4 w-4 text-emerald-600 shrink-0" />{" "}
-                    Exportar Stock
-                  </button>
+                  {/* Con puestos comunales y «Todos», se elige cómo armar el Excel. Con un
+                      establecimiento elegido, o en una hoja de una sola farmacia, no hay nada
+                      que consolidar y el botón descarga directamente. */}
+                  {hojaConPuestosComunales && dataFilterPharmacy === "all" ? (
+                    <div className="relative z-30">
+                      <button
+                        type="button"
+                        onClick={() => setIsSheetExportMenuOpen(!isSheetExportMenuOpen)}
+                        className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap cursor-pointer"
+                      >
+                        <Download className="h-4 w-4 text-emerald-600 shrink-0" />
+                        Exportar Stock
+                        <ChevronDown
+                          className={`h-4 w-4 text-slate-400 shrink-0 transition-transform duration-200 ${isSheetExportMenuOpen ? "rotate-180" : ""}`}
+                        />
+                      </button>
+                      {isSheetExportMenuOpen && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-40"
+                            onClick={() => setIsSheetExportMenuOpen(false)}
+                          />
+                          <div className="absolute right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-[0_10px_25px_-5px_rgba(0,0,0,0.1),0_8px_10px_-6px_rgba(0,0,0,0.05)] z-50 overflow-hidden w-72 divide-y divide-slate-100 py-1 animate-in fade-in slide-in-from-top-2 duration-150 text-left">
+                            {(
+                              [
+                                {
+                                  modo: "consolidado" as const,
+                                  titulo: "Consolidado",
+                                  detalle: "Farmacias y puestos comunales sumados por lote, como «Consolidar farmacias» del Toolkit",
+                                  Icono: Layers,
+                                },
+                                {
+                                  modo: "detallado" as const,
+                                  titulo: "Por farmacia",
+                                  detalle: "Una fila por farmacia y lote, con el código de cada una",
+                                  Icono: Building2,
+                                },
+                              ]
+                            ).map(({ modo, titulo, detalle, Icono }) => (
+                              <button
+                                key={modo}
+                                type="button"
+                                onClick={() => {
+                                  setIsSheetExportMenuOpen(false);
+                                  exportCurrentSheetToExcel(modo);
+                                }}
+                                className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-all cursor-pointer"
+                              >
+                                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                                  <Icono className="w-4 h-4" />
+                                </div>
+                                <div className="flex flex-col gap-0.5 min-w-0">
+                                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 leading-tight">
+                                    {titulo}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-medium leading-normal">
+                                    {detalle}
+                                  </span>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => exportCurrentSheetToExcel()}
+                      className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
+                    >
+                      <Download className="h-4 w-4 text-emerald-600 shrink-0" />{" "}
+                      Exportar Stock
+                    </button>
+                  )}
                 </>
               )}
 
