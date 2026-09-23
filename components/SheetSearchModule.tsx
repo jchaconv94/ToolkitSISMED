@@ -19,7 +19,6 @@ import {
   Lock,
   ArrowLeft,
   Building2,
-  Layers,
   ChevronRight,
   MapPin,
   Clock,
@@ -109,6 +108,7 @@ import { CustomSelect } from "./ui/CustomSelect";
 import { consolidateStockRows } from "../services/stockConsolidation";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { StockNetworkSearchModal } from "./StockNetworkSearchModal";
+import { SheetExportMenu } from "./SheetExportMenu";
 import { readStockField } from "../services/stockNetworkSearch";
 import {
   DeficiencyCaptureModal,
@@ -1253,7 +1253,6 @@ export const SheetSearchModule: React.FC = () => {
    */
   const [dataFilterPharmacy, setDataFilterPharmacy] = useState<string>("all");
   /** Menú de «Exportar Stock» con sus dos modos, en las hojas con puestos comunales. */
-  const [isSheetExportMenuOpen, setIsSheetExportMenuOpen] = useState(false);
   const [isMonthDropdownOpen, setIsMonthDropdownOpen] = useState(false);
   const [isYearDropdownOpen, setIsYearDropdownOpen] = useState(false);
   const [reportSort, setReportSort] = useState<{
@@ -6041,67 +6040,7 @@ function processSheet(sheet) {
                       establecimiento elegido, o en una hoja de una sola farmacia, no hay nada
                       que consolidar y el botón descarga directamente. */}
                   {hojaConPuestosComunales && dataFilterPharmacy === "all" ? (
-                    <div className="relative z-30">
-                      <button
-                        type="button"
-                        onClick={() => setIsSheetExportMenuOpen(!isSheetExportMenuOpen)}
-                        className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap cursor-pointer"
-                      >
-                        <Download className="h-4 w-4 text-emerald-600 shrink-0" />
-                        Exportar Stock
-                        <ChevronDown
-                          className={`h-4 w-4 text-slate-400 shrink-0 transition-transform duration-200 ${isSheetExportMenuOpen ? "rotate-180" : ""}`}
-                        />
-                      </button>
-                      {isSheetExportMenuOpen && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-40"
-                            onClick={() => setIsSheetExportMenuOpen(false)}
-                          />
-                          <div className="absolute right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-[0_10px_25px_-5px_rgba(0,0,0,0.1),0_8px_10px_-6px_rgba(0,0,0,0.05)] z-50 overflow-hidden w-72 divide-y divide-slate-100 py-1 animate-in fade-in slide-in-from-top-2 duration-150 text-left">
-                            {(
-                              [
-                                {
-                                  modo: "consolidado" as const,
-                                  titulo: "Consolidado",
-                                  detalle: "Farmacias y puestos comunales sumados por lote, como «Consolidar farmacias» del Toolkit",
-                                  Icono: Layers,
-                                },
-                                {
-                                  modo: "detallado" as const,
-                                  titulo: "Por farmacia",
-                                  detalle: "Una fila por farmacia y lote, con el código de cada una",
-                                  Icono: Building2,
-                                },
-                              ]
-                            ).map(({ modo, titulo, detalle, Icono }) => (
-                              <button
-                                key={modo}
-                                type="button"
-                                onClick={() => {
-                                  setIsSheetExportMenuOpen(false);
-                                  exportCurrentSheetToExcel(modo);
-                                }}
-                                className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-all cursor-pointer"
-                              >
-                                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-                                  <Icono className="w-4 h-4" />
-                                </div>
-                                <div className="flex flex-col gap-0.5 min-w-0">
-                                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 leading-tight">
-                                    {titulo}
-                                  </span>
-                                  <span className="text-[10px] text-slate-400 font-medium leading-normal">
-                                    {detalle}
-                                  </span>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
+                    <SheetExportMenu onExport={exportCurrentSheetToExcel} />
                   ) : (
                     <button
                       onClick={() => exportCurrentSheetToExcel()}
