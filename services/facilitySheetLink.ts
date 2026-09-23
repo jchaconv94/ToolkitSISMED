@@ -196,6 +196,65 @@ export const describePharmacyCode = (
   };
 };
 
+/** Una farmacia presente en una hoja, tal como se ofrece en el filtro por establecimiento. */
+export interface PharmacyInSheet extends PharmacyLabel {
+  /** Cuántas filas (lotes) de la hoja son suyas. */
+  rows: number;
+}
+
+/**
+ * Farmacias que aparecen en una hoja, para filtrar por establecimiento dentro de ella.
+ *
+ * Una IPRESS que envía sin consolidar trae en la misma pestaña su farmacia principal y sus
+ * puestos comunales, cada uno con su ALMCOD. Esta lista es lo que se ofrece para ver solo
+ * uno de ellos. La principal va primero —es la IPRESS— y los puestos comunales después, en
+ * orden de código.
+ *
+ * Las filas sin ALMCOD legible no abren una entrada propia: se le cuentan a la IPRESS, con
+ * la misma regla que `rowsBelongingToFacility`.
+ */
+export const pharmaciesInRows = <T>(
+  rows: T[] | null | undefined,
+  almcodOf: (row: T) => string,
+  facilities: Array<{ code?: string | null; name?: string | null }> | null | undefined,
+): PharmacyInSheet[] => {
+  const porCodigo = new Map<string, PharmacyInSheet>();
+  let sinCodigo = 0;
+
+  for (const row of rows || []) {
+    const almcod = almcodOf(row);
+    const code = facilityCodeOf(almcod);
+    if (!code) {
+      sinCodigo += 1;
+      continue;
+    }
+    const existente = porCodigo.get(code);
+    if (existente) existente.rows += 1;
+    else porCodigo.set(code, { ...describePharmacyCode(almcod, facilities), rows: 1 });
+  }
+
+  const lista = Array.from(porCodigo.values());
+  const esPuesto = (p: PharmacyInSheet) => parseFacilityCode(p.code).kind === "puesto-comunal";
+  lista.sort((a, b) => Number(esPuesto(a)) - Number(esPuesto(b)) || a.code.localeCompare(b.code));
+
+  const principal = lista.find((p) => !esPuesto(p));
+  if (principal) principal.rows += sinCodigo;
+  return lista;
+};
+
+/**
+ * Si una fila pertenece a la farmacia elegida en el filtro por establecimiento.
+ *
+ * `"all"` deja pasar todo. Una fila sin ALMCOD legible se trata como de la IPRESS —nunca de
+ * un puesto comunal—, igual que en `rowsBelongingToFacility`: nada dice que sea del puesto.
+ */
+export const rowMatchesPharmacy = (almcod: string | null | undefined, selected: string): boolean => {
+  if (!selected || selected === "all") return true;
+  const code = facilityCodeOf(almcod);
+  if (!code) return parseFacilityCode(selected).kind !== "puesto-comunal";
+  return code === selected;
+};
+
 /**
  * Si vale la pena mostrar la columna «Código IPRESS».
  *

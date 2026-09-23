@@ -97,7 +97,12 @@ import {
   type KnownRowCounts,
 } from "../services/sheetsApiService";
 import { sheetOwnerCodeOf } from "../services/facilityCodes";
-import { describePharmacyCode, showsPharmacyColumn } from "../services/facilitySheetLink";
+import {
+  describePharmacyCode,
+  pharmaciesInRows,
+  rowMatchesPharmacy,
+  showsPharmacyColumn,
+} from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import { CustomSelect } from "./ui/CustomSelect";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
@@ -1240,6 +1245,11 @@ export const SheetSearchModule: React.FC = () => {
     useState<string>("all");
   const [dataFilterExpMonth, setDataFilterExpMonth] = useState<string>("all");
   const [dataFilterExpYear, setDataFilterExpYear] = useState<string>("all");
+  /**
+   * Farmacia elegida dentro de la hoja abierta: `"all"` o el código del establecimiento
+   * (`06519`, `06519F02`). Solo se ofrece en las hojas que traen puestos comunales.
+   */
+  const [dataFilterPharmacy, setDataFilterPharmacy] = useState<string>("all");
   const [isMonthDropdownOpen, setIsMonthDropdownOpen] = useState(false);
   const [isYearDropdownOpen, setIsYearDropdownOpen] = useState(false);
   const [reportSort, setReportSort] = useState<{
@@ -3522,9 +3532,13 @@ export const SheetSearchModule: React.FC = () => {
     const ws = XLSX.utils.json_to_sheet(dataToExport);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Stock");
+    // Con un establecimiento elegido el archivo solo trae el suyo: que el nombre lo diga,
+    // o un puesto comunal se guardaría como si fuera el stock de toda la IPRESS.
+    const alcance =
+      dataFilterPharmacy !== "all" ? `${sheetInfo.name}_${dataFilterPharmacy}` : sheetInfo.name;
     XLSX.writeFile(
       wb,
-      `Stock_${sheetInfo.name}_${new Date().toISOString().split("T")[0]}.xlsx`.replace(
+      `Stock_${alcance}_${new Date().toISOString().split("T")[0]}.xlsx`.replace(
         /\s+/g,
         "_",
       ),
@@ -3993,6 +4007,9 @@ function processSheet(sheet) {
         if (!matchesSearch) return false;
       }
 
+      // 1b. Farmacia: la IPRESS o uno de sus puestos comunales
+      if (!rowMatchesPharmacy(readAlmCode(item), dataFilterPharmacy)) return false;
+
       // 2. Tipsum filter (dynamic match)
       if (dataFilterTipsum !== "all") {
         const tipsum = String(item.TIPSUM || "")
@@ -4062,6 +4079,7 @@ function processSheet(sheet) {
     dataFilterExpiration,
     dataFilterExpMonth,
     dataFilterExpYear,
+    dataFilterPharmacy,
   ]);
 
   const modalStockData = useMemo(() => {
@@ -4123,6 +4141,24 @@ function processSheet(sheet) {
     () => getExpirationStats(activeSheetData),
     [activeSheetData],
   );
+
+  /**
+   * Farmacias de la hoja abierta, para el filtro por establecimiento.
+   *
+   * Se calculan sobre la hoja **entera** y no sobre lo filtrado: al elegir un puesto
+   * comunal lo filtrado trae una sola farmacia, y el selector desaparecería justo después
+   * de usarlo, sin forma de volver atrás.
+   */
+  const farmaciasDeLaHoja = useMemo(
+    () => pharmaciesInRows(activeSheetData, readAlmCode, allFacilities),
+    [activeSheetData, allFacilities],
+  );
+  const hojaConPuestosComunales = farmaciasDeLaHoja.length > 1;
+
+  // Otra hoja, otras farmacias: la elección de la anterior no significa nada aquí.
+  useEffect(() => {
+    setDataFilterPharmacy("all");
+  }, [selectedSourceId]);
   const filteredDataExpirationInfo = useMemo(
     () => getExpirationStats(filteredData),
     [filteredData],
@@ -5859,7 +5895,7 @@ function processSheet(sheet) {
                     placeholder="Buscar medicamento en esta hoja..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-32 py-2.5 bg-slate-50/85 md:bg-slate-50 border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
+                    className="w-full pl-10 pr-32 sm:pr-48 py-2.5 bg-slate-50/85 md:bg-slate-50 border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
                   />
                   <div className="absolute inset-y-0 right-0 pr-1.5 flex items-center gap-1.5">
                     {searchTerm && (
@@ -5878,7 +5914,8 @@ function processSheet(sheet) {
                       className="flex items-center gap-1.5 bg-white hover:bg-slate-50 active:scale-95 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200/85 text-xs font-black transition-all shrink-0 relative shadow-sm cursor-pointer hover:border-slate-300 active:bg-slate-100"
                     >
                       <Filter className="h-3.5 w-3.5 text-teal-600" />
-                      <span>Filtros</span>
+                      <span className="hidden sm:inline">Filtros avanzados</span>
+                      <span className="sm:hidden">Filtros</span>
                       {(dataFilterTipsum !== "all" ||
                         dataFilterFFinan !== "all" ||
                         dataFilterStock !== "all" ||
@@ -5890,6 +5927,27 @@ function processSheet(sheet) {
                 </div>
               )}
             </div>
+
+            {/* Filtro por establecimiento dentro de la hoja. Solo en las hojas que traen
+                puestos comunales —una IPRESS que envía sin consolidar—: en las demás hay una
+                sola farmacia y no habría nada que elegir. */}
+            {viewLevel === "data" && hojaConPuestosComunales && (
+              <div className="w-full md:w-72 shrink-0">
+                <CustomSelect
+                  value={dataFilterPharmacy}
+                  onChange={setDataFilterPharmacy}
+                  ariaLabel="Filtrar por establecimiento"
+                  className="h-[42px] rounded-xl"
+                  options={[
+                    { value: "all", label: "Todos los establecimientos" },
+                    ...farmaciasDeLaHoja.map((farmacia) => ({
+                      value: farmacia.code,
+                      label: `${farmacia.name || (farmacia.unregistered ? "Puesto sin registrar" : "Sin registrar")} (${farmacia.code})`,
+                    })),
+                  ]}
+                />
+              </div>
+            )}
 
             <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 pt-1 md:pt-0 md:ml-auto pb-1 relative z-30">
               {viewLevel === "data" && (
