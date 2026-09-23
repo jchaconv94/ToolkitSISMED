@@ -117,6 +117,50 @@ después, y forzar recarga con `Ctrl + Shift + R`.
 - **Resto de tablas.** `personnel`, `facilities`, `ungets` y las de farmacia siguen
   abiertas a lectura. Se dejaron fuera porque el login las necesita antes de tener sesión.
 - **Migración a Supabase Auth**, que permitiría políticas por rol y ámbito reales.
+- **Envío de stock sin credencial** (anotado el 2026-09-23 a pedido del usuario, que lo
+  considera importante). Ver la sección siguiente.
+
+## Pendiente: el envío de stock a Google Sheets no pide credencial
+
+Anotado el 2026-09-23 al revisar el script que recibe el stock de Sync SISMED
+(`Toolkit-OGM/docs/apps-script/sync_sismed_google_sheets.gs`). **Queda por hacer; el usuario
+pidió que se le recuerde.**
+
+**El problema.** El `doPost` de cada UNGET está publicado para «Cualquiera» y no comprueba
+quién envía. Quien conozca la dirección del script puede:
+
+- **reemplazar el stock** de cualquier establecimiento con datos inventados, porque cada
+  envío sustituye la pestaña completa;
+- **dejar en blanco** cualquier pestaña, enviando una lista vacía con
+  `reported_almcods=<código>`. Es la vía más dañina: no deja rastro de quién fue.
+
+La dirección no es secreta en la práctica: está en la configuración de cada PC y hay una por
+defecto escrita en el código del Toolkit (`toolskit/sismed_sync.py`, `apps_script_url`), así
+que viaja dentro del instalador `.exe`. **No escribir esa dirección en ningún documento.**
+
+**Lo que se propuso: una clave por conexión.**
+
+- Cada UNGET guarda su propia clave en las propiedades del script
+  (`PropertiesService.getScriptProperties()`), no en el código.
+- El Toolkit de escritorio suma un campo «Clave de envío» en su configuración y la manda en
+  cada envío. **Tiene que ir en la dirección (`?clave=...`) o en el cuerpo:** un `doPost` de
+  Apps Script no puede leer cabeceras HTTP.
+- El script rechaza, sin tocar la hoja, todo envío cuya clave no coincida.
+
+**Cómo desplegarlo sin cortar el envío**, porque son 22 PC solo en Bellavista:
+
+1. Publicar el script aceptando envíos con y sin clave, y registrando los que llegan sin ella.
+2. Actualizar el Toolkit en todas las PC y cargarles la clave.
+3. Cuando el registro muestre que ya nadie envía sin clave, empezar a exigirla.
+
+Cambiar la clave en el futuro es cambiar la propiedad y actualizarla en las PC.
+
+**Relacionado, de menor gravedad:** las hojas están compartidas como «Cualquiera con el
+enlace: lector», que es lo que permite a la web leerlas sin iniciar sesión. Quien tenga el
+enlace puede ver el stock. No hay datos personales, pero conviene decidirlo explícitamente.
+
+**La solución de fondo ya existe:** Sync SISMED 2.0 envía a Supabase con un token por máquina
+y una lista blanca de almacenes por instalación. Migrar a él cierra ambos puntos.
 
 ## Prioridades recomendadas
 
