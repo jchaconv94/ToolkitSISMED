@@ -3,7 +3,9 @@ import {
   describePharmacyCode,
   isLinkedToSheet,
   linkedSheetName,
+  pharmaciesInRows,
   resolveFacilitySheet,
+  rowMatchesPharmacy,
   rowsBelongingToFacility,
   sheetOwnerCode,
   showsPharmacyColumn,
@@ -201,6 +203,74 @@ describe("describePharmacyCode", () => {
       { code: "06520F0101", name: "OTRO REGISTRO" },
     ];
     expect(describePharmacyCode("06520F0101", ambiguo).name).toBe("");
+  });
+});
+
+describe("pharmaciesInRows", () => {
+  const almcod = (row: { ALMCOD: string }) => row.ALMCOD;
+  const registro = [
+    { code: "06519", name: "C.S. NUEVO LIMA" },
+    { code: "06519F02", name: "P.C. LOS OLIVOS" },
+  ];
+
+  it("lista cada farmacia de la hoja una vez, con cuántos lotes tiene", () => {
+    const filas = [
+      { ALMCOD: "06519F0101" },
+      { ALMCOD: "06519F0201" },
+      { ALMCOD: "06519F0101" },
+      { ALMCOD: "06519F0301" },
+    ];
+    const lista = pharmaciesInRows(filas, almcod, registro);
+    expect(lista.map((p) => [p.code, p.rows])).toEqual([
+      ["06519", 2],
+      ["06519F02", 1],
+      ["06519F03", 1],
+    ]);
+    expect(lista[1].name).toBe("P.C. LOS OLIVOS");
+    // El puesto que nadie registró sigue apareciendo, marcado: es la señal de darlo de alta.
+    expect(lista[2]).toMatchObject({ name: "", unregistered: true });
+  });
+
+  it("pone primero a la IPRESS aunque sus filas lleguen después", () => {
+    const filas = [{ ALMCOD: "06519F0201" }, { ALMCOD: "06519F0101" }];
+    expect(pharmaciesInRows(filas, almcod, registro).map((p) => p.code)).toEqual([
+      "06519",
+      "06519F02",
+    ]);
+  });
+
+  it("las filas sin ALMCOD se le cuentan a la IPRESS, no abren entrada propia", () => {
+    const filas = [{ ALMCOD: "06519F0101" }, { ALMCOD: "" }, { ALMCOD: "06519F0201" }];
+    const lista = pharmaciesInRows(filas, almcod, registro);
+    expect(lista.map((p) => [p.code, p.rows])).toEqual([
+      ["06519", 2],
+      ["06519F02", 1],
+    ]);
+  });
+
+  it("una hoja consolidada da una sola farmacia: no hay nada que filtrar", () => {
+    expect(pharmaciesInRows([{ ALMCOD: "06519F01" }, { ALMCOD: "06519F01" }], almcod, registro)).toHaveLength(1);
+    expect(pharmaciesInRows([], almcod, registro)).toEqual([]);
+    expect(pharmaciesInRows(null, almcod, registro)).toEqual([]);
+  });
+});
+
+describe("rowMatchesPharmacy", () => {
+  it("«todos» deja pasar cualquier fila", () => {
+    expect(rowMatchesPharmacy("06519F0201", "all")).toBe(true);
+    expect(rowMatchesPharmacy("", "all")).toBe(true);
+  });
+
+  it("separa la IPRESS de sus puestos comunales", () => {
+    expect(rowMatchesPharmacy("06519F0101", "06519")).toBe(true);
+    expect(rowMatchesPharmacy("06519F0201", "06519")).toBe(false);
+    expect(rowMatchesPharmacy("06519F0201", "06519F02")).toBe(true);
+    expect(rowMatchesPharmacy("06519F0101", "06519F02")).toBe(false);
+  });
+
+  it("una fila sin ALMCOD es de la IPRESS, nunca de un puesto comunal", () => {
+    expect(rowMatchesPharmacy("", "06519")).toBe(true);
+    expect(rowMatchesPharmacy("", "06519F02")).toBe(false);
   });
 });
 
