@@ -453,6 +453,8 @@ Regla del reporte IPRESS que también aplica a los tres: si el inventario inicia
 3. **Deuda UX restante:** faltan las vistas de tarjeta en móvil para los módulos supervisores, y los filtros territoriales avanzados para DIRESA (`docs/UX_PLAN_INMUNIZACIONES.md` §9).
 4. **Migrar a Supabase Auth** algún día. Es la única vía para retirar el modelo de token propio, pero hoy funciona y no es urgente.
 
+**Pendiente de seguridad que el usuario pidió recordarle (2026-09-23):** el script de Google que recibe el stock de Sync SISMED no pide credencial, y cualquiera con su dirección puede reemplazar o dejar en blanco el stock de un establecimiento. Se acordó poner una clave por conexión. El detalle, el diseño propuesto y cómo desplegarlo sin cortar el envío están en `docs/SEGURIDAD_AUDITORIA.md`, sección «Pendiente: el envío de stock a Google Sheets no pide credencial». **Recuérdaselo al usuario si retoma trabajo sobre conexiones o sincronización.**
+
 **Antes de empezar, corre el diagnóstico contra datos reales** (solo lectura, necesita `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`):
 
 ```bash
