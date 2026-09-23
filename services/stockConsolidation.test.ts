@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { consolidateStockRows } from "./stockConsolidation";
+import { consolidateStockRows, exportAlmcod, exportDescAlm } from "./stockConsolidation";
 
 /** Como llegan las filas de la hoja: todo en texto. */
 const fila = (over: Record<string, any>) => ({
@@ -93,5 +93,46 @@ describe("consolidateStockRows", () => {
   it("no se cae con listas vacías ni con huecos", () => {
     expect(consolidateStockRows(null, almcod)).toEqual([]);
     expect(consolidateStockRows([null, fila({ Saldo: "2" })], almcod)).toHaveLength(1);
+  });
+});
+
+describe("exportAlmcod", () => {
+  it("deja el código del establecimiento y solo los puestos comunales con su F0x", () => {
+    expect(exportAlmcod("06519F0101")).toBe("06519"); // farmacia principal
+    expect(exportAlmcod("35635F01")).toBe("35635"); // enviado consolidado por la PC
+    expect(exportAlmcod("06519F0201")).toBe("06519F02"); // puesto comunal
+    expect(exportAlmcod("030S0501")).toBe("030S05"); // almacén
+    expect(exportAlmcod("06519")).toBe("06519");
+  });
+});
+
+describe("exportDescAlm", () => {
+  it("quita «(CONSOLIDADO)» y el «FARM -» de la farmacia principal", () => {
+    expect(exportDescAlm("FARM - C.S. CONSUELO", "06506F0101")).toBe("C.S. CONSUELO");
+    expect(exportDescAlm("P.S. CHALLUAL (CONSOLIDADO)", "35635F01")).toBe("P.S. CHALLUAL");
+    expect(exportDescAlm("ALM. ANEXO BELLAVISTA - SAN MARTIN (CONSOLIDADO)", "030S0501")).toBe(
+      "ALM. ANEXO BELLAVISTA - SAN MARTIN",
+    );
+  });
+
+  it("el puesto comunal conserva su nombre tal cual", () => {
+    expect(exportDescAlm("FARM - P.C. SANTA ROSA", "06519F0201")).toBe("FARM - P.C. SANTA ROSA");
+    expect(exportDescAlm("FARMACIA NUEVO CHANCHAMAYO", "06519F0301")).toBe("FARMACIA NUEVO CHANCHAMAYO");
+  });
+});
+
+describe("consolidateStockRows sin nombre dado", () => {
+  it("rotula con el nombre de la farmacia principal, aunque el lote solo esté en un puesto", () => {
+    const filas = consolidateStockRows(
+      [
+        fila({ ALMCOD: "06519F0101", DESC_ALM: "FARM - C.S. NUEVO LIMA", Saldo: "5" }),
+        fila({ ALMCOD: "06519F0201", DESC_ALM: "FARM - P.C. SANTA ROSA", Lote: "SOLO-PUESTO", Saldo: "3" }),
+      ],
+      almcod,
+    );
+    expect(filas.map((r) => [r.ALMCOD, r.DESC_ALM])).toEqual([
+      ["06519", "C.S. NUEVO LIMA"],
+      ["06519", "C.S. NUEVO LIMA"],
+    ]);
   });
 });
