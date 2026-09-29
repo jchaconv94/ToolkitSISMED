@@ -78,6 +78,10 @@ const setSessionToken = (token: string | null) => {
     }
 };
 
+/** La función RPC no existe todavía en la base (script aún sin ejecutar). */
+const isMissingFunction = (error: any): boolean =>
+    error?.code === "PGRST202" || /could not find the function/i.test(String(error?.message || ""));
+
 const requireSessionToken = (): string => {
     const token = getSessionToken();
     if (!token) throw new Error("Su sesión expiró. Vuelva a iniciar sesión para realizar esta operación.");
@@ -381,8 +385,38 @@ export const api = {
             usersCache = null;
             if (supabase) {
                 const targetPersonnelId = userData.personnelId || ('P' + Date.now() + Math.floor(Math.random() * 1000));
-                
-                // Upsert Personnel
+
+                // Todo en el servidor y en una sola operación: la ficha de personal y la
+                // cuenta se guardan juntas o no se guarda nada. El servidor aplica las
+                // reglas de `userManagementRules.ts`: el ADMIN puede todo y quien tiene
+                // Gestión de Usuarios solo dentro de su jurisdicción.
+                const { error } = await supabase.rpc('app_manage_save_user', {
+                    p_token: requireSessionToken(),
+                    p_is_new: Boolean(userData.isNew),
+                    p_username: userData.username,
+                    p_role: userData.role,
+                    p_is_active: userData.isActive !== undefined ? userData.isActive : true,
+                    p_password: userData.password ? String(userData.password) : null,
+                    p_personnel_id: targetPersonnelId,
+                    p_first_name: userData.firstName,
+                    p_last_name: userData.lastName,
+                    p_dni: userData.dni,
+                    p_phone: userData.phone || null,
+                    p_email: userData.email,
+                    p_labor_regime: userData.laborRegime || null,
+                    p_labor_regime_id: userData.laborRegimeId || null,
+                    p_profession_id: userData.professionId || null,
+                    p_facility_code: userData.facilityCode || null,
+                    p_diresa_id: userData.diresaId || null,
+                    p_ogess_id: userData.ogessId || null,
+                    p_unget_id: userData.ungetId || null,
+                    p_microred_id: userData.microredId || null
+                });
+                if (!error) return { success: true };
+                if (!isMissingFunction(error)) throw error;
+
+                // La función nueva aún no está instalada
+                // (supabase/SUPABASE_USUARIOS_POR_JURISDICCION.sql): camino anterior, solo ADMIN.
                 const { error: pError } = await supabase.from('personnel').upsert({
                     id: targetPersonnelId,
                     first_name: userData.firstName,
@@ -399,13 +433,8 @@ export const api = {
                     unget_id: userData.ungetId || null,
                     microred_id: userData.microredId || null
                 });
-
                 if (pError) throw pError;
 
-                // La contraseña se envía en claro por HTTPS y se cifra en el servidor: el
-                // navegador ya no genera hashes ni los escribe en la tabla.
-                // La escritura sobre `users` se hace en el servidor: verifica que quien
-                // llama sea un ADMIN con sesión válida antes de tocar nada.
                 const { error: uError } = await supabase.rpc('app_admin_save_user', {
                     p_token: requireSessionToken(),
                     p_username: userData.username,
@@ -428,15 +457,17 @@ export const api = {
         try {
             usersCache = null;
             if (supabase) {
-                const { error } = await supabase.rpc('app_admin_toggle_user', {
-                    p_token: requireSessionToken(),
-                    p_username: username,
-                    p_status: status
-                });
+                const params = { p_token: requireSessionToken(), p_username: username, p_status: status };
+                let { error } = await supabase.rpc('app_manage_toggle_user', params);
+                if (error && isMissingFunction(error)) {
+                    ({ error } = await supabase.rpc('app_admin_toggle_user', params));
+                }
                 if (error) throw error;
                 return { success: true };
             }
-        } catch(e) {}
+        } catch(e: any) {
+            return { success: false, message: e?.message };
+        }
         return { success: false };
     },
 
