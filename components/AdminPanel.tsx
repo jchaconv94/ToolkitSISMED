@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { RoleConfig, HealthFacility, AVAILABLE_MODULES, LaborRegime, Profession } from '../types';
+import { canAssignRole } from '../services/userManagementRules';
 import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
@@ -399,6 +400,19 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       'IPRESS': 0,
       '': -1
   };
+
+  // Misma regla que aplica el servidor (`app_manage_save_user`): el nivel sale solo de
+  // la configuración del rol, sin adivinarlo por el nombre, para no ofrecer lo que el
+  // guardado va a rechazar.
+  const configuredLevel = (roleKey?: string) =>
+      roles.find(r => r.role === roleKey)?.jurisdictionLevel || '';
+  const canAssignRoleKey = (roleKey?: string) =>
+      canAssignRole({
+          callerIsAdmin: isSuperAdmin,
+          callerLevel: configuredLevel(currentUser?.role),
+          targetRole: roleKey,
+          targetLevel: configuredLevel(roleKey),
+      });
 
   const getLevelForRole = (roleKey: string): 'GLOBAL' | 'DIRESA' | 'OGESS' | 'UNGET' | 'MICRORED' | 'IPRESS' | '' => {
       const config = roles.find(r => r.role === roleKey);
@@ -1512,6 +1526,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                     {/* Acciones (Contains Edit + Status indicator inside status icon color) */}
                                                     <td className="px-4 py-3 whitespace-nowrap text-right text-xs font-medium w-[110px] max-w-[110px]">
                                                         <div className="flex justify-end gap-1.5">
+                                                            {canAssignRoleKey(u.role) && (<>
                                                             <button 
                                                                 onClick={(e) => { e.stopPropagation(); handleEditUserClick(u); }}
                                                                 className="text-gray-500 hover:text-teal-600 bg-gray-50 hover:bg-teal-50 border border-gray-200/80 hover:border-teal-200 p-1.5 rounded-lg transition-colors cursor-pointer" title="Editar"
@@ -1525,6 +1540,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                             >
                                                                 <Power className="h-3.5 w-3.5" />
                                                             </button>
+                                                            </>)}
                                                             {isSuperAdmin && currentUser?.username !== u.username && (
                                                                 <button 
                                                                     onClick={(e) => { e.stopPropagation(); setUserToDelete({ username: u.username, personnelId: u.personnelId || null }); }}
@@ -2153,14 +2169,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                         }));
                                                     }}
                                                     options={roles
-                                                        .filter(r => {
-                                                            if (isSuperAdmin) return true;
-                                                            const currentUserLevel = getLevelForRole(currentUser?.role || '');
-                                                            const currentUserWeight = HIERARCHY_WEIGHTS[currentUserLevel] ?? -1;
-                                                            const optionLevel = getLevelForRole(r.role);
-                                                            const optionWeight = HIERARCHY_WEIGHTS[optionLevel] ?? -1;
-                                                            return optionWeight <= currentUserWeight && optionWeight < 100 && optionWeight >= 0;
-                                                        })
+                                                        .filter(r => canAssignRoleKey(r.role))
                                                         .map(r => ({ value: r.role, label: r.label || r.role }))}
                                                 />
                                             </div>

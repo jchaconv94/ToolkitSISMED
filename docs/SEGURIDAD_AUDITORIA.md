@@ -108,6 +108,30 @@ sirviendo la versión anterior, la aplicación no enviaba la cabecera y se qued�
 No era un fallo de la política. El orden correcto es desplegar primero, aplicar el SQL
 después, y forzar recarga con `Ctrl + Shift + R`.
 
+## Usuarios por jurisdicción (2026-09-29)
+
+Guardar un usuario pasaba por `app_admin_save_user`, que solo acepta ADMIN. El informático
+de una UNGET veía el formulario completo y al guardar recibía «Esta operación requiere
+permisos de administrador». Además, la aplicación escribía antes la ficha en `personnel`,
+así que los datos personales **sí** cambiaban aunque saliera el error.
+
+`supabase/SUPABASE_USUARIOS_POR_JURISDICCION.sql` agrega `app_manage_save_user` y
+`app_manage_toggle_user`, que hacen todo en el servidor y en una sola operación:
+
+- **ADMIN:** todo, igual que antes.
+- **Quien tiene el módulo Gestión de Usuarios y no es ADMIN:** solo dentro de su
+  jurisdicción y solo roles de nivel inferior al suyo, más los roles `COORDINADOR…` de su
+  mismo nivel. Nunca otro de su mismo rol, nunca un nivel superior, nunca ADMIN. Puede
+  asignar contraseña y activar o desactivar. Eliminar sigue siendo solo del ADMIN.
+- El nivel de cada rol sale **solo** de `roles_config.jurisdiction_level`. Un rol sin nivel
+  configurado no lo puede asignar nadie que no sea ADMIN.
+- Una ficha de personal existente también tiene que estar en la jurisdicción de quien guarda,
+  para que conocer su id no baste para sobrescribir la de otra UNGET.
+
+La regla está duplicada a propósito en `services/userManagementRules.ts`, que la pantalla usa
+para no ofrecer lo que el servidor rechaza. **Si cambias una, cambia la otra.** Si la función
+nueva no está instalada, la aplicación vuelve sola al camino anterior (solo ADMIN).
+
 ## Lo que queda pendiente
 
 - **Alcance por rol dentro de la sesión.** Hoy la política distingue "con sesión" de "sin
