@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  AlertTriangle, ArrowRightLeft, MonitorSmartphone, CheckCircle2, ChevronRight, Clock, Copy, History, KeyRound,
+  AlertTriangle, ArrowRightLeft, Download, MonitorSmartphone, CheckCircle2, ChevronRight, Clock, Copy, History, KeyRound,
   Loader2, Monitor, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -27,8 +27,10 @@ const MODULE_TABS: Array<{ id: ModuleTab; label: string; icon: React.ElementType
 /** Claves de envío y, en otra pestaña, qué versión del Toolkit tiene cada PC. */
 export const AdminSendKeysModule: React.FC = () => {
   const [tab, setTab] = useState<ModuleTab>("keys");
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
   return (
     <div className="space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex w-full rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:w-auto" role="tablist">
         {MODULE_TABS.map(({ id, label, icon: Icon }) => (
           <button
@@ -45,7 +47,13 @@ export const AdminSendKeysModule: React.FC = () => {
           </button>
         ))}
       </div>
-      {tab === "keys" ? <SendKeysPanel /> : <AdminToolkitDevicesTab />}
+        {tab === "devices" && latestVersion && (
+          <div className="flex w-fit items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs text-teal-800">
+            <Download className="h-4 w-4" /> Última versión publicada: <b>{latestVersion}</b>
+          </div>
+        )}
+      </div>
+      {tab === "keys" ? <SendKeysPanel /> : <AdminToolkitDevicesTab onLatestVersion={setLatestVersion} />}
     </div>
   );
 };
@@ -438,7 +446,7 @@ const DetailDrawer: React.FC<{
   }, [onClose]);
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex justify-end bg-slate-900/40" onClick={onClose}>
+    <div className="fixed inset-0 z-[200000] flex justify-end bg-slate-900/40" onClick={onClose}>
       <aside className="flex h-full w-full max-w-md flex-col bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <header className="relative overflow-hidden bg-slate-900 px-5 py-5 text-white sm:px-6">
           <KeyRound className="pointer-events-none absolute -bottom-6 right-12 h-28 w-28 text-teal-400 opacity-10" />
@@ -532,7 +540,7 @@ const DetailDrawer: React.FC<{
 
 const NewKeyModal: React.FC<{ row: SendKeyRow; secret: string; onCopy: () => void; onClose: () => void }> = ({ row, secret, onCopy, onClose }) =>
   createPortal(
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/50 p-4">
+    <div className="fixed inset-0 z-[200001] flex items-center justify-center bg-slate-900/50 p-4">
       <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
         <header className="relative flex items-center justify-between overflow-hidden bg-gradient-to-r from-teal-700 to-cyan-600 px-5 py-5 sm:px-6">
           <KeyRound className="pointer-events-none absolute -bottom-6 right-14 h-24 w-24 text-white opacity-10" />
