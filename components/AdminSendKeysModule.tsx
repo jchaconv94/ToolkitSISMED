@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle, ArrowRightLeft, Download, MonitorSmartphone, CheckCircle2, ChevronRight, Clock, Copy, History, KeyRound,
-  Loader2, Monitor, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
+  Loader2, Monitor, PlugZap, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -16,23 +16,30 @@ import {
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
 import { AdminToolkitDevicesTab } from "./AdminToolkitDevicesTab";
+import { AdminConnectionTestTab } from "./AdminConnectionTestTab";
+import { useAuth } from "../contexts/AuthContext";
 
-type ModuleTab = "keys" | "devices";
+type ModuleTab = "keys" | "devices" | "connection";
 
 const MODULE_TABS: Array<{ id: ModuleTab; label: string; icon: React.ElementType }> = [
   { id: "keys", label: "Claves", icon: KeyRound },
   { id: "devices", label: "Equipos", icon: MonitorSmartphone },
 ];
 
+/** Prueba de la conexión inmediata (Backups SISMED, etapa 1): solo el administrador. */
+const CONNECTION_TAB = { id: "connection" as ModuleTab, label: "Conexión (prueba)", icon: PlugZap };
+
 /** Claves de envío y, en otra pestaña, qué versión del Toolkit tiene cada PC. */
 export const AdminSendKeysModule: React.FC = () => {
   const [tab, setTab] = useState<ModuleTab>("keys");
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  const { user } = useAuth();
+  const tabs = user?.role === "ADMIN" ? [...MODULE_TABS, CONNECTION_TAB] : MODULE_TABS;
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 sm:justify-between">
       <div className="flex min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:flex-none" role="tablist">
-        {MODULE_TABS.map(({ id, label, icon: Icon }) => (
+        {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
@@ -57,7 +64,9 @@ export const AdminSendKeysModule: React.FC = () => {
           </div>
         )}
       </div>
-      {tab === "keys" ? <SendKeysPanel /> : <AdminToolkitDevicesTab onLatestVersion={setLatestVersion} />}
+      {tab === "keys" && <SendKeysPanel />}
+      {tab === "devices" && <AdminToolkitDevicesTab onLatestVersion={setLatestVersion} />}
+      {tab === "connection" && user?.role === "ADMIN" && <AdminConnectionTestTab />}
     </div>
   );
 };

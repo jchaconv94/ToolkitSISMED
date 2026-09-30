@@ -1,0 +1,81 @@
+# Backups SISMED con un clic
+
+Plan aprobado por el usuario el 2026-09-30. Reemplaza el procedimiento manual de pedir a cada
+establecimiento que envíe su backup del SISMED.
+
+## Qué se construye
+
+El informático de cada UNGET aprieta «Descargar» en una PC conectada y recibe el backup más
+reciente que el propio SISMED ya generó (`<instalación>\backup\BKDA<AAAAMMDD><HHMM>.Zip`, con su
+contraseña), sin que nadie en el establecimiento haga nada.
+
+Reglas acordadas:
+
+- **Solo a pedido.** Sin descargas automáticas: lo que nadie descarga no debe quedar ocupando espacio.
+- **Solo PC conectadas en ese momento**, y solo las de su jurisdicción.
+- **Inmediato:** el aviso llega a la PC en 1–2 s (conexión abierta), no cada 2 ni 10 minutos.
+- **Un backup por establecimiento al día**, para todos los usuarios. No cuenta si falló.
+- **Gratis:** aviso al 70 % del uso gratuito y pausa al 80 %.
+- La descarga sigue al cambiar de módulo (panel flotante); al cerrar la pestaña el navegador
+  avisa y, si igual se cierra, se retoma al volver.
+
+## Arquitectura
+
+| Pieza | Para qué |
+|---|---|
+| **Toolkit de escritorio** | Mantiene una conexión abierta con Cloudflare; toma el `BKDA…zip` más reciente y lo sube directo a R2 en partes de 20 MB con huella SHA-256. |
+| **Supabase** | Pedidos, permisos, jurisdicción y reglas. Firma enlaces temporales. Solo filas chicas: no consume el límite de descargas. |
+| **Cloudflare Durable Objects** (`cloudflare/conexion`, servicio `sismed-conexion`) | Las conexiones abiertas. Hibernan: una conexión quieta no consume nada. |
+| **Cloudflare R2** (bucket `sismed-backups`) | Los zips, de paso. Descargas gratis e ilimitadas. |
+
+**Por qué no Supabase para los archivos:** el plan gratuito trae 5 GB de descargas al mes y la
+región movería ~28 GB (10 UNGET × ~40 IPRESS × ~15 MB + hospitales de 70–150 MB, una vez por
+semana). R2 no cobra descargas.
+
+**Por qué la PC abre la conexión:** las PC están detrás de routers y cortafuegos; nadie puede
+conectarse a ellas desde afuera, pero ellas sí pueden salir.
+
+### Los tres candados contra cobros
+
+1. **Regla del bucket** `borrar-a-1-dia`: borra todo objeto con más de 1 día y cancela las subidas
+   incompletas a 1 día, aunque nuestro sistema falle.
+2. **Tope propio en la web**: aviso al 70 % y pausa al 80 % de lo gratuito.
+3. **Alerta de presupuesto** de $1 en Cloudflare.
+
+Cloudflare no tiene un tope de gasto que corte el servicio; por eso existen los candados 1 y 2.
+
+## Etapas
+
+| Etapa | Qué | Estado |
+|---|---|---|
+| 0 | Cuenta Cloudflare, R2, bucket privado, regla de borrado, alerta de $1, clave limitada guardada en Supabase (`R2_*`) | hecha el 2026-09-30 |
+| 1 | Conexión inmediata con 2–3 PC reales (sin pantalla definitiva) | en curso |
+| 2 | Traslado del archivo por partes a R2 | pendiente |
+| 3 | Reglas en Supabase (jurisdicción, 1 al día, topes, limpieza) | pendiente |
+| 4 | Módulo web Backups SISMED con descarga en segundo plano | pendiente |
+| 5 | Piloto una semana en UNGET Bellavista | pendiente |
+| 6 | Abrir a las demás UNGET | pendiente |
+
+Cada etapa termina con una prueba que tiene que salir bien antes de pasar a la siguiente.
+
+## Etapa 1 · Conexión inmediata
+
+- **Servicio:** `cloudflare/conexion` (Worker + Durable Object `Region`, uno solo para toda la
+  región). Lo publica `.github/workflows/cloudflare-conexion.yml` al cambiar esa carpeta en `main`,
+  con los secretos `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` y `VITE_SUPABASE_ANON_KEY`.
+  Dirección: `wss://sismed-conexion.jchaconvillacis.workers.dev`.
+- **SQL:** `supabase/SUPABASE_BACKUPS_CONEXION.sql`.
+  - `backup_pilot_codes`: establecimientos del piloto (empieza con `030S05`).
+  - `app_backup_pc_enabled`: el Toolkit pregunta si debe conectarse (cada 30 min).
+  - `app_backup_pc_auth`: el servicio acepta una PC solo con clave de envío vigente, PC vinculada
+    y código en el piloto.
+  - `app_backup_web_auth`: el servicio acepta la web con la sesión y la jurisdicción de Claves de envío.
+- **Toolkit:** `toolskit/backup_connection.py` (Toolkit-OGM). Arranca y se detiene con Sync SISMED;
+  Sync SISMED 2.0 no lo usa. Manda el texto «ping» cada 50 s (el servicio responde «pong» sin
+  despertarse) y se reconecta solo con espera creciente.
+- **Web:** pestaña «Conexión (prueba)» en Claves de envío, solo para el administrador
+  (`components/AdminConnectionTestTab.tsx`).
+
+**Criterio para pasar a la etapa 2:** el aviso llega en menos de 2 s; al cortar la red la PC se
+reconecta sola; el consumo diario de Durable Objects queda por debajo del 10 % de lo gratuito
+(100 000 operaciones/día).

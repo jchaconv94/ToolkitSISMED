@@ -1,0 +1,14 @@
+{
+  "name": "sismed-conexion",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260930.2",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.0.0"
+  }
+}
