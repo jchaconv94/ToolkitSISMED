@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronRight, Clock, Copy, History, KeyRound,
+  AlertTriangle, ArrowRightLeft, MonitorSmartphone, CheckCircle2, ChevronRight, Clock, Copy, History, KeyRound,
   Loader2, Monitor, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -15,6 +15,40 @@ import {
 } from "./ui/immunization";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
+import { AdminToolkitDevicesTab } from "./AdminToolkitDevicesTab";
+
+type ModuleTab = "keys" | "devices";
+
+const MODULE_TABS: Array<{ id: ModuleTab; label: string; icon: React.ElementType }> = [
+  { id: "keys", label: "Claves", icon: KeyRound },
+  { id: "devices", label: "Equipos", icon: MonitorSmartphone },
+];
+
+/** Claves de envío y, en otra pestaña, qué versión del Toolkit tiene cada PC. */
+export const AdminSendKeysModule: React.FC = () => {
+  const [tab, setTab] = useState<ModuleTab>("keys");
+  return (
+    <div className="space-y-4">
+      <div className="flex w-full rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:w-auto" role="tablist">
+        {MODULE_TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-1.5 text-[12.5px] font-bold transition-colors sm:flex-none ${
+              tab === id ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <Icon className="h-4 w-4" /> {label}
+          </button>
+        ))}
+      </div>
+      {tab === "keys" ? <SendKeysPanel /> : <AdminToolkitDevicesTab />}
+    </div>
+  );
+};
 
 const PAGE_SIZE = 10;
 
@@ -48,7 +82,7 @@ type PendingAction =
   | { kind: "revoke"; row: SendKeyRow }
   | { kind: "rebind"; row: SendKeyRow };
 
-export const AdminSendKeysModule: React.FC = () => {
+const SendKeysPanel: React.FC = () => {
   const [rows, setRows] = useState<SendKeyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");

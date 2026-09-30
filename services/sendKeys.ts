@@ -138,14 +138,18 @@ export const relativeTime = (value?: string | null, now: Date = new Date()): str
 //  Servidor
 // ---------------------------------------------------------------------------
 
-const call = async <T>(fn: string, params: Record<string, unknown> = {}): Promise<T> => {
+export const callSendKeysRpc = async <T>(
+  fn: string,
+  params: Record<string, unknown> = {},
+  script = "SUPABASE_CLAVES_DE_ENVIO.sql",
+): Promise<T> => {
   if (!supabase) throw new Error("Claves de envío necesita conexión con el servidor.");
   const token = getSessionToken();
   if (!token) throw new Error("Su sesión expiró. Vuelva a iniciar sesión.");
   const { data, error } = await supabase.rpc(fn, { p_token: token, ...params });
   if (error) {
     if (error.code === "PGRST202" || /could not find the function/i.test(error.message || "")) {
-      throw new Error("Falta instalar Claves de envío en la base de datos (SUPABASE_CLAVES_DE_ENVIO.sql).");
+      throw new Error(`Falta instalar esta función en la base de datos (${script}).`);
     }
     throw new Error(error.message || "No se pudo completar la operación.");
   }
@@ -154,14 +158,14 @@ const call = async <T>(fn: string, params: Record<string, unknown> = {}): Promis
 
 export const sendKeysApi = {
   overview: async (): Promise<SendKeyRow[]> => {
-    const rows = await call<SendKeyRow[] | null>("app_send_keys_overview");
+    const rows = await callSendKeysRpc<SendKeyRow[] | null>("app_send_keys_overview");
     return (rows || []).map((row) => ({ ...row, blockedToday: Number(row.blockedToday || 0), alert: row.alert || null }));
   },
   history: async (code: string): Promise<SendAttempt[]> =>
-    (await call<SendAttempt[] | null>("app_send_key_history", { p_code: code })) || [],
+    (await callSendKeysRpc<SendAttempt[] | null>("app_send_key_history", { p_code: code })) || [],
   /** Devuelve la clave en claro. Es la única vez que existe fuera del Toolkit. */
-  generate: (code: string) => call<string>("app_send_key_generate", { p_code: code }),
-  ignore: (code: string) => call<void>("app_send_key_ignore", { p_code: code }),
-  rebind: (attemptId: number) => call<void>("app_send_key_rebind", { p_attempt_id: attemptId }),
-  revoke: (code: string) => call<void>("app_send_key_revoke", { p_code: code }),
+  generate: (code: string) => callSendKeysRpc<string>("app_send_key_generate", { p_code: code }),
+  ignore: (code: string) => callSendKeysRpc<void>("app_send_key_ignore", { p_code: code }),
+  rebind: (attemptId: number) => callSendKeysRpc<void>("app_send_key_rebind", { p_attempt_id: attemptId }),
+  revoke: (code: string) => callSendKeysRpc<void>("app_send_key_revoke", { p_code: code }),
 };

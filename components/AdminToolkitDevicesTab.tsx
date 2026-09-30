@@ -1,0 +1,227 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, CheckCircle2, CircleHelp, Clock, Download, Loader2, Monitor, MonitorSmartphone, Search } from "lucide-react";
+import { relativeTime } from "../services/sendKeys";
+import {
+  DEVICE_STATE_LABEL, DeviceFilter, DeviceState, REPORT_WINDOW_DAYS, ToolkitDeviceRow,
+  activeDevices, deviceState, filterDevices, summarizeDevices, toolkitDevicesApi,
+} from "../services/toolkitDevices";
+import { ImmunizationEmptyState, ImmunizationKpiCard, ImmunizationTableHeader, immunizationFilterInputClass } from "./ui/immunization";
+import { TablePagination } from "./ui/TablePagination";
+
+const PAGE_SIZE = 10;
+
+const STYLE: Record<DeviceState, { chip: string; icon: React.ElementType; bar: string; tile: string; text: string }> = {
+  current: { chip: "border-emerald-200 bg-emerald-50 text-emerald-700", icon: CheckCircle2, bar: "bg-emerald-500", tile: "bg-emerald-100 text-emerald-700", text: "text-emerald-700" },
+  outdated: { chip: "border-amber-200 bg-amber-50 text-amber-700", icon: AlertTriangle, bar: "bg-amber-500", tile: "bg-amber-100 text-amber-700", text: "text-amber-700" },
+  none: { chip: "border-slate-200 bg-slate-100 text-slate-600", icon: CircleHelp, bar: "bg-slate-400", tile: "bg-slate-100 text-slate-500", text: "text-slate-600" },
+};
+
+const FILTERS: Array<{ id: DeviceFilter; label: string }> = [
+  { id: "all", label: "Todos" },
+  { id: "current", label: "Al día" },
+  { id: "outdated", label: "Desactualizados" },
+  { id: "none", label: "Sin reportar" },
+];
+
+const VersionChip: React.FC<{ version?: string | null; state: DeviceState; small?: boolean }> = ({ version, state, small }) =>
+  version ? (
+    <span className={`rounded-md font-mono font-bold ${small ? "px-1.5 py-0.5 text-[11px]" : "px-2 py-0.5 text-xs"} ${state === "outdated" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
+      v{version}
+    </span>
+  ) : small ? null : <span className="text-slate-400">—</span>;
+
+/** Otras PC que enviaron el mismo establecimiento en los últimos 30 días. */
+const OtherPcs: React.FC<{ row: ToolkitDeviceRow }> = ({ row }) => {
+  const others = activeDevices(row).slice(1);
+  if (others.length === 0) return null;
+  return (
+    <span
+      title={`También envió: ${others.map((d) => `${d.deviceName || "PC sin nombre"} (v${d.version || "?"}, ${relativeTime(d.lastSeen).toLowerCase()})`).join(", ")}`}
+      className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-bold text-amber-700 ring-1 ring-amber-200"
+    >
+      +{others.length} PC
+    </span>
+  );
+};
+
+export const AdminToolkitDevicesTab: React.FC = () => {
+  const [rows, setRows] = useState<ToolkitDeviceRow[]>([]);
+  const [latest, setLatest] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<DeviceFilter>("all");
+  const [page, setPage] = useState(1);
+
+  const load = useCallback(async () => {
+    try {
+      setLoadError("");
+      const [data, version] = await Promise.all([toolkitDevicesApi.overview(), toolkitDevicesApi.latestRelease()]);
+      setRows(data);
+      setLatest(version);
+    } catch (error: any) {
+      setLoadError(error?.message || "No se pudieron cargar los equipos.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const summary = useMemo(() => summarizeDevices(rows, latest), [rows, latest]);
+  const filtered = useMemo(() => filterDevices(rows, latest, search, filter), [rows, latest, search, filter]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  useEffect(() => { setPage(1); }, [search, filter]);
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center gap-2 text-sm font-semibold text-slate-500">
+        <Loader2 className="h-5 w-5 animate-spin text-teal-600" /> Cargando equipos…
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="rounded-2xl border border-red-200 bg-white shadow-sm">
+        <ImmunizationEmptyState
+          icon={<AlertTriangle className="h-6 w-6" />}
+          title="No se pudieron cargar los equipos"
+          description={loadError}
+          action={<button type="button" onClick={() => { setLoading(true); void load(); }} className="h-10 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white">Reintentar</button>}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {latest && (
+        <div className="flex w-fit items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs text-teal-800">
+          <Download className="h-4 w-4" /> Última versión publicada: <b>{latest}</b>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <ImmunizationKpiCard watermark tone="info" icon={<MonitorSmartphone />} label="Equipos que reportan" value={summary.reporting} onClick={() => setFilter("all")} active={filter === "all"} />
+        <ImmunizationKpiCard watermark tone="success" icon={<CheckCircle2 />} label="Al día" value={summary.current} onClick={() => setFilter("current")} active={filter === "current"} />
+        <ImmunizationKpiCard watermark tone="warning" icon={<AlertTriangle />} label="Desactualizados" value={summary.outdated} onClick={() => setFilter("outdated")} active={filter === "outdated"} />
+        <ImmunizationKpiCard watermark tone="neutral" icon={<CircleHelp />} label="Sin reportar" value={summary.none} onClick={() => setFilter("none")} active={filter === "none"} />
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center sm:px-4">
+          <div className="relative w-full sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${immunizationFilterInputClass} pl-9`} />
+          </div>
+          <div className="flex gap-1.5 overflow-x-auto">
+            {FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setFilter(f.id)}
+                className={`shrink-0 rounded-full border px-3 py-1 text-[11.5px] font-bold transition-colors ${
+                  filter === f.id ? "border-teal-600 bg-teal-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <ImmunizationEmptyState
+            icon={<MonitorSmartphone className="h-6 w-6" />}
+            title={rows.length === 0 ? "No hay establecimientos en su jurisdicción" : "Ningún establecimiento coincide"}
+            description={rows.length === 0 ? "Registre sus IPRESS y almacenes en Establecimientos." : "Pruebe con otra búsqueda o filtro."}
+          />
+        ) : (
+          <>
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-[13px]">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr>
+                    <ImmunizationTableHeader>Establecimiento</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>Equipo</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>Versión</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>Último reporte</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>Estado</ImmunizationTableHeader>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {pageRows.map((row) => {
+                    const state = deviceState(row, latest);
+                    const device = activeDevices(row)[0];
+                    const style = STYLE[state];
+                    const Icon = style.icon;
+                    return (
+                      <tr key={row.code} className="h-14 hover:bg-slate-50/60">
+                        <td className="px-4 py-2">
+                          <div className="font-bold text-slate-800">{row.name}</div>
+                          <div className="font-mono text-[11px] text-teal-700">{row.code}</div>
+                        </td>
+                        <td className="px-4 py-2">
+                          {device ? (
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
+                              <Monitor className="h-4 w-4 text-slate-400" />{device.deviceName || "PC sin nombre"} <OtherPcs row={row} />
+                            </span>
+                          ) : <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className="px-4 py-2"><VersionChip version={device?.version} state={state} /></td>
+                        <td className="px-4 py-2 text-slate-500">{device ? relativeTime(device.lastSeen) : "—"}</td>
+                        <td className="px-4 py-2">
+                          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-bold ${style.chip}`}>
+                            <Icon className="h-3.5 w-3.5" />{DEVICE_STATE_LABEL[state]}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="space-y-2 p-3 md:hidden">
+              {pageRows.map((row) => {
+                const state = deviceState(row, latest);
+                const device = activeDevices(row)[0];
+                const style = STYLE[state];
+                const Icon = style.icon;
+                return (
+                  <div key={row.code} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <span className={`absolute inset-y-0 left-0 w-1 ${style.bar}`} />
+                    <div className="flex items-center gap-3 p-3 pl-4">
+                      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${style.tile}`}><Icon className="h-5 w-5" /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13.5px] font-black text-slate-800">{row.name}</span>
+                        <span className="mt-0.5 flex items-center gap-1.5">
+                          <span className="rounded bg-teal-50 px-1.5 font-mono text-[10.5px] font-bold text-teal-700">{row.code}</span>
+                          <span className={`truncate text-[10.5px] font-bold ${style.text}`}>{DEVICE_STATE_LABEL[state]}</span>
+                        </span>
+                      </span>
+                      <VersionChip version={device?.version} state={state} small />
+                    </div>
+                    <div className="mb-3 ml-4 mr-3 flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
+                      <span className="flex min-w-0 items-center gap-1"><Monitor className="h-3.5 w-3.5 shrink-0" />{device ? <b className="truncate text-slate-700">{device.deviceName || "PC sin nombre"}</b> : "Sin datos"} <OtherPcs row={row} /></span>
+                      <span className="flex shrink-0 items-center gap-1"><Clock className="h-3 w-3" />{device ? relativeTime(device.lastSeen) : "Nunca"}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} itemLabel="establecimientos" />
+          </>
+        )}
+      </div>
+
+      <p className="px-1 text-[11.5px] text-slate-500">
+        «Sin reportar»: la PC tiene una versión anterior a la 2.1.10 o no ha sincronizado en los últimos {REPORT_WINDOW_DAYS} días.
+      </p>
+    </div>
+  );
+};
