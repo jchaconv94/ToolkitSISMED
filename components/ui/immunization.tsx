@@ -75,6 +75,15 @@ const toneChip: Record<ImmunizationTone, string> = {
   locked: "border-slate-300 bg-slate-900 text-white"
 };
 
+const toneWatermark: Record<ImmunizationTone, { gradient: string; icon: string; value: string }> = {
+  neutral: { gradient: "from-slate-100", icon: "text-slate-500", value: "text-slate-700" },
+  success: { gradient: "from-emerald-50", icon: "text-emerald-600", value: "text-emerald-700" },
+  warning: { gradient: "from-amber-50", icon: "text-amber-600", value: "text-amber-700" },
+  danger: { gradient: "from-red-50", icon: "text-red-600", value: "text-red-600" },
+  info: { gradient: "from-teal-50", icon: "text-teal-600", value: "text-teal-700" },
+  locked: { gradient: "from-slate-200", icon: "text-slate-700", value: "text-slate-900" }
+};
+
 const defaultToneIcons: Record<ImmunizationTone, React.ReactNode> = {
   neutral: <Package className="h-5 w-5" />,
   success: <CheckCircle2 className="h-5 w-5" />,
@@ -97,7 +106,32 @@ export const ImmunizationKpiCard: React.FC<{
   compact?: boolean;
   onClick?: () => void;
   active?: boolean;
-}> = ({ label, value, icon, tone = "neutral", hint, filled, compact = false, onClick, active }) => {
+  /** Ícono grande y tenue de fondo, con franja lateral y degradado del tono. */
+  watermark?: boolean;
+}> = ({ label, value, icon, tone = "neutral", hint, filled, compact = false, onClick, active, watermark }) => {
+  if (watermark) {
+    const isInteractive = Boolean(onClick);
+    const Container = isInteractive ? "button" : "div";
+    return (
+      <Container
+        {...(isInteractive ? { type: "button", onClick } : {})}
+        className={`relative overflow-hidden rounded-2xl border bg-gradient-to-br ${toneWatermark[tone].gradient} to-white p-4 text-left shadow-sm transition-all duration-200 ${
+          active ? "border-teal-500 ring-2 ring-teal-500/20" : "border-slate-200/90"
+        } ${isInteractive ? "cursor-pointer hover:-translate-y-0.5 hover:shadow-md" : ""}`}
+      >
+        <span className={`absolute inset-y-0 left-0 w-1 ${toneTopBar[tone]}`} />
+        <span className={`pointer-events-none absolute -bottom-4 -right-3 opacity-[0.09] [&>svg]:h-24 [&>svg]:w-24 ${toneWatermark[tone].icon}`}>
+          {icon || defaultToneIcons[tone]}
+        </span>
+        <div className="relative min-w-0">
+          <p className="line-clamp-2 text-[11px] font-black uppercase leading-tight tracking-wider text-slate-500 sm:truncate">{label}</p>
+          <p className={`mt-1 truncate text-2xl font-black leading-tight sm:text-[28px] ${toneWatermark[tone].value}`}>{value}</p>
+          {hint && <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">{hint}</p>}
+        </div>
+      </Container>
+    );
+  }
+
   if (filled) {
     return (
       <div className={`rounded-2xl border px-3.5 py-3 ${toneFilled[tone]}`}>

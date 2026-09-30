@@ -162,7 +162,24 @@ La dirección no es secreta en la práctica: está en la configuración de cada 
 defecto escrita en el código del Toolkit (`toolskit/sismed_sync.py`, `apps_script_url`), así
 que viaja dentro del instalador `.exe`. **No escribir esa dirección en ningún documento.**
 
-**Lo que se propuso: una clave por conexión.**
+**Decisión del 2026-09-30: claves por establecimiento, gestionadas desde la web.** La idea
+de abajo (una clave por conexión guardada en Apps Script) se descartó: el usuario no quiere
+contraseñas en Apps Script, el Toolkit lo usan otras redes y las PC y las instalaciones del
+SISMED cambian cada año. Lo vigente es el módulo **Claves de envío**
+(`ADMIN_SEND_KEYS`, `components/AdminSendKeysModule.tsx`,
+`supabase/SUPABASE_CLAVES_DE_ENVIO.sql`):
+
+- El informático SISMED genera una clave por IPRESS o almacén. Solo se guarda su sha256.
+- La PC donde se configura queda **vinculada** en el primer envío; cualquier otra (sin
+  clave, con otra clave o con la misma copiada) se **bloquea y avisa** en la web, donde se
+  elige «Ignorar» o «Cambiar a este equipo».
+- Los establecimientos sin clave envían como siempre: no afecta a quien no lo use.
+- El script de Google consulta `app_send_key_check` antes de reemplazar una pestaña.
+
+Se entrega por partes: 1) módulo web y SQL (hecho), 2) Toolkit de escritorio envía clave e
+identificador de la PC, 3) Apps Script consulta la clave.
+
+**Lo que se propuso antes (descartado): una clave por conexión.**
 
 - Cada UNGET guarda su propia clave en las propiedades del script
   (`PropertiesService.getScriptProperties()`), no en el código.

@@ -9,7 +9,7 @@ import {
   Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network,
   BarChart2, FilterX, RefreshCw, Search, Database, Activity, Syringe, ClipboardList, Package,
   PackageSearch, ArrowDownLeft, Truck, Receipt, RotateCcw, SlidersHorizontal, CalendarCheck,
-  Settings, Users, Shield, Building, FolderKanban, DatabaseBackup, FileSpreadsheet, Smartphone, User
+  Settings, Users, Shield, Building, FolderKanban, DatabaseBackup, FileSpreadsheet, Smartphone, User, KeyRound
 } from 'lucide-react';
 
 // NEW IMPORTS
@@ -35,6 +35,7 @@ import { showWelcomeToast } from './components/WelcomeToast';
 import { RedistributionModule } from './components/RedistributionModule';
 import { SheetSearchModule } from './components/SheetSearchModule';
 import { AdminStockAssignmentModule } from './components/AdminStockAssignmentModule';
+import { AdminSendKeysModule } from './components/AdminSendKeysModule';
 import { AssignedIpressStockModule } from './components/AssignedIpressStockModule';
 import { StockMonitoringModule } from './components/IpressStockModule';
 import { AnalysisExclusionsModule } from './components/AnalysisExclusionsModule';
@@ -204,6 +205,7 @@ const AuthenticatedApp: React.FC = () => {
             else if (hasPermission('ADMIN_CATALOGS')) setCurrentView('ADMIN_CATALOGS');
             else if (hasPermission('ADMIN_PARAMS')) setCurrentView('ADMIN_PARAMS');
             else if (hasPermission('ADMIN_MIGRATION')) setCurrentView('ADMIN_MIGRATION');
+            else if (hasPermission('ADMIN_SEND_KEYS')) setCurrentView('ADMIN_SEND_KEYS');
             else if (hasPermission('PROFILE')) setCurrentView('PROFILE');
         }
     }, [currentView, isAuthenticated, isLoading, user, hasPermission]);
@@ -264,6 +266,8 @@ const AuthenticatedApp: React.FC = () => {
                 return { title: 'Columnas de Stock por Establecimiento', description: 'Columnas visibles del stock; la hoja se reconoce sola por el código', icon: <FileSpreadsheet className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'ADMIN_SYNC_DEVICES':
                 return { title: 'Dispositivos Sync', description: 'Gestión de dispositivos autorizados de Sync SISMED 2.0', icon: <Smartphone className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
+            case 'ADMIN_SEND_KEYS':
+                return { title: 'Claves de envío', description: 'Solo la PC vinculada puede enviar el stock de su establecimiento a Google Sheets', icon: <KeyRound className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'PROFILE':
                 return { title: 'Perfil de Usuario', description: 'Configuración de perfil e información personal', icon: <User className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             default:
@@ -374,7 +378,8 @@ const AuthenticatedApp: React.FC = () => {
                                 {currentView === 'IMMUNIZATION_REPORTS' && <ImmunizationReportsModule />}
                                 {currentView === 'IMMUNIZATION_CONFIG' && <ImmunizationConfigModule />}
                                 {currentView === 'ADMIN_STOCK_ASSIGN' && <AdminStockAssignmentModule />}
-                                {currentView.startsWith('ADMIN') && currentView !== 'ADMIN_STOCK_ASSIGN' && <AdminPanel currentView={currentView} />}
+                                {currentView === 'ADMIN_SEND_KEYS' && <AdminSendKeysModule />}
+                                {currentView.startsWith('ADMIN') && currentView !== 'ADMIN_STOCK_ASSIGN' && currentView !== 'ADMIN_SEND_KEYS' && <AdminPanel currentView={currentView} />}
                                 {currentView === 'PROFILE' && <UserProfile />}
                             </Suspense>
                         </ErrorBoundary>
