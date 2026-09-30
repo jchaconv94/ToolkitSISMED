@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDropdownPosition } from "../hooks/useDropdownPosition";
-import { AlertTriangle, CheckCircle2, CircleHelp, Clock, Database, Loader2, Monitor, MonitorSmartphone, Search } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleHelp, Clock, Database, Download, Loader2, Monitor, MonitorSmartphone, Search } from "lucide-react";
 import { relativeTime } from "../services/sendKeys";
 import {
   DEVICE_STATE_LABEL, DeviceFilter, DeviceState, REPORT_WINDOW_DAYS, SismedFilter, SismedState, ToolkitDevice, ToolkitDeviceRow,
@@ -211,17 +211,29 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={() => setSismedFilter(sismedFilter === "outdated" ? "all" : "outdated")}
-          className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left text-[12px] ${
-            sismedFilter === "outdated" ? "border-amber-400 bg-amber-100 ring-2 ring-amber-400/20" : "border-amber-200 bg-amber-50"
-          }`}
-        >
-          <Database className="h-4 w-4 shrink-0 text-amber-600" />
-          <b className="text-amber-800">{summary.sismedOutdated} SISMED desactualizado{summary.sismedOutdated === 1 ? "" : "s"}</b>
-          <span className="ml-auto shrink-0 text-amber-700">{latestSismed ? `vigente v${latestSismed}` : "sin reportes"}</span>
-        </button>
+        {/* La versión publicada va aquí en celular: la primera fila es solo de las pestañas. */}
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className="flex min-w-0 items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-2.5 py-1.5">
+            <Download className="h-4 w-4 shrink-0 text-teal-600" />
+            <span className="min-w-0 leading-tight">
+              <b className="block truncate text-[12px] text-teal-800">{latest ? `Toolkit v${latest}` : "Toolkit —"}</b>
+              <span className="block truncate text-[10.5px] text-teal-700">última publicada</span>
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSismedFilter(sismedFilter === "outdated" ? "all" : "outdated")}
+            className={`flex min-w-0 items-center gap-2 rounded-xl border px-2.5 py-1.5 text-left ${
+              sismedFilter === "outdated" ? "border-amber-400 bg-amber-100 ring-2 ring-amber-400/20" : "border-amber-200 bg-amber-50"
+            }`}
+          >
+            <Database className="h-4 w-4 shrink-0 text-amber-600" />
+            <span className="min-w-0 leading-tight">
+              <b className="block truncate text-[12px] text-amber-800">{summary.sismedOutdated} SISMED desact.</b>
+              <span className="block truncate text-[10.5px] text-amber-700">{latestSismed ? `vigente v${latestSismed}` : "sin reportes"}</span>
+            </span>
+          </button>
+        </div>
       </div>
 
       <div className="hidden gap-3 md:grid md:grid-cols-3 lg:grid-cols-5">

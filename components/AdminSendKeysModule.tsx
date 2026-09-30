@@ -50,11 +50,10 @@ export const AdminSendKeysModule: React.FC = () => {
         {tab === "devices" && latestVersion && (
           <div
             title={`Última versión publicada del Toolkit: ${latestVersion}`}
-            className="flex h-[42px] shrink-0 items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs text-teal-800"
+            className="hidden h-[42px] shrink-0 items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs text-teal-800 sm:flex"
           >
             <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Última versión publicada:</span>
-            <b><span className="sm:hidden">v</span>{latestVersion}</b>
+            Última versión publicada: <b>{latestVersion}</b>
           </div>
         )}
       </div>
