@@ -30,8 +30,8 @@ export const AdminSendKeysModule: React.FC = () => {
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex w-full rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:w-auto" role="tablist">
+      <div className="flex items-center gap-2 sm:justify-between">
+      <div className="flex min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:flex-none" role="tablist">
         {MODULE_TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -48,8 +48,12 @@ export const AdminSendKeysModule: React.FC = () => {
         ))}
       </div>
         {tab === "devices" && latestVersion && (
-          <div className="flex w-fit items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs text-teal-800">
-            <Download className="h-4 w-4" /> Última versión publicada: <b>{latestVersion}</b>
+          <div
+            title={`Última versión publicada del Toolkit: ${latestVersion}`}
+            className="hidden h-[42px] shrink-0 items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs text-teal-800 sm:flex"
+          >
+            <Download className="h-4 w-4" />
+            Última versión publicada: <b>{latestVersion}</b>
           </div>
         )}
       </div>

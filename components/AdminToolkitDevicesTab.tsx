@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDropdownPosition } from "../hooks/useDropdownPosition";
-import { AlertTriangle, CheckCircle2, CircleHelp, Clock, Database, Loader2, Monitor, MonitorSmartphone, Search } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleHelp, Clock, Database, Download, Loader2, Monitor, MonitorSmartphone, Search } from "lucide-react";
 import { relativeTime } from "../services/sendKeys";
 import {
   DEVICE_STATE_LABEL, DeviceFilter, DeviceState, REPORT_WINDOW_DAYS, SismedFilter, SismedState, ToolkitDevice, ToolkitDeviceRow,
@@ -26,6 +26,13 @@ const FILTERS: Array<{ id: DeviceFilter; label: string }> = [
   { id: "current", label: "Al día" },
   { id: "outdated", label: "Desactualizados" },
   { id: "none", label: "Sin reportar" },
+];
+
+const MOBILE_KPIS: Array<{ id: DeviceFilter; label: string; value: "reporting" | DeviceState; text: string; bar: string }> = [
+  { id: "all", label: "Reportan", value: "reporting", text: "text-teal-700", bar: "bg-teal-500" },
+  { id: "current", label: "Al día", value: "current", text: "text-emerald-700", bar: "bg-emerald-500" },
+  { id: "outdated", label: "Desactualiz.", value: "outdated", text: "text-amber-700", bar: "bg-amber-500" },
+  { id: "none", label: "Sin reportar", value: "none", text: "text-slate-700", bar: "bg-slate-400" },
 ];
 
 const VersionChip: React.FC<{ version?: string | null; state: DeviceState; small?: boolean }> = ({ version, state, small }) =>
@@ -186,12 +193,55 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
   return (
     <div className="space-y-4">
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      {/* Celular: mosaico de una fila y franja del SISMED, para que la lista se vea sin desplazarse. */}
+      <div className="space-y-2 md:hidden">
+        <div className="grid grid-cols-4 gap-1.5">
+          {MOBILE_KPIS.map((k) => (
+            <button
+              key={k.id}
+              type="button"
+              onClick={() => setFilter(k.id)}
+              className={`relative overflow-hidden rounded-xl border bg-white px-1 py-2 text-center shadow-sm ${
+                filter === k.id ? "border-teal-500 ring-2 ring-teal-500/20" : "border-slate-200"
+              }`}
+            >
+              <span className={`absolute inset-x-0 top-0 h-0.5 ${k.bar}`} />
+              <span className={`block text-xl font-black leading-tight ${k.text}`}>{summary[k.value]}</span>
+              <span className="block text-[9.5px] font-black uppercase leading-tight tracking-tight text-slate-500">{k.label}</span>
+            </button>
+          ))}
+        </div>
+        {/* La versión publicada va aquí en celular: la primera fila es solo de las pestañas. */}
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className="flex min-w-0 items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-2.5 py-1.5">
+            <Download className="h-4 w-4 shrink-0 text-teal-600" />
+            <span className="min-w-0 leading-tight">
+              <b className="block truncate text-[12px] text-teal-800">{latest ? `Toolkit v${latest}` : "Toolkit —"}</b>
+              <span className="block truncate text-[10.5px] text-teal-700">última publicada</span>
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSismedFilter(sismedFilter === "outdated" ? "all" : "outdated")}
+            className={`flex min-w-0 items-center gap-2 rounded-xl border px-2.5 py-1.5 text-left ${
+              sismedFilter === "outdated" ? "border-amber-400 bg-amber-100 ring-2 ring-amber-400/20" : "border-amber-200 bg-amber-50"
+            }`}
+          >
+            <Database className="h-4 w-4 shrink-0 text-amber-600" />
+            <span className="min-w-0 leading-tight">
+              <b className="block truncate text-[12px] text-amber-800">{summary.sismedOutdated} SISMED desact.</b>
+              <span className="block truncate text-[10.5px] text-amber-700">{latestSismed ? `vigente v${latestSismed}` : "sin reportes"}</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div className="hidden gap-3 md:grid md:grid-cols-3 lg:grid-cols-5">
         <ImmunizationKpiCard watermark tone="info" icon={<MonitorSmartphone />} label="Equipos que reportan" value={summary.reporting} onClick={() => setFilter("all")} active={filter === "all"} />
         <ImmunizationKpiCard watermark tone="success" icon={<CheckCircle2 />} label="Al día" value={summary.current} onClick={() => setFilter("current")} active={filter === "current"} />
         <ImmunizationKpiCard watermark tone="warning" icon={<AlertTriangle />} label="Desactualizados" value={summary.outdated} onClick={() => setFilter("outdated")} active={filter === "outdated"} />
         <ImmunizationKpiCard watermark tone="neutral" icon={<CircleHelp />} label="Sin reportar" value={summary.none} onClick={() => setFilter("none")} active={filter === "none"} />
-        <div className="col-span-2 flex lg:col-span-1 [&>*]:w-full">
+        <div className="flex [&>*]:w-full">
           <ImmunizationKpiCard
             watermark
             tone="warning"
