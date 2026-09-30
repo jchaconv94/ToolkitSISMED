@@ -4,7 +4,8 @@ vi.mock("./supabaseClient", () => ({ supabase: null }));
 vi.mock("./api", () => ({ getSessionToken: () => null }));
 
 import {
-  compareVersions, deviceState, filterDevices, latestDesktopVersion, summarizeDevices, ToolkitDeviceRow,
+  compareVersions, deviceState, filterDevices, latestDesktopVersion, latestSismedVersion, sismedState,
+  sismedVersionsInUse, summarizeDevices, ToolkitDeviceRow,
 } from "./toolkitDevices";
 
 const ahora = new Date("2026-09-30T12:00:00Z");
@@ -49,13 +50,41 @@ describe("deviceState", () => {
 describe("summarizeDevices y filterDevices", () => {
   const todos = [alDia, nunca, vieja, dormida];
   it("cuenta cada estado", () => {
-    expect(summarizeDevices(todos, "2.2.0", ahora)).toEqual({ reporting: 2, current: 1, outdated: 1, none: 2 });
+    expect(summarizeDevices(todos, "2.2.0", ahora)).toEqual({ reporting: 2, current: 1, outdated: 1, none: 2, sismedOutdated: 0 });
   });
   it("ordena desactualizados primero y filtra", () => {
     expect(filterDevices(todos, "2.2.0", "", "all", ahora).map((r) => r.code)).toEqual(["06515", "06503", "06508", "030S05"]);
     expect(filterDevices(todos, "2.2.0", "", "outdated", ahora).map((r) => r.code)).toEqual(["06515"]);
     expect(filterDevices(todos, "2.2.0", "almacen", "all", ahora).map((r) => r.code)).toEqual(["030S05"]);
     expect(filterDevices(todos, "2.2.0", "farmacia-sr", "all", ahora).map((r) => r.code)).toEqual(["06515"]);
+  });
+});
+
+describe("versión del SISMED", () => {
+  const nueva = fila("06519", "C.S. NUEVO LIMA", [{ deviceName: "PC-NL", version: "2.2.1", sismedVersion: "2.5.3", lastSeen: hace(0) }]);
+  const atrasada = fila("06515", "C.S. SAN RAFAEL", [{ deviceName: "FARMACIA-SR", version: "2.2.1", sismedVersion: "2.5.1", lastSeen: hace(1) }]);
+  const sinDato = fila("06503", "P.S. BUENOS AIRES", [{ deviceName: "PC-BA", version: "2.2.0", lastSeen: hace(1) }]);
+  // Una PC dormida no fija la vigente, aunque tuviera una versión mayor.
+  const dormidaNueva = fila("06508", "P.S. SAN PABLO", [{ deviceName: "PC-SP", sismedVersion: "2.6.0", lastSeen: hace(45) }]);
+  const todos = [nueva, atrasada, sinDato, dormidaNueva];
+
+  it("la vigente es la más alta que reporta alguna PC activa", () => {
+    expect(latestSismedVersion(todos, ahora)).toBe("2.5.3");
+    expect(latestSismedVersion([sinDato], ahora)).toBeNull();
+  });
+  it("al día, desactualizado y sin dato", () => {
+    expect(sismedState(nueva, "2.5.3", ahora)).toBe("current");
+    expect(sismedState(atrasada, "2.5.3", ahora)).toBe("outdated");
+    expect(sismedState(sinDato, "2.5.3", ahora)).toBe("none");
+    expect(sismedState(dormidaNueva, "2.5.3", ahora)).toBe("none");
+  });
+  it("cuenta y filtra", () => {
+    expect(summarizeDevices(todos, "2.2.1", ahora).sismedOutdated).toBe(1);
+    expect(sismedVersionsInUse(todos, ahora)).toEqual(["2.5.3", "2.5.1"]);
+    const codigos = (f: Parameters<typeof filterDevices>[5]) => filterDevices(todos, "2.2.1", "", "all", ahora, f).map((r) => r.code).sort();
+    expect(codigos("outdated")).toEqual(["06515"]);
+    expect(codigos("none")).toEqual(["06503", "06508"]);
+    expect(codigos("v:2.5.3")).toEqual(["06519"]);
   });
 });
 

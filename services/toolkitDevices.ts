@@ -8,6 +8,10 @@
  *
  * La última versión publicada se toma de las releases de GitHub, igual que el actualizador
  * del Toolkit.
+ *
+ * La versión del SISMED la lee el Toolkit de DATOS\MCONFIG.DBF (fila SIS / AB) y la manda en
+ * la misma consulta (`supabase/SUPABASE_EQUIPOS_SISMED.sql`). Como del SISMED no hay un sitio
+ * oficial que diga cuál es la última, se toma como vigente la más alta que reporte alguna PC.
  */
 
 import { callSendKeysRpc } from "./sendKeys";
@@ -15,6 +19,12 @@ import { callSendKeysRpc } from "./sendKeys";
 export interface ToolkitDevice {
   deviceName?: string | null;
   version?: string | null;
+  /** Valor tal cual está en MCONFIG, p. ej. `V2.5.3 vf 12/01/2026`. */
+  sismedRaw?: string | null;
+  /** `2.5.3`, separado del valor anterior por la base. */
+  sismedVersion?: string | null;
+  /** `2026-01-12`. */
+  sismedDate?: string | null;
   firstSeen?: string | null;
   lastSeen?: string | null;
 }
@@ -68,24 +78,72 @@ export const deviceState = (row: ToolkitDeviceRow, latest: string | null, now: D
   return compareVersions(device.version, latest) >= 0 ? "current" : "outdated";
 };
 
+/** La versión de SISMED más alta que reporta alguna PC activa: es la que se toma como vigente. */
+export const latestSismedVersion = (rows: ToolkitDeviceRow[], now: Date = new Date()): string | null => {
+  let latest: string | null = null;
+  rows.forEach((row) => activeDevices(row, now).forEach((d) => {
+    if (d.sismedVersion && (!latest || compareVersions(d.sismedVersion, latest) > 0)) latest = d.sismedVersion;
+  }));
+  return latest;
+};
+
+export type SismedState = "current" | "outdated" | "none";
+
+/**
+ * SISMED del establecimiento según la PC que lo envió por última vez. «none» si esa PC no
+ * informó su SISMED (Toolkit anterior o MCONFIG ilegible).
+ */
+export const sismedState = (row: ToolkitDeviceRow, latestSismed: string | null, now: Date = new Date()): SismedState => {
+  const device = activeDevices(row, now)[0];
+  if (!device?.sismedVersion) return "none";
+  if (!latestSismed) return "current";
+  return compareVersions(device.sismedVersion, latestSismed) >= 0 ? "current" : "outdated";
+};
+
+/** Versiones de SISMED que envían las PC activas, la más nueva primero, para el filtro. */
+export const sismedVersionsInUse = (rows: ToolkitDeviceRow[], now: Date = new Date()): string[] => {
+  const versions = new Set<string>();
+  rows.forEach((row) => {
+    const version = activeDevices(row, now)[0]?.sismedVersion;
+    if (version) versions.add(version);
+  });
+  return Array.from(versions).sort((a, b) => compareVersions(b, a));
+};
+
 export interface DeviceSummary {
   reporting: number;
   current: number;
   outdated: number;
   none: number;
+  sismedOutdated: number;
 }
 
-export const summarizeDevices = (rows: ToolkitDeviceRow[], latest: string | null, now: Date = new Date()): DeviceSummary => {
-  const summary: DeviceSummary = { reporting: 0, current: 0, outdated: 0, none: 0 };
+export const summarizeDevices = (
+  rows: ToolkitDeviceRow[],
+  latest: string | null,
+  now: Date = new Date(),
+  latestSismed: string | null = latestSismedVersion(rows, now),
+): DeviceSummary => {
+  const summary: DeviceSummary = { reporting: 0, current: 0, outdated: 0, none: 0, sismedOutdated: 0 };
   rows.forEach((row) => {
     const state = deviceState(row, latest, now);
     summary[state] += 1;
     if (state !== "none") summary.reporting += 1;
+    if (sismedState(row, latestSismed, now) === "outdated") summary.sismedOutdated += 1;
   });
   return summary;
 };
 
 export type DeviceFilter = "all" | DeviceState;
+
+/** Filtro de SISMED: todas, las desactualizadas, sin dato o una versión concreta (`v:2.5.3`). */
+export type SismedFilter = "all" | "outdated" | "none" | `v:${string}`;
+
+const matchesSismed = (row: ToolkitDeviceRow, filter: SismedFilter, latestSismed: string | null, now: Date): boolean => {
+  if (filter === "all") return true;
+  if (filter === "outdated" || filter === "none") return sismedState(row, latestSismed, now) === filter;
+  return activeDevices(row, now)[0]?.sismedVersion === filter.slice(2);
+};
 
 const normalize = (value: string) =>
   value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
@@ -97,6 +155,8 @@ export const filterDevices = (
   search: string,
   filter: DeviceFilter,
   now: Date = new Date(),
+  sismedFilter: SismedFilter = "all",
+  latestSismed: string | null = latestSismedVersion(rows, now),
 ): ToolkitDeviceRow[] => {
   const needle = normalize(search);
   const order: Record<DeviceState, number> = { outdated: 0, none: 1, current: 2 };
@@ -104,6 +164,7 @@ export const filterDevices = (
     .filter((row) => {
       const state = deviceState(row, latest, now);
       if (filter !== "all" && state !== filter) return false;
+      if (!matchesSismed(row, sismedFilter, latestSismed, now)) return false;
       if (!needle) return true;
       const pcs = row.devices.map((d) => d.deviceName || "").join(" ");
       return normalize(`${row.name} ${row.code} ${pcs}`).includes(needle);
