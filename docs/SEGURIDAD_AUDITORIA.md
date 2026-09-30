@@ -179,6 +179,20 @@ SISMED cambian cada año. Lo vigente es el módulo **Claves de envío**
 Se entrega por partes: 1) módulo web y SQL (hecho), 2) Toolkit de escritorio envía clave e
 identificador de la PC, 3) Apps Script consulta la clave.
 
+**Parte 3, aprobada el 2026-09-30: script v3.** El Toolkit ya verifica antes de enviar, pero
+eso no cierra el envío a mano a la dirección del script ni el de un Toolkit anterior a la
+2.1.10. El script v3 (`Toolkit-OGM/docs/apps-script/sync_sismed_google_sheets.gs`) pregunta
+a `app_send_key_verify` (`supabase/SUPABASE_CLAVE_ENVIO_SCRIPT.sql`) antes de escribir la
+pestaña de un establecimiento con clave:
+
+- Solo lee: no vincula PC ni anota intentos; eso lo hace `app_send_key_check` desde el
+  Toolkit, justo antes de enviar.
+- La clave pública de Supabase va escrita en el código: no hay propiedades que configurar.
+  Cada informático pega el código y publica una versión nueva, una vez.
+- **Si la web no responde, el envío pasa** (opción elegida por el usuario): una caída de
+  Supabase no deja a nadie sin actualizar, a cambio de dejar el hueco abierto mientras dure.
+- Los establecimientos **sin clave** siguen abiertos. Para cerrarlos hay que generarles clave.
+
 **Lo que se propuso antes (descartado): una clave por conexión.**
 
 - Cada UNGET guarda su propia clave en las propiedades del script
