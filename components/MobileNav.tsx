@@ -26,7 +26,8 @@ import {
   Truck,
   UserCircle,
   Users,
-  X
+  X,
+  KeyRound
 } from 'lucide-react';
 import { AppModule } from '../types';
 
@@ -81,6 +82,7 @@ const GRUPOS: Grupo[] = [
       { module: 'ADMIN_PARAMS', label: 'Parámetros del Sistema', icon: icono(Sliders) },
       { module: 'ADMIN_STOCK_ASSIGN', label: 'Columnas de Stock', icon: icono(ShieldCheck) },
       { module: 'ADMIN_SYNC_DEVICES', label: 'Dispositivos Sync', icon: icono(RefreshCw) },
+      { module: 'ADMIN_SEND_KEYS', label: 'Claves de envío', icon: icono(KeyRound) },
       { module: 'ADMIN_MIGRATION', label: 'Migración (Supabase)', icon: icono(Database) }
     ]
   }

@@ -129,7 +129,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
           // El administrador total debe poder acceder a los modulos nuevos aun cuando
           // su configuracion de rol en Supabase todavia no haya sido actualizada.
-          if (state.user.role === 'ADMIN' && (module.startsWith('IMMUNIZATION_') || module === 'STOCK_MONITORING' || module === 'ANALYSIS_EXCLUSIONS')) return true;
+          if (state.user.role === 'ADMIN' && (module.startsWith('IMMUNIZATION_') || module === 'STOCK_MONITORING' || module === 'ANALYSIS_EXCLUSIONS' || module === 'ADMIN_SEND_KEYS')) return true;
           return Array.isArray(state.user.permissions) && state.user.permissions.includes(module);
       } catch (e) {
           console.error("Error checking permission:", e);

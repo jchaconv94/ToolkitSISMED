@@ -29,7 +29,8 @@ import {
   Activity,
   ArchiveX,
   CalendarCheck,
-  Ban
+  Ban,
+  KeyRound
 } from 'lucide-react';
 import { AppModule, User } from '../types';
 
@@ -559,6 +560,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <RefreshCw className="h-4 w-4 shrink-0" />
                       Dispositivos Sync
+                    </button>
+                  )}
+                  {hasPermission('ADMIN_SEND_KEYS') && (
+                    <button
+                      onClick={() => setCurrentView('ADMIN_SEND_KEYS')}
+                      className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                        currentView === 'ADMIN_SEND_KEYS'
+                          ? 'text-teal-400 bg-white/5'
+                          : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <KeyRound className="h-4 w-4 shrink-0" />
+                      Claves de envío
                     </button>
                   )}
                 </div>
