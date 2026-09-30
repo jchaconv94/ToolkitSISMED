@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { useDropdownPosition } from "../hooks/useDropdownPosition";
 import { AlertTriangle, CheckCircle2, CircleHelp, Clock, Loader2, Monitor, MonitorSmartphone, Search } from "lucide-react";
 import { relativeTime } from "../services/sendKeys";
 import {
   DEVICE_STATE_LABEL, DeviceFilter, DeviceState, REPORT_WINDOW_DAYS, ToolkitDeviceRow,
-  activeDevices, deviceState, filterDevices, summarizeDevices, toolkitDevicesApi,
+  activeDevices, compareVersions, deviceState, filterDevices, summarizeDevices, toolkitDevicesApi,
 } from "../services/toolkitDevices";
 import { ImmunizationEmptyState, ImmunizationKpiCard, ImmunizationTableHeader, immunizationFilterInputClass } from "./ui/immunization";
 import { TablePagination } from "./ui/TablePagination";
@@ -30,16 +32,65 @@ const VersionChip: React.FC<{ version?: string | null; state: DeviceState; small
     </span>
   ) : small ? null : <span className="text-slate-400">—</span>;
 
-/** Otras PC que enviaron el mismo establecimiento en los últimos 30 días. */
-const OtherPcs: React.FC<{ row: ToolkitDeviceRow }> = ({ row }) => {
-  const others = activeDevices(row).slice(1);
-  if (others.length === 0) return null;
+const POPOVER_WIDTH = 280;
+
+/**
+ * Otras PC que enviaron el mismo establecimiento en los últimos 30 días. Al tocarlo muestra
+ * cuáles son: sirve para descubrir una copia vieja del SISMED en otra máquina.
+ */
+const OtherPcs: React.FC<{ row: ToolkitDeviceRow; latest: string | null }> = ({ row, latest }) => {
+  const [open, setOpen] = useState(false);
+  const { triggerRef, menuStyles } = useDropdownPosition(open, { align: "left", customWidth: POPOVER_WIDTH });
+  const devices = activeDevices(row);
+  if (devices.length < 2) return null;
+  const others = devices.length - 1;
+
   return (
-    <span
-      title={`También envió: ${others.map((d) => `${d.deviceName || "PC sin nombre"} (v${d.version || "?"}, ${relativeTime(d.lastSeen).toLowerCase()})`).join(", ")}`}
-      className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-bold text-amber-700 ring-1 ring-amber-200"
-    >
-      +{others.length} PC
+    <span ref={triggerRef} className="inline-flex">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-bold text-amber-700 ring-1 ring-amber-200 hover:bg-amber-100"
+      >
+        +{others} PC
+      </button>
+      {open && createPortal(
+        <>
+          <div className="fixed inset-0 z-[9998]" onClick={() => setOpen(false)} />
+          <div
+            role="dialog"
+            style={{ ...menuStyles, width: POPOVER_WIDTH }}
+            className="fixed z-[9999] overflow-y-auto rounded-2xl border border-slate-200 bg-white text-left shadow-[0_10px_25px_-5px_rgba(0,0,0,0.1),0_8px_10px_-6px_rgba(0,0,0,0.05)] animate-in fade-in slide-in-from-top-2 duration-150"
+          >
+            <p className="border-b border-slate-100 px-4 py-2.5 text-[11px] font-black uppercase tracking-wider text-slate-500">
+              PC que enviaron {row.code} · últimos {REPORT_WINDOW_DAYS} días
+            </p>
+            <ul className="divide-y divide-slate-100">
+              {devices.map((device, index) => {
+                const outdated = Boolean(latest && device.version && compareVersions(device.version, latest) < 0);
+                return (
+                  <li key={`${device.deviceName}-${index}`} className="flex items-center gap-2.5 px-4 py-2.5">
+                    <Monitor className={`h-4 w-4 shrink-0 ${index === 0 ? "text-teal-600" : "text-slate-400"}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-bold text-slate-800">{device.deviceName || "PC sin nombre"}</span>
+                      <span className="block text-[11px] text-slate-500">
+                        {index === 0 ? "La más reciente · " : ""}{relativeTime(device.lastSeen)}
+                      </span>
+                    </span>
+                    {device.version && (
+                      <span className={`shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[11px] font-bold ${outdated ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
+                        v{device.version}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </>,
+        document.body,
+      )}
     </span>
   );
 };
@@ -163,7 +214,7 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
                         <td className="px-4 py-2">
                           {device ? (
                             <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
-                              <Monitor className="h-4 w-4 text-slate-400" />{device.deviceName || "PC sin nombre"} <OtherPcs row={row} />
+                              <Monitor className="h-4 w-4 text-slate-400" />{device.deviceName || "PC sin nombre"} <OtherPcs row={row} latest={latest} />
                             </span>
                           ) : <span className="text-slate-400">—</span>}
                         </td>
@@ -202,7 +253,7 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
                       <VersionChip version={device?.version} state={state} small />
                     </div>
                     <div className="mb-3 ml-4 mr-3 flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
-                      <span className="flex min-w-0 items-center gap-1"><Monitor className="h-3.5 w-3.5 shrink-0" />{device ? <b className="truncate text-slate-700">{device.deviceName || "PC sin nombre"}</b> : "Sin datos"} <OtherPcs row={row} /></span>
+                      <span className="flex min-w-0 items-center gap-1"><Monitor className="h-3.5 w-3.5 shrink-0" />{device ? <b className="truncate text-slate-700">{device.deviceName || "PC sin nombre"}</b> : "Sin datos"} <OtherPcs row={row} latest={latest} /></span>
                       <span className="flex shrink-0 items-center gap-1"><Clock className="h-3 w-3" />{device ? relativeTime(device.lastSeen) : "Nunca"}</span>
                     </div>
                   </div>
