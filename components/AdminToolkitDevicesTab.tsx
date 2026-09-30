@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDropdownPosition } from "../hooks/useDropdownPosition";
-import { AlertTriangle, CheckCircle2, CircleHelp, Clock, Loader2, Monitor, MonitorSmartphone, Search } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleHelp, Clock, Database, Loader2, Monitor, MonitorSmartphone, Search } from "lucide-react";
 import { relativeTime } from "../services/sendKeys";
 import {
-  DEVICE_STATE_LABEL, DeviceFilter, DeviceState, REPORT_WINDOW_DAYS, ToolkitDeviceRow,
-  activeDevices, compareVersions, deviceState, filterDevices, summarizeDevices, toolkitDevicesApi,
+  DEVICE_STATE_LABEL, DeviceFilter, DeviceState, REPORT_WINDOW_DAYS, SismedFilter, SismedState, ToolkitDevice, ToolkitDeviceRow,
+  activeDevices, compareVersions, deviceState, filterDevices, latestSismedVersion, sismedState, sismedVersionsInUse,
+  summarizeDevices, toolkitDevicesApi,
 } from "../services/toolkitDevices";
-import { ImmunizationEmptyState, ImmunizationKpiCard, ImmunizationTableHeader, immunizationFilterInputClass } from "./ui/immunization";
+import {
+  ImmunizationEmptyState, ImmunizationKpiCard, ImmunizationTableHeader, formatImmunizationDate, immunizationFilterInputClass,
+} from "./ui/immunization";
 import { TablePagination } from "./ui/TablePagination";
 
 const PAGE_SIZE = 10;
@@ -32,13 +35,33 @@ const VersionChip: React.FC<{ version?: string | null; state: DeviceState; small
     </span>
   ) : small ? null : <span className="text-slate-400">—</span>;
 
+/** Versión del SISMED de una PC con la fecha de esa versión debajo. */
+const SismedChip: React.FC<{ device?: ToolkitDevice; state: SismedState; small?: boolean }> = ({ device, state, small }) => {
+  if (!device?.sismedVersion) {
+    if (small) return null;
+    return <span className="text-slate-400" title={device?.sismedRaw || undefined}>{device?.sismedRaw || "—"}</span>;
+  }
+  const chip = (
+    <span className={`rounded-md font-mono font-bold ${small ? "px-1.5 py-0.5 text-[11px]" : "px-2 py-0.5 text-xs"} ${state === "outdated" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
+      {small ? "SISMED " : ""}v{device.sismedVersion}
+    </span>
+  );
+  if (small) return chip;
+  return (
+    <span className="inline-flex flex-col items-start gap-0.5">
+      {chip}
+      {device.sismedDate && <span className="text-[11px] text-slate-500">{formatImmunizationDate(device.sismedDate)}</span>}
+    </span>
+  );
+};
+
 const POPOVER_WIDTH = 280;
 
 /**
  * Otras PC que enviaron el mismo establecimiento en los últimos 30 días. Al tocarlo muestra
  * cuáles son: sirve para descubrir una copia vieja del SISMED en otra máquina.
  */
-const OtherPcs: React.FC<{ row: ToolkitDeviceRow; latest: string | null }> = ({ row, latest }) => {
+const OtherPcs: React.FC<{ row: ToolkitDeviceRow; latest: string | null; latestSismed: string | null }> = ({ row, latest, latestSismed }) => {
   const [open, setOpen] = useState(false);
   const { triggerRef, menuStyles } = useDropdownPosition(open, { align: "left", customWidth: POPOVER_WIDTH });
   const devices = activeDevices(row);
@@ -69,6 +92,7 @@ const OtherPcs: React.FC<{ row: ToolkitDeviceRow; latest: string | null }> = ({ 
             <ul className="divide-y divide-slate-100">
               {devices.map((device, index) => {
                 const outdated = Boolean(latest && device.version && compareVersions(device.version, latest) < 0);
+                const sismedOutdated = Boolean(latestSismed && device.sismedVersion && compareVersions(device.sismedVersion, latestSismed) < 0);
                 return (
                   <li key={`${device.deviceName}-${index}`} className="flex items-center gap-2.5 px-4 py-2.5">
                     <Monitor className={`h-4 w-4 shrink-0 ${index === 0 ? "text-teal-600" : "text-slate-400"}`} />
@@ -77,6 +101,11 @@ const OtherPcs: React.FC<{ row: ToolkitDeviceRow; latest: string | null }> = ({ 
                       <span className="block text-[11px] text-slate-500">
                         {index === 0 ? "La más reciente · " : ""}{relativeTime(device.lastSeen)}
                       </span>
+                      {device.sismedVersion && (
+                        <span className={`block text-[11px] font-semibold ${sismedOutdated ? "text-amber-700" : "text-slate-500"}`}>
+                          SISMED v{device.sismedVersion}
+                        </span>
+                      )}
                     </span>
                     {device.version && (
                       <span className={`shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[11px] font-bold ${outdated ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
@@ -102,6 +131,7 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
   const [loadError, setLoadError] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<DeviceFilter>("all");
+  const [sismedFilter, setSismedFilter] = useState<SismedFilter>("all");
   const [page, setPage] = useState(1);
 
   const load = useCallback(async () => {
@@ -120,12 +150,17 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
 
   useEffect(() => { void load(); }, [load]);
 
-  const summary = useMemo(() => summarizeDevices(rows, latest), [rows, latest]);
-  const filtered = useMemo(() => filterDevices(rows, latest, search, filter), [rows, latest, search, filter]);
+  const latestSismed = useMemo(() => latestSismedVersion(rows), [rows]);
+  const sismedVersions = useMemo(() => sismedVersionsInUse(rows), [rows]);
+  const summary = useMemo(() => summarizeDevices(rows, latest, undefined, latestSismed), [rows, latest, latestSismed]);
+  const filtered = useMemo(
+    () => filterDevices(rows, latest, search, filter, undefined, sismedFilter, latestSismed),
+    [rows, latest, search, filter, sismedFilter, latestSismed],
+  );
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [search, filter]);
+  useEffect(() => { setPage(1); }, [search, filter, sismedFilter]);
 
   if (loading) {
     return (
@@ -151,11 +186,23 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
   return (
     <div className="space-y-4">
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <ImmunizationKpiCard watermark tone="info" icon={<MonitorSmartphone />} label="Equipos que reportan" value={summary.reporting} onClick={() => setFilter("all")} active={filter === "all"} />
         <ImmunizationKpiCard watermark tone="success" icon={<CheckCircle2 />} label="Al día" value={summary.current} onClick={() => setFilter("current")} active={filter === "current"} />
         <ImmunizationKpiCard watermark tone="warning" icon={<AlertTriangle />} label="Desactualizados" value={summary.outdated} onClick={() => setFilter("outdated")} active={filter === "outdated"} />
         <ImmunizationKpiCard watermark tone="neutral" icon={<CircleHelp />} label="Sin reportar" value={summary.none} onClick={() => setFilter("none")} active={filter === "none"} />
+        <div className="col-span-2 flex lg:col-span-1 [&>*]:w-full">
+          <ImmunizationKpiCard
+            watermark
+            tone="warning"
+            icon={<Database />}
+            label="SISMED desactualizado"
+            value={summary.sismedOutdated}
+            hint={latestSismed ? `Vigente: v${latestSismed}` : "Aún sin reportes"}
+            onClick={() => setSismedFilter(sismedFilter === "outdated" ? "all" : "outdated")}
+            active={sismedFilter === "outdated"}
+          />
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -178,6 +225,19 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
               </button>
             ))}
           </div>
+          <select
+            value={sismedFilter}
+            onChange={(e) => setSismedFilter(e.target.value as SismedFilter)}
+            aria-label="Versión del SISMED"
+            className={`${immunizationFilterInputClass} sm:ml-auto sm:w-52`}
+          >
+            <option value="all">SISMED: todas</option>
+            <option value="outdated">SISMED desactualizado</option>
+            {sismedVersions.map((v) => (
+              <option key={v} value={`v:${v}`}>SISMED v{v}{v === latestSismed ? " (vigente)" : ""}</option>
+            ))}
+            <option value="none">SISMED sin dato</option>
+          </select>
         </div>
 
         {filtered.length === 0 ? (
@@ -194,7 +254,8 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
                   <tr>
                     <ImmunizationTableHeader>Establecimiento</ImmunizationTableHeader>
                     <ImmunizationTableHeader>Equipo</ImmunizationTableHeader>
-                    <ImmunizationTableHeader>Versión</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>Toolkit</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>SISMED</ImmunizationTableHeader>
                     <ImmunizationTableHeader>Último reporte</ImmunizationTableHeader>
                     <ImmunizationTableHeader>Estado</ImmunizationTableHeader>
                   </tr>
@@ -214,11 +275,12 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
                         <td className="px-4 py-2">
                           {device ? (
                             <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
-                              <Monitor className="h-4 w-4 text-slate-400" />{device.deviceName || "PC sin nombre"} <OtherPcs row={row} latest={latest} />
+                              <Monitor className="h-4 w-4 text-slate-400" />{device.deviceName || "PC sin nombre"} <OtherPcs row={row} latest={latest} latestSismed={latestSismed} />
                             </span>
                           ) : <span className="text-slate-400">—</span>}
                         </td>
                         <td className="px-4 py-2"><VersionChip version={device?.version} state={state} /></td>
+                        <td className="px-4 py-2"><SismedChip device={device} state={sismedState(row, latestSismed)} /></td>
                         <td className="px-4 py-2 text-slate-500">{device ? relativeTime(device.lastSeen) : "—"}</td>
                         <td className="px-4 py-2">
                           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-bold ${style.chip}`}>
@@ -250,10 +312,13 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
                           <span className={`truncate text-[10.5px] font-bold ${style.text}`}>{DEVICE_STATE_LABEL[state]}</span>
                         </span>
                       </span>
-                      <VersionChip version={device?.version} state={state} small />
+                      <span className="flex shrink-0 flex-col items-end gap-1">
+                        <VersionChip version={device?.version} state={state} small />
+                        <SismedChip device={device} state={sismedState(row, latestSismed)} small />
+                      </span>
                     </div>
                     <div className="mb-3 ml-4 mr-3 flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
-                      <span className="flex min-w-0 items-center gap-1"><Monitor className="h-3.5 w-3.5 shrink-0" />{device ? <b className="truncate text-slate-700">{device.deviceName || "PC sin nombre"}</b> : "Sin datos"} <OtherPcs row={row} latest={latest} /></span>
+                      <span className="flex min-w-0 items-center gap-1"><Monitor className="h-3.5 w-3.5 shrink-0" />{device ? <b className="truncate text-slate-700">{device.deviceName || "PC sin nombre"}</b> : "Sin datos"} <OtherPcs row={row} latest={latest} latestSismed={latestSismed} /></span>
                       <span className="flex shrink-0 items-center gap-1"><Clock className="h-3 w-3" />{device ? relativeTime(device.lastSeen) : "Nunca"}</span>
                     </div>
                   </div>
@@ -268,6 +333,7 @@ export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: stri
 
       <p className="px-1 text-[11.5px] text-slate-500">
         «Sin reportar»: la PC tiene una versión anterior a la 2.1.10 o no ha sincronizado en los últimos {REPORT_WINDOW_DAYS} días.
+        {" "}SISMED: la versión vigente es la más alta que reporta alguna PC; la informan los Toolkit posteriores a la 2.2.0.
       </p>
     </div>
   );
