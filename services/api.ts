@@ -326,9 +326,13 @@ export const api = {
         if (usersCache && !forceRefresh) return usersCache;
         try {
             if (supabase) {
+                // Orden fijo por fecha de creación: sin él, Postgres devuelve al final la
+                // fila recién actualizada y el usuario editado «saltaba» al fondo de la lista.
                 const { data, error } = await supabase
                     .from("users")
-                    .select(USER_SELECT);
+                    .select(USER_SELECT)
+                    .order("created_at", { ascending: true })
+                    .order("username", { ascending: true });
                 if (!error && data) {
                     const normalized = data.map(u => {
                         const p = Array.isArray(u.personnel) ? u.personnel[0] : u.personnel;
