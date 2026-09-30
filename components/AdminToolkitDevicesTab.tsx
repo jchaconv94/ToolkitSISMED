@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, CircleHelp, Clock, Download, Loader2, Monitor, MonitorSmartphone, Search } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleHelp, Clock, Loader2, Monitor, MonitorSmartphone, Search } from "lucide-react";
 import { relativeTime } from "../services/sendKeys";
 import {
   DEVICE_STATE_LABEL, DeviceFilter, DeviceState, REPORT_WINDOW_DAYS, ToolkitDeviceRow,
@@ -44,7 +44,7 @@ const OtherPcs: React.FC<{ row: ToolkitDeviceRow }> = ({ row }) => {
   );
 };
 
-export const AdminToolkitDevicesTab: React.FC = () => {
+export const AdminToolkitDevicesTab: React.FC<{ onLatestVersion?: (version: string | null) => void }> = ({ onLatestVersion }) => {
   const [rows, setRows] = useState<ToolkitDeviceRow[]>([]);
   const [latest, setLatest] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,12 +59,13 @@ export const AdminToolkitDevicesTab: React.FC = () => {
       const [data, version] = await Promise.all([toolkitDevicesApi.overview(), toolkitDevicesApi.latestRelease()]);
       setRows(data);
       setLatest(version);
+      onLatestVersion?.(version);
     } catch (error: any) {
       setLoadError(error?.message || "No se pudieron cargar los equipos.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onLatestVersion]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -98,11 +99,6 @@ export const AdminToolkitDevicesTab: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {latest && (
-        <div className="flex w-fit items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs text-teal-800">
-          <Download className="h-4 w-4" /> Última versión publicada: <b>{latest}</b>
-        </div>
-      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <ImmunizationKpiCard watermark tone="info" icon={<MonitorSmartphone />} label="Equipos que reportan" value={summary.reporting} onClick={() => setFilter("all")} active={filter === "all"} />
