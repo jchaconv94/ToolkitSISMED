@@ -397,8 +397,6 @@ const DetailDrawer: React.FC<{
   onRegenerate: () => void;
   onRevoke: () => void;
 }> = ({ row, history, historyLoading, busy, onClose, onIgnore, onRebind, onRegenerate, onRevoke }) => {
-  const state = sendKeyState(row);
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -408,15 +406,19 @@ const DetailDrawer: React.FC<{
   return createPortal(
     <div className="fixed inset-0 z-[80] flex justify-end bg-slate-900/40" onClick={onClose}>
       <aside className="flex h-full w-full max-w-md flex-col bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <header className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 sm:px-6">
-          <div className="min-w-0">
-            <div className="font-mono text-xs font-bold text-teal-700">{row.code}</div>
-            <h2 className="truncate text-lg font-black text-slate-900">{row.name}</h2>
-            <div className="mt-2"><StateChip state={state} /></div>
+        <header className="relative overflow-hidden bg-slate-900 px-5 py-5 text-white sm:px-6">
+          <KeyRound className="pointer-events-none absolute -bottom-6 right-12 h-28 w-28 text-teal-400 opacity-10" />
+          <div className="relative flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="flex items-center gap-2 text-[11px] font-bold uppercase text-teal-300">
+                <KeyRound className="h-3.5 w-3.5" /> Clave de envío · <span className="font-mono">{row.code}</span>
+              </p>
+              <h2 className="mt-1 truncate text-lg font-black leading-tight">{row.name}</h2>
+            </div>
+            <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-white/70 hover:bg-white/10 hover:text-white" aria-label="Cerrar">
+              <X className="h-5 w-5" />
+            </button>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Cerrar">
-            <X className="h-5 w-5" />
-          </button>
         </header>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5 sm:px-6">
