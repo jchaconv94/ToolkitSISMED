@@ -32,7 +32,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: cloudflare/conexion/package-lock.json
 
@@ -48,6 +48,8 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: cloudflare/conexion
+          # La misma versión de package-lock.json (requiere Node 22).
+          wranglerVersion: "4.145.0"
           secrets: |
             SUPABASE_ANON_KEY
         env:
