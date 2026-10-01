@@ -82,3 +82,51 @@ export const onlineFor = (
   });
   return Array.from(rows.values()).sort((a, b) => a.name.localeCompare(b.name, "es"));
 };
+
+// ---------------------------------------------------------------------------------------
+//  Backups (etapa 2)
+// ---------------------------------------------------------------------------------------
+
+/** Tamaño de cada parte que sube el Toolkit. R2 exige al menos 5 MiB salvo en la última. */
+export const BACKUP_PART_SIZE = 20 * 1024 * 1024;
+/** Un backup que nadie descargó se borra a la hora (la regla del bucket lo haría al día). */
+export const BACKUP_TTL_MS = 60 * 60 * 1000;
+/** Tamaño máximo aceptado: el hospital pesa 70–150 MB; se deja margen. */
+export const BACKUP_MAX_BYTES = 600 * 1024 * 1024;
+
+export type BackupStatus = "requested" | "uploading" | "ready" | "failed";
+
+export interface BackupJob {
+  id: string;
+  code: string;
+  web: string;
+  uploadToken: string;
+  downloadToken: string;
+  status: BackupStatus;
+  createdAt: number;
+  name?: string;
+  size?: number;
+  sha256?: string;
+  modified?: string;
+  key?: string;
+  uploadId?: string;
+  reason?: string;
+}
+
+/** Nombre del zip como lo genera el SISMED: BKDA<AAAAMMDD><HHMM>.zip (o BKDH…). */
+export const isBackupName = (name: unknown): name is string =>
+  typeof name === "string" && /^BKD[AH]\d{8,12}\.zip$/i.test(name);
+
+/** Dónde vive el zip en R2 mientras está de paso. */
+export const backupKey = (job: Pick<BackupJob, "id" | "code">, name: string) => `backups/${job.code}/${job.id}/${name}`;
+
+export const isExpired = (job: Pick<BackupJob, "createdAt">, now: number) => now - job.createdAt > BACKUP_TTL_MS;
+
+/** Datos del backup que manda el Toolkit, validados. */
+export const parseBackupMeta = (data: any): { name: string; size: number; sha256: string; modified: string } | null => {
+  if (!data || !isBackupName(data.name)) return null;
+  const size = Number(data.size);
+  if (!Number.isFinite(size) || size <= 0 || size > BACKUP_MAX_BYTES) return null;
+  if (typeof data.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(data.sha256)) return null;
+  return { name: data.name, size, sha256: data.sha256.toLowerCase(), modified: String(data.modified || "").slice(0, 40) };
+};

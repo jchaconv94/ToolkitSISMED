@@ -12,25 +12,47 @@
  *   /web  Navegador. ?token=<sesión de ToolkitSISMED> (app_backup_web_auth). Cada usuario
  *         solo ve las PC de su jurisdicción.
  *
- * Mensajes (JSON):
- *   web → servicio  {t:"list"}                         → {t:"list", rows}
- *   web → servicio  {t:"ping", id, code}               → reenvía {t:"ping", id, web, sentAt} a la PC
- *   pc  → servicio  {t:"pong", id, web, sentAt}         → {t:"ping_result", id, ok, code, rtt} a esa web
- *   servicio → web  {t:"presence", online, codes}       cuando una PC se conecta o se va
+ * Mensajes (JSON) por la conexión abierta:
+ *   web → {t:"list"}                          → {t:"list", rows}
+ *   web → {t:"ping", id, code}                → la PC responde {t:"pong", ...} → {t:"ping_result"}
+ *   web → {t:"backup_request", code}          → la PC recibe {t:"backup", job, token, partSize, uploadUrl}
+ *   pc  → {t:"backup_meta"|"backup_progress"|"backup_error", job, ...} → se reenvía a esa web
+ *   servicio → web {t:"backup_ready", job, downloadUrl, name, size, sha256}
+ *   web → {t:"backup_done", job}              → se borra de R2
+ *   servicio → web {t:"presence", online, codes} cuando una PC se conecta o se va
  * El texto «ping» recibe «pong» sin despertar al servicio (mantiene viva la conexión).
+ *
+ * Backups (el archivo no pasa por la conexión abierta, va por HTTPS directo a R2):
+ *   POST /backup/<job>/start           (X-Job-Token)   inicia la subida por partes
+ *   PUT  /backup/<job>/part/<n>        (X-Job-Token)   sube una parte (≤ 20 MiB)
+ *   POST /backup/<job>/complete        (X-Job-Token)   {parts:[{partNumber, etag}]}
+ *   POST /backup/<job>/abort           (X-Job-Token)
+ *   GET  /backup/<job>/download?token=…                 descarga (admite Range)
+ * Un backup no descargado se borra a la hora; la regla del bucket lo borra al día.
  */
 
 import { DurableObject } from "cloudflare:workers";
-import { PcCode, PcInfo, WebInfo, canSee, keysByCode, onlineFor } from "./logic";
+import {
+  BACKUP_MAX_BYTES, BACKUP_PART_SIZE, BackupJob, PcCode, PcInfo, WebInfo, backupKey, canSee, isExpired,
+  keysByCode, onlineFor, parseBackupMeta,
+} from "./logic";
 
 export interface Env {
   REGION: DurableObjectNamespace<Region>;
+  BACKUPS: R2Bucket;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
 }
 
+const CORS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+  "Access-Control-Allow-Headers": "Range, Content-Type, X-Job-Token",
+  "Access-Control-Expose-Headers": "Content-Length, Content-Range, ETag, X-Backup-Name, X-Backup-Sha256",
+};
+
 const json = (data: unknown, status = 200) =>
-  new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+  new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...CORS } });
 
 async function rpc<T>(env: Env, fn: string, body: unknown): Promise<T> {
   const response = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
@@ -44,10 +66,113 @@ async function rpc<T>(env: Env, fn: string, body: unknown): Promise<T> {
 
 const clean = (value: string | null, max = 120) => String(value || "").trim().slice(0, max);
 
+const region = (env: Env) => env.REGION.get(env.REGION.idFromName("region"));
+
+/** Comparación en tiempo constante, para que el tiempo de respuesta no delate el permiso. */
+const sameToken = (a: string | null | undefined, b: string | null | undefined) => {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+};
+
+async function handleBackup(request: Request, env: Env, parts: string[]): Promise<Response> {
+  const [, , jobId, action, partNumber] = parts;
+  const stub = region(env);
+  const job = await stub.getJob(jobId || "");
+  if (!job) return json({ error: "El pedido de backup no existe o ya venció" }, 404);
+
+  if (action === "download" && request.method === "GET") {
+    const url = new URL(request.url);
+    if (!sameToken(url.searchParams.get("token"), job.downloadToken)) return json({ error: "Permiso no válido" }, 403);
+    if (job.status !== "ready" || !job.key) return json({ error: "El backup todavía no está listo" }, 409);
+    const object = await env.BACKUPS.get(job.key, { range: request.headers });
+    if (!object) return json({ error: "El backup ya no está disponible" }, 410);
+    const headers = new Headers(CORS);
+    headers.set("Content-Type", "application/zip");
+    headers.set("Content-Disposition", `attachment; filename="${job.name}"`);
+    headers.set("ETag", object.httpEtag);
+    headers.set("X-Backup-Name", job.name || "");
+    headers.set("X-Backup-Sha256", job.sha256 || "");
+    headers.set("Accept-Ranges", "bytes");
+    const range = object.range as { offset?: number; length?: number } | undefined;
+    if (range && request.headers.has("Range")) {
+      const offset = range.offset ?? 0;
+      const length = range.length ?? object.size - offset;
+      headers.set("Content-Range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
+      headers.set("Content-Length", String(length));
+      return new Response(object.body, { status: 206, headers });
+    }
+    headers.set("Content-Length", String(object.size));
+    return new Response(object.body, { status: 200, headers });
+  }
+
+  if (!sameToken(request.headers.get("X-Job-Token"), job.uploadToken)) return json({ error: "Permiso no válido" }, 403);
+  if (job.status === "ready" || job.status === "failed") return json({ error: "El pedido ya terminó" }, 409);
+
+  if (action === "start" && request.method === "POST") {
+    if (!job.name || !job.size) return json({ error: "Falta informar el backup (nombre y tamaño)" }, 409);
+    if (job.uploadId && job.key) return json({ ok: true, partSize: BACKUP_PART_SIZE });
+    const key = backupKey(job, job.name);
+    const upload = await env.BACKUPS.createMultipartUpload(key, { httpMetadata: { contentType: "application/zip" } });
+    await stub.uploadStarted(job.id, key, upload.uploadId);
+    return json({ ok: true, partSize: BACKUP_PART_SIZE });
+  }
+
+  if (!job.key || !job.uploadId) return json({ error: "La subida no se inició" }, 409);
+  const upload = env.BACKUPS.resumeMultipartUpload(job.key, job.uploadId);
+
+  if (action === "part" && request.method === "PUT") {
+    const n = Number(partNumber);
+    const length = Number(request.headers.get("Content-Length"));
+    if (!Number.isInteger(n) || n < 1 || n > 1000) return json({ error: "Número de parte no válido" }, 400);
+    if (!request.body || !length || length > BACKUP_PART_SIZE) return json({ error: "Parte vacía o demasiado grande" }, 413);
+    // Se pasa el cuerpo tal cual a R2: el servicio no guarda la parte en memoria.
+    const { readable, writable } = new FixedLengthStream(length);
+    const pipe = request.body.pipeTo(writable);
+    const part = await upload.uploadPart(n, readable);
+    await pipe;
+    return json({ partNumber: part.partNumber, etag: part.etag });
+  }
+
+  if (action === "complete" && request.method === "POST") {
+    const body = (await request.json().catch(() => null)) as { parts?: R2UploadedPart[] } | null;
+    const uploaded = (body?.parts || []).filter((p) => Number.isInteger(p.partNumber) && typeof p.etag === "string");
+    if (!uploaded.length) return json({ error: "Faltan las partes" }, 400);
+    const object = await upload.complete(uploaded.sort((a, b) => a.partNumber - b.partNumber));
+    if (object.size !== job.size) {
+      await env.BACKUPS.delete(job.key);
+      await stub.uploadFailed(job.id, `El tamaño no coincide (${object.size} de ${job.size} bytes)`);
+      return json({ error: "El tamaño del archivo no coincide" }, 422);
+    }
+    await stub.uploadReady(job.id, new URL(request.url).origin);
+    return json({ ok: true });
+  }
+
+  if (action === "abort" && request.method === "POST") {
+    await upload.abort().catch(() => undefined);
+    await stub.uploadFailed(job.id, "La PC canceló la subida");
+    return json({ ok: true });
+  }
+
+  return json({ error: "No encontrado" }, 404);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === "/salud") return json({ ok: true });
+
+    const parts = url.pathname.split("/");
+    if (parts[1] === "backup") {
+      try {
+        return await handleBackup(request, env, parts);
+      } catch (error) {
+        return json({ error: `Error del servicio: ${String((error as Error).message || error)}` }, 500);
+      }
+    }
+
     if (url.pathname !== "/pc" && url.pathname !== "/web") return json({ error: "No encontrado" }, 404);
     if (request.headers.get("Upgrade") !== "websocket") return json({ error: "Se esperaba WebSocket" }, 426);
 
@@ -79,11 +204,14 @@ export default {
       return json({ error: String((error as Error).message || error) }, 401);
     }
 
-    const stub = env.REGION.get(env.REGION.idFromName("region"));
-    const forwarded = new Request(request.url, { headers: { Upgrade: "websocket", "X-Auth": JSON.stringify(auth) } });
-    return stub.fetch(forwarded);
+    // Las cabeceras solo admiten ASCII: los nombres con tilde («Almacén») van codificados.
+    const forwarded = new Request(request.url, { headers: { Upgrade: "websocket", "X-Auth": encodeURIComponent(JSON.stringify(auth)) } });
+    return region(env).fetch(forwarded);
   },
 } satisfies ExportedHandler<Env>;
+
+const JOB_PREFIX = "job:";
+const CLEANUP_EVERY_MS = 10 * 60 * 1000;
 
 export class Region extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -92,7 +220,8 @@ export class Region extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    const auth = JSON.parse(request.headers.get("X-Auth") || "null") as PcInfo | Omit<WebInfo, "id"> | null;
+    let auth: PcInfo | Omit<WebInfo, "id"> | null = null;
+    try { auth = JSON.parse(decodeURIComponent(request.headers.get("X-Auth") || "null")); } catch { auth = null; }
     if (!auth) return new Response("Sin autorización", { status: 403 });
 
     const pair = new WebSocketPair();
@@ -128,13 +257,17 @@ export class Region extends DurableObject<Env> {
         ws.send(JSON.stringify({ t: "list", rows: this.rowsFor(info) }));
       } else if (data.t === "ping") {
         const code = String(data.code || "").toUpperCase();
-        const row = this.rowsFor(info).find((r) => r.code === code);
-        const pc = row ? this.ctx.getWebSockets(`pc:${code}`)[0] : undefined;
+        const pc = this.pcFor(info, code);
         if (!pc) {
           ws.send(JSON.stringify({ t: "ping_result", id: data.id, code, ok: false, reason: "La PC no está conectada o no es de su jurisdicción" }));
           return;
         }
         pc.send(JSON.stringify({ t: "ping", id: data.id, code, web: info.id, sentAt: Date.now() }));
+      } else if (data.t === "backup_request") {
+        await this.requestBackup(ws, info, String(data.code || "").toUpperCase());
+      } else if (data.t === "backup_done" && typeof data.job === "string") {
+        const job = await this.getJob(data.job);
+        if (job && job.web === info.id) await this.dropJob(job);
       }
       return;
     }
@@ -143,6 +276,26 @@ export class Region extends DurableObject<Env> {
       const target = this.ctx.getWebSockets(`w:${data.web}`)[0];
       const rtt = Math.max(0, Date.now() - Number(data.sentAt || 0));
       target?.send(JSON.stringify({ t: "ping_result", id: data.id, code: data.code, ok: true, rtt, equipo: info.equipo }));
+      return;
+    }
+
+    if (typeof data.job === "string" && data.t.startsWith("backup_")) {
+      const job = await this.getJob(data.job);
+      if (!job || !info.codes.some((c) => c.code === job.code)) return;
+      if (data.t === "backup_meta") {
+        const meta = parseBackupMeta(data);
+        if (!meta) {
+          await this.uploadFailed(job.id, "El Toolkit informó un backup no válido");
+          return;
+        }
+        Object.assign(job, meta, { status: "uploading" });
+        await this.ctx.storage.put(JOB_PREFIX + job.id, job);
+        this.toWeb(job, { t: "backup_meta", job: job.id, code: job.code, ...meta });
+      } else if (data.t === "backup_progress") {
+        this.toWeb(job, { t: "backup_progress", job: job.id, code: job.code, sent: Number(data.sent) || 0, total: job.size || 0 });
+      } else if (data.t === "backup_error") {
+        await this.uploadFailed(job.id, String(data.reason || "Error en la PC").slice(0, 200));
+      }
     }
   }
 
@@ -153,6 +306,90 @@ export class Region extends DurableObject<Env> {
 
   async webSocketError(ws: WebSocket) {
     this.forget(ws);
+  }
+
+  // --- Backups ---------------------------------------------------------------------
+
+  private async requestBackup(ws: WebSocket, web: WebInfo, code: string) {
+    const pc = this.pcFor(web, code);
+    if (!pc) {
+      ws.send(JSON.stringify({ t: "backup_failed", code, reason: "La PC no está conectada o no es de su jurisdicción" }));
+      return;
+    }
+    const job: BackupJob = {
+      id: crypto.randomUUID(),
+      code,
+      web: web.id,
+      uploadToken: crypto.randomUUID() + crypto.randomUUID(),
+      downloadToken: crypto.randomUUID() + crypto.randomUUID(),
+      status: "requested",
+      createdAt: Date.now(),
+    };
+    await this.ctx.storage.put(JOB_PREFIX + job.id, job);
+    if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + CLEANUP_EVERY_MS);
+    ws.send(JSON.stringify({ t: "backup_requested", job: job.id, code }));
+    pc.send(JSON.stringify({ t: "backup", job: job.id, code, token: job.uploadToken, partSize: BACKUP_PART_SIZE, maxBytes: BACKUP_MAX_BYTES }));
+  }
+
+  async getJob(id: string): Promise<BackupJob | null> {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+    const job = (await this.ctx.storage.get<BackupJob>(JOB_PREFIX + id)) || null;
+    return job && !isExpired(job, Date.now()) ? job : null;
+  }
+
+  async uploadStarted(id: string, key: string, uploadId: string) {
+    const job = await this.getJob(id);
+    if (!job) return;
+    Object.assign(job, { key, uploadId, status: "uploading" });
+    await this.ctx.storage.put(JOB_PREFIX + id, job);
+  }
+
+  async uploadReady(id: string, origin: string) {
+    const job = await this.getJob(id);
+    if (!job) return;
+    job.status = "ready";
+    await this.ctx.storage.put(JOB_PREFIX + id, job);
+    this.toWeb(job, {
+      t: "backup_ready", job: id, code: job.code, name: job.name, size: job.size, sha256: job.sha256, modified: job.modified,
+      downloadUrl: `${origin}/backup/${id}/download?token=${job.downloadToken}`,
+    });
+  }
+
+  async uploadFailed(id: string, reason: string) {
+    const job = await this.getJob(id);
+    if (!job) return;
+    this.toWeb(job, { t: "backup_failed", job: id, code: job.code, reason });
+    await this.dropJob(job);
+  }
+
+  private async dropJob(job: BackupJob) {
+    try {
+      if (job.key && job.status === "ready") await this.env.BACKUPS.delete(job.key);
+      else if (job.key && job.uploadId) await this.env.BACKUPS.resumeMultipartUpload(job.key, job.uploadId).abort();
+    } catch { /* la regla del bucket lo borra al día igual */ }
+    await this.ctx.storage.delete(JOB_PREFIX + job.id);
+  }
+
+  async alarm() {
+    const now = Date.now();
+    const jobs = await this.ctx.storage.list<BackupJob>({ prefix: JOB_PREFIX });
+    let pending = 0;
+    for (const job of jobs.values()) {
+      if (isExpired(job, now)) await this.dropJob(job);
+      else pending += 1;
+    }
+    if (pending) await this.ctx.storage.setAlarm(now + CLEANUP_EVERY_MS);
+  }
+
+  private toWeb(job: BackupJob, message: unknown) {
+    const target = this.ctx.getWebSockets(`w:${job.web}`)[0];
+    try { target?.send(JSON.stringify(message)); } catch { /* la web se fue */ }
+  }
+
+  // --- Conexiones ------------------------------------------------------------------
+
+  private pcFor(web: WebInfo, code: string) {
+    return this.rowsFor(web).some((r) => r.code === code) ? this.ctx.getWebSockets(`pc:${code}`)[0] : undefined;
   }
 
   private forget(ws: WebSocket) {

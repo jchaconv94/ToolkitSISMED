@@ -18,3 +18,8 @@ new_sqlite_classes = ["Region"]
 [vars]
 SUPABASE_URL = "https://ujknopysvgqqvkmgrfhp.supabase.co"
 # SUPABASE_ANON_KEY llega como secreto desde GitHub (la clave pública de Supabase).
+
+# Backups SISMED: los zips viajan de paso por este bucket (privado, borra todo a 1 día).
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "sismed-backups"

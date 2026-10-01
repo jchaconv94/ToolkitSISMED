@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PC_SILENCE_MS, PcInfo, canSee, isAlive, keysByCode, onlineFor } from "./logic";
+import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, PC_SILENCE_MS, PcInfo, backupKey, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, parseBackupMeta } from "./logic";
 
 const now = 1_000_000_000;
 const pc = (codes: Array<[string, string | null]>, since = now - 1000, equipo = "PC"): PcInfo => ({
@@ -52,5 +52,27 @@ describe("isAlive y onlineFor", () => {
       now,
     );
     expect(rows.map((r) => [r.code, r.equipo])).toEqual([["030S05", "ALMACEN"], ["06519", "NUEVA"]]);
+  });
+});
+
+describe("backups", () => {
+  it("acepta solo nombres de backup del SISMED", () => {
+    expect(isBackupName("BKDA202610011300.zip")).toBe(true);
+    expect(isBackupName("BKDA202610010812.Zip")).toBe(true);
+    expect(isBackupName("BKDH202601010000.zip")).toBe(true);
+    expect(isBackupName("../../otro.zip")).toBe(false);
+    expect(isBackupName("BKDA2026.zip")).toBe(false);
+  });
+  it("valida los datos que manda el Toolkit", () => {
+    const sha = "a".repeat(64);
+    expect(parseBackupMeta({ name: "BKDA202610011300.zip", size: 1000, sha256: sha.toUpperCase() })?.sha256).toBe(sha);
+    expect(parseBackupMeta({ name: "BKDA202610011300.zip", size: BACKUP_MAX_BYTES + 1, sha256: sha })).toBeNull();
+    expect(parseBackupMeta({ name: "BKDA202610011300.zip", size: 0, sha256: sha })).toBeNull();
+    expect(parseBackupMeta({ name: "BKDA202610011300.zip", size: 10, sha256: "xyz" })).toBeNull();
+  });
+  it("ruta en el bucket y vencimiento a la hora", () => {
+    expect(backupKey({ id: "j1", code: "030S05" }, "BKDA202610011300.zip")).toBe("backups/030S05/j1/BKDA202610011300.zip");
+    expect(isExpired({ createdAt: now - BACKUP_TTL_MS - 1 }, now)).toBe(true);
+    expect(isExpired({ createdAt: now - 1000 }, now)).toBe(false);
   });
 });
