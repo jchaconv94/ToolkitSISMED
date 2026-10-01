@@ -133,3 +133,6 @@ Thumbs.db
 # fuera.
 .claude/*
 !.claude/launch.json
+
+# Cloudflare Workers (wrangler dev)
+.wrangler/

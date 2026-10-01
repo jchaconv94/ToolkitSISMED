@@ -1,0 +1,54 @@
+name: Publicar servicio de conexión (Cloudflare)
+
+# Publica cloudflare/conexion (sismed-conexion) en Cloudflare Workers.
+# Secretos del repositorio: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID y
+# VITE_SUPABASE_ANON_KEY (la clave pública de Supabase que ya usa la web).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cloudflare/conexion/**"
+      - ".github/workflows/cloudflare-conexion.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-conexion
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Probar y publicar
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cloudflare/conexion
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cloudflare/conexion/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Revisar tipos
+        run: npx tsc --noEmit
+
+      - name: Publicar en Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cloudflare/conexion
+          secrets: |
+            SUPABASE_ANON_KEY
+        env:
+          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}

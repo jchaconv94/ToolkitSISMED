@@ -17,5 +17,5 @@
     "jsx": "react-jsx"
   },
   "include": ["./**/*.ts", "./**/*.tsx"],
-  "exclude": ["node_modules", "supabase"]
+  "exclude": ["node_modules", "supabase", "cloudflare"]
 }

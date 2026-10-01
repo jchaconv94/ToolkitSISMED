@@ -1,0 +1,20 @@
+# Servicio «sismed-conexion»: mantiene abiertas las conexiones del Toolkit de escritorio
+# para que la web pueda pedirle algo a una PC al instante (backups SISMED).
+# Se publica solo desde GitHub: .github/workflows/cloudflare-conexion.yml
+name = "sismed-conexion"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "REGION"
+class_name = "Region"
+
+# En el plan gratuito solo existen los Durable Objects con SQLite.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Region"]
+
+[vars]
+SUPABASE_URL = "https://ujknopysvgqqvkmgrfhp.supabase.co"
+# SUPABASE_ANON_KEY llega como secreto desde GitHub (la clave pública de Supabase).
