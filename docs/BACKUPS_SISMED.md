@@ -23,10 +23,12 @@ Reglas acordadas:
 
 | Pieza | Para qué |
 |---|---|
-| **Toolkit de escritorio** | Mantiene una conexión abierta con Cloudflare; toma el `BKDA…zip` más reciente y lo sube directo a R2 en partes de 20 MB con huella SHA-256. |
-| **Supabase** | Pedidos, permisos, jurisdicción y reglas. Firma enlaces temporales. Solo filas chicas: no consume el límite de descargas. |
-| **Cloudflare Durable Objects** (`cloudflare/conexion`, servicio `sismed-conexion`) | Las conexiones abiertas. Hibernan: una conexión quieta no consume nada. |
+| **Toolkit de escritorio** | Mantiene una conexión abierta con Cloudflare; toma el `BKDA…zip` más reciente y lo sube en partes de 20 MiB con huella SHA-256. |
+| **Supabase** | Quién entra (PC con clave vigente y vinculada; usuarios con su jurisdicción) y, en la etapa 3, las reglas. Solo filas chicas: no consume el límite de descargas. |
+| **Cloudflare Worker + Durable Object** (`cloudflare/conexion`, servicio `sismed-conexion`) | Las conexiones abiertas (hibernan: una conexión quieta no consume nada) y el paso del archivo hacia y desde R2, por el enlace interno de Cloudflare. |
 | **Cloudflare R2** (bucket `sismed-backups`) | Los zips, de paso. Descargas gratis e ilimitadas. |
+
+**Cambio aprobado en la etapa 2 (2026-10-01):** el archivo ya no se sube con enlaces firmados por Supabase, sino por el mismo servicio de Cloudflare, que llega a R2 por su enlace interno (`BACKUPS`) sin ninguna clave. Los secretos `R2_*` guardados en Supabase en la etapa 0 **no se usan** y pueden borrarse.
 
 **Por qué no Supabase para los archivos:** el plan gratuito trae 5 GB de descargas al mes y la
 región movería ~28 GB (10 UNGET × ~40 IPRESS × ~15 MB + hospitales de 70–150 MB, una vez por
@@ -49,8 +51,8 @@ Cloudflare no tiene un tope de gasto que corte el servicio; por eso existen los 
 | Etapa | Qué | Estado |
 |---|---|---|
 | 0 | Cuenta Cloudflare, R2, bucket privado, regla de borrado, alerta de $1, clave limitada guardada en Supabase (`R2_*`) | hecha el 2026-09-30 |
-| 1 | Conexión inmediata con 2–3 PC reales (sin pantalla definitiva) | en curso |
-| 2 | Traslado del archivo por partes a R2 | pendiente |
+| 1 | Conexión inmediata con PC reales (sin pantalla definitiva) | probada el 2026-10-01 con ACER-JORDAN (06525): aviso en 270 ms, reconexión sola al cortar el wifi. Falta revisar el consumo a los 2–3 días |
+| 2 | Traslado del archivo por partes a R2 | programada; pendiente de prueba real |
 | 3 | Reglas en Supabase (jurisdicción, 1 al día, topes, limpieza) | pendiente |
 | 4 | Módulo web Backups SISMED con descarga en segundo plano | pendiente |
 | 5 | Piloto una semana en UNGET Bellavista | pendiente |
@@ -79,3 +81,22 @@ Cada etapa termina con una prueba que tiene que salir bien antes de pasar a la s
 **Criterio para pasar a la etapa 2:** el aviso llega en menos de 2 s; al cortar la red la PC se
 reconecta sola; el consumo diario de Durable Objects queda por debajo del 10 % de lo gratuito
 (100 000 operaciones/día).
+
+## Etapa 2 · Traslado del archivo
+
+- **Pedido:** la web manda `backup_request` por la conexión abierta. El servicio crea el pedido
+  (vence a la hora) con dos permisos de un solo uso: uno para que la PC suba y otro para que la
+  web descargue.
+- **Toolkit** (`toolskit/backup_upload.py`): toma el `BKD[AH]<fecha>.zip` más reciente de
+  `<carpeta SISMED>\backup` que tenga más de 90 s (uno más nuevo puede estar escribiéndose),
+  informa nombre, tamaño y SHA-256, y sube partes de 20 MiB a
+  `/backup/<pedido>/part/<n>`. Reintenta solo la parte que falla (4 intentos). Un backup a la vez.
+- **Servicio:** pasa cada parte a R2 sin guardarla en memoria; al completar comprueba el tamaño.
+  Descarga en `/backup/<pedido>/download?token=…`, con soporte de `Range` para retomar.
+- **Web** (pestaña de prueba): descarga, compara la huella y recién entonces guarda el archivo y
+  pide borrarlo (`backup_done`). Si nadie lo descarga, el servicio lo borra a la hora.
+
+Probado en local de punta a punta (runtime real de Workers con R2 simulado, cliente Python real
+y navegador): 45 MB en 3 partes con un corte simulado, archivo descargado idéntico al original,
+descarga parcial, permisos inválidos rechazados, otra UNGET sin acceso y borrado al confirmar.
+

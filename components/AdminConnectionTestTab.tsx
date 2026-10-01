@@ -1,10 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Monitor, Plug, PlugZap, RefreshCw, Send } from "lucide-react";
+import { CheckCircle2, Download, Loader2, Monitor, Plug, PlugZap, RefreshCw, Send, XCircle } from "lucide-react";
 import { relativeTime } from "../services/sendKeys";
-import { OnlinePc, applyPresence, connectionUrl, parseServerMessage } from "../services/backupConnection";
+import { OnlinePc, applyPresence, connectionUrl, formatMegabytes, parseServerMessage, sha256Hex } from "../services/backupConnection";
 import { ImmunizationEmptyState, ImmunizationTableHeader } from "./ui/immunization";
 
 type Status = "connecting" | "open" | "closed";
+
+interface BackupState {
+  job?: string;
+  phase: "requested" | "uploading" | "downloading" | "done" | "failed";
+  name?: string;
+  size?: number;
+  sent?: number;
+  detail?: string;
+}
 
 interface LogLine {
   at: number;
@@ -22,6 +31,9 @@ export const AdminConnectionTestTab: React.FC = () => {
   const [rows, setRows] = useState<OnlinePc[]>([]);
   const [log, setLog] = useState<LogLine[]>([]);
   const [pending, setPending] = useState<Record<string, number>>({});
+  const [backups, setBackups] = useState<Record<string, BackupState>>({});
+  const setBackup = (code: string, patch: Partial<BackupState>) =>
+    setBackups((prev) => ({ ...prev, [code]: { ...(prev[code] || { phase: "requested" }), ...patch } as BackupState }));
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<number | undefined>(undefined);
 
@@ -51,6 +63,17 @@ export const AdminConnectionTestTab: React.FC = () => {
         setRows((prev) => applyPresence(prev, message));
         if (message.online) ws.send(JSON.stringify({ t: "list" }));
       }
+      if (message.t === "backup_requested") setBackup(message.code, { job: message.job, phase: "requested", detail: "Esperando a la PC…" });
+      if (message.t === "backup_meta") {
+        setBackup(message.code, { phase: "uploading", name: message.name, size: message.size, sent: 0, detail: undefined });
+        addLog(`${message.code}: la PC envía ${message.name} (${formatMegabytes(message.size)}).`);
+      }
+      if (message.t === "backup_progress") setBackup(message.code, { sent: message.sent });
+      if (message.t === "backup_failed") {
+        setBackup(message.code, { phase: "failed", detail: message.reason });
+        addLog(`${message.code}: backup no disponible: ${message.reason}`, "warn");
+      }
+      if (message.t === "backup_ready") void downloadBackup(ws, message);
       if (message.t === "ping_result") {
         setPending((prev) => {
           const next = { ...prev };
@@ -68,6 +91,37 @@ export const AdminConnectionTestTab: React.FC = () => {
       retryRef.current = window.setTimeout(connect, 5000);
     };
   }, []);
+
+  /** Descarga, comprueba la huella y guarda. Solo entonces le dice al servicio que lo borre. */
+  const downloadBackup = async (ws: WebSocket, ready: { job: string; code: string; name: string; size: number; sha256: string; downloadUrl: string }) => {
+    setBackup(ready.code, { phase: "downloading", detail: "Descargando y comprobando…" });
+    try {
+      const response = await fetch(ready.downloadUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.arrayBuffer();
+      const hash = await sha256Hex(data);
+      if (data.byteLength !== ready.size || hash !== ready.sha256) throw new Error("la huella no coincide: el archivo llegó dañado");
+      const url = URL.createObjectURL(new Blob([data], { type: "application/zip" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = ready.name;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      ws.send(JSON.stringify({ t: "backup_done", job: ready.job }));
+      setBackup(ready.code, { phase: "done", detail: `${ready.name} · ${formatMegabytes(ready.size)} · huella verificada` });
+      addLog(`${ready.code}: ${ready.name} descargado y verificado; borrado de la nube.`, "ok");
+    } catch (error) {
+      setBackup(ready.code, { phase: "failed", detail: String((error as Error).message || error) });
+      addLog(`${ready.code}: la descarga falló: ${String((error as Error).message || error)}`, "warn");
+    }
+  };
+
+  const requestBackup = (code: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    setBackup(code, { job: undefined, phase: "requested", name: undefined, size: undefined, sent: 0, detail: "Pidiendo…" });
+    ws.send(JSON.stringify({ t: "backup_request", code }));
+  };
 
   useEffect(() => {
     connect();
@@ -133,6 +187,7 @@ export const AdminConnectionTestTab: React.FC = () => {
                 <ImmunizationTableHeader>Toolkit</ImmunizationTableHeader>
                 <ImmunizationTableHeader>Conectada desde</ImmunizationTableHeader>
                 <ImmunizationTableHeader>Última señal</ImmunizationTableHeader>
+                <ImmunizationTableHeader>Backup</ImmunizationTableHeader>
                 <ImmunizationTableHeader align="right">Prueba</ImmunizationTableHeader>
               </tr>
             </thead>
@@ -147,7 +202,16 @@ export const AdminConnectionTestTab: React.FC = () => {
                   <td className="px-4 py-2 font-mono text-xs">v{row.version || "?"}</td>
                   <td className="px-4 py-2 text-slate-500">{relativeTime(new Date(row.since).toISOString())}</td>
                   <td className="px-4 py-2 text-slate-500">{relativeTime(new Date(row.lastSeen).toISOString())}</td>
-                  <td className="px-4 py-2 text-right">
+                  <td className="px-4 py-2"><BackupCell state={backups[row.code]} /></td>
+                  <td className="space-x-2 whitespace-nowrap px-4 py-2 text-right">
+                    <button
+                      type="button"
+                      disabled={status !== "open" || ["requested", "uploading", "downloading"].includes(backups[row.code]?.phase || "")}
+                      onClick={() => requestBackup(row.code)}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-teal-600 px-3 text-xs font-bold text-teal-700 disabled:opacity-50"
+                    >
+                      <Download className="h-4 w-4" /> Pedir backup
+                    </button>
                     <button type="button" disabled={busy(row.code) || status !== "open"} onClick={() => sendPing(row.code)} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-teal-600 px-3 text-xs font-bold text-white disabled:opacity-50">
                       {busy(row.code) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Enviar aviso de prueba
                     </button>
@@ -171,6 +235,25 @@ export const AdminConnectionTestTab: React.FC = () => {
           </ul>
         )}
       </div>
+    </div>
+  );
+};
+
+const BackupCell: React.FC<{ state?: BackupState }> = ({ state }) => {
+  if (!state) return <span className="text-slate-400">—</span>;
+  if (state.phase === "done") {
+    return <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-700"><CheckCircle2 className="h-4 w-4" />{state.detail}</span>;
+  }
+  if (state.phase === "failed") {
+    return <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-red-700"><XCircle className="h-4 w-4" />{state.detail}</span>;
+  }
+  const pct = state.size ? Math.round(((state.sent || 0) / state.size) * 100) : 0;
+  return (
+    <div className="min-w-[160px] text-[12px] text-slate-600">
+      <div className="flex items-center gap-1.5"><Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" />
+        {state.phase === "uploading" ? `Subiendo ${pct}%${state.size ? ` de ${formatMegabytes(state.size)}` : ""}` : state.detail}
+      </div>
+      {state.phase === "uploading" && <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-teal-500" style={{ width: `${pct}%` }} /></div>}
     </div>
   );
 };
