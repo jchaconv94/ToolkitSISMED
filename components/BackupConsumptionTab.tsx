@@ -5,6 +5,9 @@ import { UsageItem, backupModuleApi, formatMegabytes } from "../services/backupC
 import { limaDay } from "../services/backupModule";
 import { ImmunizationStatusChip, ImmunizationTableHeader, ImmunizationTone } from "./ui/immunization";
 
+/** Porcentaje con coma decimal y dos decimales: 0,25 %. es-PE usaría punto, por eso se arma a mano. */
+const percent = (ratio: number) => `${(ratio * 100).toFixed(2).replace(".", ",")} %`;
+
 const number = (n: number) => n.toLocaleString("es-PE", { maximumFractionDigits: n < 100 ? 1 : 0 });
 
 /** Mes siguiente, para «se reinicia el 1 de noviembre». */
@@ -27,7 +30,7 @@ const LimitCard: React.FC<{ icon: React.ReactNode; label: string; ratio: number 
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">{label}</p>
           <div className="mt-1 flex flex-wrap items-baseline gap-2">
-            <span className={`text-[30px] font-black leading-none ${VALUE[tone]}`}>{ratio == null ? "—" : `${Math.round(ratio * 100)} %`}</span>
+            <span className={`text-[30px] font-black leading-none ${VALUE[tone]}`}>{ratio == null ? "—" : percent(ratio)}</span>
             {tone === "warning" && <ImmunizationStatusChip label="Cerca del tope" tone="warning" />}
             {tone === "danger" && <ImmunizationStatusChip label="Pausado" tone="danger" />}
           </div>
@@ -79,7 +82,7 @@ const DailyChart: React.FC<{ daily: Array<{ date: string; requests: number }>; l
           const pct = d.requests / limit;
           return (
             <g key={d.date}>
-              <title>{`${DAY_LABEL(d.date, today)}: ${number(d.requests)} mensajes (${Math.round(pct * 100)} % del límite)`}</title>
+              <title>{`${DAY_LABEL(d.date, today)}: ${number(d.requests)} mensajes (${percent(pct)} del límite)`}</title>
               <rect x={x - 6} y={12} width={36} height={h - bottom - 12} fill="transparent" />
               {d.requests > 0 && (
                 <path d={`M${x},${h - bottom} V${Math.min(top + 4, h - bottom)} q0,-4 4,-4 h16 q4,0 4,4 V${h - bottom} Z`} fill={pct >= 0.8 ? "#ef4444" : pct >= 0.7 ? "#f59e0b" : isToday ? "#14b8a6" : "#99f6e4"} />
@@ -99,7 +102,7 @@ const DailyChart: React.FC<{ daily: Array<{ date: string; requests: number }>; l
         )}
       </svg>
       {max < limit * 0.7 && (
-        <p className="mt-1 text-[11.5px] text-slate-500">Lejos del límite: el día más alto llegó al {Math.max(1, Math.round((top / limit) * 100))} % de {number(limit)}.</p>
+        <p className="mt-1 text-[11.5px] text-slate-500">Lejos del límite: el día más alto llegó al {percent(top / limit)} de {number(limit)}.</p>
       )}
     </>
   );
@@ -141,10 +144,10 @@ export const BackupConsumptionTab: React.FC = () => {
   const bannerText = level === "unknown"
     ? `Cloudflare no respondió las métricas${usage?.error ? ` (${usage.error})` : ""}. Las descargas siguen permitidas.`
     : level === "paused"
-      ? <>Un límite llegó al 80 %: <b>{worst?.label}, {Math.round((worst?.ratio || 0) * 100)} %</b>. Se reanudan cuando se reinicie.</>
+      ? <>Un límite llegó al 80 %: <b>{worst?.label}, {percent(worst?.ratio || 0)}</b>. Se reanudan cuando se reinicie.</>
       : level === "warn"
-        ? <>El dato más alto es <b>{worst?.label}, {Math.round((worst?.ratio || 0) * 100)} %</b>. Al 80 % se pausan las descargas.</>
-        : <>Ningún límite llegó al 70 %. El dato más alto es <b>{worst?.label}, {Math.round((worst?.ratio || 0) * 100)} %</b>.</>;
+        ? <>El dato más alto es <b>{worst?.label}, {percent(worst?.ratio || 0)}</b>. Al 80 % se pausan las descargas.</>
+        : <>Ningún límite llegó al 70 %. El dato más alto es <b>{worst?.label}, {percent(worst?.ratio || 0)}</b>.</>;
 
   if (!usage) {
     return <div className="flex h-48 items-center justify-center gap-2 text-sm font-semibold text-slate-500"><Loader2 className="h-5 w-5 animate-spin text-teal-600" /> Midiendo el consumo…</div>;
