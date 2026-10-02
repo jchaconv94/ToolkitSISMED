@@ -86,6 +86,8 @@ BEGIN
     INTO v_result
   FROM jsonb_each(v_verify) e(code, r)
   JOIN public.facilities f ON upper(f.code) = e.code
+  -- Solo la PC ya vinculada: una clave sin vincular que llegó a otra PC por error no basta.
+  JOIN public.sync_send_keys k ON k.code = e.code AND k.device_id = left(trim(p_device_id), 120)
   WHERE public.app_backup_code_open(e.code)
     AND (e.r->>'protegido')::boolean AND (e.r->>'permitido')::boolean;
 

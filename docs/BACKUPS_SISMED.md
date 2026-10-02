@@ -251,3 +251,13 @@ ejecuta, entra todo establecimiento con **clave de envío**.
 Probado en Postgres local: antes, solo 030S05; después, todos los códigos con clave (y no
 el que no la tiene), cada informático solo su jurisdicción; la función de la regla no la
 puede llamar `anon`, y la reversión vuelve al piloto.
+
+**Solo PC ya vinculadas (2026-10-02, `SUPABASE_BACKUPS_SOLO_VINCULADAS.sql`).** La
+verificación de claves acepta una clave todavía sin vincular, porque la vincula el Toolkit
+en su primer envío de stock. En Backups eso abría un hueco: si la clave de la IPRESS A
+llegaba por error a la PC de la IPRESS B antes de que A la usara, la PC de B se conectaba
+como A y el backup de A descargaba el SISMED de B. Ahora `app_backup_pc_auth` exige además
+que la PC sea la vinculada (`sync_send_keys.device_id`). La PC de B nunca se vincula a la
+clave de A, porque no tiene stock de A. Una PC con clave recién puesta aparece en Backups
+después de su primer envío de stock. `SUPABASE_BACKUPS_ABRIR_REGION.sql` ya trae esta
+versión, así que volver a ejecutarlo no deshace el arreglo.
