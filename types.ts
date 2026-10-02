@@ -137,6 +137,7 @@ export type AppModule =
   | 'STOCK_MONITORING'
   | 'ADMIN_SYNC_DEVICES'
   | 'ADMIN_SEND_KEYS'
+  | 'ADMIN_BACKUPS'
   | 'IMMUNIZATION_CATALOG'
   | 'IMMUNIZATION_INITIAL_INVENTORY'
   | 'IMMUNIZATION_STOCK'
@@ -168,6 +169,7 @@ export const AVAILABLE_MODULES: { id: AppModule; label: string; description: str
   { id: 'ADMIN_STOCK_ASSIGN', label: 'Columnas de Stock', description: 'Columnas visibles del stock de cada establecimiento' },
   { id: 'ADMIN_SYNC_DEVICES', label: 'Dispositivos Sync', description: 'Gestión de dispositivos autorizados de Sync SISMED 2.0' },
   { id: 'ADMIN_SEND_KEYS', label: 'Claves de envío', description: 'Solo la PC vinculada puede enviar el stock de su establecimiento a Google Sheets' },
+  { id: 'ADMIN_BACKUPS', label: 'Backups SISMED', description: 'Descargar con un clic el backup del SISMED de los establecimientos de su jurisdicción' },
   { id: 'PROFILE', label: 'Perfil de Usuario', description: 'Configuración del perfil personal' }
   ,{ id: 'IMMUNIZATION_CATALOG', label: 'Catálogo Biológico', description: 'Catálogo maestro de vacunas, jeringas y diluyentes' },
   { id: 'IMMUNIZATION_INITIAL_INVENTORY', label: 'Inventario Inicial', description: 'Carga manual o Excel del inventario inicial por lote' },

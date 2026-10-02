@@ -45,7 +45,8 @@ const RUTAS: Record<AppModule, string> = {
   ADMIN_MIGRATION: "/administracion/migracion",
   ADMIN_STOCK_ASSIGN: "/administracion/asignar-stock",
   ADMIN_SYNC_DEVICES: "/administracion/dispositivos",
-  ADMIN_SEND_KEYS: "/administracion/claves-de-envio"
+  ADMIN_SEND_KEYS: "/administracion/claves-de-envio",
+  ADMIN_BACKUPS: "/administracion/backups-sismed"
 };
 
 const MODULOS_POR_RUTA = new Map<string, AppModule>(

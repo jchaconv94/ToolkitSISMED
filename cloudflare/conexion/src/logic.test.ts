@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, PC_SILENCE_MS, PcInfo, backupKey, buildUsage, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, parseBackupMeta, quotaMessage, r2OperationClass, usageBlocks, usageMessage, utcDayStart, utcMonthStart } from "./logic";
+import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, PC_SILENCE_MS, PcInfo, backupKey, buildUsage, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, jobMessages, parseBackupMeta, quotaMessage, usageFor, r2OperationClass, usageBlocks, usageMessage, utcDayStart, utcMonthStart } from "./logic";
 
 const now = 1_000_000_000;
 const pc = (codes: Array<[string, string | null]>, since = now - 1000, equipo = "PC"): PcInfo => ({
@@ -130,5 +130,28 @@ describe("cupo de descargas", () => {
       .toBe("Hoy ya se usó el cupo de este establecimiento (1 backup por día); el último lo descargó bellavista a las 22:36. Se podrá pedir otro mañana.");
     expect(quotaMessage({ ok: false, limit: 2, used: 2, last: { username: "admin", status: "UPLOADING", at } }))
       .toBe("Ya hay un backup de este establecimiento en curso: lo pidió admin a las 22:36. Se admiten 2 backups por día.");
+  });
+});
+
+describe("etapa 4", () => {
+  it("el informático ve el estado del consumo, no las cifras de Cloudflare", () => {
+    const full = buildUsage({ doRequests: 72_000, workers: 10 }, now, undefined, [{ date: "2026-10-02", requests: 72_000 }]);
+    expect(usageFor(full, true)).toBe(full);
+    const reduced = usageFor(full, false);
+    expect(reduced.level).toBe("warn");
+    expect(reduced.items).toEqual([]);
+    expect(reduced.daily).toBeUndefined();
+    expect(reduced.worst?.ratio).toBeCloseTo(0.72);
+    expect(reduced.worst?.used).toBeNull();
+  });
+
+  it("al volver, cada pedido se muestra en el punto en que quedó", () => {
+    const base = { id: "j1", code: "06525", sha256: "a".repeat(64), modified: "" };
+    expect(jobMessages({ ...base, status: "requested" }).map((m: any) => m.t)).toEqual(["backup_requested"]);
+    expect(jobMessages({ ...base, status: "uploading", name: "BKDA202610021300.zip", size: 100, sent: 40 }).map((m: any) => m.t))
+      .toEqual(["backup_requested", "backup_meta", "backup_progress"]);
+    const ready = jobMessages({ ...base, status: "ready", name: "BKDA202610021300.zip", size: 100, downloadUrl: "https://x/backup/j1/download?token=t" });
+    expect(ready.map((m: any) => m.t)).toEqual(["backup_requested", "backup_meta", "backup_ready"]);
+    expect((ready[2] as any).downloadUrl).toContain("/backup/j1/download");
   });
 });

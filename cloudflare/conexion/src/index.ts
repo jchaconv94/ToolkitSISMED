@@ -40,7 +40,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   BACKUP_MAX_BYTES, BACKUP_PART_SIZE, BackupJob, PcCode, PcInfo, USAGE_REFRESH_MS, UsageReading, WebInfo, backupKey,
-  canSee, isExpired, keysByCode, onlineFor, parseBackupMeta, quotaMessage, usageBlocks, usageMessage,
+  canSee, isExpired, jobMessages, keysByCode, onlineFor, parseBackupMeta, quotaMessage, usageBlocks, usageFor, usageMessage,
 } from "./logic";
 import { UsageEnv, readUsage } from "./usage";
 
@@ -251,7 +251,8 @@ export class Region extends DurableObject<Env> {
       server.serializeAttachment(info);
       server.send(JSON.stringify({ t: "hello", username: info.username, isAdmin: info.isAdmin }));
       server.send(JSON.stringify({ t: "list", rows: this.rowsFor(info) }));
-      this.ctx.waitUntil(this.usage().then((usage) => this.sendUsage(server, usage)).catch(() => undefined));
+      this.ctx.waitUntil(this.resumeJobs(server, info).catch(() => undefined));
+      this.ctx.waitUntil(this.usage().then((usage) => this.sendUsage(server, info, usage)).catch(() => undefined));
     }
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -283,7 +284,7 @@ export class Region extends DurableObject<Env> {
           await this.dropJob(job);
         }
       } else if (data.t === "usage") {
-        this.sendUsage(ws, await this.usage());
+        this.sendUsage(ws, info, await this.usage());
       }
       return;
     }
@@ -309,7 +310,9 @@ export class Region extends DurableObject<Env> {
         await this.report(job, "UPLOADING", { p_file_name: meta.name, p_size: meta.size });
         this.toWeb(job, { t: "backup_meta", job: job.id, code: job.code, ...meta });
       } else if (data.t === "backup_progress") {
-        this.toWeb(job, { t: "backup_progress", job: job.id, code: job.code, sent: Number(data.sent) || 0, total: job.size || 0 });
+        job.sent = Math.max(0, Math.min(Number(data.sent) || 0, job.size || 0));
+        await this.ctx.storage.put(JOB_PREFIX + job.id, job);
+        this.toWeb(job, { t: "backup_progress", job: job.id, code: job.code, sent: job.sent, total: job.size || 0 });
       } else if (data.t === "backup_error") {
         await this.uploadFailed(job.id, String(data.reason || "Error en la PC").slice(0, 200));
       }
@@ -336,7 +339,7 @@ export class Region extends DurableObject<Env> {
 
     const usage = await this.usage();
     if (usageBlocks(usage)) {
-      ws.send(JSON.stringify({ t: "backup_failed", code, reason: usageMessage(usage), usage }));
+      ws.send(JSON.stringify({ t: "backup_failed", code, reason: usageMessage(usage), usage: usageFor(usage, web.isAdmin) }));
       return;
     }
 
@@ -359,6 +362,7 @@ export class Region extends DurableObject<Env> {
       code,
       web: web.id,
       webToken: web.token,
+      username: web.username,
       uploadToken: crypto.randomUUID() + crypto.randomUUID(),
       downloadToken: crypto.randomUUID() + crypto.randomUUID(),
       status: "requested",
@@ -392,11 +396,12 @@ export class Region extends DurableObject<Env> {
     const job = await this.getJob(id);
     if (!job) return;
     job.status = "ready";
+    job.downloadUrl = `${origin}/backup/${id}/download?token=${job.downloadToken}`;
     await this.ctx.storage.put(JOB_PREFIX + id, job);
     await this.report(job, "READY");
     this.toWeb(job, {
       t: "backup_ready", job: id, code: job.code, name: job.name, size: job.size, sha256: job.sha256, modified: job.modified,
-      downloadUrl: `${origin}/backup/${id}/download?token=${job.downloadToken}`,
+      downloadUrl: job.downloadUrl,
     });
   }
 
@@ -430,6 +435,22 @@ export class Region extends DurableObject<Env> {
     if (pending) await this.ctx.storage.setAlarm(now + CLEANUP_EVERY_MS);
   }
 
+  /**
+   * Al volver a conectarse (recargó la página, cambió de módulo o volvió a entrar), los pedidos
+   * de esa persona pasan a esta conexión y se le vuelven a mostrar: así la descarga sigue.
+   */
+  private async resumeJobs(ws: WebSocket, web: WebInfo) {
+    const jobs = await this.ctx.storage.list<BackupJob>({ prefix: JOB_PREFIX });
+    const now = Date.now();
+    for (const job of jobs.values()) {
+      if (job.username !== web.username || isExpired(job, now)) continue;
+      job.web = web.id;
+      job.webToken = web.token;
+      await this.ctx.storage.put(JOB_PREFIX + job.id, job);
+      jobMessages(job).forEach((m) => { try { ws.send(JSON.stringify(m)); } catch { /* cerrada */ } });
+    }
+  }
+
   /** Registra el paso en Supabase con la sesión de quien pidió. Si falla, el pedido sigue. */
   private async report(job: BackupJob, status: string, extra: Record<string, unknown> = {}) {
     try {
@@ -455,8 +476,8 @@ export class Region extends DurableObject<Env> {
     return this.usageRefresh;
   }
 
-  private sendUsage(ws: WebSocket, usage: UsageReading) {
-    try { ws.send(JSON.stringify({ t: "usage", usage, message: usageMessage(usage) })); } catch { /* cerrada */ }
+  private sendUsage(ws: WebSocket, web: WebInfo, usage: UsageReading) {
+    try { ws.send(JSON.stringify({ t: "usage", usage: usageFor(usage, web.isAdmin), message: usageMessage(usage) })); } catch { /* cerrada */ }
   }
 
   private toWeb(job: BackupJob, message: unknown) {

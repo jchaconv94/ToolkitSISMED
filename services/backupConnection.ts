@@ -9,7 +9,9 @@
 import { getSessionToken } from "./api";
 import { callSendKeysRpc } from "./sendKeys";
 
-export const CONNECTION_URL = "wss://sismed-conexion.jchaconvillacis.workers.dev/web";
+/** Se puede cambiar con VITE_BACKUP_CONNECTION_URL para probar contra un servicio local. */
+export const CONNECTION_URL: string =
+  (import.meta as any).env?.VITE_BACKUP_CONNECTION_URL || "wss://sismed-conexion.jchaconvillacis.workers.dev/web";
 
 export interface OnlinePc {
   code: string;
@@ -35,6 +37,8 @@ export interface UsageReading {
   items: UsageItem[];
   level: "ok" | "warn" | "paused" | "unknown";
   worst: UsageItem | null;
+  /** Solo el administrador: mensajes de conexión por día, los últimos 7. */
+  daily?: Array<{ date: string; requests: number }>;
   error?: string;
 }
 
@@ -90,4 +94,16 @@ const RULES_SQL = "SUPABASE_BACKUPS_REGLAS.sql";
 export const backupSettingsApi = {
   get: () => callSendKeysRpc<{ dailyLimit: number; updatedBy: string | null; updatedAt: string | null }>("app_backup_settings_get", {}, RULES_SQL),
   save: (dailyLimit: number) => callSendKeysRpc<void>("app_backup_settings_save", { p_daily_limit: dailyLimit }, RULES_SQL),
+};
+
+const MODULE_SQL = "SUPABASE_BACKUPS_MODULO.sql";
+
+/** Datos del módulo Backups SISMED (cada función exige el permiso del módulo). */
+export const backupModuleApi = {
+  overview: async () => (await callSendKeysRpc<any[] | null>("app_backup_overview", {}, MODULE_SQL)) || [],
+  activity: async () => (await callSendKeysRpc<any[] | null>("app_backup_activity", {}, MODULE_SQL)) || [],
+  /** Solo el administrador. */
+  monthByUnget: async () =>
+    (await callSendKeysRpc<Array<{ ungetId: string; unget: string; downloaded: number; failed: number; bytes: number; lastAt: string | null }> | null>(
+      "app_backup_month_by_unget", {}, MODULE_SQL)) || [],
 };

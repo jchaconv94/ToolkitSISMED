@@ -27,7 +27,8 @@ import {
   UserCircle,
   Users,
   X,
-  KeyRound
+  KeyRound,
+  HardDriveDownload
 } from 'lucide-react';
 import { AppModule } from '../types';
 
@@ -83,6 +84,7 @@ const GRUPOS: Grupo[] = [
       { module: 'ADMIN_STOCK_ASSIGN', label: 'Columnas de Stock', icon: icono(ShieldCheck) },
       { module: 'ADMIN_SYNC_DEVICES', label: 'Dispositivos Sync', icon: icono(RefreshCw) },
       { module: 'ADMIN_SEND_KEYS', label: 'Claves de envío', icon: icono(KeyRound) },
+      { module: 'ADMIN_BACKUPS', label: 'Backups SISMED', icon: icono(HardDriveDownload) },
       { module: 'ADMIN_MIGRATION', label: 'Migración (Supabase)', icon: icono(Database) }
     ]
   }

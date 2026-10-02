@@ -30,7 +30,8 @@ import {
   ArchiveX,
   CalendarCheck,
   Ban,
-  KeyRound
+  KeyRound,
+  HardDriveDownload
 } from 'lucide-react';
 import { AppModule, User } from '../types';
 
@@ -430,7 +431,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {(hasPermission('ADMIN_USERS') || hasPermission('ADMIN_ROLES') || hasPermission('ADMIN_FACILITIES') || hasPermission('ADMIN_PARAMS') || hasPermission('ADMIN_MIGRATION') || hasPermission('ADMIN_CATALOGS')) && (
+        {(hasPermission('ADMIN_USERS') || hasPermission('ADMIN_ROLES') || hasPermission('ADMIN_FACILITIES') || hasPermission('ADMIN_PARAMS') || hasPermission('ADMIN_MIGRATION') || hasPermission('ADMIN_CATALOGS') || hasPermission('ADMIN_SEND_KEYS') || hasPermission('ADMIN_BACKUPS')) && (
           <div className="flex flex-col gap-1">
             <button
               onClick={toggleAdmin}
@@ -573,6 +574,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <KeyRound className="h-4 w-4 shrink-0" />
                       Claves de envío
+                    </button>
+                  )}
+                  {hasPermission('ADMIN_BACKUPS') && (
+                    <button
+                      onClick={() => setCurrentView('ADMIN_BACKUPS')}
+                      className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                        currentView === 'ADMIN_BACKUPS'
+                          ? 'text-teal-400 bg-white/5'
+                          : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <HardDriveDownload className="h-4 w-4 shrink-0" />
+                      Backups SISMED
                     </button>
                   )}
                 </div>
