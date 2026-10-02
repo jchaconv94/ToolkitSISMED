@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   Activity, AlertTriangle, CheckCircle2, Clock3, Download, FolderDown, Gauge, History, Loader2, RefreshCw, Search, Wifi, WifiOff, X,
 } from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
 import { useBackupManager } from "../contexts/BackupManagerContext";
 import { backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import {
@@ -99,6 +100,9 @@ type Tab = "backups" | "consumo";
 
 export const BackupsSismedModule: React.FC = () => {
   const manager = useBackupManager();
+  // La pestaña sale del rol de la sesión, no de lo que diga el servicio: así no aparece
+  // ni desaparece al conectar. Los datos de Consumo los sigue protegiendo Supabase.
+  const isAdmin = useAuth().user?.role === "ADMIN";
   const [tab, setTab] = useState<Tab>("backups");
   const [overview, setOverview] = useState<BackupOverviewRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -180,7 +184,7 @@ export const BackupsSismedModule: React.FC = () => {
         </div>
       </ModuleHeaderPortal>
 
-      {manager.isAdmin && (
+      {isAdmin && (
         <div className="flex">
           <div className="flex min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:flex-none" role="tablist">
             {([["backups", "Backups", FolderDown], ["consumo", "Consumo", Gauge]] as const).map(([id, label, Icon]) => (
@@ -201,7 +205,7 @@ export const BackupsSismedModule: React.FC = () => {
         </div>
       )}
 
-      {tab === "consumo" && manager.isAdmin ? <BackupConsumptionTab /> : (
+      {tab === "consumo" && isAdmin ? <BackupConsumptionTab /> : (
         <>
           <ImmunizationKpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
             <ImmunizationKpiCard watermark tone="info" icon={<Wifi />} label="PC en línea ahora" value={`${summary.online} / ${summary.total}`} hint={summary.total - summary.online ? `${summary.total - summary.online} desconectadas` : "todas conectadas"} onClick={() => setFilter(filter === "online" ? "all" : "online")} active={filter === "online"} />
