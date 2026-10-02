@@ -104,6 +104,12 @@ export interface BackupJob {
   web: string;
   /** Sesión de quien lo pidió: solo esa persona actualiza el pedido en Supabase. */
   webToken: string;
+  /** Quién lo pidió: si recarga la página o vuelve a entrar, el pedido se le vuelve a mostrar. */
+  username: string;
+  /** Bytes que la PC ya subió (para mostrar el avance al volver). */
+  sent?: number;
+  /** Enlace de descarga, cuando ya está en la nube. */
+  downloadUrl?: string;
   uploadToken: string;
   downloadToken: string;
   status: BackupStatus;
@@ -178,6 +184,8 @@ export interface UsageReading {
   level: UsageLevel;
   /** El dato más alto, para el aviso. */
   worst: UsageItem | null;
+  /** Mensajes de conexión por día (UTC), los últimos 7, para el gráfico del administrador. */
+  daily?: Array<{ date: string; requests: number }>;
   error?: string;
 }
 
@@ -199,7 +207,12 @@ export const utcMonthStart = (now: number) => {
 };
 
 /** Arma la lectura a partir de lo que respondió Cloudflare (null = ese dato falló). */
-export const buildUsage = (values: Partial<Record<UsageKey, number | null>>, now: number, error?: string): UsageReading => {
+export const buildUsage = (
+  values: Partial<Record<UsageKey, number | null>>,
+  now: number,
+  error?: string,
+  daily?: Array<{ date: string; requests: number }>,
+): UsageReading => {
   const items = (Object.keys(FREE_LIMITS) as UsageKey[]).map((key) => {
     const { label, limit } = FREE_LIMITS[key];
     const raw = values[key];
@@ -210,7 +223,7 @@ export const buildUsage = (values: Partial<Record<UsageKey, number | null>>, now
   const worst = known.reduce<UsageItem | null>((top, i) => (!top || (i.ratio as number) > (top.ratio as number) ? i : top), null);
   const top = worst?.ratio ?? null;
   const level: UsageLevel = top == null ? "unknown" : top >= USAGE_PAUSE ? "paused" : top >= USAGE_WARN ? "warn" : "ok";
-  return { at: now, items, level, worst, ...(error ? { error } : {}) };
+  return { at: now, items, level, worst, ...(daily ? { daily } : {}), ...(error ? { error } : {}) };
 };
 
 /**
@@ -254,4 +267,30 @@ export const quotaMessage = (quota: Quota): string => {
   }
   const who = last ? `; el último lo descargó ${last.username} a las ${limaTime(last.at)}` : "";
   return `Hoy ya se usó el cupo de este establecimiento (${cupo})${who}. Se podrá pedir otro mañana.`;
+};
+
+/**
+ * Lo que ve cada uno del consumo: el administrador, todo; los demás, solo el estado (cuánto
+ * falta para la pausa), sin las cifras de Cloudflare.
+ */
+export const usageFor = (reading: UsageReading, isAdmin: boolean): UsageReading =>
+  isAdmin ? reading : {
+    at: reading.at,
+    level: reading.level,
+    items: [],
+    worst: reading.worst ? { ...reading.worst, used: null, limit: 0 } : null,
+  };
+
+/** Mensajes que hay que volver a mandar a la web para que muestre un pedido en curso. */
+export const jobMessages = (job: Pick<BackupJob, "id" | "code" | "status" | "name" | "size" | "sha256" | "modified" | "sent" | "downloadUrl">): unknown[] => {
+  const base = { job: job.id, code: job.code };
+  const messages: unknown[] = [{ t: "backup_requested", ...base }];
+  if (job.name && job.size) {
+    messages.push({ t: "backup_meta", ...base, name: job.name, size: job.size, sha256: job.sha256, modified: job.modified });
+    if (job.status === "uploading" && job.sent) messages.push({ t: "backup_progress", ...base, sent: job.sent, total: job.size });
+  }
+  if (job.status === "ready" && job.downloadUrl) {
+    messages.push({ t: "backup_ready", ...base, name: job.name, size: job.size, sha256: job.sha256, modified: job.modified, downloadUrl: job.downloadUrl });
+  }
+  return messages;
 };

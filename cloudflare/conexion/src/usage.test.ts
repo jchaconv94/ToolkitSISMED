@@ -60,6 +60,23 @@ describe("readUsage", () => {
     expect(reading.error).toContain("activeTime");
   });
 
+  it("mensajes de conexión por día: los últimos 7, con cero los días sin dato", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      const rows = body.query.includes("dimensions { date }")
+        ? [{ sum: { requests: 1200 }, dimensions: { date: "2026-09-30" } }, { sum: { requests: 300 }, dimensions: { date: "2026-10-02" } }, { sum: { requests: 100 }, dimensions: { date: "2026-10-02" } }]
+        : [];
+      return new Response(JSON.stringify({ data: { viewer: { accounts: [{ durableObjectsInvocationsAdaptiveGroups: rows }] } } }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const reading = await readUsage(env, now);
+    expect(reading.daily).toEqual([
+      { date: "2026-09-26", requests: 0 }, { date: "2026-09-27", requests: 0 }, { date: "2026-09-28", requests: 0 },
+      { date: "2026-09-29", requests: 0 }, { date: "2026-09-30", requests: 1200 }, { date: "2026-10-01", requests: 0 },
+      { date: "2026-10-02", requests: 400 },
+    ]);
+  });
+
   it("sin clave no consulta nada", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

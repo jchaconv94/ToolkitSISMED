@@ -74,16 +74,39 @@ const QUERIES: Record<string, (env: UsageEnv, now: number) => Promise<Values>> =
   },
 };
 
+/** Mensajes de conexión por día, los últimos 7 (UTC). */
+async function readDaily(env: UsageEnv, now: number): Promise<Array<{ date: string; requests: number }>> {
+  const from = utcDayStart(now) - 6 * 24 * 60 * 60 * 1000;
+  const a = await query(env, `query($accountTag: string!, $day: Date!) { viewer { accounts(filter: {accountTag: $accountTag}) {
+    durableObjectsInvocationsAdaptiveGroups(limit: 100, filter: {date_geq: $day}) { sum { requests } dimensions { date } } } } }`,
+  { day: isoDate(from) });
+  const byDate = new Map<string, number>();
+  for (const row of (a.durableObjectsInvocationsAdaptiveGroups || []) as any[]) {
+    const date = String(row.dimensions?.date || "");
+    if (date) byDate.set(date, (byDate.get(date) || 0) + (Number(row.sum?.requests) || 0));
+  }
+  return Array.from({ length: 7 }, (_, i) => {
+    const date = isoDate(from + i * 24 * 60 * 60 * 1000);
+    return { date, requests: byDate.get(date) || 0 };
+  });
+}
+
 export async function readUsage(env: UsageEnv, now = Date.now()): Promise<UsageReading> {
   if (!env.CF_ACCOUNT_ID || !env.CF_ANALYTICS_TOKEN) return buildUsage({}, now, "Falta la clave de métricas de Cloudflare");
   const values: Values = {};
   const failures: string[] = [];
-  await Promise.all(Object.entries(QUERIES).map(async ([name, run]) => {
-    try {
-      Object.assign(values, await run(env, now));
-    } catch (error) {
-      failures.push(`${name}: ${String((error as Error).message || error).slice(0, 120)}`);
-    }
-  }));
-  return buildUsage(values, now, failures.length ? failures.join(" · ") : undefined);
+  let daily: Array<{ date: string; requests: number }> | undefined;
+  await Promise.all([
+    ...Object.entries(QUERIES).map(async ([name, run]) => {
+      try {
+        Object.assign(values, await run(env, now));
+      } catch (error) {
+        failures.push(`${name}: ${String((error as Error).message || error).slice(0, 120)}`);
+      }
+    }),
+    readDaily(env, now).then((d) => { daily = d; }, (error) => {
+      failures.push(`daily: ${String((error as Error).message || error).slice(0, 120)}`);
+    }),
+  ]);
+  return buildUsage(values, now, failures.length ? failures.join(" · ") : undefined, daily);
 }

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle, ArrowRightLeft, Bell, CheckCircle2, ChevronRight, Clock, Copy, Database, Download, History, KeyRound,
-  Loader2, Monitor, MonitorSmartphone, PlugZap, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
+  Loader2, Monitor, MonitorSmartphone, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -23,16 +23,12 @@ import {
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
 import { ModuleHeaderPortal } from "./ui/ModuleHeaderSlot";
-import { AdminConnectionTestTab } from "./AdminConnectionTestTab";
 import { useDropdownPosition } from "../hooks/useDropdownPosition";
-import { useAuth } from "../contexts/AuthContext";
 
-type ModuleTab = "establishments" | "connection";
+type ModuleTab = "establishments";
 
-/** Prueba de la conexión inmediata (Backups SISMED): solo el administrador, hasta que exista el módulo. */
-const MODULE_TABS: Array<{ id: ModuleTab; label: string; icon: React.ElementType; adminOnly?: boolean }> = [
+const MODULE_TABS: Array<{ id: ModuleTab; label: string; icon: React.ElementType }> = [
   { id: "establishments", label: "Establecimientos", icon: KeyRound },
-  { id: "connection", label: "Conexión (prueba)", icon: PlugZap, adminOnly: true },
 ];
 
 const PAGE_SIZE = 10;
@@ -87,8 +83,6 @@ type PendingAction =
 
 /** Claves de envío y las PC de cada establecimiento, en una sola pestaña. */
 export const AdminSendKeysModule: React.FC = () => {
-  const { user } = useAuth();
-  const isAdmin = user?.role === "ADMIN";
   const [tab, setTab] = useState<ModuleTab>("establishments");
 
   const [keys, setKeys] = useState<SendKeyRow[]>([]);
@@ -186,7 +180,7 @@ export const AdminSendKeysModule: React.FC = () => {
     }
   };
 
-  const tabs = MODULE_TABS.filter((t) => !t.adminOnly || isAdmin);
+  const tabs = MODULE_TABS;
   const bell = (
     <AlertsBell
       alerts={alerts}
@@ -262,7 +256,6 @@ export const AdminSendKeysModule: React.FC = () => {
           />
         )
       )}
-      {tab === "connection" && isAdmin && <AdminConnectionTestTab />}
 
       {newKey && <NewKeyModal row={newKey.row} secret={newKey.key} onCopy={() => void copyKey()} onClose={() => setNewKey(null)} />}
 

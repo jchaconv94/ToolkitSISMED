@@ -9,7 +9,7 @@ import {
   Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network,
   BarChart2, FilterX, RefreshCw, Search, Database, Activity, Syringe, ClipboardList, Package,
   PackageSearch, ArrowDownLeft, Truck, Receipt, RotateCcw, SlidersHorizontal, CalendarCheck,
-  Settings, Users, Shield, Building, FolderKanban, DatabaseBackup, FileSpreadsheet, Smartphone, User, KeyRound
+  Settings, Users, Shield, Building, FolderKanban, DatabaseBackup, FileSpreadsheet, Smartphone, User, KeyRound, HardDriveDownload
 } from 'lucide-react';
 
 // NEW IMPORTS
@@ -37,6 +37,8 @@ import { RedistributionModule } from './components/RedistributionModule';
 import { SheetSearchModule } from './components/SheetSearchModule';
 import { AdminStockAssignmentModule } from './components/AdminStockAssignmentModule';
 import { AdminSendKeysModule } from './components/AdminSendKeysModule';
+import { BackupsSismedModule } from './components/BackupsSismedModule';
+import { BackupManagerProvider } from './contexts/BackupManagerContext';
 import { AssignedIpressStockModule } from './components/AssignedIpressStockModule';
 import { StockMonitoringModule } from './components/IpressStockModule';
 import { AnalysisExclusionsModule } from './components/AnalysisExclusionsModule';
@@ -100,7 +102,9 @@ const App: React.FC = () => {
         <ErrorBoundary>
             <AuthProvider>
                 <Toaster position="top-center" closeButton theme="light" style={{ zIndex: 2147483647 }} toastOptions={{ style: { zIndex: 2147483647, color: '#1e293b' }, className: 'text-slate-800' }} />
-                <AuthenticatedApp />
+                <BackupManagerProvider>
+                    <AuthenticatedApp />
+                </BackupManagerProvider>
             </AuthProvider>
         </ErrorBoundary>
     );
@@ -207,6 +211,7 @@ const AuthenticatedApp: React.FC = () => {
             else if (hasPermission('ADMIN_PARAMS')) setCurrentView('ADMIN_PARAMS');
             else if (hasPermission('ADMIN_MIGRATION')) setCurrentView('ADMIN_MIGRATION');
             else if (hasPermission('ADMIN_SEND_KEYS')) setCurrentView('ADMIN_SEND_KEYS');
+            else if (hasPermission('ADMIN_BACKUPS')) setCurrentView('ADMIN_BACKUPS');
             else if (hasPermission('PROFILE')) setCurrentView('PROFILE');
         }
     }, [currentView, isAuthenticated, isLoading, user, hasPermission]);
@@ -269,6 +274,8 @@ const AuthenticatedApp: React.FC = () => {
                 return { title: 'Dispositivos Sync', description: 'Gestión de dispositivos autorizados de Sync SISMED 2.0', icon: <Smartphone className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'ADMIN_SEND_KEYS':
                 return { title: 'Claves de envío', description: 'Solo la PC vinculada puede enviar el stock de su establecimiento a Google Sheets', icon: <KeyRound className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
+            case 'ADMIN_BACKUPS':
+                return { title: 'Backups SISMED', description: 'Descargue con un clic el backup del SISMED de sus establecimientos', icon: <HardDriveDownload className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'PROFILE':
                 return { title: 'Perfil de Usuario', description: 'Configuración de perfil e información personal', icon: <User className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             default:
@@ -381,7 +388,8 @@ const AuthenticatedApp: React.FC = () => {
                                 {currentView === 'IMMUNIZATION_CONFIG' && <ImmunizationConfigModule />}
                                 {currentView === 'ADMIN_STOCK_ASSIGN' && <AdminStockAssignmentModule />}
                                 {currentView === 'ADMIN_SEND_KEYS' && <AdminSendKeysModule />}
-                                {currentView.startsWith('ADMIN') && currentView !== 'ADMIN_STOCK_ASSIGN' && currentView !== 'ADMIN_SEND_KEYS' && <AdminPanel currentView={currentView} />}
+                                {currentView === 'ADMIN_BACKUPS' && <BackupsSismedModule />}
+                                {currentView.startsWith('ADMIN') && !['ADMIN_STOCK_ASSIGN', 'ADMIN_SEND_KEYS', 'ADMIN_BACKUPS'].includes(currentView) && <AdminPanel currentView={currentView} />}
                                 {currentView === 'PROFILE' && <UserProfile />}
                             </Suspense>
                         </ErrorBoundary>

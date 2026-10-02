@@ -54,7 +54,7 @@ Cloudflare no tiene un tope de gasto que corte el servicio; por eso existen los 
 | 1 | Conexión inmediata con PC reales (sin pantalla definitiva) | probada el 2026-10-01 con ACER-JORDAN (06525): aviso en 270 ms, reconexión sola al cortar el wifi. Falta revisar el consumo a los 2–3 días |
 | 2 | Traslado del archivo por partes a R2 | probada el 2026-10-01 con ACER-JORDAN (06525): 8.3 MB y 74.3 MB con corte de red, huella verificada, restaurado en el SISMED, bucket vacío |
 | 3 | Reglas: descargas por día configurables, topes de consumo, auditoría | probada el 2026-10-02: cupo de 1 al día respetado también por el admin, métricas reales de Cloudflare |
-| 4 | Módulo web Backups SISMED con descarga en segundo plano | pendiente |
+| 4 | Módulo web Backups SISMED con descarga en segundo plano | programada; pendiente de prueba real |
 | 5 | Piloto una semana en UNGET Bellavista | pendiente |
 | 6 | Abrir a las demás UNGET | pendiente |
 
@@ -165,3 +165,36 @@ se descargó y el segundo pedido se rechazó con «Cupo del día usado · admin 
 activo 0,4 GB-s, R2 26 escrituras y 16 lecturas en el mes. Con una PC conectada unas 5 horas,
 113 mensajes indica que los «ping» automáticos no estarían contando; se confirma con varios
 días de uso antes de la etapa 6.
+
+## Etapa 4 · Módulo «Backups SISMED»
+
+Diseño aprobado el 2026-10-02 con prototipos. Administración → **Backups SISMED**
+(`ADMIN_BACKUPS`, `/administracion/backups-sismed`).
+
+- **Quién entra:** el administrador y todo rol que tenga «Backups SISMED» en Configuración de
+  Roles. Cada uno ve los establecimientos de su jurisdicción.
+- **Pestaña Backups (todos):** KPIs PC en línea ahora · Descargados hoy · Sin backup en 7 días ·
+  Plan gratuito (solo el estado, sin cifras). Tabla con buscador, filtro «Mostrar» (Todos, En
+  línea, Para descargar, Descargados hoy, Desconectados, con conteo), botón Actividad (panel
+  lateral con lo de hoy) y paginación. Lista los establecimientos con clave de envío y en el
+  piloto, también los desconectados.
+- **Pestaña Consumo (solo el administrador):** estado general y protecciones, los 4 límites de
+  Cloudflare con qué cuentan, cuándo se reinician y si podrían cobrar, mensajes de conexión de
+  los últimos 7 días y backups del mes por UNGET.
+- **Estado del servicio** en la cabecera de la app («Conectado · N PC en línea» y actualizar).
+- **Descargas en segundo plano** (`contexts/BackupManagerContext.tsx`): el gestor vive arriba
+  de todo, así que la descarga sigue al cambiar de módulo; panel flotante «Descargas»; el
+  navegador pregunta antes de cerrar la pestaña con pedidos en curso; si se recarga o se
+  vuelve a entrar, el servicio reenvía los pedidos de esa persona y la descarga se retoma.
+- **Descarga** (`services/backupDownloader.ts`): con `Range`, retoma desde el último byte si se
+  corta; comprueba la huella antes de guardar; guarda como `<código>_<nombre>.zip` en la
+  carpeta elegida (Chrome y Edge) o en Descargas. La web no puede abrir la carpeta: el panel
+  dice dónde quedó y copia el nombre.
+- **SQL:** `supabase/SUPABASE_BACKUPS_MODULO.sql` (permiso del módulo, lista, actividad y
+  resumen del mes).
+- Se retiró la pestaña «Conexión (prueba)» de Claves de envío.
+
+Probado en local de punta a punta (web real en el navegador, servicio real, SQL real en
+Postgres y cliente Python del Toolkit): el informático pide, la PC sube, la web descarga y
+verifica aunque se recargue la página a mitad, Supabase registra DOWNLOADED, la fila pasa a
+«Cupo del día usado» y la actividad lo muestra. El administrador ve la pestaña Consumo.
