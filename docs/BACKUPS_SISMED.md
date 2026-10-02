@@ -53,7 +53,7 @@ Cloudflare no tiene un tope de gasto que corte el servicio; por eso existen los 
 | 0 | Cuenta Cloudflare, R2, bucket privado, regla de borrado, alerta de $1, clave limitada guardada en Supabase (`R2_*`) | hecha el 2026-09-30 |
 | 1 | Conexión inmediata con PC reales (sin pantalla definitiva) | probada el 2026-10-01 con ACER-JORDAN (06525): aviso en 270 ms, reconexión sola al cortar el wifi. Falta revisar el consumo a los 2–3 días |
 | 2 | Traslado del archivo por partes a R2 | probada el 2026-10-01 con ACER-JORDAN (06525): 8.3 MB y 74.3 MB con corte de red, huella verificada, restaurado en el SISMED, bucket vacío |
-| 3 | Reglas: descargas por día configurables, topes de consumo, auditoría | programada; pendiente de prueba real |
+| 3 | Reglas: descargas por día configurables, topes de consumo, auditoría | probada el 2026-10-02: cupo de 1 al día respetado también por el admin, métricas reales de Cloudflare |
 | 4 | Módulo web Backups SISMED con descarga en segundo plano | pendiente |
 | 5 | Piloto una semana en UNGET Bellavista | pendiente |
 | 6 | Abrir a las demás UNGET | pendiente |
@@ -158,3 +158,10 @@ de cada PC cuentan (uno cada 50 s ≈ 1 730 al día por PC), unas 55 PC conectad
 llegarían al 100 % de las 100 000 diarias. La prueba real de esta etapa lo dirá con el dato
 «Mensajes de conexión»; si es así, antes de abrir a toda la región (etapa 6) hay que
 espaciar el «ping».
+
+**Prueba real (2026-10-02, 00:22 hora de Perú):** con ACER-JORDAN (06525), el primer backup
+se descargó y el segundo pedido se rechazó con «Cupo del día usado · admin a las 00:22 · 1 de
+1 hoy». Los cuatro medidores leyeron datos reales: Conexiones 113, Peticiones 22, Tiempo
+activo 0,4 GB-s, R2 26 escrituras y 16 lecturas en el mes. Con una PC conectada unas 5 horas,
+113 mensajes indica que los «ping» automáticos no estarían contando; se confirma con varios
+días de uso antes de la etapa 6.
