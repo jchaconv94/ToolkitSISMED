@@ -7,7 +7,7 @@ import { relativeTime } from "../services/sendKeys";
 import {
   BackupQuota, OnlinePc, UsageItem, UsageReading, applyPresence, connectionUrl, formatMegabytes, parseServerMessage, sha256Hex,
 } from "../services/backupConnection";
-import { ImmunizationEmptyState, ImmunizationStatusChip, ImmunizationTableHeader, ImmunizationTone } from "./ui/immunization";
+import { ImmunizationEmptyState, ImmunizationKpiCard, ImmunizationStatusChip, ImmunizationTableHeader, ImmunizationTone } from "./ui/immunization";
 
 type Status = "connecting" | "open" | "closed";
 
@@ -387,41 +387,13 @@ const BackupDetail: React.FC<{ state?: BackupState }> = ({ state }) => {
 
 // --- Consumo del plan gratuito -----------------------------------------------------------
 
-const toneOf = (ratio: number | null) => (ratio == null ? "none" : ratio >= 0.8 ? "danger" : ratio >= 0.7 ? "warning" : "ok");
-const BAR = { ok: "bg-teal-500", warning: "bg-amber-500", danger: "bg-red-500", none: "bg-slate-200" } as const;
-const VALUE = { ok: "text-slate-900", warning: "text-amber-700", danger: "text-red-700", none: "text-slate-300" } as const;
-const BORDER = { ok: "border-slate-200", warning: "border-amber-200", danger: "border-red-200", none: "border-slate-200" } as const;
+const toneOf = (ratio: number | null): ImmunizationTone => (ratio == null ? "neutral" : ratio >= 0.8 ? "danger" : ratio >= 0.7 ? "warning" : "info");
 const number = (n: number) => n.toLocaleString("es-PE", { maximumFractionDigits: n < 100 ? 1 : 0 });
+const percent = (ratio: number | null) => (ratio == null ? "—" : `${Math.round(ratio * 100)} %`);
+const withState = (ratio: number | null, hint: string) =>
+  ratio != null && ratio >= 0.8 ? `Pausado · ${hint}` : ratio != null && ratio >= 0.7 ? `Cerca del tope · ${hint}` : hint;
 
-const Meter: React.FC<{ ratio: number | null }> = ({ ratio }) => (
-  <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-slate-100" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={ratio == null ? undefined : Math.round(ratio * 100)}>
-    {ratio != null && <div className={`h-full rounded-full ${BAR[toneOf(ratio)]}`} style={{ width: `${Math.min(100, Math.max(ratio * 100, 1.5))}%` }} />}
-    {/* marcas del aviso (70 %) y de la pausa (80 %) */}
-    <span className="absolute inset-y-0 left-[70%] w-px bg-white" />
-    <span className="absolute inset-y-0 left-[80%] w-0.5 bg-white" />
-  </div>
-);
-
-const Tile: React.FC<{ icon: React.ReactNode; title: string; period: string; ratio: number | null; hint: string }> = ({ icon, title, period, ratio, hint }) => {
-  const tone = toneOf(ratio);
-  return (
-    <div className={`rounded-2xl border bg-white p-4 shadow-sm ${BORDER[tone]}`}>
-      <div className="flex items-center gap-2 text-[12px] font-bold text-slate-500">
-        <span className="shrink-0 text-slate-400">{icon}</span><span className="truncate">{title}</span>
-        <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] font-bold text-slate-500">{period}</span>
-      </div>
-      <div className="mt-2 flex items-baseline gap-2">
-        <span className={`text-[26px] font-black leading-none ${VALUE[tone]}`}>{ratio == null ? "—" : `${Math.round(ratio * 100)}%`}</span>
-        {tone === "warning" && <span className="text-[11.5px] font-bold text-amber-700">Cerca del tope</span>}
-        {tone === "danger" && <span className="text-[11.5px] font-bold text-red-700">Pausado</span>}
-      </div>
-      <Meter ratio={ratio} />
-      <p className="mt-2 truncate text-[11.5px] text-slate-500" title={hint}>{hint}</p>
-    </div>
-  );
-};
-
-/** Cuatro medidores: los tres límites diarios y R2 (el más alto de sus tres datos del mes). */
+/** Cuatro indicadores: los tres límites diarios y R2 (el más alto de sus tres datos del mes). */
 const UsageTiles: React.FC<{ reading: UsageReading; onRefresh: () => void }> = ({ reading, onRefresh }) => {
   const get = (key: string) => reading.items.find((i) => i.key === key);
   const of = (item?: UsageItem, unit = "") => (item?.used == null ? "sin dato" : `${number(item.used)} de ${number(item.limit)}${unit}`);
@@ -440,10 +412,14 @@ const UsageTiles: React.FC<{ reading: UsageReading; onRefresh: () => void }> = (
         <button type="button" onClick={onRefresh} className="ml-auto text-[12px] font-bold text-teal-700 hover:underline">Volver a medir</button>
       </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Tile icon={<PlugZap className="h-4 w-4" />} title="Conexiones" period="hoy" ratio={get("doRequests")?.ratio ?? null} hint={of(get("doRequests"))} />
-        <Tile icon={<Server className="h-4 w-4" />} title="Peticiones" period="hoy" ratio={get("workers")?.ratio ?? null} hint={of(get("workers"))} />
-        <Tile icon={<Timer className="h-4 w-4" />} title="Tiempo activo" period="hoy" ratio={get("doDuration")?.ratio ?? null} hint={of(get("doDuration"), " GB-s")} />
-        <Tile icon={<CloudUpload className="h-4 w-4" />} title="Nube R2" period="mes" ratio={r2Ratio} hint={r2Hint} />
+        {[
+          { label: "Conexiones hoy", icon: <PlugZap />, ratio: get("doRequests")?.ratio ?? null, hint: of(get("doRequests")) },
+          { label: "Peticiones hoy", icon: <Server />, ratio: get("workers")?.ratio ?? null, hint: of(get("workers")) },
+          { label: "Tiempo activo hoy", icon: <Timer />, ratio: get("doDuration")?.ratio ?? null, hint: of(get("doDuration"), " GB-s") },
+          { label: "Nube R2 del mes", icon: <CloudUpload />, ratio: r2Ratio, hint: r2Hint },
+        ].map((k) => (
+          <ImmunizationKpiCard key={k.label} watermark tone={toneOf(k.ratio)} icon={k.icon} label={k.label} value={percent(k.ratio)} hint={withState(k.ratio, k.hint)} />
+        ))}
       </div>
     </section>
   );
