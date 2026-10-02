@@ -19,6 +19,7 @@
  *   pc  → {t:"backup_meta"|"backup_progress"|"backup_error", job, ...} → se reenvía a esa web
  *   servicio → web {t:"backup_ready", job, downloadUrl, name, size, sha256}
  *   web → {t:"backup_done", job}              → se borra de R2
+ *   web → {t:"usage"}                         → {t:"usage", usage} consumo del plan gratuito
  *   servicio → web {t:"presence", online, codes} cuando una PC se conecta o se va
  * El texto «ping» recibe «pong» sin despertar al servicio (mantiene viva la conexión).
  *
@@ -29,15 +30,21 @@
  *   POST /backup/<job>/abort           (X-Job-Token)
  *   GET  /backup/<job>/download?token=…                 descarga (admite Range)
  * Un backup no descargado se borra a la hora; la regla del bucket lo borra al día.
+ *
+ * Reglas (etapa 3), antes de avisar a la PC:
+ *   - Consumo: si algún dato del plan gratuito llega al 80 %, se rechaza el pedido.
+ *   - Cupo: app_backup_request_start reserva el pedido si el establecimiento no agotó
+ *     sus descargas del día. Cada paso queda registrado con app_backup_request_update.
  */
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  BACKUP_MAX_BYTES, BACKUP_PART_SIZE, BackupJob, PcCode, PcInfo, WebInfo, backupKey, canSee, isExpired,
-  keysByCode, onlineFor, parseBackupMeta,
+  BACKUP_MAX_BYTES, BACKUP_PART_SIZE, BackupJob, PcCode, PcInfo, USAGE_REFRESH_MS, UsageReading, WebInfo, backupKey,
+  canSee, isExpired, keysByCode, onlineFor, parseBackupMeta, quotaMessage, usageBlocks, usageMessage,
 } from "./logic";
+import { UsageEnv, readUsage } from "./usage";
 
-export interface Env {
+export interface Env extends UsageEnv {
   REGION: DurableObjectNamespace<Region>;
   BACKUPS: R2Bucket;
   SUPABASE_URL: string;
@@ -197,7 +204,7 @@ export default {
         const token = clean(url.searchParams.get("token"), 64);
         if (!/^[0-9a-f-]{36}$/i.test(token)) return json({ error: "Sesión no válida" }, 401);
         const who = await rpc<{ username: string; isAdmin: boolean; ungetIds: string[] }>(env, "app_backup_web_auth", { p_token: token });
-        auth = { role: "web", username: who.username, isAdmin: Boolean(who.isAdmin), ungetIds: (who.ungetIds || []).slice(0, 30) };
+        auth = { role: "web", username: who.username, isAdmin: Boolean(who.isAdmin), ungetIds: (who.ungetIds || []).slice(0, 30), token };
       }
     } catch (error) {
       // Una sesión vencida o un rol sin permiso vuelven de Supabase como error.
@@ -211,9 +218,12 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 const JOB_PREFIX = "job:";
+const USAGE_KEY = "usage";
 const CLEANUP_EVERY_MS = 10 * 60 * 1000;
 
 export class Region extends DurableObject<Env> {
+  private usageRefresh: Promise<UsageReading> | null = null;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
@@ -241,6 +251,7 @@ export class Region extends DurableObject<Env> {
       server.serializeAttachment(info);
       server.send(JSON.stringify({ t: "hello", username: info.username, isAdmin: info.isAdmin }));
       server.send(JSON.stringify({ t: "list", rows: this.rowsFor(info) }));
+      this.ctx.waitUntil(this.usage().then((usage) => this.sendUsage(server, usage)).catch(() => undefined));
     }
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -267,7 +278,12 @@ export class Region extends DurableObject<Env> {
         await this.requestBackup(ws, info, String(data.code || "").toUpperCase());
       } else if (data.t === "backup_done" && typeof data.job === "string") {
         const job = await this.getJob(data.job);
-        if (job && job.web === info.id) await this.dropJob(job);
+        if (job && job.web === info.id) {
+          await this.report(job, "DOWNLOADED");
+          await this.dropJob(job);
+        }
+      } else if (data.t === "usage") {
+        this.sendUsage(ws, await this.usage());
       }
       return;
     }
@@ -290,6 +306,7 @@ export class Region extends DurableObject<Env> {
         }
         Object.assign(job, meta, { status: "uploading" });
         await this.ctx.storage.put(JOB_PREFIX + job.id, job);
+        await this.report(job, "UPLOADING", { p_file_name: meta.name, p_size: meta.size });
         this.toWeb(job, { t: "backup_meta", job: job.id, code: job.code, ...meta });
       } else if (data.t === "backup_progress") {
         this.toWeb(job, { t: "backup_progress", job: job.id, code: job.code, sent: Number(data.sent) || 0, total: job.size || 0 });
@@ -316,10 +333,32 @@ export class Region extends DurableObject<Env> {
       ws.send(JSON.stringify({ t: "backup_failed", code, reason: "La PC no está conectada o no es de su jurisdicción" }));
       return;
     }
+
+    const usage = await this.usage();
+    if (usageBlocks(usage)) {
+      ws.send(JSON.stringify({ t: "backup_failed", code, reason: usageMessage(usage), usage }));
+      return;
+    }
+
+    const id = crypto.randomUUID();
+    let quota: { ok: boolean; limit: number; used: number; last?: { username: string; status: string; at: string } };
+    try {
+      quota = await rpc(this.env, "app_backup_request_start", { p_token: web.token, p_job: id, p_code: code, p_equipo: this.equipoOf(code) });
+    } catch (error) {
+      // Sin poder contar el cupo no se pide: así el límite no se salta por una caída.
+      ws.send(JSON.stringify({ t: "backup_failed", code, reason: `No se pudo verificar el cupo de descargas: ${String((error as Error).message || error)}` }));
+      return;
+    }
+    if (!quota.ok) {
+      ws.send(JSON.stringify({ t: "backup_failed", code, reason: quotaMessage(quota), quota }));
+      return;
+    }
+
     const job: BackupJob = {
-      id: crypto.randomUUID(),
+      id,
       code,
       web: web.id,
+      webToken: web.token,
       uploadToken: crypto.randomUUID() + crypto.randomUUID(),
       downloadToken: crypto.randomUUID() + crypto.randomUUID(),
       status: "requested",
@@ -327,8 +366,13 @@ export class Region extends DurableObject<Env> {
     };
     await this.ctx.storage.put(JOB_PREFIX + job.id, job);
     if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + CLEANUP_EVERY_MS);
-    ws.send(JSON.stringify({ t: "backup_requested", job: job.id, code }));
-    pc.send(JSON.stringify({ t: "backup", job: job.id, code, token: job.uploadToken, partSize: BACKUP_PART_SIZE, maxBytes: BACKUP_MAX_BYTES }));
+    ws.send(JSON.stringify({ t: "backup_requested", job: job.id, code, quota: { limit: quota.limit, used: quota.used } }));
+    try {
+      pc.send(JSON.stringify({ t: "backup", job: job.id, code, token: job.uploadToken, partSize: BACKUP_PART_SIZE, maxBytes: BACKUP_MAX_BYTES }));
+    } catch {
+      // Se fue justo ahora: se libera el cupo en vez de dejarlo ocupado una hora.
+      await this.uploadFailed(job.id, "La PC se desconectó antes de recibir el pedido");
+    }
   }
 
   async getJob(id: string): Promise<BackupJob | null> {
@@ -349,6 +393,7 @@ export class Region extends DurableObject<Env> {
     if (!job) return;
     job.status = "ready";
     await this.ctx.storage.put(JOB_PREFIX + id, job);
+    await this.report(job, "READY");
     this.toWeb(job, {
       t: "backup_ready", job: id, code: job.code, name: job.name, size: job.size, sha256: job.sha256, modified: job.modified,
       downloadUrl: `${origin}/backup/${id}/download?token=${job.downloadToken}`,
@@ -359,6 +404,7 @@ export class Region extends DurableObject<Env> {
     const job = await this.getJob(id);
     if (!job) return;
     this.toWeb(job, { t: "backup_failed", job: id, code: job.code, reason });
+    await this.report(job, "FAILED", { p_reason: reason });
     await this.dropJob(job);
   }
 
@@ -375,10 +421,42 @@ export class Region extends DurableObject<Env> {
     const jobs = await this.ctx.storage.list<BackupJob>({ prefix: JOB_PREFIX });
     let pending = 0;
     for (const job of jobs.values()) {
-      if (isExpired(job, now)) await this.dropJob(job);
+      if (isExpired(job, now)) {
+        await this.report(job, "EXPIRED", { p_reason: "Venció sin descargarse" });
+        await this.dropJob(job);
+      }
       else pending += 1;
     }
     if (pending) await this.ctx.storage.setAlarm(now + CLEANUP_EVERY_MS);
+  }
+
+  /** Registra el paso en Supabase con la sesión de quien pidió. Si falla, el pedido sigue. */
+  private async report(job: BackupJob, status: string, extra: Record<string, unknown> = {}) {
+    try {
+      await rpc(this.env, "app_backup_request_update", { p_token: job.webToken, p_job: job.id, p_status: status, ...extra });
+    } catch (error) {
+      // Supabase vence solo a la hora lo que quedó abierto: nunca bloquea el cupo del día.
+      console.warn(`No se registró ${status} del pedido ${job.id}: ${String((error as Error).message || error)}`);
+    }
+  }
+
+  // --- Consumo del plan gratuito ----------------------------------------------------
+
+  /** Última lectura; se renueva solo si tiene más de 10 minutos y alguien la necesita. */
+  async usage(): Promise<UsageReading> {
+    const cached = await this.ctx.storage.get<UsageReading>(USAGE_KEY);
+    if (cached && Date.now() - cached.at < USAGE_REFRESH_MS) return cached;
+    this.usageRefresh ??= readUsage(this.env)
+      .then(async (reading) => {
+        await this.ctx.storage.put(USAGE_KEY, reading);
+        return reading;
+      })
+      .finally(() => { this.usageRefresh = null; });
+    return this.usageRefresh;
+  }
+
+  private sendUsage(ws: WebSocket, usage: UsageReading) {
+    try { ws.send(JSON.stringify({ t: "usage", usage, message: usageMessage(usage) })); } catch { /* cerrada */ }
   }
 
   private toWeb(job: BackupJob, message: unknown) {
@@ -387,6 +465,11 @@ export class Region extends DurableObject<Env> {
   }
 
   // --- Conexiones ------------------------------------------------------------------
+
+  private equipoOf(code: string) {
+    const ws = this.ctx.getWebSockets(`pc:${code}`)[0];
+    return (ws?.deserializeAttachment() as PcInfo | null)?.equipo || "";
+  }
 
   private pcFor(web: WebInfo, code: string) {
     return this.rowsFor(web).some((r) => r.code === code) ? this.ctx.getWebSockets(`pc:${code}`)[0] : undefined;

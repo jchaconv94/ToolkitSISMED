@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { RoleConfig, HealthFacility, AVAILABLE_MODULES, LaborRegime, Profession } from '../types';
 import { canAssignRole } from '../services/userManagementRules';
-import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench } from 'lucide-react';
+import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench, Archive } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -13,6 +13,7 @@ import { AdminMigrationModule } from './AdminMigrationModule';
 import { AdminOrganizationModule } from './AdminOrganizationModule';
 import { AdminCatalogsModule } from './AdminCatalogsModule';
 import { AdminSyncDevicesModule } from './AdminSyncDevicesModule';
+import { backupSettingsApi } from '../services/backupConnection';
 import { CustomSelect } from './ui/CustomSelect';
 
 export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) => {
@@ -83,6 +84,8 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
   const { systemConfig, updateSystemConfigContext, user: currentUser, refreshUserData, hasPermission } = useAuth();
   const [tempConfig, setTempConfig] = useState(systemConfig);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
+  // Backups SISMED: el límite vive en su propia tabla, que solo escribe el administrador.
+  const [backupLimit, setBackupLimit] = useState<{ saved: number | null; value: number; error: string | null }>({ saved: null, value: 1, error: null });
   const [isRefreshingUsers, setIsRefreshingUsers] = useState(false);
 
   // --- USER DIRECTORY SEARCH & FILTERS STATE ---
@@ -682,10 +685,28 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       }
   }, [filteredUsers, users, roles, getExpandedHierarchy, diresaMapLookup, ogessMapLookup, ungetMapLookup, microredMapLookup, facilityMapLookup, professionMapLookup, laborRegimeMapLookup, searchTerm]);
 
+  useEffect(() => {
+      if (activeTab !== 'PARAMS' || currentUser?.role !== 'ADMIN') return;
+      backupSettingsApi.get()
+          .then((s) => setBackupLimit({ saved: s.dailyLimit, value: s.dailyLimit, error: null }))
+          .catch((e: any) => setBackupLimit((prev) => ({ ...prev, error: e?.message || 'No se pudo leer el límite.' })));
+  }, [activeTab, currentUser?.role]);
+
   const handleSaveConfig = async () => {
       setIsSavingConfig(true);
       const toastId = toast.loading('Guardando parámetros...');
-      
+
+      if (backupLimit.saved != null && backupLimit.value !== backupLimit.saved) {
+          try {
+              await backupSettingsApi.save(backupLimit.value);
+              setBackupLimit((prev) => ({ ...prev, saved: prev.value, error: null }));
+          } catch (e: any) {
+              toast.error(e?.message || 'No se pudo guardar el límite de backups.', { id: toastId });
+              setIsSavingConfig(false);
+              return;
+          }
+      }
+
       console.log("Saving config:", tempConfig);
       const res = await api.updateSystemConfig(tempConfig);
       if (res.success) {
@@ -1843,6 +1864,39 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                 </div>
                             </div>
                         </div>
+
+                        {/* BACKUPS SISMED */}
+                        {currentUser?.role === 'ADMIN' && (
+                        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                            <h3 className="font-bold text-gray-800 mb-2 flex items-center gap-2">
+                                <Archive className="h-5 w-5 text-gray-500" />
+                                Backups SISMED
+                            </h3>
+                            <p className="text-xs text-gray-500 mb-5 leading-relaxed max-w-3xl">
+                                Cuántos backups se pueden descargar de un mismo establecimiento en un día
+                                (hora de Perú). Vale para todos los usuarios, también el administrador. Un
+                                pedido que falla o vence sin descargarse no cuenta.
+                            </p>
+                            <label className="block text-sm font-bold text-gray-700 mb-2">
+                                Descargas por establecimiento al día
+                            </label>
+                            <div className="flex items-center gap-3">
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="20"
+                                    value={backupLimit.value}
+                                    disabled={backupLimit.saved == null}
+                                    onChange={(e) => setBackupLimit({ ...backupLimit, value: Math.min(20, Math.max(1, Math.round(Number(e.target.value) || 1))) })}
+                                    className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-center font-bold text-gray-900 focus:ring-2 focus:ring-teal-500 outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                                />
+                                <span className="text-sm text-gray-500">por día (de 1 a 20)</span>
+                            </div>
+                            {backupLimit.error && (
+                                <p className="text-xs text-amber-700 mt-2">{backupLimit.error}</p>
+                            )}
+                        </div>
+                        )}
 
                         <div className="flex items-center gap-4">
                             <button 

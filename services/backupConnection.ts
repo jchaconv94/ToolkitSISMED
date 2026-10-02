@@ -7,6 +7,7 @@
  */
 
 import { getSessionToken } from "./api";
+import { callSendKeysRpc } from "./sendKeys";
 
 export const CONNECTION_URL = "wss://sismed-conexion.jchaconvillacis.workers.dev/web";
 
@@ -20,16 +21,42 @@ export interface OnlinePc {
   lastSeen: number;
 }
 
+/** Un dato del plan gratuito de Cloudflare (lo mide el servicio cada 10 minutos). */
+export interface UsageItem {
+  key: string;
+  label: string;
+  used: number | null;
+  limit: number;
+  ratio: number | null;
+}
+
+export interface UsageReading {
+  at: number;
+  items: UsageItem[];
+  level: "ok" | "warn" | "paused" | "unknown";
+  worst: UsageItem | null;
+  error?: string;
+}
+
+/** Cupo de descargas del establecimiento en el día. */
+export interface BackupQuota {
+  ok?: boolean;
+  limit: number;
+  used: number;
+  last?: { username: string; status: string; at: string } | null;
+}
+
 export type ServerMessage =
   | { t: "hello"; username: string; isAdmin: boolean }
   | { t: "list"; rows: OnlinePc[] }
   | { t: "presence"; online: boolean; codes: string[]; equipo?: string }
   | { t: "ping_result"; id: string; code: string; ok: boolean; rtt?: number; reason?: string; equipo?: string }
-  | { t: "backup_requested"; job: string; code: string }
+  | { t: "backup_requested"; job: string; code: string; quota?: BackupQuota }
   | { t: "backup_meta"; job: string; code: string; name: string; size: number; sha256: string; modified: string }
   | { t: "backup_progress"; job: string; code: string; sent: number; total: number }
   | { t: "backup_ready"; job: string; code: string; name: string; size: number; sha256: string; modified?: string; downloadUrl: string }
-  | { t: "backup_failed"; job?: string; code: string; reason: string };
+  | { t: "backup_failed"; job?: string; code: string; reason: string; quota?: BackupQuota; usage?: UsageReading }
+  | { t: "usage"; usage: UsageReading; message: string | null };
 
 export const connectionUrl = (token: string | null = getSessionToken()): string | null =>
   token ? `${CONNECTION_URL}?token=${encodeURIComponent(token)}` : null;
@@ -56,3 +83,11 @@ export const sha256Hex = async (data: ArrayBuffer): Promise<string> => {
 };
 
 export const formatMegabytes = (bytes: number) => `${(bytes / 1048576).toLocaleString("es-PE", { maximumFractionDigits: 1 })} MB`;
+
+const RULES_SQL = "SUPABASE_BACKUPS_REGLAS.sql";
+
+/** Ajustes de Backups SISMED (Parámetros del Sistema; solo el administrador). */
+export const backupSettingsApi = {
+  get: () => callSendKeysRpc<{ dailyLimit: number; updatedBy: string | null; updatedAt: string | null }>("app_backup_settings_get", {}, RULES_SQL),
+  save: (dailyLimit: number) => callSendKeysRpc<void>("app_backup_settings_save", { p_daily_limit: dailyLimit }, RULES_SQL),
+};
