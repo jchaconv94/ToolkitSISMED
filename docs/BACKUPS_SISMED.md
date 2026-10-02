@@ -52,7 +52,7 @@ Cloudflare no tiene un tope de gasto que corte el servicio; por eso existen los 
 |---|---|---|
 | 0 | Cuenta Cloudflare, R2, bucket privado, regla de borrado, alerta de $1, clave limitada guardada en Supabase (`R2_*`) | hecha el 2026-09-30 |
 | 1 | Conexión inmediata con PC reales (sin pantalla definitiva) | probada el 2026-10-01 con ACER-JORDAN (06525): aviso en 270 ms, reconexión sola al cortar el wifi. Falta revisar el consumo a los 2–3 días |
-| 2 | Traslado del archivo por partes a R2 | probada el 2026-10-01 con ACER-JORDAN (06525): 8.3 MB en ~11 s, huella verificada, borrado de la nube. Falta un backup grande (70+ MB) con corte de red y restaurarlo en el SISMED |
+| 2 | Traslado del archivo por partes a R2 | probada el 2026-10-01 con ACER-JORDAN (06525): 8.3 MB y 74.3 MB con corte de red, huella verificada, restaurado en el SISMED, bucket vacío |
 | 3 | Reglas en Supabase (jurisdicción, 1 al día, topes, limpieza) | pendiente |
 | 4 | Módulo web Backups SISMED con descarga en segundo plano | pendiente |
 | 5 | Piloto una semana en UNGET Bellavista | pendiente |
@@ -104,7 +104,8 @@ descarga parcial, permisos inválidos rechazados, otra UNGET sin acceso y borrad
 La PC subió `BKDA202609301300.zip` (8.3 MB) y la web lo descargó con la huella verificada y lo
 borró de la nube: 11 s de punta a punta.
 
-**Falta para pasar a la etapa 3:** un backup de 70 MB o más (almacén u hospital) cortando el
-wifi a mitad de la subida, restaurar en el SISMED el zip descargado, y comprobar en R2 que el
-bucket queda vacío.
+Luego, `BKDA202609220718.zip` de hospital (74.3 MB, 4 partes): se cortó internet a mitad de la
+subida y retomó sola; subida y descarga verificada en 1 min 30 s. El zip descargado se restauró
+en el SISMED y funciona. En R2 el bucket quedó en 0 B (también se borró solo `prueba.txt` de la
+etapa 0) con 3 operaciones de clase A y 4 de clase B en el día.
 
