@@ -243,6 +243,18 @@ export const ImmunizationKpiCard: React.FC<{
 };
 
 /**
+ * Fila de tarjetas KPI. En escritorio es una cuadrícula (`cols`, p. ej. "md:grid-cols-4");
+ * en el celular, una sola fila que se desliza con el dedo, para que la tabla quede a la vista.
+ */
+export const ImmunizationKpiStrip: React.FC<{ children: React.ReactNode; cols: string }> = ({ children, cols }) => (
+  <div
+    className={`-mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-1 md:mx-0 md:grid md:overflow-visible md:px-0 md:pb-0 ${cols} [&>*]:min-w-[72%] [&>*]:shrink-0 [&>*]:snap-start md:[&>*]:min-w-0`}
+  >
+    {children}
+  </div>
+);
+
+/**
  * Cabecera estándar de módulo: icono, título, distintivos, una línea de descripción y
  * el ámbito operativo. Las acciones van a la derecha.
  */
