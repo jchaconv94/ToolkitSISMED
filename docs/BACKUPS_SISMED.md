@@ -52,7 +52,7 @@ Cloudflare no tiene un tope de gasto que corte el servicio; por eso existen los 
 |---|---|---|
 | 0 | Cuenta Cloudflare, R2, bucket privado, regla de borrado, alerta de $1, clave limitada guardada en Supabase (`R2_*`) | hecha el 2026-09-30 |
 | 1 | Conexión inmediata con PC reales (sin pantalla definitiva) | probada el 2026-10-01 con ACER-JORDAN (06525): aviso en 270 ms, reconexión sola al cortar el wifi. Falta revisar el consumo a los 2–3 días |
-| 2 | Traslado del archivo por partes a R2 | programada; pendiente de prueba real |
+| 2 | Traslado del archivo por partes a R2 | probada el 2026-10-01 con ACER-JORDAN (06525): 8.3 MB en ~11 s, huella verificada, borrado de la nube. Falta un backup grande (70+ MB) con corte de red y restaurarlo en el SISMED |
 | 3 | Reglas en Supabase (jurisdicción, 1 al día, topes, limpieza) | pendiente |
 | 4 | Módulo web Backups SISMED con descarga en segundo plano | pendiente |
 | 5 | Piloto una semana en UNGET Bellavista | pendiente |
@@ -99,4 +99,12 @@ reconecta sola; el consumo diario de Durable Objects queda por debajo del 10 % d
 Probado en local de punta a punta (runtime real de Workers con R2 simulado, cliente Python real
 y navegador): 45 MB en 3 partes con un corte simulado, archivo descargado idéntico al original,
 descarga parcial, permisos inválidos rechazados, otra UNGET sin acceso y borrado al confirmar.
+
+**Prueba real (2026-10-01):** Toolkit 2.2.3 en ACER-JORDAN (`C:\SISMEDV2OGM`, código 06525).
+La PC subió `BKDA202609301300.zip` (8.3 MB) y la web lo descargó con la huella verificada y lo
+borró de la nube: 11 s de punta a punta.
+
+**Falta para pasar a la etapa 3:** un backup de 70 MB o más (almacén u hospital) cortando el
+wifi a mitad de la subida, restaurar en el SISMED el zip descargado, y comprobar en R2 que el
+bucket queda vacío.
 
