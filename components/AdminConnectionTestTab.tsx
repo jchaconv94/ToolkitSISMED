@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Download, Loader2, Monitor, Plug, PlugZap, RefreshCw, Send, XCircle } from "lucide-react";
 import { relativeTime } from "../services/sendKeys";
-import { OnlinePc, applyPresence, connectionUrl, formatMegabytes, parseServerMessage, sha256Hex } from "../services/backupConnection";
+import { OnlinePc, UsageReading, applyPresence, connectionUrl, formatMegabytes, formatUsage, parseServerMessage, sha256Hex } from "../services/backupConnection";
 import { ImmunizationEmptyState, ImmunizationTableHeader } from "./ui/immunization";
 
 type Status = "connecting" | "open" | "closed";
@@ -32,6 +32,7 @@ export const AdminConnectionTestTab: React.FC = () => {
   const [log, setLog] = useState<LogLine[]>([]);
   const [pending, setPending] = useState<Record<string, number>>({});
   const [backups, setBackups] = useState<Record<string, BackupState>>({});
+  const [usage, setUsage] = useState<{ reading: UsageReading; message: string | null } | null>(null);
   const setBackup = (code: string, patch: Partial<BackupState>) =>
     setBackups((prev) => ({ ...prev, [code]: { ...(prev[code] || { phase: "requested" }), ...patch } as BackupState }));
   const wsRef = useRef<WebSocket | null>(null);
@@ -63,7 +64,11 @@ export const AdminConnectionTestTab: React.FC = () => {
         setRows((prev) => applyPresence(prev, message));
         if (message.online) ws.send(JSON.stringify({ t: "list" }));
       }
-      if (message.t === "backup_requested") setBackup(message.code, { job: message.job, phase: "requested", detail: "Esperando a la PC…" });
+      if (message.t === "usage") setUsage({ reading: message.usage, message: message.message });
+      if (message.t === "backup_requested") {
+        setBackup(message.code, { job: message.job, phase: "requested", detail: "Esperando a la PC…" });
+        if (message.quota) addLog(`${message.code}: pedido aceptado (${message.quota.used} de ${message.quota.limit} hoy).`);
+      }
       if (message.t === "backup_meta") {
         setBackup(message.code, { phase: "uploading", name: message.name, size: message.size, sent: 0, detail: undefined });
         addLog(`${message.code}: la PC envía ${message.name} (${formatMegabytes(message.size)}).`);
@@ -168,12 +173,14 @@ export const AdminConnectionTestTab: React.FC = () => {
           {status === "open" ? "Servicio conectado" : status === "connecting" ? "Conectando…" : "Sin conexión · reintentando"}
         </span>
         <p className="text-[12.5px] text-slate-500">
-          Prueba de la etapa 1 de Backups SISMED. Solo la ve el administrador. Las PC aparecen si su establecimiento está en el piloto y el Toolkit tiene la clave de envío.
+          Prueba de Backups SISMED. Solo la ve el administrador. Las PC aparecen si su establecimiento está en el piloto y el Toolkit tiene la clave de envío.
         </p>
         <button type="button" onClick={() => wsRef.current?.send(JSON.stringify({ t: "list" }))} className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">
           <RefreshCw className="h-4 w-4" /> Actualizar
         </button>
       </div>
+
+      {usage && <UsagePanel reading={usage.reading} message={usage.message} onRefresh={() => wsRef.current?.send(JSON.stringify({ t: "usage" }))} />}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         {rows.length === 0 ? (
@@ -257,3 +264,26 @@ const BackupCell: React.FC<{ state?: BackupState }> = ({ state }) => {
     </div>
   );
 };
+
+/** Consumo del plan gratuito de Cloudflare, tal como lo ve el servicio. */
+const UsagePanel: React.FC<{ reading: UsageReading; message: string | null; onRefresh: () => void }> = ({ reading, message, onRefresh }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="mb-2 flex items-center gap-2">
+      <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Consumo del plan gratuito</p>
+      <span className="text-[11px] text-slate-400">medido {new Date(reading.at).toLocaleTimeString("es-PE")}</span>
+      <button type="button" onClick={onRefresh} className="ml-auto text-[11px] font-bold text-teal-700 hover:underline">Volver a medir</button>
+    </div>
+    {message && (
+      <p className={`mb-2 rounded-xl px-3 py-2 text-[12.5px] font-semibold ${reading.level === "paused" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-800"}`}>{message}</p>
+    )}
+    <ul className="grid gap-x-6 gap-y-1 text-[12.5px] sm:grid-cols-2 lg:grid-cols-3">
+      {reading.items.map((item) => (
+        <li key={item.key} className="flex justify-between gap-3 border-b border-slate-100 py-1">
+          <span className="text-slate-600">{item.label}</span>
+          <span className={`font-mono text-[12px] ${item.ratio == null ? "text-slate-400" : item.ratio >= 0.8 ? "text-red-700" : item.ratio >= 0.7 ? "text-amber-700" : "text-slate-800"}`}>{formatUsage(item)}</span>
+        </li>
+      ))}
+    </ul>
+    {reading.error && <p className="mt-2 text-[11.5px] text-amber-700">Sin dato: {reading.error}</p>}
+  </div>
+);

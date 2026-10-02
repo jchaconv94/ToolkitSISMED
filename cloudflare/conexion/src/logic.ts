@@ -25,6 +25,8 @@ export interface WebInfo {
   username: string;
   isAdmin: boolean;
   ungetIds: string[];
+  /** Sesión con la que entró; el servicio la usa para registrar sus pedidos en Supabase. */
+  token: string;
 }
 
 /** Una PC sin «ping» en este tiempo se da por desconectada aunque el socket siga abierto. */
@@ -100,6 +102,8 @@ export interface BackupJob {
   id: string;
   code: string;
   web: string;
+  /** Sesión de quien lo pidió: solo esa persona actualiza el pedido en Supabase. */
+  webToken: string;
   uploadToken: string;
   downloadToken: string;
   status: BackupStatus;
@@ -129,4 +133,125 @@ export const parseBackupMeta = (data: any): { name: string; size: number; sha256
   if (!Number.isFinite(size) || size <= 0 || size > BACKUP_MAX_BYTES) return null;
   if (typeof data.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(data.sha256)) return null;
   return { name: data.name, size, sha256: data.sha256.toLowerCase(), modified: String(data.modified || "").slice(0, 40) };
+};
+
+// ---------------------------------------------------------------------------------------
+//  Consumo del plan gratuito (etapa 3)
+// ---------------------------------------------------------------------------------------
+
+/** Por encima de esto se avisa; desde PAUSE se rechazan pedidos nuevos. */
+export const USAGE_WARN = 0.7;
+export const USAGE_PAUSE = 0.8;
+/** Cada cuánto se vuelve a preguntar a Cloudflare (solo si alguien lo necesita). */
+export const USAGE_REFRESH_MS = 10 * 60 * 1000;
+
+export type UsageKey = "workers" | "doRequests" | "doDuration" | "r2ClassA" | "r2ClassB" | "r2Storage";
+
+/**
+ * Límites gratuitos (documentación de Cloudflare, 2026-10). Los diarios vuelven a cero a
+ * las 00:00 UTC; los de R2, cada mes. En Workers y Durable Objects el plan gratuito no
+ * cobra: al pasarse, falla. Lo único que podría cobrar es R2.
+ */
+export const FREE_LIMITS: Record<UsageKey, { label: string; limit: number; period: "day" | "month" }> = {
+  workers: { label: "Peticiones al servicio (día)", limit: 100_000, period: "day" },
+  doRequests: { label: "Mensajes de conexión (día)", limit: 100_000, period: "day" },
+  doDuration: { label: "Tiempo activo, GB-s (día)", limit: 13_000, period: "day" },
+  r2ClassA: { label: "R2 escrituras, clase A (mes)", limit: 1_000_000, period: "month" },
+  r2ClassB: { label: "R2 lecturas, clase B (mes)", limit: 10_000_000, period: "month" },
+  r2Storage: { label: "R2 almacenamiento, GB", limit: 10, period: "month" },
+};
+
+export interface UsageItem {
+  key: UsageKey;
+  label: string;
+  used: number | null;
+  limit: number;
+  /** used / limit; null si Cloudflare no respondió ese dato. */
+  ratio: number | null;
+}
+
+export type UsageLevel = "ok" | "warn" | "paused" | "unknown";
+
+export interface UsageReading {
+  at: number;
+  items: UsageItem[];
+  level: UsageLevel;
+  /** El dato más alto, para el aviso. */
+  worst: UsageItem | null;
+  error?: string;
+}
+
+/** Operaciones de R2 por clase, según la tabla de precios. Lo que no es B ni gratis, es A. */
+const R2_CLASS_B = new Set(["HeadBucket", "HeadObject", "GetObject", "UsageSummary", "GetBucketEncryption", "GetBucketLocation", "GetBucketCors", "GetBucketLifecycleConfiguration"]);
+const R2_FREE = new Set(["DeleteObject", "DeleteObjects", "DeleteBucket", "AbortMultipartUpload"]);
+
+export const r2OperationClass = (actionType: string): "A" | "B" | "free" =>
+  R2_FREE.has(actionType) ? "free" : R2_CLASS_B.has(actionType) ? "B" : "A";
+
+export const utcDayStart = (now: number) => {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+};
+
+export const utcMonthStart = (now: number) => {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+};
+
+/** Arma la lectura a partir de lo que respondió Cloudflare (null = ese dato falló). */
+export const buildUsage = (values: Partial<Record<UsageKey, number | null>>, now: number, error?: string): UsageReading => {
+  const items = (Object.keys(FREE_LIMITS) as UsageKey[]).map((key) => {
+    const { label, limit } = FREE_LIMITS[key];
+    const raw = values[key];
+    const used = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+    return { key, label, used, limit, ratio: used == null ? null : used / limit };
+  });
+  const known = items.filter((i) => i.ratio != null);
+  const worst = known.reduce<UsageItem | null>((top, i) => (!top || (i.ratio as number) > (top.ratio as number) ? i : top), null);
+  const top = worst?.ratio ?? null;
+  const level: UsageLevel = top == null ? "unknown" : top >= USAGE_PAUSE ? "paused" : top >= USAGE_WARN ? "warn" : "ok";
+  return { at: now, items, level, worst, ...(error ? { error } : {}) };
+};
+
+/**
+ * ¿Se acepta un pedido nuevo? Solo se pausa con una lectura que diga 80 % o más. Si
+ * Cloudflare no responde se deja pasar: en Workers pasarse no cobra, y R2 tiene además
+ * la regla de borrado a 1 día y la alerta de $1.
+ */
+export const usageBlocks = (reading: UsageReading | null) => reading?.level === "paused";
+
+/** Texto del aviso para la web. */
+export const usageMessage = (reading: UsageReading | null): string | null => {
+  if (!reading || !reading.worst || reading.level === "ok" || reading.level === "unknown") return null;
+  const pct = Math.round((reading.worst.ratio as number) * 100);
+  const when = FREE_LIMITS[reading.worst.key].period === "day" ? "mañana a las 19:00 (hora de Perú)" : "el 1 del próximo mes";
+  return reading.level === "paused"
+    ? `Pausado para no salir de lo gratuito: ${reading.worst.label} al ${pct} %. Se reanuda ${when}.`
+    : `Atención: ${reading.worst.label} al ${pct} % de lo gratuito. Al 80 % se pausan los pedidos.`;
+};
+
+// ---------------------------------------------------------------------------------------
+//  Cupo de descargas por día (etapa 3; lo cuenta Supabase, app_backup_request_start)
+// ---------------------------------------------------------------------------------------
+
+export interface Quota {
+  ok: boolean;
+  limit: number;
+  used: number;
+  last?: { username: string; status: string; at: string } | null;
+}
+
+const limaTime = (at: string) =>
+  new Date(at).toLocaleTimeString("es-PE", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hour12: false });
+
+/** Por qué no se pudo pedir, dicho para la persona. */
+export const quotaMessage = (quota: Quota): string => {
+  const cupo = quota.limit === 1 ? "1 backup por día" : `${quota.limit} backups por día`;
+  const last = quota.last;
+  if (last && last.status !== "DOWNLOADED") {
+    const admite = quota.limit === 1 ? "Se admite 1 backup por día" : `Se admiten ${quota.limit} backups por día`;
+    return `Ya hay un backup de este establecimiento en curso: lo pidió ${last.username} a las ${limaTime(last.at)}. ${admite}.`;
+  }
+  const who = last ? `; el último lo descargó ${last.username} a las ${limaTime(last.at)}` : "";
+  return `Hoy ya se usó el cupo de este establecimiento (${cupo})${who}. Se podrá pedir otro mañana.`;
 };
