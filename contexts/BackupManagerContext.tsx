@@ -235,6 +235,10 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
     setJobs({});
     setOnline([]);
     setEvents([]);
+    // Si no, la siguiente cuenta hereda un instante lo de la anterior (p. ej. la pestaña Consumo del admin).
+    setUsername(null);
+    setIsAdmin(false);
+    setUsage(null);
   }, [enabled]);
 
   // Mientras haya pedidos en curso, el navegador pregunta antes de cerrar la pestaña.
