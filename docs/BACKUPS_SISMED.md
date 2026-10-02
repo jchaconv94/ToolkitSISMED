@@ -28,7 +28,7 @@ Reglas acordadas:
 | **Cloudflare Worker + Durable Object** (`cloudflare/conexion`, servicio `sismed-conexion`) | Las conexiones abiertas (hibernan: una conexión quieta no consume nada) y el paso del archivo hacia y desde R2, por el enlace interno de Cloudflare. |
 | **Cloudflare R2** (bucket `sismed-backups`) | Los zips, de paso. Descargas gratis e ilimitadas. |
 
-**Cambio aprobado en la etapa 2 (2026-10-01):** el archivo ya no se sube con enlaces firmados por Supabase, sino por el mismo servicio de Cloudflare, que llega a R2 por su enlace interno (`BACKUPS`) sin ninguna clave. Los secretos `R2_*` guardados en Supabase en la etapa 0 **no se usan** y pueden borrarse.
+**Cambio aprobado en la etapa 2 (2026-10-01):** el archivo ya no se sube con enlaces firmados por Supabase, sino por el mismo servicio de Cloudflare, que llega a R2 por su enlace interno (`BACKUPS`) sin ninguna clave. Los secretos `R2_*` que se guardaron en Supabase en la etapa 0 se borraron el 2026-10-02, junto con su token `sismed-backups-web` en Cloudflare. Queda solo «Edit Cloudflare Workers», el que usa GitHub para publicar (`CLOUDFLARE_API_TOKEN`).
 
 **Por qué no Supabase para los archivos:** el plan gratuito trae 5 GB de descargas al mes y la
 región movería ~28 GB (10 UNGET × ~40 IPRESS × ~15 MB + hospitales de 70–150 MB, una vez por
@@ -220,3 +220,10 @@ el administrador revisa la pestaña Consumo cada uno o dos días. Lo que se mide
 
 **Para pasar a la etapa 6:** una semana sin fallos sin explicar y el consumo diario lejos del
 70 %.
+
+**Limpieza de las pruebas (2026-10-02):** el 06525 (P.S. Cuzco, PC de casa ACER-JORDAN) dejó
+de ser establecimiento de prueba: se le retiró la clave de envío, salió de
+`backup_pilot_codes` (queda solo 030S05) y el Toolkit de esa PC volvió a la dirección real
+sin clave. Su historial en `backup_requests` se conserva como auditoría. Esa PC tiene un
+SISMED de prueba: no debe iniciar Sync SISMED, o sobrescribiría la pestaña real del P.S.
+Cuzco.
