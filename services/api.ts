@@ -18,7 +18,7 @@ const MOCK_DB = {
         { code: '00002', name: 'C.S. MIRAFLORES', category: 'I-3' },
     ],
     roles: [
-        { role: 'ADMIN', label: 'Administrador Total', allowedModules: ['DASHBOARD', 'ANALYSIS', 'ADMIN_USERS', 'ADMIN_ROLES', 'PROFILE', 'REDISTRIBUTION', 'SIG_SEARCH', 'ADMIN_STOCK_ASSIGN', 'IPRESS_STOCK', 'STOCK_MONITORING', 'IMMUNIZATION_CATALOG', 'IMMUNIZATION_INITIAL_INVENTORY', 'IMMUNIZATION_STOCK', 'IMMUNIZATION_INCOMES', 'IMMUNIZATION_INCOME_ORIGINS', 'IMMUNIZATION_DISTRIBUTIONS', 'IMMUNIZATION_CONSUMPTION', 'IMMUNIZATION_RETURNS', 'IMMUNIZATION_ADJUSTMENTS', 'IMMUNIZATION_CLOSURES', 'IMMUNIZATION_REPORTS'], maxUrlsAllowed: 10 },
+        { role: 'ADMIN', label: 'Administrador Total', allowedModules: ['DASHBOARD', 'ANALYSIS', 'ADMIN_USERS', 'ADMIN_ROLES', 'PROFILE', 'REDISTRIBUTION', 'SIG_SEARCH', 'ADMIN_STOCK_ASSIGN', 'IPRESS_STOCK', 'IMMUNIZATION_CATALOG', 'IMMUNIZATION_INITIAL_INVENTORY', 'IMMUNIZATION_STOCK', 'IMMUNIZATION_INCOMES', 'IMMUNIZATION_INCOME_ORIGINS', 'IMMUNIZATION_DISTRIBUTIONS', 'IMMUNIZATION_CONSUMPTION', 'IMMUNIZATION_RETURNS', 'IMMUNIZATION_ADJUSTMENTS', 'IMMUNIZATION_CLOSURES', 'IMMUNIZATION_REPORTS'], maxUrlsAllowed: 10 },
         { role: 'FARMACIA', label: 'Responsable Farmacia', allowedModules: ['DASHBOARD', 'ANALYSIS', 'PROFILE', 'REDISTRIBUTION', 'IPRESS_STOCK'], maxUrlsAllowed: 1 }
     ],
     laborRegimes: [
@@ -952,9 +952,6 @@ export const api = {
                 if (!error && data) {
                     return data.map(r => {
                         const allowedModules = Array.isArray(r.allowed_modules) ? [...r.allowed_modules] : [];
-                        if (r.role === 'ADMIN' && !allowedModules.includes('STOCK_MONITORING')) {
-                            allowedModules.push('STOCK_MONITORING');
-                        }
                         if (r.role === 'ADMIN' && !allowedModules.includes('IMMUNIZATION_CLOSURES')) {
                             allowedModules.push('IMMUNIZATION_CLOSURES');
                         }
@@ -1393,8 +1390,7 @@ export const api = {
      *
      * `sheet_name` y `sheet_url` ya no deciden **este** vínculo, pero **no son adorno**:
      * Consulta Stock empareja la pestaña con su asignación por `sheet_name` para ponerle a
-     * la tarjeta el nombre oficial del establecimiento (`SheetSearchModule`), y
-     * `IpressStockModule` lo usa de nombre cuando el establecimiento no está registrado.
+     * la tarjeta el nombre oficial del establecimiento (`SheetSearchModule`).
      * Por eso, si aquí llega vacío —el vínculo no se pudo deducir en ese momento— se
      * **conserva el que ya tuviera la fila** en vez de borrarlo: guardar unas columnas no
      * puede dejar sin nombre a una tarjeta de Consulta Stock.
@@ -1579,195 +1575,5 @@ export const api = {
         } catch (e: any) {
             return { success: false, message: e.message };
         }
-    },
-
-    getSyncInstallations: async (): Promise<any[]> => {
-        try {
-            if (supabase) {
-                const { data, error } = await supabase
-                    .from('sync_installations')
-                    .select('*, facilities(*)');
-                if (!error && data) return data;
-            }
-        } catch (e) {
-            console.error(e);
-        }
-        return [];
-    },
-
-    createSyncInstallation: async (installation: {
-        facilityCode: string;
-        pcName: string;
-        sismedPath?: string;
-        isActive: boolean;
-        allowedAlmcods?: string[];
-    }): Promise<{ success: boolean; rawToken?: string; installation?: any; message?: string }> => {
-        try {
-            if (!supabase) throw new Error("No conectado a Supabase");
-
-            const randomBody = Array.from({ length: 21 }, () => {
-                const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-                return chars.charAt(Math.floor(Math.random() * chars.length));
-            }).join("");
-            const rawToken = `sismed_${randomBody}`;
-            
-            const msgBuffer = new TextEncoder().encode(rawToken);
-            const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const tokenHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-            const { data, error } = await supabase
-                .from('sync_installations')
-                .insert({
-                    token_hash: tokenHash,
-                    facility_code: installation.facilityCode,
-                    pc_name: installation.pcName,
-                    sismed_path: installation.sismedPath || null,
-                    is_active: installation.isActive,
-                    allowed_almcods: installation.allowedAlmcods && installation.allowedAlmcods.length > 0 ? installation.allowedAlmcods : null
-                })
-                .select()
-                .single();
-
-            if (error) throw error;
-
-            return {
-                success: true,
-                rawToken,
-                installation: data
-            };
-        } catch (e: any) {
-            return { success: false, message: e.message };
-        }
-    },
-
-    updateSyncInstallationStatus: async (id: string, isActive: boolean): Promise<{ success: boolean; message?: string }> => {
-        try {
-            if (!supabase) throw new Error("No conectado a Supabase");
-            const { error } = await supabase
-                .from('sync_installations')
-                .update({ is_active: isActive })
-                .eq('id', id);
-
-            if (error) throw error;
-            return { success: true };
-        } catch (e: any) {
-            return { success: false, message: e.message };
-        }
-    },
-
-    regenerateSyncInstallationKey: async (id: string): Promise<{ success: boolean; rawToken?: string; message?: string }> => {
-        try {
-            if (!supabase) throw new Error("No conectado a Supabase");
-
-            const randomBody = Array.from({ length: 21 }, () => {
-                const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-                return chars.charAt(Math.floor(Math.random() * chars.length));
-            }).join("");
-            const rawToken = `sismed_${randomBody}`;
-
-            const msgBuffer = new TextEncoder().encode(rawToken);
-            const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const tokenHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-            const { error } = await supabase
-                .from('sync_installations')
-                .update({ token_hash: tokenHash })
-                .eq('id', id);
-
-            if (error) throw error;
-
-            return {
-                success: true,
-                rawToken
-            };
-        } catch (e: any) {
-            return { success: false, message: e.message };
-        }
-    },
-
-    deleteSyncInstallation: async (id: string): Promise<{ success: boolean; message?: string }> => {
-        try {
-            if (!supabase) throw new Error("No conectado a Supabase");
-            const { error } = await supabase
-                .from('sync_installations')
-                .delete()
-                .eq('id', id);
-
-            if (error) throw error;
-            return { success: true };
-        } catch (e: any) {
-            return { success: false, message: e.message };
-        }
-    },
-
-    getSyncRuns: async (facilityCodes?: string[]): Promise<any[]> => {
-        try {
-            if (supabase) {
-                let query = supabase.from('sync_runs').select('*, sync_installations(*)');
-                if (facilityCodes && facilityCodes.length > 0) {
-                    query = query.in('facility_code', facilityCodes);
-                }
-                const { data, error } = await query.order('started_at', { ascending: false }).limit(200);
-                if (!error && data) return data;
-            }
-        } catch (e) {
-            console.error(e);
-        }
-        return [];
-    },
-
-    getStockActual: async (facilityCodes?: string[]): Promise<any[]> => {
-        try {
-            if (supabase) {
-                let allData: any[] = [];
-                let from = 0;
-                let step = 999;
-                let fetchMore = true;
-
-                while (fetchMore) {
-                    let query = supabase.from('stock_actual').select('*');
-                    if (facilityCodes && facilityCodes.length > 0) {
-                        query = query.in('facility_code', facilityCodes);
-                    }
-                    const { data, error } = await query.range(from, from + step);
-                    if (error) {
-                        console.error("Error fetching stock:", error);
-                        break;
-                    }
-                    if (data && data.length > 0) {
-                        allData = [...allData, ...data];
-                        if (data.length < (step + 1)) {
-                            fetchMore = false;
-                        } else {
-                            from += step + 1;
-                        }
-                    } else {
-                        fetchMore = false;
-                    }
-                }
-                return allData;
-            }
-        } catch (e) {
-            console.error(e);
-        }
-        return [];
-    },
-
-    deleteStockActualByAlmcod: async (almcod: string): Promise<boolean> => {
-        try {
-            if (supabase) {
-                const { error } = await supabase.from('stock_actual').delete().eq('almcod', almcod);
-                if (error) {
-                    console.error("Error deleting stock:", error);
-                    return false;
-                }
-                return true;
-            }
-        } catch (e) {
-            console.error(e);
-        }
-        return false;
     }
 };

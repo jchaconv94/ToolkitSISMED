@@ -4,7 +4,7 @@ Guía de contexto para agentes de IA que trabajen en este repositorio. Última a
 
 > **Lee la sección 8 antes de escribir cualquier componente o utilidad.** El error más caro que ha cometido una IA en este proyecto es volver a escribir algo que ya existía: llegó a haber cinco `HeaderCell` distintos, cuatro `formatDate` y seis `Field`. Antes de crear una tarjeta, un formateador, una celda de tabla o una regla de negocio, **búscala** en `components/ui/immunization.tsx` y `services/immunizationDomain.ts`.
 
-> **FRONTERA CRÍTICA DE STOCK (no mezclar):** `SIG_SEARCH` / `SheetSearchModule` (**Consulta Stock**) usa exclusivamente **Google Sheets → Google Apps Script → IndexedDB** para medicamentos, lotes, saldos, vencimientos y actualización. `STOCK_MONITORING` / `IpressStockModule` (**Monitoreo de Stock**) usa **Supabase (`stock_actual`)** y es independiente. **No introducir fallbacks cruzados y no leer `stock_actual` desde Consulta Stock.** Supabase **sí** se usa en Consulta Stock para el historial/auditoría en `stock_sync_history`: los snapshots se construyen exclusivamente a partir del stock leído de Google Sheets y nunca sustituyen la fuente de inventario de `SIG_SEARCH`.
+> **FRONTERA CRÍTICA DE STOCK (no mezclar):** `SIG_SEARCH` / `SheetSearchModule` (**Consulta Stock**) usa exclusivamente **Google Sheets → Google Apps Script → IndexedDB** para medicamentos, lotes, saldos, vencimientos y actualización. El 2026-10-02 se retiraron **Monitoreo de Stock** (`STOCK_MONITORING`) y **Sync SISMED 2.0** (la subida a la tabla `stock_actual` de Supabase, con su edge function y sus dispositivos), así que ninguna pantalla lee `stock_actual`: el inventario de Consulta Stock y de Stock SISMED (`IPRESS_STOCK`) sale **solo de Google Sheets**. **No reintroducir lecturas de `stock_actual`.** Supabase **sí** se usa en Consulta Stock para el historial/auditoría en `stock_sync_history`: los snapshots se construyen exclusivamente a partir del stock leído de Google Sheets y nunca sustituyen la fuente de inventario de `SIG_SEARCH`.
 
 ---
 
@@ -93,7 +93,6 @@ components/ui/              Kit compartido: immunization.tsx, ConfirmationDialog
 services/                   Acceso a datos, reglas de dominio y generación de documentos
 docs/                       Toda la documentación (fases, planes, auditorías). Solo README y AGENTS viven en la raíz
 supabase/                   Todos los .sql que el usuario ejecuta a mano en el panel de Supabase
-supabase/functions/         Edge function sync-stock
 backend/                    Google Apps Script legado
 scripts/                    Previews de PDF/Excel y diagnóstico contra Supabase (ejecución manual)
 reportes-ejemplo/           PDFs de referencia visual
@@ -478,7 +477,7 @@ Otros pendientes menores:
 0. **Antes de escribir un componente o una utilidad, búscalo.** Sección 8 de este documento, `components/ui/immunization.tsx` y `services/immunizationDomain.ts`. Este proyecto ya pagó el precio de no hacerlo.
 1. **Leer primero** el `FASE_NN_*.md` más reciente en `docs/` y la sección correspondiente de `docs/INMUNIZACIONES_DISENO_FUNCIONAL.md` antes de tocar código.
 2. **Incrementos pequeños**, una fase por vez, con entregable verificable. No construir varias fases de golpe.
-3. **No romper farmacia/SISMED.** Los componentes de ese dominio (`SheetSearchModule`, `RedistributionModule`, `AdminOrganizationModule`, `IpressStockModule`…) son grandes y frágiles; no refactorizarlos de paso.
+3. **No romper farmacia/SISMED.** Los componentes de ese dominio (`SheetSearchModule`, `RedistributionModule`, `AdminOrganizationModule`…) son grandes y frágiles; no refactorizarlos de paso.
    Y si tocas las **conexiones de stock** —las tarjetas de UNGET, sus botones o `saveUngetConfigs`—, lee antes la sección 7 bis: ahí están las reglas de propiedad, que ya costaron varios defectos.
 4. Al agregar una operación de escritura: validar scope, validar periodo bloqueado, no permitir negativos, registrar movimiento auditable, e implementar la **ruta Supabase y la ruta localStorage**.
 5. Cerrar cada fase con `npm run lint` + `npm run build` y un documento `FASE_NN_*.md` con: alcance implementado, reglas funcionales, archivos modificados, migración a ejecutar, validación técnica y pendiente posterior.

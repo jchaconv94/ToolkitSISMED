@@ -127,15 +127,12 @@ export type AppModule =
   | 'ADMIN_ROLES'
   | 'ADMIN_FACILITIES'
   | 'ADMIN_PARAMS'
-  | 'ADMIN_MIGRATION'
   | 'PROFILE'
   | 'REDISTRIBUTION'
   | 'SIG_SEARCH'
   | 'ADMIN_CATALOGS'
   | 'ADMIN_STOCK_ASSIGN'
   | 'IPRESS_STOCK'
-  | 'STOCK_MONITORING'
-  | 'ADMIN_SYNC_DEVICES'
   | 'ADMIN_SEND_KEYS'
   | 'ADMIN_BACKUPS'
   | 'IMMUNIZATION_CATALOG'
@@ -158,16 +155,13 @@ export const AVAILABLE_MODULES: { id: AppModule; label: string; description: str
   { id: 'ANALYSIS', label: 'Análisis Inteligente', description: 'Módulo de análisis de requerimientos' },
   { id: 'SIG_SEARCH', label: 'Consulta Stock', description: 'Buscador de stock SIG' },
   { id: 'REDISTRIBUTION', label: 'Redistribución', description: 'Módulo de redistribución de medicamentos' },
-  { id: 'IPRESS_STOCK', label: 'Stock SISMED', description: 'Stock propio de la IPRESS, sincronizado o asignado por hoja (solo lectura)' },
-  { id: 'STOCK_MONITORING', label: 'Monitoreo de Stock', description: 'Directorio territorial del stock sincronizado de los establecimientos' },
+  { id: 'IPRESS_STOCK', label: 'Stock SISMED', description: 'Stock propio de la IPRESS, leído de la hoja de Google Sheets asignada (solo lectura)' },
   { id: 'ADMIN_USERS', label: 'Gestión de Usuarios', description: 'Administración de cuentas de usuario' },
   { id: 'ADMIN_ROLES', label: 'Configuración de Roles', description: 'Gestión de roles y permisos' },
   { id: 'ADMIN_FACILITIES', label: 'Establecimientos', description: 'Gestión de la organización y establecimientos' },
   { id: 'ADMIN_CATALOGS', label: 'Regímenes y Profesiones', description: 'Gestión de regímenes laborales y profesiones' },
   { id: 'ADMIN_PARAMS', label: 'Parámetros del Sistema', description: 'Configuraciones generales del sistema' },
-  { id: 'ADMIN_MIGRATION', label: 'Migración (Supabase)', description: 'Herramientas de migración de datos' },
   { id: 'ADMIN_STOCK_ASSIGN', label: 'Columnas de Stock', description: 'Columnas visibles del stock de cada establecimiento' },
-  { id: 'ADMIN_SYNC_DEVICES', label: 'Dispositivos Sync', description: 'Gestión de dispositivos autorizados de Sync SISMED 2.0' },
   { id: 'ADMIN_SEND_KEYS', label: 'Claves de envío', description: 'Solo la PC vinculada puede enviar el stock de su establecimiento a Google Sheets' },
   { id: 'ADMIN_BACKUPS', label: 'Backups SISMED', description: 'Descargar con un clic el backup del SISMED de los establecimientos de su jurisdicción' },
   { id: 'PROFILE', label: 'Perfil de Usuario', description: 'Configuración del perfil personal' }

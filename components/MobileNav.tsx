@@ -14,10 +14,8 @@ import {
   ClipboardList,
   Database,
   FileSpreadsheet,
-  LineChart,
   Menu,
   PackageSearch,
-  RefreshCw,
   Scale,
   Settings,
   Shield,
@@ -52,8 +50,7 @@ const GRUPOS: Grupo[] = [
       { module: 'ANALYSIS_EXCLUSIONS', label: 'Lista de Exclusiones', icon: icono(Ban) },
       { module: 'REDISTRIBUTION', label: 'Redistribución', icon: icono(ArrowRightLeft) },
       { module: 'SIG_SEARCH', label: 'Consulta Stock', icon: icono(Database) },
-      { module: 'IPRESS_STOCK', label: 'Stock SISMED', icon: icono(FileSpreadsheet) },
-      { module: 'STOCK_MONITORING', label: 'Monitoreo de Stock', icon: icono(LineChart) }
+      { module: 'IPRESS_STOCK', label: 'Stock SISMED', icon: icono(FileSpreadsheet) }
     ]
   },
   {
@@ -82,10 +79,8 @@ const GRUPOS: Grupo[] = [
       { module: 'ADMIN_CATALOGS', label: 'Regímenes y Profesiones', icon: icono(Briefcase) },
       { module: 'ADMIN_PARAMS', label: 'Parámetros del Sistema', icon: icono(Sliders) },
       { module: 'ADMIN_STOCK_ASSIGN', label: 'Columnas de Stock', icon: icono(ShieldCheck) },
-      { module: 'ADMIN_SYNC_DEVICES', label: 'Dispositivos Sync', icon: icono(RefreshCw) },
       { module: 'ADMIN_SEND_KEYS', label: 'Claves de envío', icon: icono(KeyRound) },
-      { module: 'ADMIN_BACKUPS', label: 'Backups SISMED', icon: icono(HardDriveDownload) },
-      { module: 'ADMIN_MIGRATION', label: 'Migración (Supabase)', icon: icono(Database) }
+      { module: 'ADMIN_BACKUPS', label: 'Backups SISMED', icon: icono(HardDriveDownload) }
     ]
   }
 ];

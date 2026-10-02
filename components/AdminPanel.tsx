@@ -9,15 +9,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 
-import { AdminMigrationModule } from './AdminMigrationModule';
 import { AdminOrganizationModule } from './AdminOrganizationModule';
 import { AdminCatalogsModule } from './AdminCatalogsModule';
-import { AdminSyncDevicesModule } from './AdminSyncDevicesModule';
 import { backupSettingsApi } from '../services/backupConnection';
 import { CustomSelect } from './ui/CustomSelect';
 
 export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) => {
-  const activeTab = currentView ? currentView.replace('ADMIN_', '') as 'USERS' | 'ROLES' | 'PARAMS' | 'MIGRATION' | 'FACILITIES' | 'CATALOGS' | 'SYNC_DEVICES' : 'USERS';
+  const activeTab = currentView ? currentView.replace('ADMIN_', '') as 'USERS' | 'ROLES' | 'PARAMS' | 'FACILITIES' | 'CATALOGS' : 'USERS';
   
   const getHeaderInfo = () => {
     switch (activeTab) {
@@ -45,16 +43,6 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
         return {
           title: "Regímenes y Profesiones",
           description: "Administre los catálogos de regímenes laborales del personal de salud de la Ficha Técnica N° 30."
-        };
-      case 'MIGRATION':
-        return {
-          title: "Migración de Datos",
-          description: "Sincronice e importe información de almacén desde bases de datos externas de manera segura."
-        };
-      case 'SYNC_DEVICES':
-        return {
-          title: "Dispositivos Sync SISMED 2.0",
-          description: "Administre y autorice los dispositivos de escritorio del ToolKit Desktop para la sincronización directa de stock."
         };
       default:
         return {
@@ -1911,17 +1899,11 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                         </div>
                      </div>
                 )}
-                {activeTab === 'MIGRATION' && currentUser?.role === 'ADMIN' && (
-                     <AdminMigrationModule />
-                )}
                 {activeTab === 'FACILITIES' && (
                      <AdminOrganizationModule />
                 )}
                 {activeTab === 'CATALOGS' && (
                      <AdminCatalogsModule onChanged={refreshCatalogs} />
-                )}
-                {activeTab === 'SYNC_DEVICES' && (
-                     <AdminSyncDevicesModule />
                 )}
             </div>
         </div>
