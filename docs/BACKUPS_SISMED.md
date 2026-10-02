@@ -55,8 +55,8 @@ Cloudflare no tiene un tope de gasto que corte el servicio; por eso existen los 
 | 2 | Traslado del archivo por partes a R2 | probada el 2026-10-01 con ACER-JORDAN (06525): 8.3 MB y 74.3 MB con corte de red, huella verificada, restaurado en el SISMED, bucket vacío |
 | 3 | Reglas: descargas por día configurables, topes de consumo, auditoría | probada el 2026-10-02: cupo de 1 al día respetado también por el admin, métricas reales de Cloudflare |
 | 4 | Módulo web Backups SISMED con descarga en segundo plano | probada el 2026-10-02 con el informático de Bellavista y la PC del Almacén (030S05) |
-| 5 | Piloto una semana en UNGET Bellavista | en curso desde el 2026-10-02 |
-| 6 | Abrir a las demás UNGET | pendiente |
+| 5 | Piloto una semana en UNGET Bellavista | acortado: el 2026-10-02 se decidió abrir sin esperar la semana |
+| 6 | Abrir a las demás UNGET | `SUPABASE_BACKUPS_ABRIR_REGION.sql`, 2026-10-02 |
 
 Cada etapa termina con una prueba que tiene que salir bien antes de pasar a la siguiente.
 
@@ -227,3 +227,27 @@ de ser establecimiento de prueba: se le retiró la clave de envío, salió de
 sin clave. Su historial en `backup_requests` se conserva como auditoría. Esa PC tiene un
 SISMED de prueba: no debe iniciar Sync SISMED, o sobrescribiría la pestaña real del P.S.
 Cuzco.
+
+**Se acortó el 2026-10-02:** el administrador decidió abrir a toda la región el mismo día,
+sin esperar la semana. El dato de consumo que había (247 mensajes de conexión en el día con
+una PC, lejos de los 1 730 que darían los «ping» si contaran) se sigue mirando ya con todas
+las UNGET, en la pestaña Consumo. Si el día llega al 70 % hay aviso y al 80 % se pausan las
+descargas, sin cobro.
+
+## Etapa 6 · Abrir a todas las UNGET
+
+`supabase/SUPABASE_BACKUPS_ABRIR_REGION.sql` quita la condición del piloto: desde que se
+ejecuta, entra todo establecimiento con **clave de envío**.
+
+- La clave sigue siendo obligatoria, porque es con lo que la PC se identifica. Un
+  establecimiento sin clave no se conecta ni aparece en el módulo.
+- El piloto no se borra: queda como interruptor en `backup_settings.pilot_only`, que leen
+  las tres funciones a través de `app_backup_code_open`. Volver al piloto es una línea
+  (`UPDATE public.backup_settings SET pilot_only = true WHERE id;`).
+- Las PC preguntan cada 30 minutos si deben conectarse, así que aparecen solas en ese
+  plazo, o al reiniciar Sync SISMED. Necesitan el Toolkit 2.2.3 o posterior.
+- Cada informático necesita «Backups SISMED» marcado en su rol (Configuración de Roles).
+
+Probado en Postgres local: antes, solo 030S05; después, todos los códigos con clave (y no
+el que no la tiene), cada informático solo su jurisdicción; la función de la regla no la
+puede llamar `anon`, y la reversión vuelve al piloto.
