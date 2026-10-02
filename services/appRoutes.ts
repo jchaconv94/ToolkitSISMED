@@ -20,7 +20,6 @@ const RUTAS: Record<AppModule, string> = {
   SIG_SEARCH: "/consulta-stock",
   REDISTRIBUTION: "/redistribucion",
   IPRESS_STOCK: "/stock-sismed",
-  STOCK_MONITORING: "/monitoreo-stock",
   PROFILE: "/perfil",
 
   IMMUNIZATION_CATALOG: "/inmunizaciones/catalogo",
@@ -42,9 +41,7 @@ const RUTAS: Record<AppModule, string> = {
   ADMIN_FACILITIES: "/administracion/establecimientos",
   ADMIN_CATALOGS: "/administracion/regimenes-profesiones",
   ADMIN_PARAMS: "/administracion/parametros",
-  ADMIN_MIGRATION: "/administracion/migracion",
   ADMIN_STOCK_ASSIGN: "/administracion/asignar-stock",
-  ADMIN_SYNC_DEVICES: "/administracion/dispositivos",
   ADMIN_SEND_KEYS: "/administracion/claves-de-envio",
   ADMIN_BACKUPS: "/administracion/backups-sismed"
 };

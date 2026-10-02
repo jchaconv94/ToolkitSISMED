@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
-  Database,
   Download,
   FileSpreadsheet,
   Filter,
@@ -39,7 +38,6 @@ import {
 import { pickOneConnectionPerUnget } from "../services/ungetConnections";
 import { StockAssignment } from "../types";
 
-type StockSource = "SYNC" | "SHEET";
 type ExpirationFilter = "ALL" | "EXPIRED" | "EXPIRING";
 type StockRow = Record<string, unknown>;
 
@@ -125,7 +123,8 @@ export const AssignedIpressStockModule: React.FC = () => {
   const [link, setLink] = useState<FacilitySheetLink | null>(null);
   /** Solo para poner nombre a cada ALMCOD en la columna «Código IPRESS». */
   const [facilities, setFacilities] = useState<Array<{ code?: string; name?: string }>>([]);
-  const [source, setSource] = useState<StockSource | null>(null);
+  /** Pestaña de la que se leyó el stock; vacía mientras no haya stock que mostrar. */
+  const [loadedSheet, setLoadedSheet] = useState("");
   const [lastUpdate, setLastUpdate] = useState("");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -139,7 +138,7 @@ export const AssignedIpressStockModule: React.FC = () => {
     if (!facilityCode) {
       setRows([]);
       setAssignment(null);
-      setSource(null);
+      setLoadedSheet("");
       setErrorMessage("El usuario no está vinculado a un código de establecimiento IPRESS.");
       setLoading(false);
       return;
@@ -149,8 +148,7 @@ export const AssignedIpressStockModule: React.FC = () => {
     setPage(1);
     setErrorMessage("");
     try {
-      const [nativeRows, assignments, conexiones] = await Promise.all([
-        api.getStockActual([facilityCode]),
+      const [assignments, conexiones] = await Promise.all([
         api.getMyStockAssignments(facilityCode),
         // La conexión vigente de la UNGET: su URL puede haber cambiado desde que se
         // creó la asignación, o puede que ya solo lea por hoja de cálculo.
@@ -166,18 +164,6 @@ export const AssignedIpressStockModule: React.FC = () => {
       setAssignment(currentAssignment);
       setLink(null);
 
-      if (nativeRows.length > 0) {
-        setRows(nativeRows.map(row => normalizeRow(row as StockRow)));
-        setSource("SYNC");
-        const updateTimes = nativeRows
-          .map(row => String(row.ultima_actualizacion || row.updated_at || ""))
-          .filter(Boolean)
-          .sort();
-        setLastUpdate(updateTimes.at(-1) || "");
-        if (showSuccess) toast.success("Stock sincronizado actualizado");
-        return;
-      }
-
       // La conexión es la de **su** UNGET, no la que quedó guardada en la asignación: así el
       // establecimiento encuentra su hoja aunque nadie le haya asignado nada.
       const conexion =
@@ -187,10 +173,10 @@ export const AssignedIpressStockModule: React.FC = () => {
 
       if (!conexion && !currentAssignment) {
         setRows([]);
-        setSource(null);
+        setLoadedSheet("");
         setLastUpdate("");
         setErrorMessage(
-          "Este establecimiento todavía no tiene stock sincronizado, y su UNGET no tiene una conexión configurada.",
+          "La UNGET de este establecimiento no tiene una conexión de stock configurada.",
         );
         return;
       }
@@ -216,11 +202,11 @@ export const AssignedIpressStockModule: React.FC = () => {
 
       if (!sheetName) {
         setRows([]);
-        setSource(null);
+        setLoadedSheet("");
         setLastUpdate("");
         setErrorMessage(
           vinculo?.message ||
-            "Este establecimiento todavía no tiene stock sincronizado ni una hoja de cálculo que le corresponda.",
+            "Este establecimiento todavía no tiene una hoja de cálculo que le corresponda.",
         );
         return;
       }
@@ -240,7 +226,7 @@ export const AssignedIpressStockModule: React.FC = () => {
       );
 
       setRows(propias.map(normalizeRow));
-      setSource("SHEET");
+      setLoadedSheet(sheetName);
       const updateTimes = propias
         .map(row => String(readValue(row, ["ULTIMA_ACTUALIZACION", "Ultima_Actualizacion", "FECHA_DEL_EQUIPO"])))
         .filter(Boolean)
@@ -250,7 +236,7 @@ export const AssignedIpressStockModule: React.FC = () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo cargar el stock asignado.";
       setRows([]);
-      setSource(null);
+      setLoadedSheet("");
       setLastUpdate("");
       setErrorMessage(message);
       toast.error(message);
@@ -265,7 +251,7 @@ export const AssignedIpressStockModule: React.FC = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [search, source, expirationFilter]);
+  }, [search, loadedSheet, expirationFilter]);
 
   const visibleColumns = useMemo(() => {
     const requested = assignment?.visibleColumns?.length ? assignment.visibleColumns : DEFAULT_STOCK_COLUMN_KEYS;
@@ -349,15 +335,13 @@ export const AssignedIpressStockModule: React.FC = () => {
           </button>
         </div>
 
-        {source && (
+        {loadedSheet && (
           <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs">
-            <span className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 font-black ${source === "SYNC" ? "bg-cyan-50 text-cyan-700" : "bg-violet-50 text-violet-700"}`}>
-              {source === "SYNC" ? <Database className="h-4 w-4" /> : <FileSpreadsheet className="h-4 w-4" />}
-              {source === "SYNC"
-                ? "Sincronización SISMED 2.0"
-                : `Hoja: ${link?.sheet?.name || assignment?.sheetName}`}
+            <span className="inline-flex items-center gap-2 rounded-lg bg-violet-50 px-2.5 py-1.5 font-black text-violet-700">
+              <FileSpreadsheet className="h-4 w-4" />
+              {`Hoja: ${link?.sheet?.name || assignment?.sheetName}`}
             </span>
-            {source === "SHEET" && link?.status === "dentro-de-su-ipress" && (
+            {link?.status === "dentro-de-su-ipress" && (
               <span className="text-slate-500">Puesto comunal: su stock viene dentro de la hoja de su IPRESS, separado por su ALMCOD.</span>
             )}
             {lastUpdate && <span className="text-slate-500">Última actualización: <strong className="text-slate-700">{lastUpdate}</strong></span>}

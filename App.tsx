@@ -9,7 +9,7 @@ import {
   Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network,
   BarChart2, FilterX, RefreshCw, Search, Database, Activity, Syringe, ClipboardList, Package,
   PackageSearch, ArrowDownLeft, Truck, Receipt, RotateCcw, SlidersHorizontal, CalendarCheck,
-  Settings, Users, Shield, Building, FolderKanban, DatabaseBackup, FileSpreadsheet, Smartphone, User, KeyRound, HardDriveDownload
+  Settings, Users, Shield, Building, FolderKanban, FileSpreadsheet, User, KeyRound, HardDriveDownload
 } from 'lucide-react';
 
 // NEW IMPORTS
@@ -40,7 +40,6 @@ import { AdminSendKeysModule } from './components/AdminSendKeysModule';
 import { BackupsSismedModule } from './components/BackupsSismedModule';
 import { BackupManagerProvider } from './contexts/BackupManagerContext';
 import { AssignedIpressStockModule } from './components/AssignedIpressStockModule';
-import { StockMonitoringModule } from './components/IpressStockModule';
 import { AnalysisExclusionsModule } from './components/AnalysisExclusionsModule';
 import { ImmunizationAdjustmentsModule } from './components/ImmunizationAdjustmentsModule';
 import { ImmunizationCatalogModule } from './components/ImmunizationCatalogModule';
@@ -200,7 +199,6 @@ const AuthenticatedApp: React.FC = () => {
             else if (hasPermission('IMMUNIZATION_CLOSURES')) setCurrentView('IMMUNIZATION_CLOSURES');
             else if (hasPermission('IMMUNIZATION_REPORTS')) setCurrentView('IMMUNIZATION_REPORTS');
             else if (hasPermission('IPRESS_STOCK')) setCurrentView('IPRESS_STOCK');
-            else if (hasPermission('STOCK_MONITORING')) setCurrentView('STOCK_MONITORING');
             else if (hasPermission('REDISTRIBUTION')) setCurrentView('REDISTRIBUTION');
             else if (hasPermission('SIG_SEARCH')) setCurrentView('SIG_SEARCH');
             else if (hasPermission('ADMIN_STOCK_ASSIGN')) setCurrentView('ADMIN_STOCK_ASSIGN');
@@ -209,7 +207,6 @@ const AuthenticatedApp: React.FC = () => {
             else if (hasPermission('ADMIN_FACILITIES')) setCurrentView('ADMIN_FACILITIES');
             else if (hasPermission('ADMIN_CATALOGS')) setCurrentView('ADMIN_CATALOGS');
             else if (hasPermission('ADMIN_PARAMS')) setCurrentView('ADMIN_PARAMS');
-            else if (hasPermission('ADMIN_MIGRATION')) setCurrentView('ADMIN_MIGRATION');
             else if (hasPermission('ADMIN_SEND_KEYS')) setCurrentView('ADMIN_SEND_KEYS');
             else if (hasPermission('ADMIN_BACKUPS')) setCurrentView('ADMIN_BACKUPS');
             else if (hasPermission('PROFILE')) setCurrentView('PROFILE');
@@ -227,9 +224,7 @@ const AuthenticatedApp: React.FC = () => {
             case 'SIG_SEARCH':
                 return { title: 'Consulta Stock', description: 'Buscador de existencias en el catálogo SIG', icon: <Search className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'IPRESS_STOCK':
-                return { title: 'Stock SISMED', description: 'Stock propio de la IPRESS, sincronizado o asignado por hoja (solo lectura)', icon: <Database className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'STOCK_MONITORING':
-                return { title: 'Monitoreo de Stock SISMED', description: 'Directorio territorial del stock sincronizado de los establecimientos', icon: <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
+                return { title: 'Stock SISMED', description: 'Stock propio de la IPRESS, leído de la hoja de Google Sheets asignada (solo lectura)', icon: <Database className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'IMMUNIZATION_CATALOG':
                 return { title: 'Catálogo Biológico', description: 'Catálogo maestro de vacunas, jeringas y diluyentes', icon: <Syringe className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'IMMUNIZATION_INITIAL_INVENTORY':
@@ -266,12 +261,8 @@ const AuthenticatedApp: React.FC = () => {
                 return { title: 'Regímenes y Profesiones', description: 'Gestión de regímenes laborales y profesiones del personal', icon: <FolderKanban className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'ADMIN_PARAMS':
                 return { title: 'Parámetros del Sistema', description: 'Configuraciones generales del sistema', icon: <Settings className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ADMIN_MIGRATION':
-                return { title: 'Migración (Supabase)', description: 'Herramientas de migración y verificación de datos', icon: <DatabaseBackup className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'ADMIN_STOCK_ASSIGN':
                 return { title: 'Columnas de Stock por Establecimiento', description: 'Columnas visibles del stock; la hoja se reconoce sola por el código', icon: <FileSpreadsheet className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ADMIN_SYNC_DEVICES':
-                return { title: 'Dispositivos Sync', description: 'Gestión de dispositivos autorizados de Sync SISMED 2.0', icon: <Smartphone className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'ADMIN_SEND_KEYS':
                 return { title: 'Claves de envío', description: 'Solo la PC vinculada puede enviar el stock de su establecimiento a Google Sheets', icon: <KeyRound className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'ADMIN_BACKUPS':
@@ -372,7 +363,6 @@ const AuthenticatedApp: React.FC = () => {
                                 {currentView === 'REDISTRIBUTION' && <RedistributionModule />}
                                 {currentView === 'SIG_SEARCH' && <SheetSearchModule />}
                                 {currentView === 'IPRESS_STOCK' && <AssignedIpressStockModule />}
-                                {currentView === 'STOCK_MONITORING' && <StockMonitoringModule />}
                                 {currentView === 'IMMUNIZATION_CATALOG' && <ImmunizationCatalogModule />}
                                 {currentView === 'IMMUNIZATION_INITIAL_INVENTORY' && <ImmunizationInitialInventoryModule />}
                                 {currentView === 'IMMUNIZATION_STOCK' && <ImmunizationStockModule />}

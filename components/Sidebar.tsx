@@ -18,7 +18,6 @@ import {
   Building2,
   Sliders,
   Briefcase,
-  RefreshCw,
   Syringe,
   ClipboardList,
   ArrowDownToLine,
@@ -251,21 +250,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         )}
 
-        {hasPermission('STOCK_MONITORING') && (
-          <button
-            onClick={() => setCurrentView('STOCK_MONITORING')}
-            className={`w-full flex items-center gap-3 py-3 rounded-xl transition-all duration-300 group ${
-              currentView === 'STOCK_MONITORING'
-                ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
-                : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
-            } ${isCollapsed ? 'justify-center px-0' : 'px-3'}`}
-            title={isCollapsed ? "Monitoreo de Stock" : ""}
-          >
-            <Layers className={`h-5 w-5 shrink-0 ${currentView === 'STOCK_MONITORING' ? 'text-teal-400' : 'group-hover:text-teal-400 transition-colors'}`} />
-            {!isCollapsed && <span className="font-semibold text-sm">Monitoreo de Stock</span>}
-          </button>
-        )}
-
         {(hasPermission('IMMUNIZATION_CATALOG') || hasPermission('IMMUNIZATION_INITIAL_INVENTORY') || hasPermission('IMMUNIZATION_STOCK') || hasPermission('IMMUNIZATION_STOCK_QUERY') || hasPermission('IMMUNIZATION_INCOMES') || hasPermission('IMMUNIZATION_INCOME_ORIGINS') || hasPermission('IMMUNIZATION_DISTRIBUTIONS') || hasPermission('IMMUNIZATION_CONSUMPTION') || hasPermission('IMMUNIZATION_RETURNS') || hasPermission('IMMUNIZATION_ADJUSTMENTS') || hasPermission('IMMUNIZATION_CLOSURES') || hasPermission('IMMUNIZATION_REPORTS') || hasPermission('IMMUNIZATION_CONFIG')) && (
           <div className="flex flex-col gap-1">
             <button
@@ -431,7 +415,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {(hasPermission('ADMIN_USERS') || hasPermission('ADMIN_ROLES') || hasPermission('ADMIN_FACILITIES') || hasPermission('ADMIN_PARAMS') || hasPermission('ADMIN_MIGRATION') || hasPermission('ADMIN_CATALOGS') || hasPermission('ADMIN_SEND_KEYS') || hasPermission('ADMIN_BACKUPS')) && (
+        {(hasPermission('ADMIN_USERS') || hasPermission('ADMIN_ROLES') || hasPermission('ADMIN_FACILITIES') || hasPermission('ADMIN_PARAMS') || hasPermission('ADMIN_CATALOGS') || hasPermission('ADMIN_SEND_KEYS') || hasPermission('ADMIN_BACKUPS')) && (
           <div className="flex flex-col gap-1">
             <button
               onClick={toggleAdmin}
@@ -524,19 +508,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       Regímenes y Profesiones
                     </button>
                   )}
-                  {hasPermission('ADMIN_MIGRATION') && (
-                    <button
-                      onClick={() => setCurrentView('ADMIN_MIGRATION')}
-                      className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
-                        currentView === 'ADMIN_MIGRATION'
-                          ? 'text-teal-400 bg-white/5'
-                          : 'text-gray-400 hover:text-white hover:bg-white/5'
-                      }`}
-                    >
-                      <Database className="h-4 w-4 shrink-0" />
-                      Migrar Datos (Supabase)
-                    </button>
-                  )}
                   {hasPermission('ADMIN_STOCK_ASSIGN') && (
                     <button
                       onClick={() => setCurrentView('ADMIN_STOCK_ASSIGN')}
@@ -548,19 +519,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <ShieldCheck className="h-4 w-4 shrink-0" />
                       Columnas de Stock
-                    </button>
-                  )}
-                  {hasPermission('ADMIN_SYNC_DEVICES') && (
-                    <button
-                      onClick={() => setCurrentView('ADMIN_SYNC_DEVICES')}
-                      className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
-                        currentView === 'ADMIN_SYNC_DEVICES'
-                          ? 'text-teal-400 bg-white/5'
-                          : 'text-gray-400 hover:text-white hover:bg-white/5'
-                      }`}
-                    >
-                      <RefreshCw className="h-4 w-4 shrink-0" />
-                      Dispositivos Sync
                     </button>
                   )}
                   {hasPermission('ADMIN_SEND_KEYS') && (
