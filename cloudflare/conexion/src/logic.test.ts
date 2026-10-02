@@ -126,10 +126,15 @@ describe("consumo del plan gratuito", () => {
 describe("cupo de descargas", () => {
   it("explica quién usó el cupo, en hora de Perú", () => {
     const at = "2026-10-02T03:36:00Z"; // 22:36 en Perú
-    expect(quotaMessage({ ok: false, limit: 1, used: 1, last: { username: "bellavista", status: "DOWNLOADED", at } }))
+    expect(quotaMessage({ ok: false, limit: 1, used: 1, last: { username: "bellavista", status: "DOWNLOADED", at } }, "bellavista"))
+      .toBe("Hoy ya usó su cupo de este establecimiento (1 backup por día por usuario); el último lo descargó a las 22:36. Podrá pedir otro mañana.");
+    expect(quotaMessage({ ok: false, limit: 2, used: 2, last: { username: "admin", status: "UPLOADING", at } }, "admin"))
+      .toBe("Ya tiene un backup de este establecimiento en curso, pedido a las 22:36.");
+    // Sin el SQL del cupo por usuario, el último puede ser de otro: se nombra.
+    expect(quotaMessage({ ok: false, limit: 1, used: 1, last: { username: "bellavista", status: "DOWNLOADED", at } }, "diresa"))
       .toBe("Hoy ya se usó el cupo de este establecimiento (1 backup por día); el último lo descargó bellavista a las 22:36. Se podrá pedir otro mañana.");
-    expect(quotaMessage({ ok: false, limit: 2, used: 2, last: { username: "admin", status: "UPLOADING", at } }))
-      .toBe("Ya hay un backup de este establecimiento en curso: lo pidió admin a las 22:36. Se admiten 2 backups por día.");
+    expect(quotaMessage({ ok: false, limit: 1, used: 1, last: { username: "admin", status: "UPLOADING", at } }, "diresa"))
+      .toBe("Ya hay un backup de este establecimiento en curso: lo pidió admin a las 22:36.");
   });
 });
 

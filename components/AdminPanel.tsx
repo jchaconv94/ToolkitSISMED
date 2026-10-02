@@ -1873,12 +1873,13 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                 Backups SISMED
                             </h3>
                             <p className="text-xs text-gray-500 mb-5 leading-relaxed max-w-3xl">
-                                Cuántos backups se pueden descargar de un mismo establecimiento en un día
-                                (hora de Perú). Vale para todos los usuarios, también el administrador. Un
-                                pedido que falla o vence sin descargarse no cuenta.
+                                Cuántos backups puede descargar cada usuario de un mismo establecimiento en
+                                un día (hora de Perú). Cada usuario tiene su propio cupo, también el
+                                administrador: lo que descarga uno no le quita al otro. Un pedido que falla
+                                o vence sin descargarse no cuenta.
                             </p>
                             <label className="block text-sm font-bold text-gray-700 mb-2">
-                                Descargas por establecimiento al día
+                                Descargas por usuario y establecimiento al día
                             </label>
                             <div className="flex items-center gap-3">
                                 <input
