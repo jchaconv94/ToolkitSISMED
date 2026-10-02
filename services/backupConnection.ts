@@ -82,13 +82,6 @@ export const sha256Hex = async (data: ArrayBuffer): Promise<string> => {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 };
 
-/** «12 345 de 100 000 · 12 %». */
-export const formatUsage = (item: UsageItem) => {
-  if (item.used == null) return "sin dato";
-  const number = (n: number) => n.toLocaleString("es-PE", { maximumFractionDigits: n < 10 ? 2 : 0 });
-  return `${number(item.used)} de ${number(item.limit)} · ${Math.round((item.ratio || 0) * 100)} %`;
-};
-
 export const formatMegabytes = (bytes: number) => `${(bytes / 1048576).toLocaleString("es-PE", { maximumFractionDigits: 1 })} MB`;
 
 const RULES_SQL = "SUPABASE_BACKUPS_REGLAS.sql";
