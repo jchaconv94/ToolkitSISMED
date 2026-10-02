@@ -54,8 +54,8 @@ Cloudflare no tiene un tope de gasto que corte el servicio; por eso existen los 
 | 1 | Conexión inmediata con PC reales (sin pantalla definitiva) | probada el 2026-10-01 con ACER-JORDAN (06525): aviso en 270 ms, reconexión sola al cortar el wifi. Falta revisar el consumo a los 2–3 días |
 | 2 | Traslado del archivo por partes a R2 | probada el 2026-10-01 con ACER-JORDAN (06525): 8.3 MB y 74.3 MB con corte de red, huella verificada, restaurado en el SISMED, bucket vacío |
 | 3 | Reglas: descargas por día configurables, topes de consumo, auditoría | probada el 2026-10-02: cupo de 1 al día respetado también por el admin, métricas reales de Cloudflare |
-| 4 | Módulo web Backups SISMED con descarga en segundo plano | programada; pendiente de prueba real |
-| 5 | Piloto una semana en UNGET Bellavista | pendiente |
+| 4 | Módulo web Backups SISMED con descarga en segundo plano | probada el 2026-10-02 con el informático de Bellavista y la PC del Almacén (030S05) |
+| 5 | Piloto una semana en UNGET Bellavista | en curso desde el 2026-10-02 |
 | 6 | Abrir a las demás UNGET | pendiente |
 
 Cada etapa termina con una prueba que tiene que salir bien antes de pasar a la siguiente.
@@ -198,3 +198,25 @@ Probado en local de punta a punta (web real en el navegador, servicio real, SQL 
 Postgres y cliente Python del Toolkit): el informático pide, la PC sube, la web descarga y
 verifica aunque se recargue la página a mitad, Supabase registra DOWNLOADED, la fila pasa a
 «Cupo del día usado» y la actividad lo muestra. El administrador ve la pestaña Consumo.
+
+**Prueba real (2026-10-02):** SQL aplicado («TODO CORRECTO»), módulo publicado (PR #93) y
+«Backups SISMED» marcado en el rol de informático. Con la cuenta del informático de
+Bellavista se ve el Almacén Bellavista (030S05, Toolkit 2.2.3) en línea, los 4 KPIs y «Cupo
+del día usado» tras la descarga de las 13:42. Dos ajustes salieron de la prueba: los
+porcentajes de Consumo con coma decimal (PR #94) y las pestañas, que aparecían un instante
+al informático cuando antes había entrado el admin en la misma ventana (PR #95: salen del
+rol de la sesión y el gestor olvida usuario, rol y consumo al cerrar sesión).
+
+## Etapa 5 · Piloto en Bellavista
+
+Una semana desde el 2026-10-02. El informático de Bellavista lo usa en su trabajo diario y
+el administrador revisa la pestaña Consumo cada uno o dos días. Lo que se mide:
+
+- **Mensajes de conexión por día**, para confirmar que los «ping» automáticos de las PC no
+  cuentan (el 2026-10-02 iban 247 con una PC). Si contaran, hay que espaciarlos antes de la
+  etapa 6.
+- Pedidos fallidos y su motivo (Actividad y backups del mes por UNGET).
+- Lo que confunda en la pantalla, anotado tal como lo diga el informático.
+
+**Para pasar a la etapa 6:** una semana sin fallos sin explicar y el consumo diario lejos del
+70 %.
