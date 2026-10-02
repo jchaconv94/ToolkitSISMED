@@ -30,6 +30,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { MaintenanceScreen } from './components/MaintenanceScreen';
 import { maintenanceMessage, shouldBlockForMaintenance } from './services/maintenanceMode';
 import { AdminPanel } from './components/AdminPanel';
+import { MODULE_HEADER_SLOT_ID, MODULES_WITH_HEADER_ACTIONS } from './components/ui/ModuleHeaderSlot';
 import { UserProfile } from './components/UserProfile';
 import { showWelcomeToast } from './components/WelcomeToast';
 import { RedistributionModule } from './components/RedistributionModule';
@@ -347,7 +348,8 @@ const AuthenticatedApp: React.FC = () => {
                             )}
                         </div>
                      </div>
-                     <div className="flex items-center gap-2.5 text-xs sm:text-sm text-gray-500 font-medium bg-slate-100/80 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full border border-slate-200/80 shadow-2xs shrink-0 ml-3">
+                     <div id={MODULE_HEADER_SLOT_ID} className="ml-auto flex shrink-0 items-center gap-2 pl-3 empty:hidden" />
+                     <div className={`${MODULES_WITH_HEADER_ACTIONS.has(currentView) ? 'hidden sm:flex' : 'flex'} items-center gap-2.5 text-xs sm:text-sm text-gray-500 font-medium bg-slate-100/80 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full border border-slate-200/80 shadow-2xs shrink-0 ml-3`}>
                          <span className="w-2 h-2 rounded-full bg-teal-500 animate-[pulse_2s_ease-in-out_infinite] shadow-[0_0_8px_rgba(20,184,166,0.6)]"></span>
                          <span className="truncate max-w-[130px] sm:max-w-[220px] font-bold text-slate-700">{user?.facilityData?.name || 'ToolKit SISMED'}</span>
                      </div>

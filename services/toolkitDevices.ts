@@ -110,69 +110,8 @@ export const sismedVersionsInUse = (rows: ToolkitDeviceRow[], now: Date = new Da
   return Array.from(versions).sort((a, b) => compareVersions(b, a));
 };
 
-export interface DeviceSummary {
-  reporting: number;
-  current: number;
-  outdated: number;
-  none: number;
-  sismedOutdated: number;
-}
-
-export const summarizeDevices = (
-  rows: ToolkitDeviceRow[],
-  latest: string | null,
-  now: Date = new Date(),
-  latestSismed: string | null = latestSismedVersion(rows, now),
-): DeviceSummary => {
-  const summary: DeviceSummary = { reporting: 0, current: 0, outdated: 0, none: 0, sismedOutdated: 0 };
-  rows.forEach((row) => {
-    const state = deviceState(row, latest, now);
-    summary[state] += 1;
-    if (state !== "none") summary.reporting += 1;
-    if (sismedState(row, latestSismed, now) === "outdated") summary.sismedOutdated += 1;
-  });
-  return summary;
-};
-
-export type DeviceFilter = "all" | DeviceState;
-
 /** Filtro de SISMED: todas, las desactualizadas, sin dato o una versión concreta (`v:2.5.3`). */
 export type SismedFilter = "all" | "outdated" | "none" | `v:${string}`;
-
-const matchesSismed = (row: ToolkitDeviceRow, filter: SismedFilter, latestSismed: string | null, now: Date): boolean => {
-  if (filter === "all") return true;
-  if (filter === "outdated" || filter === "none") return sismedState(row, latestSismed, now) === filter;
-  return activeDevices(row, now)[0]?.sismedVersion === filter.slice(2);
-};
-
-const normalize = (value: string) =>
-  value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
-
-/** Búsqueda y filtro. Primero los desactualizados, luego sin reportar, luego al día. */
-export const filterDevices = (
-  rows: ToolkitDeviceRow[],
-  latest: string | null,
-  search: string,
-  filter: DeviceFilter,
-  now: Date = new Date(),
-  sismedFilter: SismedFilter = "all",
-  latestSismed: string | null = latestSismedVersion(rows, now),
-): ToolkitDeviceRow[] => {
-  const needle = normalize(search);
-  const order: Record<DeviceState, number> = { outdated: 0, none: 1, current: 2 };
-  return rows
-    .filter((row) => {
-      const state = deviceState(row, latest, now);
-      if (filter !== "all" && state !== filter) return false;
-      if (!matchesSismed(row, sismedFilter, latestSismed, now)) return false;
-      if (!needle) return true;
-      const pcs = row.devices.map((d) => d.deviceName || "").join(" ");
-      return normalize(`${row.name} ${row.code} ${pcs}`).includes(needle);
-    })
-    .sort((a, b) =>
-      order[deviceState(a, latest, now)] - order[deviceState(b, latest, now)]
-      || a.name.localeCompare(b.name, "es", { numeric: true }));
-};
 
 const RELEASES_URL = "https://api.github.com/repos/jchaconv94/ToolkitSISMED/releases?per_page=20";
 const TAG = /^desktop-v(\d+(?:\.\d+){1,3})$/i;

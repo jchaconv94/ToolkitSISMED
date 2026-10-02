@@ -1,75 +1,39 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  AlertTriangle, ArrowRightLeft, Download, MonitorSmartphone, CheckCircle2, ChevronRight, Clock, Copy, History, KeyRound,
-  Loader2, Monitor, PlugZap, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
+  AlertTriangle, ArrowRightLeft, Bell, CheckCircle2, ChevronRight, Clock, Copy, Database, Download, History, KeyRound,
+  Loader2, Monitor, MonitorSmartphone, PlugZap, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  ATTEMPT_RESULT_LABEL, SEND_KEY_STATE_LABEL, SendAttempt, SendKeyFilter, SendKeyRow, SendKeyState,
-  filterSendKeys, relativeTime, sendKeyState, sendKeysApi, summarizeSendKeys,
+  ATTEMPT_RESULT_LABEL, SEND_KEY_STATE_LABEL, SendAttempt, SendKeyRow, SendKeyState, relativeTime, sendKeyState, sendKeysApi,
 } from "../services/sendKeys";
 import {
-  ImmunizationEmptyState, ImmunizationKpiCard, ImmunizationTableHeader, formatImmunizationDate,
+  DeviceState, REPORT_WINDOW_DAYS, SismedFilter, SismedState, ToolkitDevice, activeDevices, compareVersions, latestSismedVersion,
+  sismedState, sismedVersionsInUse, toolkitDevicesApi,
+} from "../services/toolkitDevices";
+import {
+  ESTABLISHMENT_FILTER_LABEL, EstablishmentFilter, EstablishmentRow, filterEstablishments, lastSendAt, latestDevice,
+  mergeEstablishments, pendingAlerts, summarizeEstablishments, toolkitState,
+} from "../services/sendKeyEstablishments";
+import {
+  ImmunizationEmptyState, ImmunizationKpiCard, ImmunizationKpiStrip, ImmunizationTableHeader, formatImmunizationDate,
   immunizationFilterInputClass,
 } from "./ui/immunization";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
-import { AdminToolkitDevicesTab } from "./AdminToolkitDevicesTab";
+import { ModuleHeaderPortal } from "./ui/ModuleHeaderSlot";
 import { AdminConnectionTestTab } from "./AdminConnectionTestTab";
+import { useDropdownPosition } from "../hooks/useDropdownPosition";
 import { useAuth } from "../contexts/AuthContext";
 
-type ModuleTab = "keys" | "devices" | "connection";
+type ModuleTab = "establishments" | "connection";
 
-const MODULE_TABS: Array<{ id: ModuleTab; label: string; icon: React.ElementType }> = [
-  { id: "keys", label: "Claves", icon: KeyRound },
-  { id: "devices", label: "Equipos", icon: MonitorSmartphone },
+/** Prueba de la conexión inmediata (Backups SISMED): solo el administrador, hasta que exista el módulo. */
+const MODULE_TABS: Array<{ id: ModuleTab; label: string; icon: React.ElementType; adminOnly?: boolean }> = [
+  { id: "establishments", label: "Establecimientos", icon: KeyRound },
+  { id: "connection", label: "Conexión (prueba)", icon: PlugZap, adminOnly: true },
 ];
-
-/** Prueba de la conexión inmediata (Backups SISMED, etapa 1): solo el administrador. */
-const CONNECTION_TAB = { id: "connection" as ModuleTab, label: "Conexión (prueba)", icon: PlugZap };
-
-/** Claves de envío y, en otra pestaña, qué versión del Toolkit tiene cada PC. */
-export const AdminSendKeysModule: React.FC = () => {
-  const [tab, setTab] = useState<ModuleTab>("keys");
-  const [latestVersion, setLatestVersion] = useState<string | null>(null);
-  const { user } = useAuth();
-  const tabs = user?.role === "ADMIN" ? [...MODULE_TABS, CONNECTION_TAB] : MODULE_TABS;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 sm:justify-between">
-      <div className="flex min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:flex-none" role="tablist">
-        {tabs.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            onClick={() => setTab(id)}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-1.5 text-[12.5px] font-bold transition-colors sm:flex-none ${
-              tab === id ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"
-            }`}
-          >
-            <Icon className="h-4 w-4" /> {label}
-          </button>
-        ))}
-      </div>
-        {tab === "devices" && latestVersion && (
-          <div
-            title={`Última versión publicada del Toolkit: ${latestVersion}`}
-            className="hidden h-[42px] shrink-0 items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs text-teal-800 sm:flex"
-          >
-            <Download className="h-4 w-4" />
-            Última versión publicada: <b>{latestVersion}</b>
-          </div>
-        )}
-      </div>
-      {tab === "keys" && <SendKeysPanel />}
-      {tab === "devices" && <AdminToolkitDevicesTab onLatestVersion={setLatestVersion} />}
-      {tab === "connection" && user?.role === "ADMIN" && <AdminConnectionTestTab />}
-    </div>
-  );
-};
 
 const PAGE_SIZE = 10;
 
@@ -80,51 +44,79 @@ const STATE_STYLE: Record<SendKeyState, { chip: string; icon: React.ElementType;
   none: { chip: "border-slate-200 bg-slate-100 text-slate-600", icon: ShieldOff, bar: "bg-slate-400", tile: "bg-slate-100 text-slate-500", text: "text-slate-600" },
 };
 
-const FILTERS: Array<{ id: SendKeyFilter; label: string }> = [
-  { id: "all", label: "Todos" },
-  { id: "protected", label: "Protegidos" },
-  { id: "alerts", label: "Con alertas" },
-  { id: "none", label: "Sin clave" },
-];
-
-const StateChip: React.FC<{ state: SendKeyState; small?: boolean }> = ({ state, small }) => {
+const StateChip: React.FC<{ state: SendKeyState }> = ({ state }) => {
   const style = STATE_STYLE[state];
   const Icon = style.icon;
   return (
-    <span className={`inline-flex w-fit items-center gap-1.5 rounded-full border font-bold ${style.chip} ${small ? "px-2 py-0.5 text-[10.5px]" : "px-2.5 py-1 text-[11.5px]"}`}>
-      <Icon className={small ? "h-3 w-3" : "h-3.5 w-3.5"} />
+    <span className={`inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-bold ${style.chip}`}>
+      <Icon className="h-3.5 w-3.5" />
       {SEND_KEY_STATE_LABEL[state]}
     </span>
   );
 };
+
+/** Versión en un chip: verde si está al día, ámbar si no. */
+const Version: React.FC<{ version?: string | null; outdated: boolean; prefix?: string }> = ({ version, outdated, prefix = "" }) =>
+  version ? (
+    <span className={`whitespace-nowrap rounded-md px-2 py-0.5 font-mono text-xs font-bold ${outdated ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
+      {prefix}v{version}
+    </span>
+  ) : null;
+
+const ToolkitVersion: React.FC<{ device?: ToolkitDevice; state: DeviceState; prefix?: string }> = ({ device, state, prefix }) =>
+  device?.version ? <Version version={device.version} outdated={state === "outdated"} prefix={prefix} /> : null;
+
+const SismedVersion: React.FC<{ device?: ToolkitDevice; state: SismedState; withDate?: boolean; prefix?: string }> = ({ device, state, withDate, prefix }) => {
+  if (!device?.sismedVersion) return null;
+  const chip = <Version version={device.sismedVersion} outdated={state === "outdated"} prefix={prefix} />;
+  if (!withDate || !device.sismedDate) return chip;
+  return (
+    <span className="inline-flex flex-col items-start gap-0.5">
+      {chip}
+      <span className="text-[11px] text-slate-500">{formatImmunizationDate(device.sismedDate)}</span>
+    </span>
+  );
+};
+
+const Dash = () => <span className="text-slate-400">—</span>;
 
 type PendingAction =
   | { kind: "regenerate"; row: SendKeyRow }
   | { kind: "revoke"; row: SendKeyRow }
   | { kind: "rebind"; row: SendKeyRow };
 
-const SendKeysPanel: React.FC = () => {
-  const [rows, setRows] = useState<SendKeyRow[]>([]);
+/** Claves de envío y las PC de cada establecimiento, en una sola pestaña. */
+export const AdminSendKeysModule: React.FC = () => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const [tab, setTab] = useState<ModuleTab>("establishments");
+
+  const [keys, setKeys] = useState<SendKeyRow[]>([]);
+  const [devices, setDevices] = useState<Awaited<ReturnType<typeof toolkitDevicesApi.overview>>>([]);
+  const [latest, setLatest] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<SendKeyFilter>("all");
-  const [page, setPage] = useState(1);
   const [busy, setBusy] = useState(false);
-
-  const [selectedCode, setSelectedCode] = useState<string | null>(null);
-  const [history, setHistory] = useState<SendAttempt[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-
-  const [newKey, setNewKey] = useState<{ row: SendKeyRow; key: string } | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const [newKey, setNewKey] = useState<{ row: SendKeyRow; key: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
       setLoadError("");
-      setRows(await sendKeysApi.overview());
+      // Las PC y la versión publicada completan la vista; si fallan, las claves se siguen viendo.
+      const [keyRows, deviceRows, version] = await Promise.all([
+        sendKeysApi.overview(),
+        toolkitDevicesApi.overview().catch((error) => {
+          console.warn("No se pudieron cargar las PC del Toolkit.", error);
+          return [];
+        }),
+        toolkitDevicesApi.latestRelease(),
+      ]);
+      setKeys(keyRows);
+      setDevices(deviceRows);
+      setLatest(version);
     } catch (error: any) {
-      setLoadError(error?.message || "No se pudieron cargar las claves de envío.");
+      setLoadError(error?.message || "No se pudieron cargar los establecimientos.");
     } finally {
       setLoading(false);
     }
@@ -132,39 +124,9 @@ const SendKeysPanel: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
-  const selected = useMemo(() => rows.find((r) => r.code === selectedCode) || null, [rows, selectedCode]);
-
-  const loadHistory = useCallback(async (code: string) => {
-    setHistoryLoading(true);
-    try {
-      setHistory(await sendKeysApi.history(code));
-    } catch (error: any) {
-      toast.error(error?.message || "No se pudo cargar el historial.");
-      setHistory([]);
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (selected?.hasKey) void loadHistory(selected.code);
-    else setHistory([]);
-  }, [selected?.code, selected?.hasKey, loadHistory]);
-
-  const summary = useMemo(() => summarizeSendKeys(rows), [rows]);
-  const filtered = useMemo(() => filterSendKeys(rows, search, filter), [rows, search, filter]);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [search, filter]);
-
-  // El aviso de arriba muestra el bloqueo más reciente; el resto se ve con «Con alertas».
-  const alerts = useMemo(
-    () => rows.filter((r) => r.alert).sort((a, b) => String(b.alert!.at).localeCompare(String(a.alert!.at))),
-    [rows]
-  );
-  const topAlert = alerts[0] || null;
-  const showUnget = useMemo(() => new Set(rows.map((r) => r.ungetId || "")).size > 1, [rows]);
+  const rows = useMemo(() => mergeEstablishments(keys, devices), [keys, devices]);
+  const latestSismed = useMemo(() => latestSismedVersion(rows), [rows]);
+  const alerts = useMemo(() => pendingAlerts(keys), [keys]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true);
@@ -172,7 +134,6 @@ const SendKeysPanel: React.FC = () => {
       await action();
       toast.success(success);
       await load();
-      if (selectedCode) void loadHistory(selectedCode);
       return true;
     } catch (error: any) {
       toast.error(error?.message || "No se pudo completar la operación.");
@@ -188,7 +149,6 @@ const SendKeysPanel: React.FC = () => {
       const key = await sendKeysApi.generate(row.code);
       setNewKey({ row, key });
       await load();
-      if (selectedCode === row.code) void loadHistory(row.code);
     } catch (error: any) {
       toast.error(error?.message || "No se pudo generar la clave.");
     } finally {
@@ -197,6 +157,10 @@ const SendKeysPanel: React.FC = () => {
   };
 
   const ignore = (row: SendKeyRow) => run(() => sendKeysApi.ignore(row.code), `Aviso de ${row.name} ignorado.`);
+  const ignoreAll = () => run(
+    () => Promise.all(alerts.map((row) => sendKeysApi.ignore(row.code))),
+    alerts.length === 1 ? "Aviso ignorado." : `${alerts.length} avisos ignorados.`,
+  );
 
   const confirmPending = async () => {
     if (!pending) return;
@@ -222,196 +186,83 @@ const SendKeysPanel: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex h-64 items-center justify-center gap-2 text-sm font-semibold text-slate-500">
-        <Loader2 className="h-5 w-5 animate-spin text-teal-600" /> Cargando claves de envío…
-      </div>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <div className="rounded-2xl border border-red-200 bg-white shadow-sm">
-        <ImmunizationEmptyState
-          icon={<AlertTriangle className="h-6 w-6" />}
-          title="No se pudieron cargar las claves de envío"
-          description={loadError}
-          action={<button type="button" onClick={() => { setLoading(true); void load(); }} className="h-10 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white">Reintentar</button>}
-        />
-      </div>
-    );
-  }
+  const tabs = MODULE_TABS.filter((t) => !t.adminOnly || isAdmin);
+  const bell = (
+    <AlertsBell
+      alerts={alerts}
+      busy={busy}
+      onIgnore={(row) => void ignore(row)}
+      onIgnoreAll={() => void ignoreAll()}
+      onRebind={(row) => setPending({ kind: "rebind", row })}
+    />
+  );
 
   return (
-    <div className="space-y-4 pb-6">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <ImmunizationKpiCard watermark tone="success" icon={<ShieldCheck />} label="Protegidos" value={`${summary.protectedCount} / ${summary.total}`} onClick={() => setFilter("protected")} active={filter === "protected"} />
-        <ImmunizationKpiCard watermark tone="danger" icon={<ShieldAlert />} label="Intentos bloqueados hoy" value={summary.blockedToday} onClick={() => setFilter("alerts")} active={filter === "alerts"} />
-        <ImmunizationKpiCard watermark tone="warning" icon={<Clock />} label="Esperando primer envío" value={summary.waiting} />
-        <ImmunizationKpiCard watermark tone="neutral" icon={<ShieldOff />} label="Sin clave" value={summary.none} onClick={() => setFilter("none")} active={filter === "none"} />
-      </div>
+    <div className="space-y-4">
+      {/* En el celular la fila es solo de las pestañas: la campana va a la cabecera. */}
+      <ModuleHeaderPortal><span className="sm:hidden">{bell}</span></ModuleHeaderPortal>
 
-      {topAlert?.alert && (
-        <div className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-3.5 sm:p-4 lg:flex-row lg:items-center">
-          <div className="flex flex-1 gap-3 text-[13px] text-red-900">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
-            <span>
-              <b>{topAlert.alert.deviceName || "Una PC sin identificar"}</b> intentó enviar el stock de{" "}
-              <b>{topAlert.name}</b> {relativeTime(topAlert.alert.at).toLowerCase()} y fue bloqueado
-              {topAlert.deviceName ? <> · el establecimiento está vinculado a <b>{topAlert.deviceName}</b></> : null}.
-              {alerts.length > 1 && (
-                <button type="button" onClick={() => setFilter("alerts")} className="ml-1 font-bold underline underline-offset-2">
-                  y {alerts.length - 1} aviso{alerts.length - 1 === 1 ? "" : "s"} más
-                </button>
-              )}
-            </span>
-          </div>
-          <div className="grid grid-cols-[auto_1fr] gap-2 lg:flex">
-            <button type="button" disabled={busy} onClick={() => void ignore(topAlert)} className="h-9 rounded-lg border border-red-200 bg-white px-3 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-60">
-              Ignorar
+      <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:flex-none" role="tablist">
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => setTab(id)}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-1.5 text-[12.5px] font-bold transition-colors sm:flex-none ${
+                tab === id ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <Icon className="h-4 w-4 shrink-0" /> <span className="truncate">{label}</span>
             </button>
-            <button type="button" disabled={busy} onClick={() => setPending({ kind: "rebind", row: topAlert })} className="flex h-9 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-60">
-              <ArrowRightLeft className="h-4 w-4" /> Cambiar a este equipo
-            </button>
-          </div>
+          ))}
         </div>
-      )}
-
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center sm:px-4">
-          <div className="relative w-full sm:max-w-xs">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento o código" className={`${immunizationFilterInputClass} pl-9`} />
+        {tab === "establishments" && (
+          <div className="ml-auto hidden items-center gap-2 sm:flex">
+            {latest && (
+              <span title="Última versión publicada del Toolkit" className="hidden h-[42px] items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs text-teal-800 lg:flex">
+                <Download className="h-4 w-4" /> Toolkit vigente <b>v{latest}</b>
+              </span>
+            )}
+            {latestSismed && (
+              <span title="La más alta que reporta alguna PC" className="hidden h-[42px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 lg:flex">
+                <Database className="h-4 w-4 text-slate-400" /> SISMED vigente <b>v{latestSismed}</b>
+              </span>
+            )}
+            {bell}
           </div>
-          <div className="flex gap-1.5 overflow-x-auto">
-            {FILTERS.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setFilter(f.id)}
-                className={`shrink-0 rounded-full border px-3 py-1 text-[11.5px] font-bold transition-colors ${
-                  filter === f.id ? "border-teal-600 bg-teal-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {filtered.length === 0 ? (
-          <ImmunizationEmptyState
-            icon={<KeyRound className="h-6 w-6" />}
-            title={rows.length === 0 ? "No hay establecimientos en su jurisdicción" : "Ningún establecimiento coincide"}
-            description={rows.length === 0 ? "Registre sus IPRESS y almacenes en Establecimientos." : "Pruebe con otra búsqueda o filtro."}
-          />
-        ) : (
-          <>
-            {/* Escritorio */}
-            <div className="hidden overflow-x-auto md:block">
-              <table className="w-full text-[13px]">
-                <thead className="sticky top-0 bg-slate-50">
-                  <tr>
-                    <ImmunizationTableHeader>Establecimiento</ImmunizationTableHeader>
-                    <ImmunizationTableHeader>Estado</ImmunizationTableHeader>
-                    <ImmunizationTableHeader>Equipo vinculado</ImmunizationTableHeader>
-                    <ImmunizationTableHeader>Último envío</ImmunizationTableHeader>
-                    <ImmunizationTableHeader align="right"><span className="sr-only">Acciones</span></ImmunizationTableHeader>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {pageRows.map((row) => {
-                    const state = sendKeyState(row);
-                    return (
-                      <tr key={row.code} className="h-14 hover:bg-slate-50/60">
-                        <td className="px-4 py-2">
-                          <div className="font-bold text-slate-800">{row.name}</div>
-                          <div className="flex items-center gap-2 text-[11px]">
-                            <span className="font-mono text-teal-700">{row.code}</span>
-                            {showUnget && row.ungetName && <span className="text-slate-400">{row.ungetName}</span>}
-                          </div>
-                        </td>
-                        <td className="px-4 py-2"><StateChip state={state} /></td>
-                        <td className="px-4 py-2">
-                          {row.deviceName
-                            ? <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700"><Monitor className="h-4 w-4 text-slate-400" />{row.deviceName}</span>
-                            : <span className="text-slate-400">—</span>}
-                        </td>
-                        <td className="px-4 py-2 text-slate-500">{row.hasKey ? relativeTime(row.lastOkAt) : "—"}</td>
-                        <td className="px-4 py-2 text-right">
-                          {state === "none" ? (
-                            <button type="button" disabled={busy} onClick={() => void generate(row)} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-teal-600 px-3 text-xs font-bold text-white hover:bg-teal-700 disabled:opacity-60">
-                              <KeyRound className="h-3.5 w-3.5" /> Generar clave
-                            </button>
-                          ) : (
-                            <button type="button" onClick={() => setSelectedCode(row.code)} className="inline-flex items-center text-xs font-bold text-teal-700 hover:text-teal-800">
-                              Ver <ChevronRight className="h-4 w-4" />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Móvil */}
-            <div className="space-y-2 p-3 md:hidden">
-              {pageRows.map((row) => {
-                const state = sendKeyState(row);
-                const style = STATE_STYLE[state];
-                const Icon = style.icon;
-                return (
-                  <div key={row.code} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                    <span className={`absolute inset-y-0 left-0 w-1 ${style.bar}`} />
-                    <button type="button" disabled={state === "none"} onClick={() => setSelectedCode(row.code)} className="flex w-full items-center gap-3 p-3 pl-4 text-left">
-                      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${style.tile}`}><Icon className="h-5 w-5" /></span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13.5px] font-black text-slate-800">{row.name}</span>
-                        <span className="mt-0.5 flex items-center gap-1.5">
-                          <span className="rounded bg-teal-50 px-1.5 font-mono text-[10.5px] font-bold text-teal-700">{row.code}</span>
-                          <span className={`truncate text-[10.5px] font-bold ${style.text}`}>{SEND_KEY_STATE_LABEL[state]}</span>
-                        </span>
-                      </span>
-                      {state !== "none" && <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />}
-                    </button>
-                    {state === "none" ? (
-                      <div className="px-3 pb-3 pl-4">
-                        <button type="button" disabled={busy} onClick={() => void generate(row)} className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-teal-600 text-xs font-bold text-white disabled:opacity-60">
-                          <KeyRound className="h-3.5 w-3.5" /> Generar clave
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="mb-3 ml-4 mr-3 flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
-                        <span className="flex min-w-0 items-center gap-1"><Monitor className="h-3.5 w-3.5 shrink-0" />{row.deviceName ? <b className="truncate text-slate-700">{row.deviceName}</b> : "Sin equipo aún"}</span>
-                        <span className="flex shrink-0 items-center gap-1"><Clock className="h-3 w-3" />{row.deviceName ? relativeTime(row.lastOkAt) : "Esperando envío"}</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} itemLabel="establecimientos" />
-          </>
         )}
       </div>
 
-      {selected && selected.hasKey && (
-        <DetailDrawer
-          row={selected}
-          history={history}
-          historyLoading={historyLoading}
-          busy={busy}
-          onClose={() => setSelectedCode(null)}
-          onIgnore={() => void ignore(selected)}
-          onRebind={() => setPending({ kind: "rebind", row: selected })}
-          onRegenerate={() => setPending({ kind: "regenerate", row: selected })}
-          onRevoke={() => setPending({ kind: "revoke", row: selected })}
-        />
+      {tab === "establishments" && (
+        loading ? (
+          <div className="flex h-64 items-center justify-center gap-2 text-sm font-semibold text-slate-500">
+            <Loader2 className="h-5 w-5 animate-spin text-teal-600" /> Cargando establecimientos…
+          </div>
+        ) : loadError ? (
+          <div className="rounded-2xl border border-red-200 bg-white shadow-sm">
+            <ImmunizationEmptyState
+              icon={<AlertTriangle className="h-6 w-6" />}
+              title="No se pudieron cargar los establecimientos"
+              description={loadError}
+              action={<button type="button" onClick={() => { setLoading(true); void load(); }} className="h-10 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white">Reintentar</button>}
+            />
+          </div>
+        ) : (
+          <EstablishmentsPanel
+            rows={rows}
+            latest={latest}
+            latestSismed={latestSismed}
+            busy={busy}
+            onGenerate={(row) => void generate(row)}
+            onIgnore={(row) => void ignore(row)}
+            onPending={setPending}
+          />
+        )
       )}
+      {tab === "connection" && isAdmin && <AdminConnectionTestTab />}
 
       {newKey && <NewKeyModal row={newKey.row} secret={newKey.key} onCopy={() => void copyKey()} onClose={() => setNewKey(null)} />}
 
@@ -441,8 +292,376 @@ const SendKeysPanel: React.FC = () => {
   );
 };
 
+const BELL_WIDTH = 420;
+
+/** Intentos bloqueados sin revisar: no ocupan la pantalla, se abren desde la campana. */
+const AlertsBell: React.FC<{
+  alerts: SendKeyRow[];
+  busy: boolean;
+  onIgnore: (row: SendKeyRow) => void;
+  onIgnoreAll: () => void;
+  onRebind: (row: SendKeyRow) => void;
+}> = ({ alerts, busy, onIgnore, onIgnoreAll, onRebind }) => {
+  const [open, setOpen] = useState(false);
+  const width = Math.min(BELL_WIDTH, typeof window === "undefined" ? BELL_WIDTH : window.innerWidth - 24);
+  const { triggerRef, menuStyles } = useDropdownPosition(open, { align: "right", customWidth: width });
+
+  return (
+    <div ref={triggerRef} className="relative">
+      <button
+        type="button"
+        aria-label={alerts.length ? `${alerts.length} intentos de envío bloqueados` : "Sin intentos de envío bloqueados"}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className={`relative flex h-10 w-10 items-center justify-center rounded-xl border bg-white transition-colors sm:h-[42px] sm:w-[42px] ${
+          open ? "border-red-300 ring-2 ring-red-500/15" : "border-slate-200 hover:bg-slate-50"
+        }`}
+      >
+        <Bell className="h-5 w-5 text-slate-600" />
+        {alerts.length > 0 && (
+          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10.5px] font-black text-white ring-2 ring-white">
+            {alerts.length > 99 ? "99+" : alerts.length}
+          </span>
+        )}
+      </button>
+      {open && createPortal(
+        <>
+          <div className="fixed inset-0 z-[9998]" onClick={() => setOpen(false)} />
+          <div
+            role="dialog"
+            aria-label="Envíos bloqueados"
+            style={{ ...menuStyles, width }}
+            className="fixed z-[9999] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_25px_-5px_rgba(0,0,0,0.12),0_8px_10px_-6px_rgba(0,0,0,0.05)] animate-in fade-in slide-in-from-top-2 duration-150"
+          >
+            <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+              <ShieldAlert className="h-4 w-4 text-red-600" />
+              <span className="text-[13px] font-black text-slate-800">Envíos bloqueados</span>
+              <span className="text-[11.5px] text-slate-400">{alerts.length ? `${alerts.length} sin revisar` : "ninguno"}</span>
+              {alerts.length > 1 && (
+                <button type="button" disabled={busy} onClick={onIgnoreAll} className="ml-auto rounded-lg px-2 py-1 text-[11.5px] font-bold text-slate-500 hover:bg-slate-100 disabled:opacity-60">
+                  Ignorar todos
+                </button>
+              )}
+            </div>
+            {alerts.length === 0 ? (
+              <p className="flex items-center gap-2 px-4 py-5 text-[12.5px] text-slate-500">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Ninguna PC intentó enviar sin permiso.
+              </p>
+            ) : (
+              <ul className="max-h-[60vh] divide-y divide-slate-100 overflow-y-auto">
+                {alerts.map((row) => (
+                  <li key={row.code} className="space-y-2 px-4 py-3">
+                    <p className="text-[12.5px] leading-snug text-slate-700">
+                      <b>{row.alert!.deviceName || "Una PC sin identificar"}</b> intentó enviar el stock de <b>{row.name}</b>{" "}
+                      <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
+                    </p>
+                    <p className="text-[11.5px] text-slate-500">
+                      {relativeTime(row.alert!.at)}{row.deviceName ? <> · vinculado a <b className="text-slate-700">{row.deviceName}</b></> : null}
+                    </p>
+                    <div className="flex gap-2">
+                      <button type="button" disabled={busy} onClick={() => onIgnore(row)} className="h-8 rounded-lg border border-slate-200 px-3 text-[11.5px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60">
+                        Ignorar
+                      </button>
+                      <button type="button" disabled={busy} onClick={() => { setOpen(false); onRebind(row); }} className="flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-[11.5px] font-bold text-white hover:bg-red-700 disabled:opacity-60">
+                        <ArrowRightLeft className="h-3.5 w-3.5" /> Cambiar a este equipo
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>,
+        document.body,
+      )}
+    </div>
+  );
+};
+
+const FILTER_ORDER: EstablishmentFilter[] = ["all", "alerts", "protected", "waiting", "none", "toolkitOutdated", "toolkitNone"];
+
+const EstablishmentsPanel: React.FC<{
+  rows: EstablishmentRow[];
+  latest: string | null;
+  latestSismed: string | null;
+  busy: boolean;
+  onGenerate: (row: SendKeyRow) => void;
+  onIgnore: (row: SendKeyRow) => void;
+  onPending: (action: PendingAction) => void;
+}> = ({ rows, latest, latestSismed, busy, onGenerate, onIgnore, onPending }) => {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<EstablishmentFilter>("all");
+  const [sismedFilter, setSismedFilter] = useState<SismedFilter>("all");
+  const [page, setPage] = useState(1);
+
+  const [selectedCode, setSelectedCode] = useState<string | null>(null);
+  const [history, setHistory] = useState<SendAttempt[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const summary = useMemo(() => summarizeEstablishments(rows, latest, undefined, latestSismed), [rows, latest, latestSismed]);
+  const sismedVersions = useMemo(() => sismedVersionsInUse(rows), [rows]);
+  const filtered = useMemo(
+    () => filterEstablishments(rows, latest, search, filter, sismedFilter, undefined, latestSismed),
+    [rows, latest, search, filter, sismedFilter, latestSismed],
+  );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  useEffect(() => { setPage(1); }, [search, filter, sismedFilter]);
+
+  const showUnget = useMemo(() => new Set(rows.map((r) => r.ungetId || "")).size > 1, [rows]);
+  const selected = useMemo(() => rows.find((r) => r.code === selectedCode) || null, [rows, selectedCode]);
+
+  const loadHistory = useCallback(async (code: string) => {
+    setHistoryLoading(true);
+    try {
+      setHistory(await sendKeysApi.history(code));
+    } catch (error: any) {
+      toast.error(error?.message || "No se pudo cargar el historial.");
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  // También recarga al cambiar el estado de la fila (ignorar, cambiar de equipo…).
+  useEffect(() => {
+    if (selected?.hasKey) void loadHistory(selected.code);
+    else setHistory([]);
+  }, [selected, loadHistory]);
+
+  const toggle = (next: EstablishmentFilter) => setFilter(filter === next ? "all" : next);
+
+  return (
+    <div className="space-y-4 pb-6">
+      <ImmunizationKpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
+        <ImmunizationKpiCard watermark tone="success" icon={<ShieldCheck />} label="Protegidos" value={`${summary.protectedCount} / ${summary.total}`} hint="con clave de envío" onClick={() => toggle("protected")} active={filter === "protected"} />
+        <ImmunizationKpiCard watermark tone="neutral" icon={<ShieldOff />} label="Sin clave" value={summary.none} hint={summary.waiting ? `${summary.waiting} esperando primer envío` : "envían desde cualquier PC"} onClick={() => toggle("none")} active={filter === "none"} />
+        <ImmunizationKpiCard watermark tone="warning" icon={<MonitorSmartphone />} label="Toolkit desactualizado" value={summary.toolkitOutdated} hint={latest ? `vigente: v${latest}` : "versión publicada desconocida"} onClick={() => toggle("toolkitOutdated")} active={filter === "toolkitOutdated"} />
+        <ImmunizationKpiCard watermark tone="warning" icon={<Database />} label="SISMED desactualizado" value={summary.sismedOutdated} hint={latestSismed ? `vigente: v${latestSismed}` : "aún sin reportes"} onClick={() => setSismedFilter(sismedFilter === "outdated" ? "all" : "outdated")} active={sismedFilter === "outdated"} />
+      </ImmunizationKpiStrip>
+
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center sm:px-4">
+          <div className="relative w-full sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${immunizationFilterInputClass} pl-9`} />
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex">
+            <select value={filter} onChange={(e) => setFilter(e.target.value as EstablishmentFilter)} aria-label="Estado" className={`${immunizationFilterInputClass} sm:w-60`}>
+              {FILTER_ORDER.map((f) => (
+                <option key={f} value={f}>{f === "all" ? "Estado: todos" : ESTABLISHMENT_FILTER_LABEL[f]} ({summary.counts[f]})</option>
+              ))}
+            </select>
+            <select value={sismedFilter} onChange={(e) => setSismedFilter(e.target.value as SismedFilter)} aria-label="Versión del SISMED" className={`${immunizationFilterInputClass} sm:w-52`}>
+              <option value="all">SISMED: todas</option>
+              <option value="outdated">SISMED desactualizado</option>
+              {sismedVersions.map((v) => (
+                <option key={v} value={`v:${v}`}>SISMED v{v}{v === latestSismed ? " (vigente)" : ""}</option>
+              ))}
+              <option value="none">SISMED sin dato</option>
+            </select>
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <ImmunizationEmptyState
+            icon={<KeyRound className="h-6 w-6" />}
+            title={rows.length === 0 ? "No hay establecimientos en su jurisdicción" : "Ningún establecimiento coincide"}
+            description={rows.length === 0 ? "Registre sus IPRESS y almacenes en Establecimientos." : "Pruebe con otra búsqueda o filtro."}
+          />
+        ) : (
+          <>
+            {/* Escritorio */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-[13px]">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr>
+                    <ImmunizationTableHeader>Establecimiento</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>Clave</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>Equipo</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>Toolkit</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>SISMED</ImmunizationTableHeader>
+                    <ImmunizationTableHeader>Último envío</ImmunizationTableHeader>
+                    <ImmunizationTableHeader align="right"><span className="sr-only">Acciones</span></ImmunizationTableHeader>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {pageRows.map((row) => {
+                    const state = sendKeyState(row);
+                    const device = latestDevice(row);
+                    const pc = row.deviceName || device?.deviceName;
+                    return (
+                      <tr key={row.code} className="h-14 hover:bg-slate-50/60">
+                        <td className="px-4 py-2">
+                          <div className="font-bold text-slate-800">{row.name}</div>
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <span className="font-mono text-teal-700">{row.code}</span>
+                            {showUnget && row.ungetName && <span className="text-slate-400">{row.ungetName}</span>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2"><StateChip state={state} /></td>
+                        <td className="px-4 py-2">
+                          {pc ? (
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
+                              <Monitor className="h-4 w-4 shrink-0 text-slate-400" />{pc}
+                              <OtherPcs row={row} latest={latest} latestSismed={latestSismed} />
+                            </span>
+                          ) : <Dash />}
+                        </td>
+                        <td className="px-4 py-2"><ToolkitVersion device={device} state={toolkitState(row, latest)} /> {!device?.version && <Dash />}</td>
+                        <td className="px-4 py-2"><SismedVersion device={device} state={sismedState(row, latestSismed)} withDate /> {!device?.sismedVersion && <Dash />}</td>
+                        <td className="px-4 py-2 text-slate-500">{relativeTime(lastSendAt(row))}</td>
+                        <td className="px-4 py-2 text-right">
+                          {state === "none" ? (
+                            <button type="button" disabled={busy} onClick={() => onGenerate(row)} className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-teal-600 px-3 text-xs font-bold text-white hover:bg-teal-700 disabled:opacity-60">
+                              <KeyRound className="h-3.5 w-3.5" /> Generar clave
+                            </button>
+                          ) : (
+                            <button type="button" onClick={() => setSelectedCode(row.code)} className="inline-flex items-center text-xs font-bold text-teal-700 hover:text-teal-800">
+                              Ver <ChevronRight className="h-4 w-4" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Móvil */}
+            <div className="space-y-2 p-3 md:hidden">
+              {pageRows.map((row) => {
+                const state = sendKeyState(row);
+                const device = latestDevice(row);
+                const pc = row.deviceName || device?.deviceName;
+                return (
+                  <div key={row.code} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <span className={`absolute inset-y-0 left-0 w-1 ${STATE_STYLE[state].bar}`} />
+                    <button type="button" disabled={state === "none"} onClick={() => setSelectedCode(row.code)} className="flex w-full items-start justify-between gap-2 p-3 pl-4 text-left">
+                      <span className="min-w-0">
+                        <span className="block truncate text-[13.5px] font-black text-slate-800">{row.name}</span>
+                        <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
+                      </span>
+                      <StateChip state={state} />
+                    </button>
+                    <div className="mb-3 ml-4 mr-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
+                      <span className="flex min-w-0 items-center gap-1"><Monitor className="h-3.5 w-3.5 shrink-0" />{pc ? <b className="truncate text-slate-700">{pc}</b> : "Sin equipo aún"}</span>
+                      <ToolkitVersion device={device} state={toolkitState(row, latest)} prefix="TK " />
+                      <SismedVersion device={device} state={sismedState(row, latestSismed)} prefix="SISMED " />
+                      <span className="ml-auto flex shrink-0 items-center gap-1"><Clock className="h-3 w-3" />{relativeTime(lastSendAt(row))}</span>
+                    </div>
+                    {state === "none" && (
+                      <div className="px-3 pb-3 pl-4">
+                        <button type="button" disabled={busy} onClick={() => onGenerate(row)} className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-teal-600 text-xs font-bold text-white disabled:opacity-60">
+                          <KeyRound className="h-3.5 w-3.5" /> Generar clave
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} itemLabel="establecimientos" />
+          </>
+        )}
+      </div>
+
+      <p className="px-1 text-[11.5px] text-slate-500">
+        Toolkit y SISMED: los informa la PC al enviar el stock (Toolkit 2.1.10 o posterior), en los últimos {REPORT_WINDOW_DAYS} días.
+        {" "}La versión vigente del SISMED es la más alta que reporta alguna PC.
+      </p>
+
+      {selected && selected.hasKey && (
+        <DetailDrawer
+          row={selected}
+          latest={latest}
+          latestSismed={latestSismed}
+          history={history}
+          historyLoading={historyLoading}
+          busy={busy}
+          onClose={() => setSelectedCode(null)}
+          onIgnore={() => onIgnore(selected)}
+          onRebind={() => onPending({ kind: "rebind", row: selected })}
+          onRegenerate={() => onPending({ kind: "regenerate", row: selected })}
+          onRevoke={() => onPending({ kind: "revoke", row: selected })}
+        />
+      )}
+    </div>
+  );
+};
+
+const POPOVER_WIDTH = 280;
+
+/**
+ * Otras PC que enviaron el mismo establecimiento en los últimos 30 días. Al tocarlo muestra
+ * cuáles son: sirve para descubrir una copia vieja del SISMED en otra máquina.
+ */
+const OtherPcs: React.FC<{ row: EstablishmentRow; latest: string | null; latestSismed: string | null }> = ({ row, latest, latestSismed }) => {
+  const [open, setOpen] = useState(false);
+  const { triggerRef, menuStyles } = useDropdownPosition(open, { align: "left", customWidth: POPOVER_WIDTH });
+  const devices = activeDevices(row);
+  if (devices.length < 2) return null;
+
+  return (
+    <span ref={triggerRef} className="inline-flex">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-bold text-amber-700 ring-1 ring-amber-200 hover:bg-amber-100"
+      >
+        +{devices.length - 1} PC
+      </button>
+      {open && createPortal(
+        <>
+          <div className="fixed inset-0 z-[9998]" onClick={() => setOpen(false)} />
+          <div
+            role="dialog"
+            style={{ ...menuStyles, width: POPOVER_WIDTH }}
+            className="fixed z-[9999] overflow-y-auto rounded-2xl border border-slate-200 bg-white text-left shadow-[0_10px_25px_-5px_rgba(0,0,0,0.1),0_8px_10px_-6px_rgba(0,0,0,0.05)] animate-in fade-in slide-in-from-top-2 duration-150"
+          >
+            <p className="border-b border-slate-100 px-4 py-2.5 text-[11px] font-black uppercase tracking-wider text-slate-500">
+              PC que enviaron {row.code} · últimos {REPORT_WINDOW_DAYS} días
+            </p>
+            <DeviceList devices={devices} latest={latest} latestSismed={latestSismed} />
+          </div>
+        </>,
+        document.body,
+      )}
+    </span>
+  );
+};
+
+/** PC de un establecimiento, la más reciente primero, con su versión del Toolkit y del SISMED. */
+const DeviceList: React.FC<{ devices: ToolkitDevice[]; latest: string | null; latestSismed: string | null }> = ({ devices, latest, latestSismed }) => (
+  <ul className="divide-y divide-slate-100">
+    {devices.map((device, index) => {
+      const outdated = Boolean(latest && device.version && compareVersions(device.version, latest) < 0);
+      const sismedOutdated = Boolean(latestSismed && device.sismedVersion && compareVersions(device.sismedVersion, latestSismed) < 0);
+      return (
+        <li key={`${device.deviceName}-${index}`} className="flex items-center gap-2.5 px-4 py-2.5">
+          <Monitor className={`h-4 w-4 shrink-0 ${index === 0 ? "text-teal-600" : "text-slate-400"}`} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-bold text-slate-800">{device.deviceName || "PC sin nombre"}</span>
+            <span className="block text-[11px] text-slate-500">{index === 0 ? "La más reciente · " : ""}{relativeTime(device.lastSeen)}</span>
+            {device.sismedVersion && (
+              <span className={`block text-[11px] font-semibold ${sismedOutdated ? "text-amber-700" : "text-slate-500"}`}>SISMED v{device.sismedVersion}</span>
+            )}
+          </span>
+          {device.version && <Version version={device.version} outdated={outdated} />}
+        </li>
+      );
+    })}
+  </ul>
+);
+
 const DetailDrawer: React.FC<{
-  row: SendKeyRow;
+  row: EstablishmentRow;
+  latest: string | null;
+  latestSismed: string | null;
   history: SendAttempt[];
   historyLoading: boolean;
   busy: boolean;
@@ -451,7 +670,8 @@ const DetailDrawer: React.FC<{
   onRebind: () => void;
   onRegenerate: () => void;
   onRevoke: () => void;
-}> = ({ row, history, historyLoading, busy, onClose, onIgnore, onRebind, onRegenerate, onRevoke }) => {
+}> = ({ row, latest, latestSismed, history, historyLoading, busy, onClose, onIgnore, onRebind, onRegenerate, onRevoke }) => {
+  const devices = activeDevices(row);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -508,6 +728,13 @@ const DetailDrawer: React.FC<{
                   <ArrowRightLeft className="h-4 w-4" /> Cambiar a este equipo
                 </button>
               </div>
+            </section>
+          )}
+
+          {devices.length > 0 && (
+            <section>
+              <p className="mb-1 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-slate-500"><MonitorSmartphone className="h-3.5 w-3.5" />PC que envían · últimos {REPORT_WINDOW_DAYS} días</p>
+              <div className="overflow-hidden rounded-2xl border border-slate-100"><DeviceList devices={devices} latest={latest} latestSismed={latestSismed} /></div>
             </section>
           )}
 

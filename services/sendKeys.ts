@@ -78,47 +78,6 @@ export const ATTEMPT_RESULT_LABEL: Record<SendAttemptResult, string> = {
   OTRO_EQUIPO: "Bloqueado · otra PC",
 };
 
-export interface SendKeySummary {
-  total: number;
-  protectedCount: number;
-  blockedToday: number;
-  waiting: number;
-  none: number;
-}
-
-export const summarizeSendKeys = (rows: SendKeyRow[]): SendKeySummary => {
-  const summary: SendKeySummary = { total: rows.length, protectedCount: 0, blockedToday: 0, waiting: 0, none: 0 };
-  rows.forEach((row) => {
-    const state = sendKeyState(row);
-    if (state === "none") summary.none += 1;
-    else summary.protectedCount += 1;
-    if (state === "waiting") summary.waiting += 1;
-    summary.blockedToday += Number(row.blockedToday || 0);
-  });
-  return summary;
-};
-
-export type SendKeyFilter = "all" | "protected" | "alerts" | "none";
-
-const normalize = (value: string) =>
-  value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
-
-/** Aplica la búsqueda y el filtro rápido. Los bloqueados van primero. */
-export const filterSendKeys = (rows: SendKeyRow[], search: string, filter: SendKeyFilter): SendKeyRow[] => {
-  const needle = normalize(search);
-  const order: Record<SendKeyState, number> = { blocked: 0, waiting: 1, protected: 2, none: 3 };
-  return rows
-    .filter((row) => {
-      const state = sendKeyState(row);
-      if (filter === "protected" && state === "none") return false;
-      if (filter === "alerts" && state !== "blocked") return false;
-      if (filter === "none" && state !== "none") return false;
-      if (!needle) return true;
-      return normalize(`${row.name} ${row.code} ${row.deviceName || ""}`).includes(needle);
-    })
-    .sort((a, b) => order[sendKeyState(a)] - order[sendKeyState(b)] || a.name.localeCompare(b.name, "es", { numeric: true }));
-};
-
 /** «Hace 5 min», «Hace 3 h», «Ayer 19:11» o la fecha. */
 export const relativeTime = (value?: string | null, now: Date = new Date()): string => {
   if (!value) return "—";
