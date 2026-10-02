@@ -418,7 +418,7 @@ const UsageTiles: React.FC<{ reading: UsageReading; onRefresh: () => void }> = (
           { label: "Tiempo activo hoy", icon: <Timer />, ratio: get("doDuration")?.ratio ?? null, hint: of(get("doDuration"), " GB-s") },
           { label: "Nube R2 del mes", icon: <CloudUpload />, ratio: r2Ratio, hint: r2Hint },
         ].map((k) => (
-          <ImmunizationKpiCard key={k.label} watermark tone={toneOf(k.ratio)} icon={k.icon} label={k.label} value={percent(k.ratio)} hint={withState(k.ratio, k.hint)} />
+          <ImmunizationKpiCard key={k.label} watermark tone={toneOf(k.ratio)} icon={k.icon} label={k.label} value={percent(k.ratio)} progress={k.ratio} progressMarks={[0.7, 0.8]} hint={withState(k.ratio, k.hint)} />
         ))}
       </div>
     </section>

@@ -108,7 +108,11 @@ export const ImmunizationKpiCard: React.FC<{
   active?: boolean;
   /** Ícono grande y tenue de fondo, con franja lateral y degradado del tono. */
   watermark?: boolean;
-}> = ({ label, value, icon, tone = "neutral", hint, filled, compact = false, onClick, active, watermark }) => {
+  /** Solo con `watermark`: barra de avance de 0 a 1, del color del tono. */
+  progress?: number | null;
+  /** Marcas sobre la barra (de 0 a 1), por ejemplo un umbral de aviso. */
+  progressMarks?: number[];
+}> = ({ label, value, icon, tone = "neutral", hint, filled, compact = false, onClick, active, watermark, progress, progressMarks = [] }) => {
   if (watermark) {
     const isInteractive = Boolean(onClick);
     const Container = isInteractive ? "button" : "div";
@@ -126,6 +130,22 @@ export const ImmunizationKpiCard: React.FC<{
         <div className="relative min-w-0">
           <p className="line-clamp-2 text-[11px] font-black uppercase leading-tight tracking-wider text-slate-500 sm:truncate">{label}</p>
           <p className={`mt-1 truncate text-2xl font-black leading-tight sm:text-[28px] ${toneWatermark[tone].value}`}>{value}</p>
+          {progress !== undefined && (
+            <div
+              className="relative mb-1.5 mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200/70"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progress == null ? undefined : Math.round(progress * 100)}
+            >
+              {progress != null && (
+                <div className={`h-full rounded-full ${toneTopBar[tone]}`} style={{ width: `${Math.min(100, Math.max(progress * 100, 2))}%` }} />
+              )}
+              {progressMarks.map((mark) => (
+                <span key={mark} className="absolute inset-y-0 w-0.5 bg-white" style={{ left: `${mark * 100}%` }} />
+              ))}
+            </div>
+          )}
           {hint && <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">{hint}</p>}
         </div>
       </Container>
