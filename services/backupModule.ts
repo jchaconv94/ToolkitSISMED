@@ -17,8 +17,10 @@ export interface BackupOverviewRow {
   /** Último backup descargado (cualquier usuario). */
   lastAt?: string | null;
   lastBy?: string | null;
-  /** Pedidos de hoy que cuentan para el cupo (en curso o descargados). */
+  /** Pedidos de hoy del establecimiento, de todos los usuarios (en curso o descargados). */
   today: number;
+  /** Los de hoy de quien consulta: el cupo es por usuario. Sin el SQL nuevo no llega. */
+  mine?: number;
   limit: number;
 }
 
@@ -74,7 +76,7 @@ export const buildBackupRows = (
   return overview.map((row) => {
     const pc = pcs.get(row.code);
     const job = jobs[row.code];
-    const quotaUsed = row.today >= row.limit;
+    const quotaUsed = (row.mine ?? row.today) >= row.limit;
     return {
       ...row,
       online: Boolean(pc),

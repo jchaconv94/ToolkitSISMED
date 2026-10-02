@@ -353,7 +353,7 @@ export class Region extends DurableObject<Env> {
       return;
     }
     if (!quota.ok) {
-      ws.send(JSON.stringify({ t: "backup_failed", code, reason: quotaMessage(quota), quota }));
+      ws.send(JSON.stringify({ t: "backup_failed", code, reason: quotaMessage(quota, web.username), quota }));
       return;
     }
 

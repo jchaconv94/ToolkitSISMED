@@ -258,15 +258,22 @@ const limaTime = (at: string) =>
   new Date(at).toLocaleTimeString("es-PE", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hour12: false });
 
 /** Por qué no se pudo pedir, dicho para la persona. */
-export const quotaMessage = (quota: Quota): string => {
+export const quotaMessage = (quota: Quota, username?: string): string => {
   const cupo = quota.limit === 1 ? "1 backup por día" : `${quota.limit} backups por día`;
   const last = quota.last;
+  // El cupo es por usuario: el último pedido es casi siempre de quien pide, pero si el SQL
+  // del cupo por usuario no está aplicado puede ser de otro, y entonces se nombra.
+  const mine = !last || !username || last.username === username;
   if (last && last.status !== "DOWNLOADED") {
-    const admite = quota.limit === 1 ? "Se admite 1 backup por día" : `Se admiten ${quota.limit} backups por día`;
-    return `Ya hay un backup de este establecimiento en curso: lo pidió ${last.username} a las ${limaTime(last.at)}. ${admite}.`;
+    return mine
+      ? `Ya tiene un backup de este establecimiento en curso, pedido a las ${limaTime(last.at)}.`
+      : `Ya hay un backup de este establecimiento en curso: lo pidió ${last.username} a las ${limaTime(last.at)}.`;
   }
-  const who = last ? `; el último lo descargó ${last.username} a las ${limaTime(last.at)}` : "";
-  return `Hoy ya se usó el cupo de este establecimiento (${cupo})${who}. Se podrá pedir otro mañana.`;
+  if (mine) {
+    const when = last ? `; el último lo descargó a las ${limaTime(last.at)}` : "";
+    return `Hoy ya usó su cupo de este establecimiento (${cupo} por usuario)${when}. Podrá pedir otro mañana.`;
+  }
+  return `Hoy ya se usó el cupo de este establecimiento (${cupo}); el último lo descargó ${last.username} a las ${limaTime(last.at)}. Se podrá pedir otro mañana.`;
 };
 
 /**

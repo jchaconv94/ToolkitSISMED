@@ -32,6 +32,14 @@ describe("buildBackupRows", () => {
     expect(por["06533"].canDownload).toBe(false); // desconectada
     expect(por["06525"].equipo).toBe("ACER-JORDAN");
   });
+  it("el cupo es de cada usuario: lo que descargó otro no se lo quita", () => {
+    const otro = { ...lista[1], today: 1, mine: 0 };
+    const suyo = { ...lista[1], today: 2, mine: 1 };
+    const [a, b] = buildBackupRows([otro, suyo], enLinea, {}, false, ahora);
+    expect(a.quotaUsed).toBe(false);
+    expect(a.canDownload).toBe(true);
+    expect(b.quotaUsed).toBe(true);
+  });
   it("con el plan en pausa no se ofrece descargar a nadie", () => {
     expect(buildBackupRows(lista, enLinea, {}, true, ahora).some((f) => f.canDownload)).toBe(false);
   });

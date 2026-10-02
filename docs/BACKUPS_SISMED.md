@@ -261,3 +261,13 @@ que la PC sea la vinculada (`sync_send_keys.device_id`). La PC de B nunca se vin
 clave de A, porque no tiene stock de A. Una PC con clave recién puesta aparece en Backups
 después de su primer envío de stock. `SUPABASE_BACKUPS_ABRIR_REGION.sql` ya trae esta
 versión, así que volver a ejecutarlo no deshace el arreglo.
+
+**Cupo por usuario (2026-10-02, `SUPABASE_BACKUPS_CUPO_POR_USUARIO.sql`).** El cupo era por
+establecimiento: si el informático de la UNGET descargaba hoy el backup de una IPRESS, DIRESA
+ya no podía ese día. Ahora es por **usuario y establecimiento**: cada uno puede descargar lo
+que diga Parámetros del Sistema (por omisión, 1 al día), sin importar lo de los demás.
+`app_backup_request_start` cuenta solo los pedidos de quien pide, y `app_backup_overview`
+devuelve además `mine`, que es lo que la web usa para «Cupo del día usado» (si no llega, usa
+`today`, el total del establecimiento). Si dos usuarios piden a la vez el mismo
+establecimiento, la PC atiende uno y el otro recibe «Esta PC ya está enviando otro backup»;
+ese pedido fallido no cuenta.

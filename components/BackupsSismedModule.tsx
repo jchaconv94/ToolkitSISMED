@@ -60,7 +60,7 @@ const Bar: React.FC<{ value: number; total: number; label: string; tone?: "teal"
   );
 };
 
-const Detail: React.FC<{ row: BackupRowView; me: string | null }> = ({ row, me }) => {
+const Detail: React.FC<{ row: BackupRowView }> = ({ row }) => {
   const job = row.job;
   if (job?.phase === "uploading" && job.size) return <Bar value={job.sent || 0} total={job.size} label={`La PC sube · ${formatMegabytes(job.size)}`} />;
   if (job?.phase === "downloading" && job.size) return <Bar value={job.received || 0} total={job.size} label={`Descargando · ${formatMegabytes(job.size)}`} tone="emerald" />;
@@ -79,8 +79,8 @@ const Detail: React.FC<{ row: BackupRowView; me: string | null }> = ({ row, me }
   if (row.quotaUsed) {
     return (
       <div className="text-[11.5px] text-slate-500">
-        {row.downloadedToday && row.lastAt ? <div><b className="font-semibold text-slate-700">{whoLabel(row.lastBy, me)}</b> a las {limaTime(row.lastAt)}</div> : <div>Hay un pedido en curso</div>}
-        <div>{row.today} de {row.limit} hoy · otro mañana</div>
+        <div><b className="font-semibold text-slate-700">Ya usó su cupo</b> · {row.mine ?? row.today} de {row.limit} hoy</div>
+        <div>Podrá pedir otro mañana</div>
       </div>
     );
   }
@@ -119,7 +119,7 @@ export const BackupsSismedModule: React.FC = () => {
     try {
       setLoadError("");
       const [rows, today] = await Promise.all([backupModuleApi.overview(), backupModuleApi.activity()]);
-      setOverview(rows.map((r: any) => ({ ...r, today: Number(r.today) || 0, limit: Number(r.limit) || 1 })));
+      setOverview(rows.map((r: any) => ({ ...r, today: Number(r.today) || 0, mine: r.mine == null ? undefined : Number(r.mine) || 0, limit: Number(r.limit) || 1 })));
       setActivity(today);
     } catch (error: any) {
       setLoadError(error?.message || "No se pudo cargar la lista de establecimientos.");
@@ -275,7 +275,7 @@ export const BackupsSismedModule: React.FC = () => {
                             </td>
                             <td className="px-4 py-2"><Signal row={row} /></td>
                             <td className="px-4 py-2">{chip ? <ImmunizationStatusChip label={chip.label} tone={chip.tone} /> : <span className="text-slate-300">—</span>}</td>
-                            <td className="px-4 py-2"><Detail row={row} me={manager.username} /></td>
+                            <td className="px-4 py-2"><Detail row={row} /></td>
                             <td className="px-4 py-2 text-[12px] text-slate-500">
                               {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}
                             </td>
@@ -299,7 +299,7 @@ export const BackupsSismedModule: React.FC = () => {
                           </div>
                           {chip ? <ImmunizationStatusChip label={chip.label} tone={chip.tone} /> : <Signal row={row} align="right" />}
                         </div>
-                        <Detail row={row} me={manager.username} />
+                        <Detail row={row} />
                         <div className="flex items-center justify-between gap-2">
                           <span className="min-w-0 truncate text-[11.5px] text-slate-500">Último: {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}</span>
                           {action(row)}
