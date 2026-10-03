@@ -4708,32 +4708,108 @@ function processSheet(sheet) {
     <div
       className={`flex flex-col h-full transition-all duration-300 ${isAdvancedFiltersSidebarOpen && viewLevel === "sheets" ? "md:pr-[380px] xl:pr-[420px]" : ""}`}
     >
-      {/* Minimalist Top Header */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center px-4 sm:px-10 lg:px-14 xl:px-16 py-4 sm:py-8 gap-4 sm:gap-6">
-        {/* Left Side: Title & KPIs underneath */}
-        <div className="w-full xl:w-auto flex flex-col gap-3 sm:gap-4 overflow-hidden">
-          {/* Title */}
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            {/* La ruta de arriba a la derecha es pequeña y no parece pulsable: la gente se
-                quedaba dentro de una hoja sin saber cómo salir. El botón va a la izquierda
-                del título, que es donde se mira, y dice a dónde lleva. */}
-            {destinoDeVolver && (
+      {/* Cabecera del módulo en una sola fila (2026-10-03): volver, dónde estoy y las acciones.
+          El título «Reporte de Stock detallado SISMED» se quitó: lo dice la cabecera de la app. */}
+      <div className="px-4 pb-3 pt-4 sm:px-10 sm:pt-6 lg:px-14 xl:px-16">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* La flecha está a la izquierda, donde se mira, y dice a dónde lleva. */}
+          {destinoDeVolver && (
+            <button
+              type="button"
+              onClick={volverUnNivel}
+              title={`Volver a ${destinoDeVolver}`}
+              aria-label={`Volver a ${destinoDeVolver}`}
+              className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:border-teal-300 hover:text-teal-700"
+            >
+              <ArrowLeft className="h-[18px] w-[18px] transition-transform group-hover:-translate-x-0.5" />
+            </button>
+          )}
+
+          {/* Dónde estoy: arriba, pequeño y pulsable, el nivel anterior; abajo, el actual. */}
+          <div className="min-w-0 flex-1">
+            {viewLevel === "data" && selectedUngetIndex !== null && (
               <button
                 type="button"
-                onClick={volverUnNivel}
-                title={`Volver a ${destinoDeVolver}`}
-                aria-label={`Volver a ${destinoDeVolver}`}
-                className="group flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center shrink-0 rounded-xl border border-slate-200 bg-white text-slate-500 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] transition-all hover:border-teal-300 hover:text-teal-700 hover:shadow-md cursor-pointer"
+                onClick={() => { setViewLevel("sheets"); setSelectedSourceId(""); }}
+                className="block max-w-full truncate text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-teal-700"
               >
-                <ArrowLeft className="h-4 w-4 sm:h-[18px] sm:w-[18px] transition-transform group-hover:-translate-x-0.5" />
+                {formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "Documento")}
               </button>
             )}
-            <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 sm:gap-2.5 min-w-0">
-              <Database className="h-5 w-5 text-teal-600 shrink-0" />
-              <span className="truncate">Reporte de Stock detallado SISMED</span>
-            </h2>
+            {viewLevel === "sheets" && hayPanelRegional && (
+              <button
+                type="button"
+                onClick={() => { setViewLevel("ungets"); setSelectedUngetIndex(null); setSelectedSourceId(""); }}
+                className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-teal-700"
+              >
+                Panel regional
+              </button>
+            )}
+            <p className="truncate text-[15px] font-black text-slate-900 sm:text-base">
+              {viewLevel === "data"
+                ? (() => {
+                    const name = sources.find((s) => s.id === selectedSourceId)?.name || "Hoja";
+                    const code = selectedSourceId ? codeForSheet(selectedSourceId) : "";
+                    return (
+                      <>
+                        {describeSheetName(name)}
+                        {code && <span className="ml-2 font-mono text-xs font-bold text-slate-400">{code}</span>}
+                      </>
+                    );
+                  })()
+                : viewLevel === "sheets" && selectedUngetIndex !== null
+                  ? formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "Documento")
+                  : "Panel regional"}
+            </p>
           </div>
 
+          {/* Acciones: íconos en el celular; en escritorio, Configurar y Sincronizar con texto. */}
+          <div className="flex shrink-0 items-center gap-2">
+            {selectedUngetIndex !== null && (
+              <button
+                type="button"
+                onClick={() => setIsNetworkSearchOpen(true)}
+                title="Buscar un producto en todos los establecimientos (Ctrl+K)"
+                aria-label="Búsqueda avanzada"
+                aria-keyshortcuts="Control+K"
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
+              >
+                <Search className="h-4 w-4" />
+              </button>
+            )}
+            {canManageConfigs && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (user) setTempUrls([...scriptUrls]);
+                  setIsConfigOpen(!isConfigOpen);
+                }}
+                title="Conexiones de stock"
+                aria-label="Configurar"
+                className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 sm:px-3.5"
+              >
+                <Settings className="h-4 w-4 text-slate-500" />
+                <span className="hidden sm:inline">Configurar</span>
+              </button>
+            )}
+            <button
+              id="sync-btn"
+              type="button"
+              onClick={() => fetchData()}
+              disabled={isLoading || isSilentSyncing}
+              aria-label="Sincronizar"
+              className="flex h-10 items-center justify-center gap-2 rounded-xl bg-teal-600 px-2.5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-50 sm:px-4"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">
+                {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* Indicadores de la lista de establecimientos o UNGET (la parte B los rehace). */}
+        <div className="mt-3">
           {/* Connection KPIs (Cards) */}
           {(() => {
             // En una hoja, los indicadores van en su propia fila a todo el ancho (abajo).
@@ -4795,144 +4871,6 @@ function processSheet(sheet) {
               </div>
             );
           })()}
-        </div>
-
-        {/* Right Side: Navigation Breadcrumbs (top-right) + Action Buttons (bottom-right) */}
-        <div className="flex flex-col gap-3 sm:gap-4 w-full xl:w-auto items-start xl:items-end justify-start overflow-hidden">
-          {/* Navigation Tabs (Breadcrumbs) aligned to the right */}
-          <div className="flex items-center text-[10px] sm:text-[12px] font-bold text-slate-500 overflow-x-auto hide-scrollbar shrink-0 uppercase tracking-widest gap-1 self-stretch xl:self-auto justify-start xl:justify-end pb-1 sm:pb-0">
-            {/* Con una sola UNGET a la vista no hay panel al que volver, así que la
-                migaja empieza directamente en su nombre. */}
-            {hayPanelRegional && (
-            <button
-              onClick={() => {
-                setViewLevel("ungets");
-                setSelectedUngetIndex(null);
-                setSelectedSourceId("");
-              }}
-              className={`flex items-center gap-1.5 sm:gap-2 transition-colors shrink-0 ${viewLevel === "ungets" ? "text-teal-600 font-black" : "hover:text-slate-800"}`}
-            >
-              <Building2
-                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${viewLevel === "ungets" ? "text-teal-600" : "text-slate-400"}`}
-              />
-              <span
-                className={
-                  viewLevel === "ungets" ? "font-black text-teal-600" : ""
-                }
-              >
-                PANEL REGIONAL
-              </span>
-            </button>
-            )}
-
-            {selectedUngetIndex !== null && (
-              <>
-                {hayPanelRegional && (
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-350 mx-0.5 sm:mx-1 shrink-0" />
-                )}
-                <button
-                  onClick={() => {
-                    setViewLevel("sheets");
-                    setSelectedSourceId("");
-                  }}
-                  className={`flex items-center gap-1.5 sm:gap-2 transition-colors shrink-0 ${viewLevel === "sheets" ? "text-teal-600 font-black" : "hover:text-slate-800"}`}
-                >
-                  <FileSpreadsheet
-                    className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${viewLevel === "sheets" ? "text-teal-600" : "text-slate-400"}`}
-                  />
-                  <span
-                    className={`truncate max-w-[120px] sm:max-w-[150px] md:max-w-[200px] ${viewLevel === "sheets" ? "font-black text-teal-600" : ""}`}
-                  >
-                    {formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "Documento")}
-                  </span>
-                </button>
-              </>
-            )}
-
-            {selectedSourceId && (
-              <>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-350 mx-0.5 sm:mx-1 shrink-0" />
-                <div className="flex items-center gap-1.5 sm:gap-2 text-teal-600 shrink-0">
-                  <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-500" />
-                  <span className="font-black truncate max-w-[120px] sm:max-w-[150px] md:max-w-[250px]">
-                    {(() => {
-                      const name =
-                        sources.find((s) => s.id === selectedSourceId)?.name ||
-                        "Hoja";
-                      const desc = describeSheetName(name);
-                      const code = selectedSourceId
-                        ? codeForSheet(selectedSourceId)
-                        : "";
-                      return code ? `${desc} (${code})` : desc;
-                    })()}
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Action Buttons underneath breadcrumbs */}
-          <div className="flex items-center gap-2 sm:gap-2.5 w-full md:w-auto overflow-x-auto pb-1 sm:pb-0 hide-scrollbar justify-start xl:justify-end shrink-0">
-            {/* Buscar un producto en todas las hojas de la UNGET, sin abrirlas una por una.
-                Solo con una UNGET abierta, que es cuando hay dónde buscar. */}
-            {selectedUngetIndex !== null && (
-              /* Solo el icono, y al pasar el ratón se estira y dice cómo se llama. Ocupa lo
-                 que ocupa un icono en una barra donde los otros dos botones ya llevan texto,
-                 y el nombre sigue estando para quien lo necesite: también al tabular, que en
-                 una pantalla táctil es la única forma de que aparezca. */
-              <button
-                type="button"
-                onClick={() => setIsNetworkSearchOpen(true)}
-                title="Buscar un producto en todos los establecimientos (Ctrl+K)"
-                aria-label="Búsqueda avanzada"
-                aria-keyshortcuts="Control+K"
-                className="group bg-white border border-teal-200 text-teal-700 h-[34px] sm:h-[42px] rounded-full font-bold text-xs sm:text-sm hover:border-teal-400 hover:bg-teal-50 focus-visible:border-teal-500 focus-visible:bg-teal-50 focus-visible:outline-none transition-all duration-300 flex items-center overflow-hidden shadow-sm whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                {/* El icono ocupa una caja tan ancha como alta, para que en reposo el botón
-                    sea un círculo y no un óvalo. Nada de relleno horizontal en el botón. */}
-                <span className="flex h-full w-8 shrink-0 items-center justify-center sm:w-10">
-                  <Search className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-teal-600" />
-                </span>
-                {/* `max-w` porque un ancho automático no se puede animar. Con `border-box`
-                    el relleno se recoge con él, así que en reposo no ocupa nada. */}
-                <span className="flex max-w-0 items-center overflow-hidden pr-0 opacity-0 transition-all duration-300 group-hover:max-w-[15rem] group-hover:pr-4 group-hover:opacity-100 group-focus-visible:max-w-[15rem] group-focus-visible:pr-4 group-focus-visible:opacity-100">
-                  Búsqueda avanzada
-                  <kbd className="hidden lg:inline ml-2 rounded border border-teal-200 bg-teal-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-teal-600">
-                    Ctrl K
-                  </kbd>
-                </span>
-              </button>
-            )}
-            {canManageConfigs && (
-              <button
-                onClick={() => {
-                  if (user) {
-                    setTempUrls([...scriptUrls]);
-                  }
-                  setIsConfigOpen(!isConfigOpen);
-                }}
-                className="bg-white border border-slate-200 text-slate-700 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm whitespace-nowrap shrink-0"
-              >
-                <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-slate-500" />
-                Configurar
-              </button>
-            )}
-            <button
-              id="sync-btn"
-              onClick={() => fetchData()}
-              disabled={isLoading || isSilentSyncing}
-              className="flex-1 sm:flex-none bg-teal-600 text-white px-4 py-2 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:bg-teal-700 hover:shadow-md transition-all disabled:opacity-50 disabled:hover:shadow-none flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm whitespace-nowrap"
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`}
-              />
-              {isLoading
-                ? "Sincronizando..."
-                : isSilentSyncing
-                  ? "Verificando..."
-                  : "Sincronizar"}
-            </button>
-          </div>
         </div>
       </div>
 
@@ -5821,7 +5759,7 @@ function processSheet(sheet) {
         {/* TOOLBAR */}
         <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col gap-4">
           {/* Search & Actions */}
-          <div className="flex flex-col md:flex-row gap-3 items-center justify-between w-full">
+          <div className={`flex gap-3 items-center justify-between w-full ${viewLevel === "data" ? "flex-row" : "flex-col md:flex-row"}`}>
             <div className="relative flex-1 w-full md:max-w-[50%] group">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
@@ -5956,7 +5894,7 @@ function processSheet(sheet) {
               </div>
             )}
 
-            <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 pt-1 md:pt-0 md:ml-auto pb-1 relative z-30">
+            <div className={`flex items-center gap-2 overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 md:ml-auto relative z-30 ${viewLevel === "data" ? "w-auto" : "w-full md:w-auto pt-1 md:pt-0 pb-1"}`}>
               {viewLevel === "data" && (
                 <>
                   {/* Con puestos comunales y «Todos», se elige cómo armar el Excel. Con un
@@ -5967,10 +5905,11 @@ function processSheet(sheet) {
                   ) : (
                     <button
                       onClick={() => exportCurrentSheetToExcel()}
-                      className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
+                      aria-label="Exportar stock"
+                      className="flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
                     >
-                      <Download className="h-4 w-4 text-emerald-600 shrink-0" />{" "}
-                      Exportar Stock
+                      <Download className="h-4 w-4 text-emerald-600 shrink-0" />
+                      <span className="hidden sm:inline">Exportar Stock</span>
                     </button>
                   )}
                 </>
