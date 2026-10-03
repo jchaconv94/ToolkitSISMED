@@ -46,7 +46,7 @@ import { NotificationsProvider } from './contexts/NotificationsContext';
 import { NotificationBell } from './components/NotificationBell';
 import { AssignedIpressStockModule } from './components/AssignedIpressStockModule';
 import { AnalysisExclusionsModule } from './components/AnalysisExclusionsModule';
-import { MODULE_HEADER_MEDIA, ModuleHeaderProvider, type ModuleHeaderOverride } from './contexts/ModuleHeaderContext';
+import { ModuleHeaderProvider, type ModuleHeaderOverride } from './contexts/ModuleHeaderContext';
 import { APP_BASE, moduleForPath, pathForModule, pathForView, viewForLocation } from './services/appRoutes';
 
 const SuspenseFallback = () => (
@@ -162,8 +162,9 @@ const AuthenticatedApp: React.FC = () => {
     const [moduleHeader, setModuleHeader] = useState<ModuleHeaderOverride | null>(null);
 
     const volver = useCallback(() => {
-        // En el celular, dentro de un nivel del módulo, la flecha sube un nivel.
-        if (moduleHeader?.onBack && window.matchMedia(MODULE_HEADER_MEDIA).matches) {
+        // Dentro de un nivel del módulo (UNGET u hoja de Consulta Stock), la flecha de la
+        // cabecera sube un nivel; el módulo ya no tiene flecha propia.
+        if (moduleHeader?.onBack) {
             moduleHeader.onBack();
             return;
         }

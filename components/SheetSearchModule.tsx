@@ -4874,19 +4874,7 @@ function processSheet(sheet) {
       <div className={`px-0 pt-0 sm:px-10 sm:pb-3 sm:pt-6 lg:px-14 xl:px-16 ${viewLevel === "data" ? "pb-0" : "pb-1"}`}>
         {viewLevel !== "ungets" && (
         <div className="hidden items-center gap-2 sm:flex sm:gap-3">
-          {/* La flecha está a la izquierda, donde se mira, y dice a dónde lleva. */}
-          {destinoDeVolver && (
-            <button
-              type="button"
-              onClick={volverUnNivel}
-              title={`Volver a ${destinoDeVolver}`}
-              aria-label={`Volver a ${destinoDeVolver}`}
-              className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:border-teal-300 hover:text-teal-700"
-            >
-              <ArrowLeft className="h-[18px] w-[18px] transition-transform group-hover:-translate-x-0.5" />
-            </button>
-          )}
-
+          {/* Sin flecha propia: la de la cabecera de la app ya sube un nivel. */}
           {/* Dónde estoy: arriba, pequeño y pulsable, el nivel anterior; abajo, el actual. */}
           <div className="min-w-0 flex-1">
             {viewLevel === "data" && selectedUngetIndex !== null && (

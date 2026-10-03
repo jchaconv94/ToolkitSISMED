@@ -5,8 +5,9 @@ import React, { createContext, useContext, useEffect, useRef } from "react";
  *
  * Un módulo con niveles (Consulta Stock: panel regional → UNGET → hoja) pone aquí el
  * nivel en que está. En el celular la cabecera de la app muestra ese título en lugar del
- * nombre del módulo, y su flecha «volver» sube un nivel con `onBack` en vez de salir del
- * módulo. En escritorio no cambia nada: el módulo pinta su propia ruta de migas.
+ * nombre del módulo (en escritorio el módulo pinta su propia ruta de migas). En cualquier
+ * ancho, la flecha «volver» de la cabecera sube un nivel con `onBack` en vez de salir del
+ * módulo: por eso el módulo no lleva flecha propia.
  */
 export interface ModuleHeaderOverride {
   title: string;
@@ -18,9 +19,6 @@ export interface ModuleHeaderOverride {
 const ModuleHeaderContext = createContext<(override: ModuleHeaderOverride | null) => void>(() => {});
 
 export const ModuleHeaderProvider = ModuleHeaderContext.Provider;
-
-/** Ancho por debajo del cual manda el título del módulo (el `sm` de Tailwind). */
-export const MODULE_HEADER_MEDIA = "(max-width: 639px)";
 
 /** Publica el título del nivel actual; `null` devuelve la cabecera al nombre del módulo. */
 export const useModuleHeaderOverride = (override: ModuleHeaderOverride | null) => {
