@@ -82,6 +82,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { module: "SIG_SEARCH", label: "Consulta Stock", shortLabel: "Consulta", description: "Stock de toda la red", icon: Database },
       { module: "IPRESS_STOCK", label: "Stock SISMED", shortLabel: "Stock SISMED", description: "Stock de su establecimiento", icon: FileSpreadsheet },
+      { module: "ADMIN_STOCK_ASSIGN", label: "Columnas de Stock", shortLabel: "Columnas", description: "Columnas que ve cada establecimiento", icon: Columns3 },
     ],
   },
   {
@@ -107,7 +108,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { module: "ADMIN_FACILITIES", label: "Establecimientos", shortLabel: "Establecimientos", description: "DIRESA, UNGET e IPRESS", icon: Building2 },
       { module: "ADMIN_CATALOGS", label: "Regímenes y Profesiones", shortLabel: "Regímenes", description: "Catálogos de personal", icon: Briefcase },
       { module: "ADMIN_PARAMS", label: "Parámetros del Sistema", shortLabel: "Parámetros", description: "Configuración general", icon: SlidersHorizontal },
-      { module: "ADMIN_STOCK_ASSIGN", label: "Columnas de Stock", shortLabel: "Columnas", description: "Qué ve cada establecimiento", icon: Columns3 },
     ],
   },
 ];
