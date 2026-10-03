@@ -28,9 +28,6 @@ import { useDropdownPosition } from "../hooks/useDropdownPosition";
 
 type ModuleTab = "establishments";
 
-const MODULE_TABS: Array<{ id: ModuleTab; label: string; icon: React.ElementType }> = [
-  { id: "establishments", label: "Establecimientos", icon: KeyRound },
-];
 
 const PAGE_SIZE = 10;
 
@@ -84,7 +81,7 @@ type PendingAction =
 
 /** Claves de envío y las PC de cada establecimiento, en una sola pestaña. */
 export const AdminSendKeysModule: React.FC = () => {
-  const [tab, setTab] = useState<ModuleTab>("establishments");
+  const tab: ModuleTab = "establishments";
 
   const [keys, setKeys] = useState<SendKeyRow[]>([]);
   const [devices, setDevices] = useState<Awaited<ReturnType<typeof toolkitDevicesApi.overview>>>([]);
@@ -181,7 +178,6 @@ export const AdminSendKeysModule: React.FC = () => {
     }
   };
 
-  const tabs = MODULE_TABS;
   const bell = (
     <AlertsBell
       alerts={alerts}
@@ -194,24 +190,8 @@ export const AdminSendKeysModule: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Una sola pestaña: en el celular sobra; la campana va junto al buscador. */}
+      {/* Una sola pestaña: no se muestra. En escritorio quedan arriba las versiones vigentes y la campana. */}
       <div className="hidden items-center gap-2 md:flex">
-        <div className="flex min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:flex-none" role="tablist">
-          {tabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={tab === id}
-              onClick={() => setTab(id)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-1.5 text-[12.5px] font-bold transition-colors sm:flex-none ${
-                tab === id ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              <Icon className="h-4 w-4 shrink-0" /> <span className="truncate">{label}</span>
-            </button>
-          ))}
-        </div>
         {tab === "establishments" && (
           <div className="ml-auto hidden items-center gap-2 sm:flex">
             {latest && (
