@@ -39,6 +39,8 @@ export interface NotificationsState {
   /** Desde cuándo está cada aviso a la vista (ms). */
   sinceOf: (notice: Notice) => number | undefined;
   markAllSeen: () => void;
+  /** Marca como visto solo ese aviso (al abrir su acción). */
+  markNoticeSeen: (notice: Notice) => void;
   refresh: () => void;
   checking: boolean;
   lastChecked: number | null;
@@ -197,6 +199,15 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     });
   }, [notices, username]);
 
+  const markNoticeSeen = useCallback((notice: Notice) => {
+    if (!username) return;
+    setMemory((prev) => {
+      const next = markSeen(prev, [notice]);
+      saveNoticeMemory(username, next);
+      return next;
+    });
+  }, [username]);
+
   const value: NotificationsState = {
     enabled,
     notices,
@@ -204,6 +215,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     isUnseen: (notice) => isUnseen(notice, memory),
     sinceOf: (notice) => memory.since[notice.id],
     markAllSeen,
+    markNoticeSeen,
     refresh: () => void refresh(),
     checking,
     lastChecked,

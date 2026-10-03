@@ -54,7 +54,7 @@ const useTick = (active: boolean) => {
 const NoticeRow: React.FC<{ notice: Notice; unseen: boolean; when: string; onAction: (notice: Notice) => void }> = ({ notice, unseen, when, onAction }) => {
   const Icon = ICONS[notice.icon];
   return (
-    <li className="flex gap-3 px-4 py-3.5">
+    <li onClick={() => onAction(notice)} className="flex cursor-pointer gap-3 px-4 py-3.5 transition-colors hover:bg-slate-50">
       <span className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-xl ${toneIconClass[notice.tone]} ${unseen ? "" : "opacity-60"}`}>
         <Icon aria-hidden="true" className="h-[18px] w-[18px]" />
         {unseen && <span aria-label="Sin ver" className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />}
@@ -69,7 +69,7 @@ const NoticeRow: React.FC<{ notice: Notice; unseen: boolean; when: string; onAct
           <span className={`text-[11px] font-semibold text-slate-400 ${unseen ? "" : "opacity-60"}`}>{when}</span>
           <button
             type="button"
-            onClick={() => onAction(notice)}
+            onClick={(event) => { event.stopPropagation(); onAction(notice); }}
             className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded text-[12.5px] font-bold text-teal-700 hover:text-teal-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
           >
             {notice.action.label}
@@ -147,7 +147,7 @@ const PanelFooter: React.FC = () => {
 
 export const NotificationBell: React.FC<{ onNavigate: (module: AppModule) => void }> = ({ onNavigate }) => {
   const notifications = useNotifications();
-  const { enabled, notices, unseen, markAllSeen } = notifications;
+  const { enabled, notices, unseen, markAllSeen, markNoticeSeen } = notifications;
   const [open, setOpen] = useState(false);
   const desktop = useIsDesktop();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -188,7 +188,9 @@ export const NotificationBell: React.FC<{ onNavigate: (module: AppModule) => voi
   useEffect(() => { if (!enabled) setOpen(false); }, [enabled]);
   if (!enabled) return null;
 
+  // Abrir la acción de un aviso lo da por visto: deja de sumar en la campana.
   const onAction = (notice: Notice) => {
+    markNoticeSeen(notice);
     if (notice.action.tab === "consumo") requestBackupsTab("consumo");
     close(false);
     onNavigate(notice.action.module);
