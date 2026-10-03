@@ -15,8 +15,10 @@ const visiblePages = (page: number, totalPages: number): Array<number | "…"> =
 };
 
 /**
- * Pie de tabla con «Mostrando 1–10 de 22» y los botones de página. En pantallas
- * pequeñas se reduce a anterior / «Página 1 de 3» / siguiente.
+ * Pie de tabla con «Mostrando 1–10 de 22» y los botones de página numerados: toda tabla de
+ * escritorio se pagina con este componente. En el celular las listas no se paginan, se
+ * cargan al bajar (`IncrementalList.tsx`); los módulos que aún no se adaptaron muestran
+ * aquí anterior / «Página 1 de 3» / siguiente.
  */
 export const TablePagination: React.FC<{
   page: number;

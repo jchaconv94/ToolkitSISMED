@@ -76,10 +76,15 @@ describe("loadAssignedIpressStock", () => {
 
 describe("getExpirationState", () => {
   const hoy = new Date("2026-10-15T10:00:00");
-  it("vencido, por vencer este mes o normal; sin saldo nunca vence", () => {
-    expect(getExpirationState({ Saldo: "3", Fec_Vencim: "01/09/2026" }, hoy)).toBe("EXPIRED");
-    expect(getExpirationState({ Saldo: "3", Fec_Vencim: "2026-10-30" }, hoy)).toBe("EXPIRING");
-    expect(getExpirationState({ Saldo: "3", Fec_Vencim: "01/01/27" }, hoy)).toBe("NORMAL");
-    expect(getExpirationState({ Saldo: "0", Fec_Vencim: "01/09/2026" }, hoy)).toBe("NORMAL");
+  it("vencido, por vencer dentro de la ventana o normal; sin saldo nunca vence", () => {
+    expect(getExpirationState({ Saldo: "3", Fec_Vencim: "01/09/2026" }, 90, hoy)).toBe("EXPIRED");
+    expect(getExpirationState({ Saldo: "3", Fec_Vencim: "2026-10-15" }, 90, hoy)).toBe("EXPIRING");
+    expect(getExpirationState({ Saldo: "3", Fec_Vencim: "2027-01-13" }, 90, hoy)).toBe("EXPIRING");
+    expect(getExpirationState({ Saldo: "3", Fec_Vencim: "2027-01-14" }, 90, hoy)).toBe("NORMAL");
+    expect(getExpirationState({ Saldo: "0", Fec_Vencim: "01/09/2026" }, 90, hoy)).toBe("NORMAL");
+  });
+  it("la ventana sale del parámetro", () => {
+    expect(getExpirationState({ Saldo: "3", Fec_Vencim: "2026-11-20" }, 30, hoy)).toBe("NORMAL");
+    expect(getExpirationState({ Saldo: "3", Fec_Vencim: "2026-11-20" }, 60, hoy)).toBe("EXPIRING");
   });
 });

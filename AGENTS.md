@@ -233,6 +233,8 @@ justamente porque cuando estaba repetida solo se actualizó uno.
 - **Color con significado:** teal/cyan = información/stock; emerald = aplicado/cerrado/vigente; amber = pendiente/advertencia; red = vencido/error/bloqueo; blue = vista supervisora; slate = neutro.
 - **Densidad:** 1 tarjeta de cabecera, máximo 4–5 KPIs, filtros en **una sola barra** compacta; fechas y filtros avanzados en popover/colapsable, nunca en tarjeta alta.
 - **Tablas:** encabezado sticky, filas 52–60 px, descripción del producto a 13–14 px (no tamaño título), código SISMED en chip/monospace, estados en chips, acciones a la derecha.
+- **Paginación numerada en toda tabla de escritorio; en el celular, lista que carga al bajar** (pedido del usuario, 2026-10-03). Ninguna tabla sin paginar: en escritorio `TablePagination` (`components/ui/TablePagination.tsx`); en el celular nada de páginas, `useIncrementalCount` + `LoadMoreSentinel` (`components/ui/IncrementalList.tsx`). Ejemplo: `AssignedIpressStockModule`.
+- **Modelo único de KPIs** (2026-10-03): `KpiCard watermark` dentro de `KpiStrip`, a todo el ancho, con `cols` según cuántos haya (`md:grid-cols-3`, `md:grid-cols-2 xl:grid-cols-4`…). Si filtran la tabla, van con `onClick` y `active`.
 - **Operación ≠ supervisión:** en vista propia **no** mostrar columnas de Ubicación/Ámbito (son implícitas en la sesión). Solo el supervisor ve filtros territoriales.
 - **Modales:** header fijo + body con scroll interno + footer fijo; sin scroll horizontal; `max-w-3xl` formulario simple, `max-w-5xl` operación con lista, `max-w-6xl` comparación compleja.
 - **Nunca `window.confirm` / `alert`.** Usar modal propio (`components/ui/ConfirmationDialog.tsx`) para toda acción irreversible.

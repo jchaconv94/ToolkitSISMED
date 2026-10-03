@@ -1,13 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  Building2,
-  ChevronLeft,
-  ChevronRight,
+  CalendarClock,
   Clock,
   Download,
-  FileSpreadsheet,
-  Filter,
   Package,
   RefreshCw,
   Search,
@@ -30,6 +26,11 @@ import {
   type FacilitySheetLink,
 } from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
+import { EmptyState, KpiCard, KpiStrip, TableHeaderCell as HeaderCell, filterInputClass } from "./ui/kit";
+import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
+import { TablePagination } from "./ui/TablePagination";
+import { noticeSettingsApi } from "../services/noticeSettings";
+import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, type NoticeThresholds, noticeWhen } from "../services/notifications";
 import {
   DEFAULT_STOCK_COLUMN_KEYS,
   STOCK_COLUMNS,
@@ -37,12 +38,6 @@ import {
 import { StockAssignment } from "../types";
 
 type ExpirationFilter = "ALL" | "EXPIRED" | "EXPIRING";
-
-const EXPIRATION_FILTER_OPTIONS: Array<{ value: ExpirationFilter; label: string }> = [
-  { value: "ALL", label: "Todos los registros" },
-  { value: "EXPIRING", label: "Por vencer este mes" },
-  { value: "EXPIRED", label: "Productos vencidos" }
-];
 
 const normalizeKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -69,9 +64,18 @@ export const AssignedIpressStockModule: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState("");
   const [search, setSearch] = useState("");
   const [expirationFilter, setExpirationFilter] = useState<ExpirationFilter>("ALL");
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
+  const [lastUpdateAt, setLastUpdateAt] = useState(0);
+  /** Ventana de «por vencer» y días sin actualizar: los mismos parámetros que usa la campana. */
+  const [thresholds, setThresholds] = useState<NoticeThresholds>(DEFAULT_NOTICE_THRESHOLDS);
+  const expiryDays = thresholds.expiryDays;
   const pageSize = 50;
+
+  useEffect(() => {
+    let vigente = true;
+    void noticeSettingsApi.getOrDefault().then(value => { if (vigente) setThresholds(value); });
+    return () => { vigente = false; };
+  }, []);
 
   const loadStock = useCallback(async (showSuccess = false) => {
     if (!facilityCode) {
@@ -102,6 +106,7 @@ export const AssignedIpressStockModule: React.FC = () => {
       setRows(result.rows);
       setLoadedSheet(result.sheetName);
       setLastUpdate(result.lastUpdate);
+      setLastUpdateAt(result.lastUpdateAt);
       if (result.message) {
         setErrorMessage(result.message);
         return;
@@ -112,6 +117,7 @@ export const AssignedIpressStockModule: React.FC = () => {
       setRows([]);
       setLoadedSheet("");
       setLastUpdate("");
+      setLastUpdateAt(0);
       setErrorMessage(message);
       toast.error(message);
     } finally {
@@ -139,19 +145,21 @@ export const AssignedIpressStockModule: React.FC = () => {
   const filteredRows = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("es");
     return rows.filter(row => {
-      if (expirationFilter !== "ALL" && getExpirationState(row) !== expirationFilter) return false;
+      if (expirationFilter !== "ALL" && getExpirationState(row, expiryDays) !== expirationFilter) return false;
       if (!query) return true;
       return visibleColumns.some(column => String(row[column.key] ?? "").toLocaleLowerCase("es").includes(query));
     });
-  }, [rows, search, visibleColumns, expirationFilter]);
+  }, [rows, search, visibleColumns, expirationFilter, expiryDays]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const visibleRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
+  // En el celular no hay páginas: la lista crece al bajar.
+  const mobileList = useIncrementalCount(filteredRows.length, `${search}|${expirationFilter}|${loadedSheet}`);
+  const mobileRows = filteredRows.slice(0, mobileList.count);
   const metrics = useMemo(() => ({
     lots: rows.length,
-    expiring: rows.filter(row => getExpirationState(row) === "EXPIRING").length,
-    expired: rows.filter(row => getExpirationState(row) === "EXPIRED").length
-  }), [rows]);
+    expiring: rows.filter(row => getExpirationState(row, expiryDays) === "EXPIRING").length,
+    expired: rows.filter(row => getExpirationState(row, expiryDays) === "EXPIRED").length
+  }), [rows, expiryDays]);
 
   const allowedKeys = useMemo(() => new Set(visibleColumns.map(column => column.key)), [visibleColumns]);
   const canShow = (key: string) => allowedKeys.has(key);
@@ -186,43 +194,16 @@ export const AssignedIpressStockModule: React.FC = () => {
     XLSX.writeFile(workbook, `STOCK_SISMED_${facilityCode || "IPRESS"}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
+  const [updateDate, updateTime] = lastUpdate.split(" ");
+  const isStale = lastUpdateAt > 0 && Date.now() - lastUpdateAt >= thresholds.staleDays * DAY_MS;
+  const toggleFilter = (value: ExpirationFilter) => setExpirationFilter(current => (current === value ? "ALL" : value));
+  const textOrDash = (key: string, ...values: unknown[]) => {
+    if (!canShow(key)) return "";
+    return values.map(value => String(value ?? "").trim()).find(Boolean) || "";
+  };
+
   return (
-    <div className="space-y-5 animate-in fade-in duration-300">
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="rounded-2xl bg-teal-50 p-3 text-teal-700"><FileSpreadsheet className="h-6 w-6" /></div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-black text-slate-900">Stock SISMED</h2>
-                <span className="rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-700">Solo lectura</span>
-              </div>
-              <p className="mt-1 text-sm text-slate-500">Existencia propia del establecimiento, sin acceso al stock de otras IPRESS.</p>
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-bold text-slate-600">
-                <span className="inline-flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5 text-teal-600" />{facilityName}</span>
-                {facilityCode && <span className="font-mono text-slate-400">IPRESS {facilityCode}</span>}
-              </div>
-            </div>
-          </div>
-          <button type="button" onClick={() => void loadStock(true)} disabled={loading || !facilityCode} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Actualizar
-          </button>
-        </div>
-
-        {loadedSheet && (
-          <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs">
-            <span className="inline-flex items-center gap-2 rounded-lg bg-violet-50 px-2.5 py-1.5 font-black text-violet-700">
-              <FileSpreadsheet className="h-4 w-4" />
-              {`Hoja: ${link?.sheet?.name || assignment?.sheetName}`}
-            </span>
-            {link?.status === "dentro-de-su-ipress" && (
-              <span className="text-slate-500">Puesto comunal: su stock viene dentro de la hoja de su IPRESS, separado por su ALMCOD.</span>
-            )}
-            {lastUpdate && <span className="text-slate-500">Última actualización: <strong className="text-slate-700">{lastUpdate}</strong></span>}
-          </div>
-        )}
-      </section>
-
+    <div className="space-y-4 animate-in fade-in duration-300">
       {loading ? (
         <div className="flex justify-center rounded-2xl border border-slate-200 bg-white py-20 shadow-sm"><div className="h-9 w-9 animate-spin rounded-full border-2 border-teal-500 border-t-transparent" /></div>
       ) : errorMessage ? (
@@ -240,119 +221,138 @@ export const AssignedIpressStockModule: React.FC = () => {
         </section>
       ) : (
         <>
-          <section className="flex flex-wrap gap-3">
-            <Metric icon={<Package className="h-4 w-4" />} label="Lotes" value={metrics.lots.toLocaleString("es-PE")} tone="teal" />
-            <Metric icon={<Clock className="h-4 w-4" />} label="Por vencer" value={metrics.expiring.toLocaleString("es-PE")} tone="amber" />
-            <Metric icon={<AlertTriangle className="h-4 w-4" />} label="Vencidos" value={metrics.expired.toLocaleString("es-PE")} tone="red" />
-          </section>
+          {/* Los indicadores son también el filtro: tocar uno muestra solo esos lotes. */}
+          <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard watermark tone="info" icon={<Package />} label="Lotes" value={metrics.lots.toLocaleString("es-PE")} hint="en la hoja del establecimiento" onClick={() => setExpirationFilter("ALL")} active={expirationFilter === "ALL"} />
+            <KpiCard watermark tone="warning" icon={<Clock />} label="Por vencer" value={metrics.expiring.toLocaleString("es-PE")} hint={`en los próximos ${expiryDays} días`} onClick={() => toggleFilter("EXPIRING")} active={expirationFilter === "EXPIRING"} />
+            <KpiCard watermark tone="danger" icon={<AlertTriangle />} label="Vencidos" value={metrics.expired.toLocaleString("es-PE")} hint="todavía con saldo" onClick={() => toggleFilter("EXPIRED")} active={expirationFilter === "EXPIRED"} />
+            {/* Ámbar con el mismo umbral de días sin actualizar que usa la campana. */}
+            <KpiCard watermark tone={isStale ? "warning" : "neutral"} icon={<CalendarClock />} label="Última actualización" value={updateDate || "—"} hint={lastUpdateAt ? `${updateTime ? `a las ${updateTime.slice(0, 5)} · ` : ""}${noticeWhen(lastUpdateAt)}` : "sin fecha en la hoja"} />
+          </KpiStrip>
 
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-col gap-3 border-b border-slate-100 p-4 md:flex-row md:items-center md:justify-between">
-              <div className="relative w-full max-w-2xl">
-                <label className="relative block">
-                  <span className="sr-only">Buscar medicamento en el stock</span>
-                  <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
-                  <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar medicamento en esta hoja..." className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-28 text-sm font-semibold text-slate-800 outline-none transition-all placeholder:text-slate-400 hover:border-slate-300 focus:border-teal-500 focus:bg-white focus:ring-4 focus:ring-teal-100" />
-                  {search && (
-                    <button type="button" onClick={() => setSearch("")} aria-label="Limpiar búsqueda" className="absolute right-[92px] top-2.5 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>
-                  )}
-                </label>
-                <button type="button" aria-expanded={filtersOpen} aria-haspopup="menu" onClick={() => setFiltersOpen(open => !open)} className="absolute right-1.5 top-1.5 inline-flex h-7 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 shadow-sm hover:bg-slate-50">
-                  <Filter className="h-3.5 w-3.5 text-teal-600" /> Filtros
-                  {expirationFilter !== "ALL" && <span className="h-2 w-2 rounded-full bg-teal-500" />}
-                </button>
-                {filtersOpen && (
-                  <div className="absolute right-0 top-12 z-40 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
-                    {EXPIRATION_FILTER_OPTIONS.map(option => (
-                      <button key={option.value} type="button" onClick={() => { setExpirationFilter(option.value); setFiltersOpen(false); }} className={`w-full rounded-lg px-3 py-2 text-left text-xs font-bold ${expirationFilter === option.value ? "bg-teal-50 text-teal-700" : "text-slate-600 hover:bg-slate-50"}`}>{option.label}</button>
-                    ))}
-                  </div>
+            <div className="flex items-center gap-2 border-b border-slate-100 p-3 sm:p-4">
+              <label className="relative min-w-0 flex-1 sm:max-w-xl">
+                <span className="sr-only">Buscar en el stock</span>
+                <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar producto, código o lote" className={`${filterInputClass} bg-slate-50 pl-10 pr-9 focus:bg-white`} />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")} aria-label="Limpiar búsqueda" className="absolute right-2 top-2.5 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>
                 )}
-              </div>
-
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
-                {metrics.expired > 0 && <button type="button" onClick={() => setExpirationFilter("EXPIRED")} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-red-100 bg-white px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"><AlertTriangle className="h-3.5 w-3.5" />{metrics.expired} Vencidos</button>}
-                {metrics.expiring > 0 && <button type="button" onClick={() => setExpirationFilter("EXPIRING")} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-100 bg-white px-3 py-2 text-xs font-bold text-amber-600 hover:bg-amber-50"><Clock className="h-3.5 w-3.5" />{metrics.expiring} Por vencer</button>}
-                <button type="button" onClick={exportStock} className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"><Download className="h-4 w-4 text-emerald-600" />Exportar Stock</button>
-              </div>
+              </label>
+              <span className="ml-auto" />
+              <button type="button" onClick={() => void loadStock(true)} disabled={loading || !facilityCode} aria-label="Actualizar" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
+                <RefreshCw className={`h-4 w-4 text-teal-600 ${loading ? "animate-spin" : ""}`} /><span className="hidden sm:inline">Actualizar</span>
+              </button>
+              <button type="button" onClick={exportStock} aria-label="Exportar a Excel" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50">
+                <Download className="h-4 w-4 text-emerald-600" /><span className="hidden sm:inline">Exportar</span>
+              </button>
             </div>
 
-            {filteredRows.length === 0 ? (
-              <div className="p-10 text-center text-sm text-slate-500">No se encontraron registros con el criterio indicado.</div>
-            ) : (
-              <div className="max-h-[calc(100vh-410px)] overflow-auto custom-scrollbar">
-                <table className="block min-w-full text-left sm:table">
-                  <thead className="sticky top-0 z-20 hidden bg-slate-50 shadow-sm sm:table-header-group">
-                    <tr>
-                      {showsPharmacy && <TableHeader>Código IPRESS</TableHeader>}
-                      <TableHeader>Cód. SISMED / SIGA</TableHeader>
-                      <TableHeader className="min-w-[300px]">Descripción del producto</TableHeader>
-                      <TableHeader align="right">Saldo</TableHeader>
-                      <TableHeader>Lote / Venc.</TableHeader>
-                      <TableHeader>Tipo Sum.</TableHeader>
-                      <TableHeader>F. Finan.</TableHeader>
-                      {canShow("FECHA_DEL_EQUIPO") && <TableHeader>Fecha del equipo</TableHeader>}
-                      {canShow("ULTIMA_ACTUALIZACION") && <TableHeader>Última actualización</TableHeader>}
-                    </tr>
-                  </thead>
-                  <tbody className="block bg-slate-50 p-3 sm:table-row-group sm:divide-y sm:divide-slate-100 sm:bg-white sm:p-0">
-                    {visibleRows.map((row, index) => (
-                      <tr key={`${String(row.Id_Producto)}-${String(row.Lote)}-${(page - 1) * pageSize + index}`} className="mb-3 block rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:bg-teal-50/40 sm:mb-0 sm:table-row sm:rounded-none sm:border-0 sm:p-0 sm:shadow-none">
-                        <td className="block sm:hidden">
-                          {showsPharmacy && (
-                            <div className="mb-2 border-b border-slate-100 pb-2">
-                              <PharmacyCodeCell label={pharmacyLabelOf(row)} />
-                            </div>
-                          )}
-                          <div className="mb-2 flex items-start justify-between">
-                            <div className="flex flex-col">
-                              <span className="mb-1 w-fit rounded border border-teal-100 bg-teal-50 px-2 py-0.5 text-xs font-black text-teal-700">{canShow("Id_Producto") ? String(row.Id_Producto || "—") : "—"}</span>
-                              <span className="text-[10px] font-bold text-slate-400">{canShow("CODIGO_SIG") ? String(row.CODIGO_SIG || "—") : "—"}</span>
-                            </div>
-                            <div className="text-right"><span className="block text-[9px] font-black uppercase text-slate-400">Saldo</span><span className="text-xl font-black text-teal-600">{canShow("Saldo") ? parseNumber(row.Saldo).toLocaleString("es-PE") : "—"}</span></div>
-                          </div>
-                          <div className="mb-2 text-sm font-bold leading-snug text-slate-900">{canShow("Nombre") ? String(row.Nombre || "—") : "—"}</div>
-                          {canShow("Reg_Sanitario") && <div className="mb-2 text-[10px] text-slate-400">RS: {String(row.Reg_Sanitario || "S/N")}</div>}
-                          <div className="flex items-end justify-between gap-3 text-[10px]">
-                            <div className="font-mono text-slate-500"><div><strong className="text-slate-400">Lote:</strong> {canShow("Lote") ? String(row.Lote || "—") : "—"}</div><div><strong className="text-slate-400">Vence:</strong> {canShow("Fec_Vencim") ? formatStockDate(row.Fec_Vencim) : "—"}</div></div>
-                            <div className="flex gap-1.5"><TypeBadge tone="indigo" value={canShow("DESC_TIPSUM") ? String(row.TIPSUM || row.DESC_TIPSUM || "—") : "—"} title={String(row.DESC_TIPSUM || "")} /><TypeBadge tone="amber" value={canShow("DESC_FFINAN") ? String(row.FFINAN || row.DESC_FFINAN || "—") : "—"} title={String(row.DESC_FFINAN || "")} /></div>
-                          </div>
-                          {(canShow("FECHA_DEL_EQUIPO") || canShow("ULTIMA_ACTUALIZACION")) && (
-                            <div className="mt-2 border-t border-slate-100 pt-2 text-[10px] text-slate-400">
-                              {canShow("FECHA_DEL_EQUIPO") && <div><strong className="text-slate-500">Equipo:</strong> {String(row.FECHA_DEL_EQUIPO || "—")}</div>}
-                              {canShow("ULTIMA_ACTUALIZACION") && <div><strong className="text-slate-500">Actualizado:</strong> {String(row.ULTIMA_ACTUALIZACION || "—")}</div>}
-                            </div>
-                          )}
-                        </td>
-                        {showsPharmacy && (
-                          <td className="hidden whitespace-nowrap px-4 py-3 align-top sm:table-cell">
-                            <PharmacyCodeCell label={pharmacyLabelOf(row)} />
-                          </td>
-                        )}
-                        <td className="hidden whitespace-nowrap px-4 py-3 font-mono text-sm text-slate-500 sm:table-cell"><div className="font-bold text-slate-700">{canShow("Id_Producto") ? String(row.Id_Producto || "—") : "—"}</div><div className="mt-0.5 text-[10px] text-slate-400">{canShow("CODIGO_SIG") ? String(row.CODIGO_SIG || "—") : "—"}</div></td>
-                        <td className="hidden px-4 py-3 text-sm font-medium text-slate-900 sm:table-cell">{canShow("Nombre") ? String(row.Nombre || "—") : "—"}{canShow("Reg_Sanitario") && <div className="mt-0.5 max-w-sm truncate text-[10px] font-normal text-slate-400" title={String(row.Reg_Sanitario || "")}>RS: {String(row.Reg_Sanitario || "S/N")}</div>}</td>
-                        <td className="hidden whitespace-nowrap px-4 py-3 text-right text-sm font-black text-slate-900 sm:table-cell">{canShow("Saldo") ? parseNumber(row.Saldo).toLocaleString("es-PE") : "—"}</td>
-                        <td className="hidden whitespace-nowrap px-4 py-3 text-sm text-slate-500 sm:table-cell"><span className="font-mono text-slate-700">{canShow("Lote") ? String(row.Lote || "—") : "—"}</span><div className="mt-0.5 text-[10px]">Vence: {canShow("Fec_Vencim") ? formatStockDate(row.Fec_Vencim) : "—"}</div></td>
-                        <td className="hidden whitespace-nowrap px-4 py-3 sm:table-cell"><TypeBadge tone="indigo" value={canShow("DESC_TIPSUM") ? String(row.TIPSUM || row.DESC_TIPSUM || "—") : "—"} title={String(row.DESC_TIPSUM || "")} /></td>
-                        <td className="hidden whitespace-nowrap px-4 py-3 sm:table-cell"><TypeBadge tone="amber" value={canShow("DESC_FFINAN") ? String(row.FFINAN || row.DESC_FFINAN || "—") : "—"} title={String(row.DESC_FFINAN || "")} /></td>
-                        {canShow("FECHA_DEL_EQUIPO") && <td className="hidden whitespace-nowrap px-4 py-3 text-sm text-slate-500 sm:table-cell">{String(row.FECHA_DEL_EQUIPO || "—")}</td>}
-                        {canShow("ULTIMA_ACTUALIZACION") && <td className="hidden whitespace-nowrap px-4 py-3 text-sm text-slate-500 sm:table-cell">{String(row.ULTIMA_ACTUALIZACION || "—")}</td>}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {expirationFilter !== "ALL" && (
+              <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2 text-xs font-semibold text-slate-600">
+                <span>Mostrando solo <strong>{expirationFilter === "EXPIRED" ? "vencidos" : `por vencer en ${expiryDays} días`}</strong></span>
+                <button type="button" onClick={() => setExpirationFilter("ALL")} className="font-bold text-teal-700 hover:underline">Ver todos</button>
               </div>
             )}
 
-            {filteredRows.length > pageSize && (
-              <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
-                <span className="text-xs text-slate-500">Página <strong>{page}</strong> de <strong>{totalPages}</strong></span>
-                <div className="flex gap-2">
-                  <button type="button" aria-label="Página anterior" onClick={() => setPage(current => Math.max(1, current - 1))} disabled={page === 1} className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
-                  <button type="button" aria-label="Página siguiente" onClick={() => setPage(current => Math.min(totalPages, current + 1))} disabled={page === totalPages} className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
+            {filteredRows.length === 0 ? (
+              <EmptyState icon={<Search className="h-5 w-5" />} title="Sin resultados" description="No hay lotes que coincidan con la búsqueda o el filtro." />
+            ) : (
+              <>
+                {/* Celular: una tarjeta compacta por lote. */}
+                <ul className="divide-y divide-slate-100 sm:hidden">
+                  {mobileRows.map((row, index) => {
+                    const state = getExpirationState(row, expiryDays);
+                    const tipo = textOrDash("DESC_TIPSUM", row.TIPSUM, row.DESC_TIPSUM);
+                    const fuente = textOrDash("DESC_FFINAN", row.FFINAN, row.DESC_FFINAN);
+                    return (
+                      <li key={`${String(row.Id_Producto)}-${String(row.Lote)}-${index}`} className="flex gap-3 px-4 py-3">
+                        <div className="min-w-0 flex-1">
+                          {showsPharmacy && <PharmacyCodeCell label={pharmacyLabelOf(row)} className="mb-1" />}
+                          <p className="text-[14px] font-bold leading-snug text-slate-900">{canShow("Nombre") ? String(row.Nombre || "—") : "—"}</p>
+                          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-slate-500">
+                            {canShow("Id_Producto") && <span className="rounded bg-slate-100 px-1.5 font-mono text-[11px] font-bold text-slate-700">{String(row.Id_Producto || "—")}</span>}
+                            {canShow("Lote") && <span>Lote <span className="font-mono text-slate-700">{String(row.Lote || "—")}</span></span>}
+                            {canShow("Fec_Vencim") && <span>Vence {formatStockDate(row.Fec_Vencim)}</span>}
+                            {state !== "NORMAL" && <ExpiryChip state={state} />}
+                          </p>
+                          {(tipo || fuente) && (
+                            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                              {tipo && <span title={String(row.DESC_TIPSUM || "")}>{tipo}</span>}
+                              {tipo && fuente && <span className="text-slate-300">·</span>}
+                              {fuente && <span title={String(row.DESC_FFINAN || "")}>{fuente}</span>}
+                            </p>
+                          )}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className={`text-lg font-black leading-tight ${state === "EXPIRED" ? "text-red-600" : "text-slate-900"}`}>{canShow("Saldo") ? parseNumber(row.Saldo).toLocaleString("es-PE") : "—"}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Saldo</p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="sm:hidden">
+                  <LoadMoreSentinel hasMore={mobileList.hasMore} onLoadMore={mobileList.loadMore} shown={mobileList.count} total={filteredRows.length} itemLabel="lotes" />
                 </div>
-              </div>
+
+                {/* Escritorio: tabla. */}
+                <div className="hidden max-h-[calc(100vh-370px)] min-h-[320px] overflow-auto custom-scrollbar sm:block">
+                  <table className="min-w-full text-left">
+                    <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_rgb(226_232_240)]">
+                      <tr>
+                        {showsPharmacy && <HeaderCell>Código IPRESS</HeaderCell>}
+                        <HeaderCell>Cód. SISMED / SIGA</HeaderCell>
+                        <HeaderCell>Descripción del producto</HeaderCell>
+                        <HeaderCell align="right">Saldo</HeaderCell>
+                        <HeaderCell>Lote / Vencimiento</HeaderCell>
+                        <HeaderCell>Tipo sum.</HeaderCell>
+                        <HeaderCell>F. finan.</HeaderCell>
+                        {canShow("FECHA_DEL_EQUIPO") && <HeaderCell>Fecha del equipo</HeaderCell>}
+                        {canShow("ULTIMA_ACTUALIZACION") && <HeaderCell>Última actualización</HeaderCell>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {visibleRows.map((row, index) => {
+                        const state = getExpirationState(row, expiryDays);
+                        const tipo = textOrDash("DESC_TIPSUM", row.TIPSUM, row.DESC_TIPSUM);
+                        const fuente = textOrDash("DESC_FFINAN", row.FFINAN, row.DESC_FFINAN);
+                        return (
+                          <tr key={`${String(row.Id_Producto)}-${String(row.Lote)}-${(page - 1) * pageSize + index}`} className="hover:bg-teal-50/40">
+                            {showsPharmacy && <td className="whitespace-nowrap px-4 py-3"><PharmacyCodeCell label={pharmacyLabelOf(row)} /></td>}
+                            <td className="whitespace-nowrap px-4 py-3">
+                              <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[12px] font-bold text-slate-700">{canShow("Id_Producto") ? String(row.Id_Producto || "—") : "—"}</span>
+                              {canShow("CODIGO_SIG") && row.CODIGO_SIG ? <div className="mt-1 font-mono text-[11px] text-slate-400">{String(row.CODIGO_SIG)}</div> : null}
+                            </td>
+                            <td className="min-w-[280px] px-4 py-3">
+                              <p className="text-[13.5px] font-semibold text-slate-900">{canShow("Nombre") ? String(row.Nombre || "—") : "—"}</p>
+                              {canShow("Reg_Sanitario") && row.Reg_Sanitario ? <p className="mt-0.5 max-w-sm truncate text-[11px] text-slate-400" title={String(row.Reg_Sanitario)}>RS: {String(row.Reg_Sanitario)}</p> : null}
+                            </td>
+                            <td className={`whitespace-nowrap px-4 py-3 text-right text-[15px] font-black ${state === "EXPIRED" ? "text-red-600" : "text-slate-900"}`}>{canShow("Saldo") ? parseNumber(row.Saldo).toLocaleString("es-PE") : "—"}</td>
+                            <td className="whitespace-nowrap px-4 py-3 text-[13px]">
+                              <span className="font-mono text-slate-700">{canShow("Lote") ? String(row.Lote || "—") : "—"}</span>
+                              <div className="mt-1 flex items-center gap-2 text-[12px] text-slate-500">
+                                {canShow("Fec_Vencim") ? formatStockDate(row.Fec_Vencim) : "—"}
+                                {state !== "NORMAL" && <ExpiryChip state={state} />}
+                              </div>
+                            </td>
+                            <td className="max-w-[160px] truncate px-4 py-3 text-[12px] text-slate-600" title={String(row.DESC_TIPSUM || "")}>{tipo || <span className="text-slate-300">—</span>}</td>
+                            <td className="max-w-[160px] truncate px-4 py-3 text-[12px] text-slate-600" title={String(row.DESC_FFINAN || "")}>{fuente || <span className="text-slate-300">—</span>}</td>
+                            {canShow("FECHA_DEL_EQUIPO") && <td className="whitespace-nowrap px-4 py-3 text-[12px] text-slate-500">{String(row.FECHA_DEL_EQUIPO || "—")}</td>}
+                            {canShow("ULTIMA_ACTUALIZACION") && <td className="whitespace-nowrap px-4 py-3 text-[12px] text-slate-500">{String(row.ULTIMA_ACTUALIZACION || "—")}</td>}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
+
+            <div className="hidden sm:block">
+              <TablePagination page={page} pageSize={pageSize} total={filteredRows.length} onPageChange={setPage} itemLabel="lotes" />
+            </div>
           </section>
         </>
       )}
@@ -360,26 +360,9 @@ export const AssignedIpressStockModule: React.FC = () => {
   );
 };
 
-const Metric: React.FC<{ icon: React.ReactNode; label: string; value: string; tone: "teal" | "amber" | "red" }> = ({ icon, label, value, tone }) => {
-  const tones = {
-    teal: { icon: "bg-teal-50 text-teal-600", label: "text-teal-600" },
-    amber: { icon: "border border-amber-100 bg-amber-50 text-amber-600", label: "text-amber-600" },
-    red: { icon: "border border-red-100 bg-red-50 text-red-500", label: "text-red-500" }
-  };
-  return (
-    <div className="flex min-w-[145px] items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
-      <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${tones[tone].icon}`}>{icon}</div>
-      <div><div className="text-lg font-black leading-none text-slate-800">{value}</div><div className={`mt-1 text-[10px] font-bold uppercase leading-none ${tones[tone].label}`}>{label}</div></div>
-    </div>
-  );
-};
-
-const TableHeader: React.FC<{ children: React.ReactNode; align?: "left" | "right"; className?: string }> = ({ children, align = "left", className = "" }) => (
-  <th scope="col" className={`sticky top-0 z-20 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-wider text-slate-500 ${align === "right" ? "text-right" : "text-left"} ${className}`}>{children}</th>
-);
-
-const TypeBadge: React.FC<{ tone: "indigo" | "amber"; value: string; title: string }> = ({ tone, value, title }) => (
-  <span title={title} className={`inline-flex max-w-[110px] truncate rounded-md border px-2 py-1 text-[10px] font-bold uppercase ${tone === "indigo" ? "border-indigo-100 bg-indigo-50 text-indigo-700" : "border-amber-100 bg-amber-50 text-amber-700"}`}>
-    {value}
+/** Estado del lote: el color acompaña al texto, nunca va solo. */
+const ExpiryChip: React.FC<{ state: "EXPIRED" | "EXPIRING" }> = ({ state }) => (
+  <span className={`rounded-full border px-2 py-px text-[10.5px] font-black ${state === "EXPIRED" ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+    {state === "EXPIRED" ? "Vencido" : "Por vencer"}
   </span>
 );
