@@ -16,20 +16,20 @@ describe("rutas de la aplicación", () => {
   });
 
   it("usa las direcciones acordadas", () => {
-    expect(pathForModule("IMMUNIZATION_CATALOG")).toBe(`${APP_BASE}/inmunizaciones/catalogo`);
-    expect(pathForModule("IMMUNIZATION_CLOSURES")).toBe(`${APP_BASE}/inmunizaciones/cierre-mensual`);
+    expect(pathForModule("ANALYSIS_EXCLUSIONS")).toBe(`${APP_BASE}/analisis/exclusiones`);
+    expect(pathForModule("ADMIN_SEND_KEYS")).toBe(`${APP_BASE}/administracion/claves-de-envio`);
     expect(pathForModule("ADMIN_USERS")).toBe(`${APP_BASE}/administracion/usuarios`);
   });
 
   it("acepta la dirección con o sin el prefijo de publicación", () => {
-    expect(moduleForPath("/inmunizaciones/catalogo")).toBe("IMMUNIZATION_CATALOG");
-    expect(moduleForPath(`${APP_BASE}/inmunizaciones/catalogo`)).toBe("IMMUNIZATION_CATALOG");
+    expect(moduleForPath("/analisis/exclusiones")).toBe("ANALYSIS_EXCLUSIONS");
+    expect(moduleForPath(`${APP_BASE}/analisis/exclusiones`)).toBe("ANALYSIS_EXCLUSIONS");
   });
 
   it("ignora la barra final, la consulta y el fragmento", () => {
-    expect(moduleForPath(`${APP_BASE}/inmunizaciones/catalogo/`)).toBe("IMMUNIZATION_CATALOG");
-    expect(moduleForPath(`${APP_BASE}/inmunizaciones/catalogo?x=1`)).toBe("IMMUNIZATION_CATALOG");
-    expect(moduleForPath(`${APP_BASE}/inmunizaciones/catalogo#seccion`)).toBe("IMMUNIZATION_CATALOG");
+    expect(moduleForPath(`${APP_BASE}/analisis/exclusiones/`)).toBe("ANALYSIS_EXCLUSIONS");
+    expect(moduleForPath(`${APP_BASE}/analisis/exclusiones?x=1`)).toBe("ANALYSIS_EXCLUSIONS");
+    expect(moduleForPath(`${APP_BASE}/analisis/exclusiones#seccion`)).toBe("ANALYSIS_EXCLUSIONS");
   });
 
   it("devuelve null en la raíz y en direcciones desconocidas", () => {

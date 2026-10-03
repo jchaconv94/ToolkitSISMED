@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, CloudUpload, Loader2, PlugZap, Server, Shi
 import { useBackupManager } from "../contexts/BackupManagerContext";
 import { UsageItem, backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import { limaDay } from "../services/backupModule";
-import { ImmunizationStatusChip, ImmunizationTableHeader, ImmunizationTone } from "./ui/immunization";
+import { StatusChip, TableHeaderCell, Tone } from "./ui/kit";
 
 /** Porcentaje con coma decimal y dos decimales: 0,25 %. es-PE usaría punto, por eso se arma a mano. */
 const percent = (ratio: number) => `${(ratio * 100).toFixed(2).replace(".", ",")} %`;
@@ -14,7 +14,7 @@ const number = (n: number) => n.toLocaleString("es-PE", { maximumFractionDigits:
 const nextMonthName = (now = new Date()) =>
   new Date(now.getFullYear(), now.getMonth() + 1, 1).toLocaleDateString("es-PE", { month: "long" }).toLowerCase();
 
-const toneOf = (ratio: number | null): ImmunizationTone => (ratio == null ? "neutral" : ratio >= 0.8 ? "danger" : ratio >= 0.7 ? "warning" : "info");
+const toneOf = (ratio: number | null): Tone => (ratio == null ? "neutral" : ratio >= 0.8 ? "danger" : ratio >= 0.7 ? "warning" : "info");
 const BAR: Record<string, string> = { danger: "bg-red-500", warning: "bg-amber-500", info: "bg-teal-500", neutral: "bg-slate-300" };
 const VALUE: Record<string, string> = { danger: "text-red-600", warning: "text-amber-700", info: "text-teal-700", neutral: "text-slate-400" };
 const ICON: Record<string, string> = { danger: "bg-red-50 text-red-700", warning: "bg-amber-50 text-amber-700", info: "bg-teal-50 text-teal-700", neutral: "bg-slate-100 text-slate-500" };
@@ -31,8 +31,8 @@ const LimitCard: React.FC<{ icon: React.ReactNode; label: string; ratio: number 
           <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">{label}</p>
           <div className="mt-1 flex flex-wrap items-baseline gap-2">
             <span className={`text-[30px] font-black leading-none ${VALUE[tone]}`}>{ratio == null ? "—" : percent(ratio)}</span>
-            {tone === "warning" && <ImmunizationStatusChip label="Cerca del tope" tone="warning" />}
-            {tone === "danger" && <ImmunizationStatusChip label="Pausado" tone="danger" />}
+            {tone === "warning" && <StatusChip label="Cerca del tope" tone="warning" />}
+            {tone === "danger" && <StatusChip label="Pausado" tone="danger" />}
           </div>
         </div>
       </div>
@@ -198,11 +198,11 @@ export const BackupConsumptionTab: React.FC = () => {
               <table className="w-full text-[12.5px]">
                 <thead className="bg-slate-50">
                   <tr>
-                    <ImmunizationTableHeader>UNGET</ImmunizationTableHeader>
-                    <ImmunizationTableHeader align="right">Descargados</ImmunizationTableHeader>
-                    <ImmunizationTableHeader align="right">Fallidos</ImmunizationTableHeader>
-                    <ImmunizationTableHeader align="right">Tamaño</ImmunizationTableHeader>
-                    <ImmunizationTableHeader>Último</ImmunizationTableHeader>
+                    <TableHeaderCell>UNGET</TableHeaderCell>
+                    <TableHeaderCell align="right">Descargados</TableHeaderCell>
+                    <TableHeaderCell align="right">Fallidos</TableHeaderCell>
+                    <TableHeaderCell align="right">Tamaño</TableHeaderCell>
+                    <TableHeaderCell>Último</TableHeaderCell>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">

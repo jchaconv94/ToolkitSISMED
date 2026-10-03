@@ -18,7 +18,7 @@ const MOCK_DB = {
         { code: '00002', name: 'C.S. MIRAFLORES', category: 'I-3' },
     ],
     roles: [
-        { role: 'ADMIN', label: 'Administrador Total', allowedModules: ['DASHBOARD', 'ANALYSIS', 'ADMIN_USERS', 'ADMIN_ROLES', 'PROFILE', 'REDISTRIBUTION', 'SIG_SEARCH', 'ADMIN_STOCK_ASSIGN', 'IPRESS_STOCK', 'IMMUNIZATION_CATALOG', 'IMMUNIZATION_INITIAL_INVENTORY', 'IMMUNIZATION_STOCK', 'IMMUNIZATION_INCOMES', 'IMMUNIZATION_INCOME_ORIGINS', 'IMMUNIZATION_DISTRIBUTIONS', 'IMMUNIZATION_CONSUMPTION', 'IMMUNIZATION_RETURNS', 'IMMUNIZATION_ADJUSTMENTS', 'IMMUNIZATION_CLOSURES', 'IMMUNIZATION_REPORTS'], maxUrlsAllowed: 10 },
+        { role: 'ADMIN', label: 'Administrador Total', allowedModules: ['DASHBOARD', 'ANALYSIS', 'ADMIN_USERS', 'ADMIN_ROLES', 'PROFILE', 'REDISTRIBUTION', 'SIG_SEARCH', 'ADMIN_STOCK_ASSIGN', 'IPRESS_STOCK'], maxUrlsAllowed: 10 },
         { role: 'FARMACIA', label: 'Responsable Farmacia', allowedModules: ['DASHBOARD', 'ANALYSIS', 'PROFILE', 'REDISTRIBUTION', 'IPRESS_STOCK'], maxUrlsAllowed: 1 }
     ],
     laborRegimes: [
@@ -952,9 +952,6 @@ export const api = {
                 if (!error && data) {
                     return data.map(r => {
                         const allowedModules = Array.isArray(r.allowed_modules) ? [...r.allowed_modules] : [];
-                        if (r.role === 'ADMIN' && !allowedModules.includes('IMMUNIZATION_CLOSURES')) {
-                            allowedModules.push('IMMUNIZATION_CLOSURES');
-                        }
                         return {
                             role: r.role,
                             label: r.label,

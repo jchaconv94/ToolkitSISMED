@@ -17,9 +17,9 @@ import {
   mergeEstablishments, pendingAlerts, summarizeEstablishments, toolkitState,
 } from "../services/sendKeyEstablishments";
 import {
-  ImmunizationEmptyState, ImmunizationKpiCard, ImmunizationKpiStrip, ImmunizationTableHeader, formatImmunizationDate,
-  immunizationFilterInputClass,
-} from "./ui/immunization";
+  EmptyState, KpiCard, KpiStrip, TableHeaderCell, formatDate,
+  filterInputClass,
+} from "./ui/kit";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
 import { ModuleHeaderPortal } from "./ui/ModuleHeaderSlot";
@@ -69,7 +69,7 @@ const SismedVersion: React.FC<{ device?: ToolkitDevice; state: SismedState; with
   return (
     <span className="inline-flex flex-col items-start gap-0.5">
       {chip}
-      <span className="text-[11px] text-slate-500">{formatImmunizationDate(device.sismedDate)}</span>
+      <span className="text-[11px] text-slate-500">{formatDate(device.sismedDate)}</span>
     </span>
   );
 };
@@ -237,7 +237,7 @@ export const AdminSendKeysModule: React.FC = () => {
           </div>
         ) : loadError ? (
           <div className="rounded-2xl border border-red-200 bg-white shadow-sm">
-            <ImmunizationEmptyState
+            <EmptyState
               icon={<AlertTriangle className="h-6 w-6" />}
               title="No se pudieron cargar los establecimientos"
               description={loadError}
@@ -427,26 +427,26 @@ const EstablishmentsPanel: React.FC<{
 
   return (
     <div className="space-y-4 pb-6">
-      <ImmunizationKpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <ImmunizationKpiCard watermark tone="success" icon={<ShieldCheck />} label="Protegidos" value={`${summary.protectedCount} / ${summary.total}`} hint="con clave de envío" onClick={() => toggle("protected")} active={filter === "protected"} />
-        <ImmunizationKpiCard watermark tone="neutral" icon={<ShieldOff />} label="Sin clave" value={summary.none} hint={summary.waiting ? `${summary.waiting} esperando primer envío` : "envían desde cualquier PC"} onClick={() => toggle("none")} active={filter === "none"} />
-        <ImmunizationKpiCard watermark tone="warning" icon={<MonitorSmartphone />} label="Toolkit desactualizado" value={summary.toolkitOutdated} hint={latest ? `vigente: v${latest}` : "versión publicada desconocida"} onClick={() => toggle("toolkitOutdated")} active={filter === "toolkitOutdated"} />
-        <ImmunizationKpiCard watermark tone="warning" icon={<Database />} label="SISMED desactualizado" value={summary.sismedOutdated} hint={latestSismed ? `vigente: v${latestSismed}` : "aún sin reportes"} onClick={() => setSismedFilter(sismedFilter === "outdated" ? "all" : "outdated")} active={sismedFilter === "outdated"} />
-      </ImmunizationKpiStrip>
+      <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard watermark tone="success" icon={<ShieldCheck />} label="Protegidos" value={`${summary.protectedCount} / ${summary.total}`} hint="con clave de envío" onClick={() => toggle("protected")} active={filter === "protected"} />
+        <KpiCard watermark tone="neutral" icon={<ShieldOff />} label="Sin clave" value={summary.none} hint={summary.waiting ? `${summary.waiting} esperando primer envío` : "envían desde cualquier PC"} onClick={() => toggle("none")} active={filter === "none"} />
+        <KpiCard watermark tone="warning" icon={<MonitorSmartphone />} label="Toolkit desactualizado" value={summary.toolkitOutdated} hint={latest ? `vigente: v${latest}` : "versión publicada desconocida"} onClick={() => toggle("toolkitOutdated")} active={filter === "toolkitOutdated"} />
+        <KpiCard watermark tone="warning" icon={<Database />} label="SISMED desactualizado" value={summary.sismedOutdated} hint={latestSismed ? `vigente: v${latestSismed}` : "aún sin reportes"} onClick={() => setSismedFilter(sismedFilter === "outdated" ? "all" : "outdated")} active={sismedFilter === "outdated"} />
+      </KpiStrip>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center sm:px-4">
           <div className="relative w-full sm:max-w-xs">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${immunizationFilterInputClass} pl-9`} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${filterInputClass} pl-9`} />
           </div>
           <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex">
-            <select value={filter} onChange={(e) => setFilter(e.target.value as EstablishmentFilter)} aria-label="Estado" className={`${immunizationFilterInputClass} sm:w-60`}>
+            <select value={filter} onChange={(e) => setFilter(e.target.value as EstablishmentFilter)} aria-label="Estado" className={`${filterInputClass} sm:w-60`}>
               {FILTER_ORDER.map((f) => (
                 <option key={f} value={f}>{f === "all" ? "Estado: todos" : ESTABLISHMENT_FILTER_LABEL[f]} ({summary.counts[f]})</option>
               ))}
             </select>
-            <select value={sismedFilter} onChange={(e) => setSismedFilter(e.target.value as SismedFilter)} aria-label="Versión del SISMED" className={`${immunizationFilterInputClass} sm:w-52`}>
+            <select value={sismedFilter} onChange={(e) => setSismedFilter(e.target.value as SismedFilter)} aria-label="Versión del SISMED" className={`${filterInputClass} sm:w-52`}>
               <option value="all">SISMED: todas</option>
               <option value="outdated">SISMED desactualizado</option>
               {sismedVersions.map((v) => (
@@ -458,7 +458,7 @@ const EstablishmentsPanel: React.FC<{
         </div>
 
         {filtered.length === 0 ? (
-          <ImmunizationEmptyState
+          <EmptyState
             icon={<KeyRound className="h-6 w-6" />}
             title={rows.length === 0 ? "No hay establecimientos en su jurisdicción" : "Ningún establecimiento coincide"}
             description={rows.length === 0 ? "Registre sus IPRESS y almacenes en Establecimientos." : "Pruebe con otra búsqueda o filtro."}
@@ -470,13 +470,13 @@ const EstablishmentsPanel: React.FC<{
               <table className="w-full text-[13px]">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr>
-                    <ImmunizationTableHeader>Establecimiento</ImmunizationTableHeader>
-                    <ImmunizationTableHeader>Clave</ImmunizationTableHeader>
-                    <ImmunizationTableHeader>Equipo</ImmunizationTableHeader>
-                    <ImmunizationTableHeader>Toolkit</ImmunizationTableHeader>
-                    <ImmunizationTableHeader>SISMED</ImmunizationTableHeader>
-                    <ImmunizationTableHeader>Último envío</ImmunizationTableHeader>
-                    <ImmunizationTableHeader align="right"><span className="sr-only">Acciones</span></ImmunizationTableHeader>
+                    <TableHeaderCell>Establecimiento</TableHeaderCell>
+                    <TableHeaderCell>Clave</TableHeaderCell>
+                    <TableHeaderCell>Equipo</TableHeaderCell>
+                    <TableHeaderCell>Toolkit</TableHeaderCell>
+                    <TableHeaderCell>SISMED</TableHeaderCell>
+                    <TableHeaderCell>Último envío</TableHeaderCell>
+                    <TableHeaderCell align="right"><span className="sr-only">Acciones</span></TableHeaderCell>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -695,7 +695,7 @@ const DetailDrawer: React.FC<{
               <p className="text-[11px] font-black uppercase tracking-wider text-emerald-700">Equipo vinculado</p>
               <p className="mt-1 flex items-center gap-2 text-base font-black text-slate-900"><Monitor className="h-5 w-5 text-emerald-700" />{row.deviceName}</p>
               <p className="mt-1 text-xs text-slate-500">
-                Vinculado el {formatImmunizationDate(row.boundAt || undefined)}
+                Vinculado el {formatDate(row.boundAt || undefined)}
                 {row.lastOkAt && <> · último envío {relativeTime(row.lastOkAt).toLowerCase()}{row.lastOkRows != null && <> ({row.lastOkRows} lotes)</>}</>}
               </p>
             </section>

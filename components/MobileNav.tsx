@@ -1,27 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Activity,
-  ArchiveX,
-  ArrowDownToLine,
   ArrowRightLeft,
   Ban,
   BarChart2,
-  BarChart3,
-  Boxes,
   Briefcase,
   Building2,
-  CalendarCheck,
-  ClipboardList,
   Database,
   FileSpreadsheet,
   Menu,
-  PackageSearch,
-  Scale,
   Settings,
   Shield,
   ShieldCheck,
   Sliders,
-  Truck,
   UserCircle,
   Users,
   X,
@@ -54,23 +44,6 @@ const GRUPOS: Grupo[] = [
     ]
   },
   {
-    titulo: 'Inmunizaciones',
-    entradas: [
-      { module: 'IMMUNIZATION_CATALOG', label: 'Catálogo Biológico', icon: icono(ShieldCheck) },
-      { module: 'IMMUNIZATION_INITIAL_INVENTORY', label: 'Inventario Inicial', icon: icono(ClipboardList) },
-      { module: 'IMMUNIZATION_STOCK', label: 'Stock Biológico', icon: icono(Boxes) },
-      { module: 'IMMUNIZATION_STOCK_QUERY', label: 'Consulta de Stock', icon: icono(PackageSearch) },
-      { module: 'IMMUNIZATION_INCOMES', label: 'Ingresos Regionales', icon: icono(ArrowDownToLine) },
-      { module: 'IMMUNIZATION_DISTRIBUTIONS', label: 'Distribuciones', icon: icono(Truck) },
-      { module: 'IMMUNIZATION_CONSUMPTION', label: 'Consumo IPRESS', icon: icono(Activity) },
-      { module: 'IMMUNIZATION_RETURNS', label: 'Devoluciones y Bajas', icon: icono(ArchiveX) },
-      { module: 'IMMUNIZATION_ADJUSTMENTS', label: 'Reajustes de Stock', icon: icono(Scale) },
-      { module: 'IMMUNIZATION_CLOSURES', label: 'Cierre Mensual', icon: icono(CalendarCheck) },
-      { module: 'IMMUNIZATION_REPORTS', label: 'Reportes', icon: icono(BarChart3) },
-      { module: 'IMMUNIZATION_CONFIG', label: 'Configuración', icon: icono(Sliders) }
-    ]
-  },
-  {
     titulo: 'Administración',
     entradas: [
       { module: 'ADMIN_USERS', label: 'Gestión de Usuarios', icon: icono(Users) },
@@ -94,7 +67,6 @@ const GRUPOS: Grupo[] = [
  */
 const BARRA_INFERIOR: Entrada[] = [
   { module: 'DASHBOARD', label: 'Análisis', icon: icono(BarChart2) },
-  { module: 'IMMUNIZATION_STOCK', label: 'Biológico', icon: icono(Boxes) },
   { module: 'IPRESS_STOCK', label: 'Stock', icon: icono(FileSpreadsheet) },
   { module: 'SIG_SEARCH', label: 'Consulta', icon: icono(Database) },
   { module: 'REDISTRIBUTION', label: 'Canjes', icon: icono(ArrowRightLeft) },

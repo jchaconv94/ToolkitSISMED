@@ -8,7 +8,7 @@ import react from '@vitejs/plugin-react';
  * Copia `index.html` como `404.html` al compilar.
  *
  * GitHub Pages es un servidor de archivos estaticos: no sabe nada de las rutas de la
- * aplicacion, asi que responde 404 a direcciones como `/inmunizaciones/catalogo`. Al
+ * aplicacion, asi que responde 404 a direcciones como `/administracion/usuarios`. Al
  * dejar una copia en `404.html`, ese 404 sirve igualmente la aplicacion, que lee la
  * direccion y abre el modulo correcto. Es la solucion habitual para publicar una SPA
  * en un hosting estatico.
