@@ -173,8 +173,7 @@ export const KpiCard: React.FC<{
             </p>
           </div>
           {renderIcon && (
-            // En el celular caben tres tarjetas por fila solo sin el ícono.
-            <div className={`hidden shrink-0 rounded-lg p-1.5 shadow-2xs sm:block ${toneIconClass[tone]}`}>
+            <div className={`shrink-0 rounded-lg p-1.5 shadow-2xs ${toneIconClass[tone]}`}>
               <div className="[&>svg]:h-4 [&>svg]:w-4">{renderIcon}</div>
             </div>
           )}

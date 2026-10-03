@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Building2,
-  ChevronLeft,
-  ChevronRight,
   Clock,
   Download,
   FileSpreadsheet,
@@ -29,7 +27,10 @@ import {
   type FacilitySheetLink,
 } from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
-import { EmptyState, KpiCard, StatusChip, TableHeaderCell as HeaderCell, filterInputClass, toneIconClass } from "./ui/kit";
+import { EmptyState, KpiCard, KpiStrip, StatusChip, TableHeaderCell as HeaderCell, filterInputClass, toneIconClass } from "./ui/kit";
+import { TablePagination } from "./ui/TablePagination";
+import { noticeSettingsApi } from "../services/noticeSettings";
+import { DEFAULT_NOTICE_THRESHOLDS } from "../services/notifications";
 import {
   DEFAULT_STOCK_COLUMN_KEYS,
   STOCK_COLUMNS,
@@ -64,7 +65,15 @@ export const AssignedIpressStockModule: React.FC = () => {
   const [search, setSearch] = useState("");
   const [expirationFilter, setExpirationFilter] = useState<ExpirationFilter>("ALL");
   const [page, setPage] = useState(1);
+  /** Ventana de «por vencer»: el mismo parámetro que usa la campana. */
+  const [expiryDays, setExpiryDays] = useState(DEFAULT_NOTICE_THRESHOLDS.expiryDays);
   const pageSize = 50;
+
+  useEffect(() => {
+    let vigente = true;
+    void noticeSettingsApi.getOrDefault().then(value => { if (vigente) setExpiryDays(value.expiryDays); });
+    return () => { vigente = false; };
+  }, []);
 
   const loadStock = useCallback(async (showSuccess = false) => {
     if (!facilityCode) {
@@ -132,19 +141,18 @@ export const AssignedIpressStockModule: React.FC = () => {
   const filteredRows = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("es");
     return rows.filter(row => {
-      if (expirationFilter !== "ALL" && getExpirationState(row) !== expirationFilter) return false;
+      if (expirationFilter !== "ALL" && getExpirationState(row, expiryDays) !== expirationFilter) return false;
       if (!query) return true;
       return visibleColumns.some(column => String(row[column.key] ?? "").toLocaleLowerCase("es").includes(query));
     });
-  }, [rows, search, visibleColumns, expirationFilter]);
+  }, [rows, search, visibleColumns, expirationFilter, expiryDays]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const visibleRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
   const metrics = useMemo(() => ({
     lots: rows.length,
-    expiring: rows.filter(row => getExpirationState(row) === "EXPIRING").length,
-    expired: rows.filter(row => getExpirationState(row) === "EXPIRED").length
-  }), [rows]);
+    expiring: rows.filter(row => getExpirationState(row, expiryDays) === "EXPIRING").length,
+    expired: rows.filter(row => getExpirationState(row, expiryDays) === "EXPIRED").length
+  }), [rows, expiryDays]);
 
   const allowedKeys = useMemo(() => new Set(visibleColumns.map(column => column.key)), [visibleColumns]);
   const canShow = (key: string) => allowedKeys.has(key);
@@ -188,28 +196,22 @@ export const AssignedIpressStockModule: React.FC = () => {
 
   return (
     <div className="space-y-4 animate-in fade-in duration-300">
-      {/* El título ya está en la cabecera de la app: aquí solo va de quién es la hoja. */}
+      {/* El título ya está en la cabecera de la app: aquí solo va de quién es la hoja y cuándo se actualizó. */}
       <section className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
         <span className={`hidden h-10 w-10 shrink-0 place-items-center rounded-xl sm:grid ${toneIconClass.info}`}><Building2 className="h-5 w-5" /></span>
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <p className="truncate text-[14px] font-black text-slate-900">{facilityName}</p>
-            {facilityCode && <span className="shrink-0 font-mono text-xs font-bold text-slate-400">{facilityCode}</span>}
-            <span className="hidden shrink-0 sm:inline"><StatusChip label="Solo lectura" tone="success" /></span>
-          </div>
+          <p className="truncate text-[14px] font-black text-slate-900">
+            {facilityName}
+            {facilityCode && <span className="ml-2 font-mono text-xs font-bold text-slate-400">{facilityCode}</span>}
+          </p>
           <p className="mt-0.5 truncate text-[12px] text-slate-500">
-            {loadedSheet ? (
-              <>
-                <FileSpreadsheet className="mr-1 inline h-3.5 w-3.5 -translate-y-px text-slate-400" />
-                <span className="hidden sm:inline">{sheetLabel}{lastUpdate && " · "}</span>
-                {lastUpdate ? <>Actualizada <strong className="font-bold text-slate-700">{lastUpdate}</strong></> : <span className="sm:hidden">{sheetLabel}</span>}
-              </>
-            ) : loading ? "Leyendo la hoja…" : "Sin hoja"}
+            {loading ? "Leyendo la hoja…" : lastUpdate ? <>Actualizada el <strong className="font-bold text-slate-700">{lastUpdate}</strong></> : loadedSheet ? "Sin fecha de actualización" : "Sin hoja"}
           </p>
           {link?.status === "dentro-de-su-ipress" && (
             <p className="mt-0.5 text-[11px] text-slate-400">Puesto comunal: su stock viene dentro de la hoja de su IPRESS, separado por su ALMCOD.</p>
           )}
         </div>
+        <span className="hidden shrink-0 sm:inline"><StatusChip label="Solo lectura" tone="success" /></span>
         <button type="button" onClick={() => void loadStock(true)} disabled={loading || !facilityCode} aria-label="Actualizar" className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 px-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:px-4">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> <span className="hidden sm:inline">Actualizar</span>
         </button>
@@ -233,11 +235,11 @@ export const AssignedIpressStockModule: React.FC = () => {
       ) : (
         <>
           {/* Los indicadores son también el filtro: tocar uno muestra solo esos lotes. */}
-          <section className="grid grid-cols-3 gap-2 sm:max-w-2xl sm:gap-3">
-            <KpiCard compact label="Lotes" value={metrics.lots.toLocaleString("es-PE")} icon={<Package />} tone="info" onClick={() => setExpirationFilter("ALL")} active={expirationFilter === "ALL"} />
-            <KpiCard compact label="Por vencer" value={metrics.expiring.toLocaleString("es-PE")} icon={<Clock />} tone="warning" onClick={() => toggleFilter("EXPIRING")} active={expirationFilter === "EXPIRING"} />
-            <KpiCard compact label="Vencidos" value={metrics.expired.toLocaleString("es-PE")} icon={<AlertTriangle />} tone="danger" onClick={() => toggleFilter("EXPIRED")} active={expirationFilter === "EXPIRED"} />
-          </section>
+          <KpiStrip cols="md:grid-cols-3">
+            <KpiCard watermark tone="info" icon={<Package />} label="Lotes" value={metrics.lots.toLocaleString("es-PE")} hint="en la hoja del establecimiento" onClick={() => setExpirationFilter("ALL")} active={expirationFilter === "ALL"} />
+            <KpiCard watermark tone="warning" icon={<Clock />} label="Por vencer" value={metrics.expiring.toLocaleString("es-PE")} hint={`en los próximos ${expiryDays} días`} onClick={() => toggleFilter("EXPIRING")} active={expirationFilter === "EXPIRING"} />
+            <KpiCard watermark tone="danger" icon={<AlertTriangle />} label="Vencidos" value={metrics.expired.toLocaleString("es-PE")} hint="todavía con saldo" onClick={() => toggleFilter("EXPIRED")} active={expirationFilter === "EXPIRED"} />
+          </KpiStrip>
 
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-slate-100 p-3 sm:p-4">
@@ -249,9 +251,7 @@ export const AssignedIpressStockModule: React.FC = () => {
                   <button type="button" onClick={() => setSearch("")} aria-label="Limpiar búsqueda" className="absolute right-2 top-2.5 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>
                 )}
               </label>
-              <span className="ml-auto hidden text-xs font-semibold text-slate-400 lg:inline">
-                {filteredRows.length.toLocaleString("es-PE")} {filteredRows.length === 1 ? "lote" : "lotes"}
-              </span>
+              <span className="ml-auto" />
               <button type="button" onClick={exportStock} aria-label="Exportar a Excel" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50">
                 <Download className="h-4 w-4 text-emerald-600" /><span className="hidden sm:inline">Exportar</span>
               </button>
@@ -259,7 +259,7 @@ export const AssignedIpressStockModule: React.FC = () => {
 
             {expirationFilter !== "ALL" && (
               <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2 text-xs font-semibold text-slate-600">
-                <span>Mostrando solo <strong>{expirationFilter === "EXPIRED" ? "vencidos" : "por vencer este mes"}</strong></span>
+                <span>Mostrando solo <strong>{expirationFilter === "EXPIRED" ? "vencidos" : `por vencer en ${expiryDays} días`}</strong></span>
                 <button type="button" onClick={() => setExpirationFilter("ALL")} className="font-bold text-teal-700 hover:underline">Ver todos</button>
               </div>
             )}
@@ -271,7 +271,7 @@ export const AssignedIpressStockModule: React.FC = () => {
                 {/* Celular: una tarjeta compacta por lote. */}
                 <ul className="divide-y divide-slate-100 sm:hidden">
                   {visibleRows.map((row, index) => {
-                    const state = getExpirationState(row);
+                    const state = getExpirationState(row, expiryDays);
                     const tipo = textOrDash("DESC_TIPSUM", row.TIPSUM, row.DESC_TIPSUM);
                     const fuente = textOrDash("DESC_FFINAN", row.FFINAN, row.DESC_FFINAN);
                     return (
@@ -303,7 +303,7 @@ export const AssignedIpressStockModule: React.FC = () => {
                 </ul>
 
                 {/* Escritorio: tabla. */}
-                <div className="hidden max-h-[calc(100vh-330px)] overflow-auto custom-scrollbar sm:block">
+                <div className="hidden max-h-[calc(100vh-440px)] min-h-[320px] overflow-auto custom-scrollbar sm:block">
                   <table className="min-w-full text-left">
                     <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_rgb(226_232_240)]">
                       <tr>
@@ -320,7 +320,7 @@ export const AssignedIpressStockModule: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {visibleRows.map((row, index) => {
-                        const state = getExpirationState(row);
+                        const state = getExpirationState(row, expiryDays);
                         const tipo = textOrDash("DESC_TIPSUM", row.TIPSUM, row.DESC_TIPSUM);
                         const fuente = textOrDash("DESC_FFINAN", row.FFINAN, row.DESC_FFINAN);
                         return (
@@ -355,15 +355,7 @@ export const AssignedIpressStockModule: React.FC = () => {
               </>
             )}
 
-            {filteredRows.length > pageSize && (
-              <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
-                <span className="text-xs text-slate-500">Página <strong>{page}</strong> de <strong>{totalPages}</strong></span>
-                <div className="flex gap-2">
-                  <button type="button" aria-label="Página anterior" onClick={() => setPage(current => Math.max(1, current - 1))} disabled={page === 1} className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
-                  <button type="button" aria-label="Página siguiente" onClick={() => setPage(current => Math.min(totalPages, current + 1))} disabled={page === totalPages} className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
-                </div>
-              </div>
-            )}
+            <TablePagination page={page} pageSize={pageSize} total={filteredRows.length} onPageChange={setPage} itemLabel="lotes" />
           </section>
         </>
       )}

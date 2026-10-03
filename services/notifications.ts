@@ -22,7 +22,7 @@ import type { SendKeyRow } from "./sendKeys";
 import { type ToolkitDeviceRow, latestSismedVersion, sismedState } from "./toolkitDevices";
 import { lastSendAt, latestDevice, mergeEstablishments, pendingAlerts, toolkitState } from "./sendKeyEstablishments";
 import type { UsageReading } from "./backupConnection";
-import { type StockRow, parseExpiryDate, parseStockNumber } from "./assignedIpressStock";
+import { type StockRow, getExpirationState, parseExpiryDate, parseStockNumber } from "./assignedIpressStock";
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -249,17 +249,13 @@ const monthYear = (date: Date) => `${String(date.getMonth() + 1).padStart(2, "0"
 
 export const buildPharmacyNotices = ({ rows, lastUpdateAt, thresholds, now = new Date() }: PharmacyInput): Notice[] => {
   const notices: Notice[] = [];
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  const windowEnd = new Date(today.getTime() + thresholds.expiryDays * DAY_MS);
-  windowEnd.setHours(23, 59, 59, 999);
-
+  // La regla de vencido / por vencer es la de Stock SISMED: mismos lotes en ambos sitios.
   const withStock = rows
-    .map((row) => ({ row, expiry: parseExpiryDate(row.Fec_Vencim), stock: parseStockNumber(row.Saldo) }))
-    .filter(({ stock }) => stock > 0);
+    .map((row) => ({ row, expiry: parseExpiryDate(row.Fec_Vencim), state: getExpirationState(row, thresholds.expiryDays, now) }))
+    .filter(({ expiry, state }) => expiry && state !== "NORMAL");
 
   // 5. Vencidos con saldo: el que venció primero va primero.
-  const expired = withStock.filter(({ expiry }) => expiry && expiry < today).sort((a, b) => a.expiry!.getTime() - b.expiry!.getTime());
+  const expired = withStock.filter(({ state }) => state === "EXPIRED").sort((a, b) => a.expiry!.getTime() - b.expiry!.getTime());
   if (expired.length) {
     const first = expired[0].row;
     const lot = String(first.Lote || "").trim();
@@ -277,7 +273,7 @@ export const buildPharmacyNotices = ({ rows, lastUpdateAt, thresholds, now = new
 
   // 6. Por vencer dentro de la ventana: el más próximo va primero.
   const expiring = withStock
-    .filter(({ expiry }) => expiry && expiry >= today && expiry <= windowEnd)
+    .filter(({ state }) => state === "EXPIRING")
     .sort((a, b) => a.expiry!.getTime() - b.expiry!.getTime());
   if (expiring.length) {
     const first = expiring[0];

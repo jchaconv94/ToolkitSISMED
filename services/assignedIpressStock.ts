@@ -82,8 +82,12 @@ export const parseExpiryDate = (value: unknown): Date | null => {
 
 export type ExpirationState = "EXPIRED" | "EXPIRING" | "NORMAL";
 
-/** Vencido, por vencer este mes o normal. Un lote sin saldo nunca cuenta como vencido. */
-export const getExpirationState = (row: StockRow, now: Date = new Date()): ExpirationState => {
+/**
+ * Vencido, por vencer o normal. «Por vencer» es que vence de hoy a `expiryDays` días, el
+ * mismo umbral de Parámetros del Sistema que usa la campana: así la pantalla y el aviso
+ * cuentan los mismos lotes. Un lote sin saldo nunca cuenta.
+ */
+export const getExpirationState = (row: StockRow, expiryDays: number, now: Date = new Date()): ExpirationState => {
   if (parseStockNumber(row.Saldo) <= 0) return "NORMAL";
   const expiration = parseExpiryDate(row.Fec_Vencim);
   if (!expiration) return "NORMAL";
@@ -91,8 +95,10 @@ export const getExpirationState = (row: StockRow, now: Date = new Date()): Expir
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   if (expiration < today) return "EXPIRED";
-  if (expiration.getMonth() === today.getMonth() && expiration.getFullYear() === today.getFullYear()) return "EXPIRING";
-  return "NORMAL";
+  const windowEnd = new Date(today);
+  windowEnd.setDate(windowEnd.getDate() + expiryDays);
+  windowEnd.setHours(23, 59, 59, 999);
+  return expiration <= windowEnd ? "EXPIRING" : "NORMAL";
 };
 
 /**
