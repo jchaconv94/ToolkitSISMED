@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Activity, AlertTriangle, CheckCircle2, Clock3, Download, FolderDown, Gauge, History, Loader2, RefreshCw, Search, Wifi, WifiOff, X,
+  Activity, AlertTriangle, CheckCircle2, Clock3, Download, FolderDown, Gauge, History, Loader2, RefreshCw, Search, SlidersHorizontal, Wifi, WifiOff, X,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useBackupManager } from "../contexts/BackupManagerContext";
@@ -18,6 +18,7 @@ import {
 } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
+import { BottomSheet } from "./ui/BottomSheet";
 import { BackupConsumptionTab } from "./BackupConsumptionTab";
 
 const PAGE_SIZE = 10;
@@ -88,6 +89,15 @@ const Detail: React.FC<{ row: BackupRowView }> = ({ row }) => {
   return <span className="text-[12px] text-slate-400">{row.online ? "Listo para pedir" : "La PC debe estar encendida"}</span>;
 };
 
+const Signal: React.FC<{ row: BackupRowView; align?: "left" | "right" }> = ({ row, align = "left" }) => (
+  <div className={align === "right" ? "text-right" : ""}>
+    {row.online
+      ? <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-500" />En línea</span>
+      : <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-slate-400"><WifiOff className="h-3.5 w-3.5" />Desconectada</span>}
+    <div className="text-[11px] text-slate-400">{row.online && row.lastSeen ? relativeTime(new Date(row.lastSeen).toISOString()) : "—"}</div>
+  </div>
+);
+
 /** La PC del establecimiento: si está en línea, cuál es y qué Toolkit tiene. */
 const Equipo: React.FC<{ row: BackupRowView }> = ({ row }) => (
   row.online ? (
@@ -133,6 +143,7 @@ export const BackupsSismedModule: React.FC = () => {
   const [page, setPage] = useState(1);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<BackupActivityRow[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => manager.attach(), [manager.attach]);
 
@@ -169,6 +180,19 @@ export const BackupsSismedModule: React.FC = () => {
     () => [...activity.map((a) => activityFromRequest(a, manager.username)), ...manager.events].sort((a, b) => b.at - a.at),
     [activity, manager.events, manager.username],
   );
+  // El número de «Actividad» cuenta solo lo nuevo desde la última vez que se abrió.
+  const seenKey = `backups-actividad-vista:${manager.username || ""}`;
+  const [activitySeenAt, setActivitySeenAt] = useState(() => {
+    try { return Number(localStorage.getItem(seenKey)) || 0; } catch { return 0; }
+  });
+  const unseenActivity = activityItems.filter((item) => item.at > activitySeenAt).length;
+  const openActivity = () => {
+    const now = Math.max(Date.now(), ...activityItems.map((item) => item.at));
+    setActivitySeenAt(now);
+    try { localStorage.setItem(seenKey, String(now)); } catch { /* sin almacenamiento: vuelve a contar en la próxima visita */ }
+    setFiltersOpen(false);
+    setActivityOpen(true);
+  };
   const plan = planState(manager.usage);
   const onlineCount = rows.filter((r) => r.online).length;
 
@@ -221,24 +245,50 @@ export const BackupsSismedModule: React.FC = () => {
           </KpiStrip>
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center sm:px-4">
-              <div className="relative w-full sm:max-w-xs">
+            <div className="flex items-center gap-2 border-b border-slate-100 p-3 sm:px-4">
+              <div className="relative min-w-0 flex-1 md:max-w-xs">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${filterInputClass} pl-9`} />
               </div>
-              <div className="flex gap-2 sm:ml-auto">
-                <button type="button" onClick={refresh} aria-label="Actualizar" className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">
-                  <RefreshCw className={`h-4 w-4 text-teal-600 ${manager.status === "connecting" ? "animate-spin" : ""}`} /><span className="hidden md:inline">Actualizar</span>
-                </button>
-                <select value={filter} onChange={(e) => setFilter(e.target.value as ShowFilter)} aria-label="Mostrar" className={`${filterInputClass} flex-1 sm:w-56 sm:flex-none`}>
+              {/* Celular: un solo botón que abre los filtros abajo. */}
+              <button type="button" onClick={() => setFiltersOpen(true)} aria-label="Filtros" className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 md:hidden">
+                <SlidersHorizontal className="h-4 w-4" />
+                {(filter !== "all" || unseenActivity > 0) && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />}
+              </button>
+              <div className="ml-auto hidden gap-2 md:flex">
+                <select value={filter} onChange={(e) => setFilter(e.target.value as ShowFilter)} aria-label="Mostrar" className={`${filterInputClass} w-56`}>
                   {FILTERS.map((f) => <option key={f} value={f}>{f === "all" ? "Mostrar: todos" : SHOW_FILTER_LABEL[f]} ({counts[f]})</option>)}
                 </select>
-                <button type="button" onClick={() => setActivityOpen(true)} aria-label="Actividad" className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">
-                  <Activity className="h-4 w-4" /><span className="hidden md:inline">Actividad</span>
-                  {activityItems.length > 0 && <span className="rounded-full bg-teal-600 px-1.5 text-[10.5px] text-white">{activityItems.length}</span>}
+                <button type="button" onClick={refresh} className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                  <RefreshCw className={`h-4 w-4 text-teal-600 ${manager.status === "connecting" ? "animate-spin" : ""}`} />Actualizar
+                </button>
+                <button type="button" onClick={openActivity} className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                  <Activity className="h-4 w-4" />Actividad
+                  {unseenActivity > 0 && <span className="rounded-full bg-teal-600 px-1.5 text-[10.5px] text-white">{unseenActivity}</span>}
                 </button>
               </div>
             </div>
+
+            <BottomSheet open={filtersOpen} title="Filtros" onClose={() => setFiltersOpen(false)}>
+              <p className="mb-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400">Mostrar</p>
+              <div className="space-y-1">
+                {FILTERS.map((f) => (
+                  <button key={f} type="button" onClick={() => { setFilter(f); setFiltersOpen(false); }} className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-[14px] font-semibold ${filter === f ? "bg-teal-50 text-teal-800" : "text-slate-700 hover:bg-slate-50"}`}>
+                    <span>{f === "all" ? "Todos" : SHOW_FILTER_LABEL[f]}</span>
+                    <span className={`text-[12px] font-bold ${filter === f ? "text-teal-700" : "text-slate-400"}`}>{counts[f]}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-4">
+                <button type="button" onClick={() => { refresh(); setFiltersOpen(false); }} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-700">
+                  <RefreshCw className="h-4 w-4 text-teal-600" />Actualizar
+                </button>
+                <button type="button" onClick={openActivity} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-700">
+                  <Activity className="h-4 w-4" />Actividad
+                  {unseenActivity > 0 && <span className="rounded-full bg-teal-600 px-1.5 text-[10.5px] text-white">{unseenActivity}</span>}
+                </button>
+              </div>
+            </BottomSheet>
 
             {loading ? (
               <div className="flex h-48 items-center justify-center gap-2 text-sm font-semibold text-slate-500"><Loader2 className="h-5 w-5 animate-spin text-teal-600" /> Cargando establecimientos…</div>
@@ -289,28 +339,29 @@ export const BackupsSismedModule: React.FC = () => {
                   </table>
                 </div>
 
-                {/* Celular: una fila compacta por establecimiento y la lista crece al bajar. */}
-                <ul className="divide-y divide-slate-100 md:hidden">
-                  {mobileRows.map((row) => (
-                    <li key={row.code} className={`flex items-start gap-3 px-4 py-3 text-[13px] ${row.online ? "" : "bg-slate-50/60"}`}>
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex items-baseline gap-2">
-                          <span className="truncate font-bold text-slate-900">{row.name}</span>
-                          <span className="shrink-0 font-mono text-[11px] text-teal-700">{row.code}</span>
+                {/* Celular: tarjetas; la lista crece al bajar. */}
+                <div className="space-y-2 p-3 md:hidden">
+                  {mobileRows.map((row) => {
+                    const chip = chipFor(row);
+                    return (
+                      <div key={row.code} className={`space-y-2.5 rounded-2xl border border-slate-200 p-3 text-[13px] ${row.online ? "bg-white" : "bg-slate-50/60"}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate font-black text-slate-800">{row.name}</div>
+                            <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
+                          </div>
+                          {chip ? <StatusChip label={chip.label} tone={chip.tone} /> : <Signal row={row} align="right" />}
                         </div>
-                        <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
-                          {row.online
-                            ? <><span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" /><span className="truncate">{row.equipo || "PC en línea"}</span></>
-                            : <><WifiOff className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="text-slate-400">Desconectada</span></>}
+                        <Detail row={row} />
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 truncate text-[11.5px] text-slate-500">Último: {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}</span>
+                          {action(row)}
                         </div>
-                        <div className="truncate text-[12px] text-slate-500">Último: {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}</div>
-                        {/* El detalle solo cuando hay un pedido en curso; el cupo lo dice el chip. */}
-                        {row.job ? <Estado row={row} /> : chipFor(row) && <StatusChip label={chipFor(row)!.label} tone={chipFor(row)!.tone} />}
                       </div>
-                      {action(row)}
-                    </li>
-                  ))}
-                </ul>
+                    );
+                  })}
+                </div>
+
                 <div className="md:hidden">
                   <LoadMoreSentinel hasMore={mobileList.hasMore} onLoadMore={mobileList.loadMore} shown={mobileList.count} total={filtered.length} itemLabel="establecimientos" />
                 </div>
