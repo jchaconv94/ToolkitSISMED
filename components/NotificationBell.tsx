@@ -54,24 +54,29 @@ const useTick = (active: boolean) => {
 const NoticeRow: React.FC<{ notice: Notice; unseen: boolean; when: string; onAction: (notice: Notice) => void }> = ({ notice, unseen, when, onAction }) => {
   const Icon = ICONS[notice.icon];
   return (
-    <li className="flex items-center gap-3 px-4 py-3.5">
-      <span className={`relative grid h-9 w-9 shrink-0 place-items-center self-start rounded-xl ${toneIconClass[notice.tone]} ${unseen ? "" : "opacity-60"}`}>
+    <li className="flex gap-3 px-4 py-3.5">
+      <span className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-xl ${toneIconClass[notice.tone]} ${unseen ? "" : "opacity-60"}`}>
         <Icon aria-hidden="true" className="h-[18px] w-[18px]" />
         {unseen && <span aria-label="Sin ver" className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />}
       </span>
-      <div className={`min-w-0 flex-1 ${unseen ? "" : "opacity-60"}`}>
-        <p className="text-[13.5px] font-bold leading-snug text-slate-900">{notice.title}</p>
-        <p className="mt-0.5 text-[12px] leading-snug text-slate-500">{notice.detail}</p>
-        {when && <p className="mt-1 text-[11px] font-semibold text-slate-400">{when}</p>}
+      <div className="min-w-0 flex-1">
+        <div className={unseen ? "" : "opacity-60"}>
+          <p className="text-[13.5px] font-bold leading-snug text-slate-900">{notice.title}</p>
+          <p className="mt-0.5 text-[12px] leading-snug text-slate-500">{notice.detail}</p>
+        </div>
+        {/* Abajo: cuándo, a la izquierda, y la acción como texto, a la derecha. */}
+        <div className="mt-1.5 flex items-center justify-between gap-3">
+          <span className={`text-[11px] font-semibold text-slate-400 ${unseen ? "" : "opacity-60"}`}>{when}</span>
+          <button
+            type="button"
+            onClick={() => onAction(notice)}
+            className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded text-[12.5px] font-bold text-teal-700 hover:text-teal-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+          >
+            {notice.action.label}
+            <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
-      <button
-        type="button"
-        onClick={() => onAction(notice)}
-        className="inline-flex h-8 shrink-0 items-center gap-0.5 whitespace-nowrap rounded-lg border border-teal-200 bg-teal-50 pl-3 pr-2 text-[12px] font-bold text-teal-700 transition hover:bg-teal-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
-      >
-        {notice.action.label}
-        <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
-      </button>
     </li>
   );
 };
