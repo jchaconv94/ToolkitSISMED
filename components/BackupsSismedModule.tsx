@@ -329,15 +329,18 @@ export const BackupsSismedModule: React.FC = () => {
                     const chip = chipFor(row);
                     return (
                       <div key={row.code} className={`space-y-2.5 rounded-2xl border border-slate-200 p-3 text-[13px] ${row.online ? "bg-white" : "bg-slate-50/60"}`}>
+                        {/* Pocos datos: código, nombre y la PC en segundo plano; el detalle solo con un pedido en curso. */}
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="truncate font-black text-slate-800">{row.name}</div>
                             <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
-                            {row.equipo && <div className="truncate text-[11.5px] text-slate-500"><span className="font-semibold text-slate-700">{row.equipo}</span> · Toolkit v{row.version || "?"}</div>}
+                            <div className="truncate font-black text-slate-800">{row.name}</div>
+                            {row.equipo && <div className="truncate text-[11.5px] text-slate-400">{row.equipo} · Toolkit v{row.version || "?"}</div>}
                           </div>
-                          {chip ? <StatusChip label={chip.label} tone={chip.tone} /> : <Signal row={row} align="right" />}
+                          {chip ? <StatusChip label={chip.label} tone={chip.tone} /> : row.online
+                            ? <span className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-500" />En línea</span>
+                            : <span className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-slate-400"><WifiOff className="h-3.5 w-3.5" />Desconectada</span>}
                         </div>
-                        <Detail row={row} />
+                        {row.job && <Detail row={row} />}
                         <div className="flex items-center justify-between gap-2">
                           <span className="min-w-0 truncate text-[11.5px] text-slate-500">Último: {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}</span>
                           {action(row)}
