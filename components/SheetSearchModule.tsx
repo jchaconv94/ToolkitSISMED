@@ -4722,9 +4722,11 @@ function processSheet(sheet) {
     <div
       className={`flex flex-col h-full transition-all duration-300 ${isAdvancedFiltersSidebarOpen && viewLevel === "sheets" ? "md:pr-[380px] xl:pr-[420px]" : ""}`}
     >
-      {/* Cabecera del módulo en una sola fila (2026-10-03): volver, dónde estoy y las acciones.
-          El título «Reporte de Stock detallado SISMED» se quitó: lo dice la cabecera de la app. */}
+      {/* Cabecera del módulo: volver y dónde estoy. En el panel regional no hay cabecera, se
+          empieza por los KPIs. Las acciones (Configurar, Sincronizar…) van en la fila del
+          buscador; en el celular, dentro del botón de tres puntos. */}
       <div className="px-4 pb-2 pt-3 sm:px-10 sm:pb-3 sm:pt-6 lg:px-14 xl:px-16">
+        {viewLevel !== "ungets" && (
         <div className="flex items-center gap-2 sm:gap-3">
           {/* La flecha está a la izquierda, donde se mira, y dice a dónde lleva. */}
           {destinoDeVolver && (
@@ -4777,97 +4779,8 @@ function processSheet(sheet) {
             </p>
           </div>
 
-          {/* Celular: un solo botón de tres puntos abre todas las acciones abajo. */}
-          <button
-            type="button"
-            onClick={() => setHeaderActionsOpen(true)}
-            aria-label="Más acciones"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 sm:hidden"
-          >
-            {isLoading || isSilentSyncing ? <RefreshCw className="h-5 w-5 animate-spin text-teal-600" /> : <MoreHorizontal className="h-5 w-5" />}
-          </button>
-          <BottomSheet open={headerActionsOpen} title="Acciones" onClose={() => setHeaderActionsOpen(false)}>
-            <div className="space-y-1">
-              <button
-                type="button"
-                disabled={isLoading || isSilentSyncing}
-                onClick={() => { setHeaderActionsOpen(false); void fetchData(); }}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-              >
-                <RefreshCw className="h-5 w-5 text-teal-600" />
-                {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
-              </button>
-              {selectedUngetIndex !== null && (
-                <button
-                  type="button"
-                  onClick={() => { setHeaderActionsOpen(false); setIsNetworkSearchOpen(true); }}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  <Search className="h-5 w-5 text-teal-600" />
-                  Buscar un producto en todos los establecimientos
-                </button>
-              )}
-              {canManageConfigs && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setHeaderActionsOpen(false);
-                    if (user) setTempUrls([...scriptUrls]);
-                    setIsConfigOpen(true);
-                  }}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  <Settings className="h-5 w-5 text-slate-500" />
-                  Configurar conexiones de stock
-                </button>
-              )}
-            </div>
-          </BottomSheet>
-
-          {/* Escritorio: lupa, Configurar y Sincronizar a la vista. */}
-          <div className="hidden shrink-0 items-center gap-2 sm:flex">
-            {selectedUngetIndex !== null && (
-              <button
-                type="button"
-                onClick={() => setIsNetworkSearchOpen(true)}
-                title="Buscar un producto en todos los establecimientos (Ctrl+K)"
-                aria-label="Búsqueda avanzada"
-                aria-keyshortcuts="Control+K"
-                className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
-              >
-                <Search className="h-4 w-4" />
-              </button>
-            )}
-            {canManageConfigs && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (user) setTempUrls([...scriptUrls]);
-                  setIsConfigOpen(!isConfigOpen);
-                }}
-                title="Conexiones de stock"
-                aria-label="Configurar"
-                className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 sm:px-3.5"
-              >
-                <Settings className="h-4 w-4 text-slate-500" />
-                <span className="hidden sm:inline">Configurar</span>
-              </button>
-            )}
-            <button
-              id="sync-btn"
-              type="button"
-              onClick={() => fetchData()}
-              disabled={isLoading || isSilentSyncing}
-              aria-label="Sincronizar"
-              className="flex h-10 items-center justify-center gap-2 rounded-xl bg-teal-600 px-2.5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-50 sm:px-4"
-            >
-              <RefreshCw className={`h-4 w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">
-                {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
-              </span>
-            </button>
-          </div>
         </div>
+        )}
 
         {/* Indicadores de la lista (establecimientos o UNGET): el modelo único de KPIs. Tocar
             uno deja a la vista solo ese estado de actualización; tocarlo otra vez, todos. */}
@@ -4887,7 +4800,7 @@ function processSheet(sheet) {
           // establecimientos, y pulsarlos aquí no cambiaba nada a la vista.
           const clickable = viewLevel === "sheets";
           return (
-            <div className="mt-2 sm:mt-3">
+            <div className={viewLevel === "ungets" ? "" : "mt-2 sm:mt-3"}>
               <KpiStrip cols="md:grid-cols-3">
                 <KpiCard watermark tone="success" icon={<Wifi />} label="En línea" value={summary.online} hint="actualizados en la última hora" onClick={clickable ? () => only(true, false, false) : undefined} active={clickable && !allOn && filter_emerald && !filter_amber && !filter_red} />
                 <KpiCard watermark tone="warning" icon={<FileClock />} label="Desconectados" value={summary.delayed} hint="entre 1 y 24 horas sin actualizar" onClick={clickable ? () => only(false, true, false) : undefined} active={clickable && !allOn && !filter_emerald && filter_amber && !filter_red} />
@@ -5794,8 +5707,8 @@ function processSheet(sheet) {
           viewLevel === "data"
             ? "top-0 bg-white sm:static p-3 sm:p-5 border-b border-slate-100"
             : viewLevel === "sheets"
-              ? "-top-2.5 bg-[#f6f7f9] px-4 py-2 md:static md:bg-white md:p-5 md:border-b md:border-slate-100"
-              : "-top-2.5 bg-[#f6f7f9] px-4 py-2 sm:static sm:px-0 sm:pt-0 sm:pb-4"
+              ? "-top-2.5 bg-[#f6f7f9] px-1 py-2 md:static md:bg-white md:p-5 md:border-b md:border-slate-100"
+              : "-top-2.5 bg-[#f6f7f9] px-1 py-2 sm:static sm:px-0 sm:pt-0 sm:pb-4"
         }`}>
           {/* Search & Actions */}
           <div className="flex gap-3 items-center justify-between w-full flex-row">
@@ -5940,12 +5853,12 @@ function processSheet(sheet) {
                       establecimiento elegido, o en una hoja de una sola farmacia, no hay nada
                       que consolidar y el botón descarga directamente. */}
                   {hojaConPuestosComunales && dataFilterPharmacy === "all" ? (
-                    <SheetExportMenu onExport={exportCurrentSheetToExcel} />
+                    <div className="hidden sm:block"><SheetExportMenu onExport={exportCurrentSheetToExcel} /></div>
                   ) : (
                     <button
                       onClick={() => exportCurrentSheetToExcel()}
                       aria-label="Exportar stock"
-                      className="flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
+                      className="hidden sm:flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
                     >
                       <Download className="h-4 w-4 text-emerald-600 shrink-0" />
                       <span className="hidden sm:inline">Exportar Stock</span>
@@ -5956,27 +5869,6 @@ function processSheet(sheet) {
 
               {viewLevel === "sheets" && (
                 <>
-                  {lastGlobalSync && (
-                    <div
-                      className="hidden items-center gap-1.5 bg-slate-50/80 border border-slate-200/80 text-slate-500 px-3 py-2 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all shrink-0 shadow-xs h-full lg:flex"
-                      title="Última comprobación global del sistema"
-                    >
-                      <RefreshCw className="h-3 w-3 text-slate-400 shrink-0" />
-                      <span>
-                        Sincronizado:{" "}
-                        <span className="font-extrabold text-slate-700">
-                          {lastGlobalSync.toLocaleString("es-PE", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            second: "2-digit",
-                          })}
-                        </span>
-                      </span>
-                    </div>
-                  )}
                   {/* Button for Exiting Capture Mode (Only visible when isCaptureMode is active) */}
                   {isCaptureMode && (
                     <button
@@ -5996,7 +5888,7 @@ function processSheet(sheet) {
                     </button>
                   )}
 
-                  <div className="relative z-30">
+                  <div className="relative z-30 hidden sm:block">
                     <button
                       onClick={() =>
                         setIsExportDropdownOpen(!isExportDropdownOpen)
@@ -6098,12 +5990,132 @@ function processSheet(sheet) {
                   <button
                     onClick={exportAllUngetsToExcel}
                     aria-label="Exportar stock"
-                    className="flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap shadow-sm"
+                    className="hidden sm:flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap shadow-sm"
                   >
                     <Download className="h-4 w-4 text-emerald-600 shrink-0" />
                     <span className="hidden sm:inline">Exportar Stock</span>
                   </button>
                 )}
+              {/* Escritorio: búsqueda en todos, Configurar y Sincronizar, en la misma fila que
+                  el buscador (antes ocupaban una fila propia arriba). */}
+              <div className="hidden items-center gap-2 sm:flex">
+                {selectedUngetIndex !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setIsNetworkSearchOpen(true)}
+                    title="Buscar un producto en todos los establecimientos (Ctrl+K)"
+                    aria-label="Búsqueda avanzada"
+                    aria-keyshortcuts="Control+K"
+                    className="flex h-[42px] w-[42px] items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
+                  >
+                    <Search className="h-4 w-4" />
+                  </button>
+                )}
+                {canManageConfigs && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (user) setTempUrls([...scriptUrls]);
+                      setIsConfigOpen(!isConfigOpen);
+                    }}
+                    title="Conexiones de stock"
+                    aria-label="Configurar"
+                    className="flex h-[42px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
+                  >
+                    <Settings className="h-4 w-4 text-slate-500" />
+                    Configurar
+                  </button>
+                )}
+                <button
+                  id="sync-btn"
+                  type="button"
+                  onClick={() => fetchData()}
+                  disabled={isLoading || isSilentSyncing}
+                  aria-label="Sincronizar"
+                  // La hora de la última comprobación iba en una pastilla aparte que le quitaba
+                  // sitio al buscador; ahora la dice el botón al pasar el cursor.
+                  title={lastGlobalSync ? `Última sincronización: ${lastGlobalSync.toLocaleString("es-PE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Sincronizar"}
+                  className="flex h-[42px] items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 text-xs font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`} />
+                  {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
+                </button>
+              </div>
+
+              {/* Celular: un solo botón de tres puntos junto al buscador, con todas las
+                  acciones y las descargas de Excel. */}
+              <button
+                type="button"
+                onClick={() => setHeaderActionsOpen(true)}
+                aria-label="Más acciones"
+                className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 sm:hidden"
+              >
+                {isLoading || isSilentSyncing ? <RefreshCw className="h-5 w-5 animate-spin text-teal-600" /> : <MoreHorizontal className="h-5 w-5" />}
+              </button>
+              <BottomSheet open={headerActionsOpen} title="Acciones" onClose={() => setHeaderActionsOpen(false)}>
+                {(() => {
+                  const item = "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40";
+                  const run = (accion: () => void) => () => { setHeaderActionsOpen(false); accion(); };
+                  const descargas: { label: string; detail: string; icon: React.ReactNode; onClick: () => void }[] = [];
+                  if (viewLevel === "ungets" && globalUngetSummary && sources.length > 0) {
+                    descargas.push({ label: "Exportar stock", detail: "Saldos de todas las UNGET", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: exportAllUngetsToExcel });
+                  }
+                  if (viewLevel === "sheets") {
+                    descargas.push(
+                      { label: "Exportar stock", detail: "Saldos de todos los establecimientos", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: exportAllEstablishmentsToExcel },
+                      { label: "Reporte de actualización", detail: "Estado y fecha de cambios comprobados", icon: <FileSpreadsheet className="h-5 w-5 text-indigo-600" />, onClick: exportReportToExcel },
+                      {
+                        label: "Foto reporte de deficiencias", detail: "Seleccionar y descargar imagen para WhatsApp", icon: <Camera className="h-5 w-5 text-rose-600" />,
+                        onClick: () => { setIsCaptureMode(true); if (selectedCaptureIds.size === 0) handleAutoSelectDeficiencies(); },
+                      },
+                    );
+                  }
+                  if (viewLevel === "data") {
+                    if (hojaConPuestosComunales && dataFilterPharmacy === "all") {
+                      descargas.push(
+                        { label: "Exportar stock consolidado", detail: "Sumar el stock de todas las farmacias", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: () => exportCurrentSheetToExcel("consolidado") },
+                        { label: "Exportar stock por farmacia", detail: "Stock de cada farmacia", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: () => exportCurrentSheetToExcel("detallado") },
+                      );
+                    } else {
+                      descargas.push({ label: "Exportar stock", detail: "Excel de esta hoja", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: () => exportCurrentSheetToExcel() });
+                    }
+                  }
+                  return (
+                    <div className="space-y-1">
+                      <button type="button" disabled={isLoading || isSilentSyncing} onClick={run(() => void fetchData())} className={item}>
+                        <RefreshCw className="h-5 w-5 text-teal-600" />
+                        {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
+                      </button>
+                      {selectedUngetIndex !== null && (
+                        <button type="button" onClick={run(() => setIsNetworkSearchOpen(true))} className={item}>
+                          <Search className="h-5 w-5 text-teal-600" />
+                          Buscar un producto en todos los establecimientos
+                        </button>
+                      )}
+                      {canManageConfigs && (
+                        <button type="button" onClick={run(() => { if (user) setTempUrls([...scriptUrls]); setIsConfigOpen(true); })} className={item}>
+                          <Settings className="h-5 w-5 text-slate-500" />
+                          Configurar conexiones de stock
+                        </button>
+                      )}
+                      {descargas.length > 0 && (
+                        <>
+                          <p className="px-3 pb-1 pt-3 text-[11px] font-black uppercase tracking-wider text-slate-400">Descargar</p>
+                          {descargas.map((d) => (
+                            <button key={d.label} type="button" onClick={run(d.onClick)} className={item}>
+                              {d.icon}
+                              <span className="min-w-0">
+                                <span className="block">{d.label}</span>
+                                <span className="block text-xs font-medium text-slate-400">{d.detail}</span>
+                              </span>
+                            </button>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+              </BottomSheet>
             </div>
           </div>
         </div>
@@ -6134,7 +6146,7 @@ function processSheet(sheet) {
             </div>
           ) : (
             <div
-              className={`flex flex-col gap-6 ${viewLevel === "data" ? "p-4 sm:p-6 pb-4 sm:pb-4" : viewLevel === "sheets" ? "px-4 pt-2 pb-32 md:p-6" : "px-4 pt-2 pb-32 sm:p-0 sm:pb-6"}`}
+              className={`flex flex-col gap-6 ${viewLevel === "data" ? "p-4 sm:p-6 pb-4 sm:pb-4" : viewLevel === "sheets" ? "px-1 pt-2 pb-32 md:p-6" : "px-1 pt-2 pb-32 sm:p-0 sm:pb-6"}`}
             >
               {/* NIVEL 1: PANEL REGIONAL. Una tarjeta por UNGET (una fila en el celular) con
                   dónde está, cuántos establecimientos tiene y cómo están de actualizados.
