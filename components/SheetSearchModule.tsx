@@ -4782,7 +4782,7 @@ function processSheet(sheet) {
           title="Buscar un producto en todos los establecimientos (Ctrl+K)"
           aria-label="Búsqueda avanzada"
           aria-keyshortcuts="Control+K"
-          className="flex h-[42px] w-[42px] items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
         >
           <Search className="h-4 w-4" />
         </button>
@@ -4796,7 +4796,7 @@ function processSheet(sheet) {
           }}
           title="Conexiones de stock"
           aria-label="Configurar"
-          className="flex h-[42px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
+          className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
         >
           <Settings className="h-4 w-4 text-slate-500" />
           Configurar
@@ -4811,7 +4811,7 @@ function processSheet(sheet) {
         // La hora de la última comprobación iba en una pastilla aparte que le quitaba
         // sitio al buscador; ahora la dice el botón al pasar el cursor.
         title={lastGlobalSync ? `Última sincronización: ${lastGlobalSync.toLocaleString("es-PE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Sincronizar"}
-        className="flex h-[42px] items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 text-xs font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-50"
+        className="flex h-10 items-center justify-center gap-2 rounded-xl border border-teal-600 bg-teal-600 px-3.5 text-xs font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-50"
       >
         <RefreshCw className={`h-4 w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`} />
         {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
