@@ -1,9 +1,8 @@
 # ToolKit SISMED Web
 
-Aplicación web interna de la **DIRESA San Martín (Perú)** para logística de salud. Cubre dos dominios:
+Aplicación web interna de la **DIRESA San Martín (Perú)** para logística de salud. Cubre el dominio de **Farmacia / SISMED**: análisis de requerimiento, consulta de stock, redistribución, claves de envío, backups SISMED y administración.
 
-- **Farmacia / SISMED** — análisis de stock, redistribución, catálogos y administración.
-- **Inmunizaciones** — control de biológicos por lote desde el almacén regional DIRESA hasta cada IPRESS, con cierre mensual y reportes de movimiento biológico. Es donde está el trabajo activo.
+El módulo de Inmunizaciones se retiró el 2026-10-03: se está reconstruyendo como un sistema aparte.
 
 React 19 + Vite 6 + TypeScript, con Supabase como backend.
 
@@ -41,13 +40,12 @@ La aplicación queda en `http://127.0.0.1:3000/ToolkitSISMED/` — la ruta base 
 |---|---|
 | `components/` | Un archivo por módulo. `components/ui/` es el kit compartido |
 | `services/` | Acceso a datos, reglas de dominio y generación de PDF/Excel |
-| `docs/` | Toda la documentación: fases, planes funcionales, auditorías |
+| `docs/` | Toda la documentación: auditorías, planes y notas técnicas |
 | `supabase/` | Scripts `.sql` que se ejecutan a mano en el panel de Supabase |
-| `scripts/` | Previews de reportes y diagnóstico contra datos reales |
 
 ## Si vas a trabajar en el código
 
-**Lee [AGENTS.md](AGENTS.md) primero.** Explica el modelo de dominio de inmunizaciones, el modelo de seguridad, qué componentes y utilidades ya existen para reutilizar, y las trampas que este proyecto ya pagó una vez.
+**Lee [AGENTS.md](AGENTS.md) primero.** Explica la arquitectura, el modelo de seguridad, las reglas de las conexiones de stock, qué componentes y utilidades ya existen para reutilizar, y las trampas que este proyecto ya pagó una vez.
 
 ## Despliegue
 

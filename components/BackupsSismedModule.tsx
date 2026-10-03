@@ -12,9 +12,9 @@ import {
 } from "../services/backupModule";
 import { relativeTime } from "../services/sendKeys";
 import {
-  ImmunizationEmptyState, ImmunizationKpiCard, ImmunizationKpiStrip, ImmunizationStatusChip, ImmunizationTableHeader, ImmunizationTone,
-  immunizationFilterInputClass,
-} from "./ui/immunization";
+  EmptyState, KpiCard, KpiStrip, StatusChip, TableHeaderCell, Tone,
+  filterInputClass,
+} from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
 import { ModuleHeaderPortal } from "./ui/ModuleHeaderSlot";
 import { BackupConsumptionTab } from "./BackupConsumptionTab";
@@ -35,7 +35,7 @@ const whenLabel = (value?: string | null, now = Date.now()) => {
   return `Hace ${days} días`;
 };
 
-const chipFor = (row: BackupRowView): { label: string; tone: ImmunizationTone } | null => {
+const chipFor = (row: BackupRowView): { label: string; tone: Tone } | null => {
   const job = row.job;
   if (job) {
     if (job.phase === "requested") return { label: "Esperando PC", tone: "info" };
@@ -207,21 +207,21 @@ export const BackupsSismedModule: React.FC = () => {
 
       {tab === "consumo" && isAdmin ? <BackupConsumptionTab /> : (
         <>
-          <ImmunizationKpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-            <ImmunizationKpiCard watermark tone="info" icon={<Wifi />} label="PC en línea ahora" value={`${summary.online} / ${summary.total}`} hint={summary.total - summary.online ? `${summary.total - summary.online} desconectadas` : "todas conectadas"} onClick={() => setFilter(filter === "online" ? "all" : "online")} active={filter === "online"} />
-            <ImmunizationKpiCard watermark tone="success" icon={<CheckCircle2 />} label="Descargados hoy" value={summary.downloadedToday} hint={`de ${summary.total} establecimientos`} onClick={() => setFilter(filter === "today" ? "all" : "today")} active={filter === "today"} />
-            <ImmunizationKpiCard watermark tone="neutral" icon={<History />} label="Sin backup en 7 días" value={summary.stale} hint={summary.stale ? "pídalos esta semana" : "todos al día"} />
-            <ImmunizationKpiCard watermark tone={plan.tone} icon={<Gauge />} label="Plan gratuito" value={plan.value} progress={plan.ratio} progressMarks={[0.7, 0.8]} hint={plan.hint} />
-          </ImmunizationKpiStrip>
+          <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard watermark tone="info" icon={<Wifi />} label="PC en línea ahora" value={`${summary.online} / ${summary.total}`} hint={summary.total - summary.online ? `${summary.total - summary.online} desconectadas` : "todas conectadas"} onClick={() => setFilter(filter === "online" ? "all" : "online")} active={filter === "online"} />
+            <KpiCard watermark tone="success" icon={<CheckCircle2 />} label="Descargados hoy" value={summary.downloadedToday} hint={`de ${summary.total} establecimientos`} onClick={() => setFilter(filter === "today" ? "all" : "today")} active={filter === "today"} />
+            <KpiCard watermark tone="neutral" icon={<History />} label="Sin backup en 7 días" value={summary.stale} hint={summary.stale ? "pídalos esta semana" : "todos al día"} />
+            <KpiCard watermark tone={plan.tone} icon={<Gauge />} label="Plan gratuito" value={plan.value} progress={plan.ratio} progressMarks={[0.7, 0.8]} hint={plan.hint} />
+          </KpiStrip>
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center sm:px-4">
               <div className="relative w-full sm:max-w-xs">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${immunizationFilterInputClass} pl-9`} />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${filterInputClass} pl-9`} />
               </div>
               <div className="flex gap-2 sm:ml-auto">
-                <select value={filter} onChange={(e) => setFilter(e.target.value as ShowFilter)} aria-label="Mostrar" className={`${immunizationFilterInputClass} flex-1 sm:w-56 sm:flex-none`}>
+                <select value={filter} onChange={(e) => setFilter(e.target.value as ShowFilter)} aria-label="Mostrar" className={`${filterInputClass} flex-1 sm:w-56 sm:flex-none`}>
                   {FILTERS.map((f) => <option key={f} value={f}>{f === "all" ? "Mostrar: todos" : SHOW_FILTER_LABEL[f]} ({counts[f]})</option>)}
                 </select>
                 <button type="button" onClick={() => setActivityOpen(true)} className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">
@@ -234,14 +234,14 @@ export const BackupsSismedModule: React.FC = () => {
             {loading ? (
               <div className="flex h-48 items-center justify-center gap-2 text-sm font-semibold text-slate-500"><Loader2 className="h-5 w-5 animate-spin text-teal-600" /> Cargando establecimientos…</div>
             ) : loadError ? (
-              <ImmunizationEmptyState
+              <EmptyState
                 icon={<AlertTriangle className="h-6 w-6" />}
                 title="No se pudo cargar la lista"
                 description={loadError}
                 action={<button type="button" onClick={() => { setLoading(true); void load(); }} className="h-10 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white">Reintentar</button>}
               />
             ) : filtered.length === 0 ? (
-              <ImmunizationEmptyState
+              <EmptyState
                 icon={<FolderDown className="h-6 w-6" />}
                 title={rows.length === 0 ? "Ningún establecimiento puede enviar backup todavía" : "Ningún establecimiento coincide"}
                 description={rows.length === 0 ? "Aparecen aquí los establecimientos de su jurisdicción con clave de envío y habilitados para backups." : "Pruebe con otra búsqueda o filtro."}
@@ -252,13 +252,13 @@ export const BackupsSismedModule: React.FC = () => {
                   <table className="w-full text-[13px]">
                     <thead className="sticky top-0 bg-slate-50">
                       <tr>
-                        <ImmunizationTableHeader>Establecimiento</ImmunizationTableHeader>
-                        <ImmunizationTableHeader>Equipo</ImmunizationTableHeader>
-                        <ImmunizationTableHeader>Señal</ImmunizationTableHeader>
-                        <ImmunizationTableHeader>Estado</ImmunizationTableHeader>
-                        <ImmunizationTableHeader>Backup</ImmunizationTableHeader>
-                        <ImmunizationTableHeader>Último descargado</ImmunizationTableHeader>
-                        <ImmunizationTableHeader align="right"><span className="sr-only">Acciones</span></ImmunizationTableHeader>
+                        <TableHeaderCell>Establecimiento</TableHeaderCell>
+                        <TableHeaderCell>Equipo</TableHeaderCell>
+                        <TableHeaderCell>Señal</TableHeaderCell>
+                        <TableHeaderCell>Estado</TableHeaderCell>
+                        <TableHeaderCell>Backup</TableHeaderCell>
+                        <TableHeaderCell>Último descargado</TableHeaderCell>
+                        <TableHeaderCell align="right"><span className="sr-only">Acciones</span></TableHeaderCell>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -274,7 +274,7 @@ export const BackupsSismedModule: React.FC = () => {
                               {row.equipo ? <><div className="font-semibold text-slate-700">{row.equipo}</div><div className="font-mono text-[11px] text-slate-400">Toolkit v{row.version || "?"}</div></> : <span className="text-slate-400">—</span>}
                             </td>
                             <td className="px-4 py-2"><Signal row={row} /></td>
-                            <td className="px-4 py-2">{chip ? <ImmunizationStatusChip label={chip.label} tone={chip.tone} /> : <span className="text-slate-300">—</span>}</td>
+                            <td className="px-4 py-2">{chip ? <StatusChip label={chip.label} tone={chip.tone} /> : <span className="text-slate-300">—</span>}</td>
                             <td className="px-4 py-2"><Detail row={row} /></td>
                             <td className="px-4 py-2 text-[12px] text-slate-500">
                               {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}
@@ -297,7 +297,7 @@ export const BackupsSismedModule: React.FC = () => {
                             <div className="truncate font-black text-slate-800">{row.name}</div>
                             <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
                           </div>
-                          {chip ? <ImmunizationStatusChip label={chip.label} tone={chip.tone} /> : <Signal row={row} align="right" />}
+                          {chip ? <StatusChip label={chip.label} tone={chip.tone} /> : <Signal row={row} align="right" />}
                         </div>
                         <Detail row={row} />
                         <div className="flex items-center justify-between gap-2">

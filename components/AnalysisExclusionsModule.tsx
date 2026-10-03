@@ -26,15 +26,14 @@ import { requirementExclusionService } from "../services/requirementExclusionSer
 import { filterFacilitiesByJurisdiction, getUserJurisdictionScope } from "../services/jurisdictionService";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { 
-  ImmunizationKpiCard, 
-  ImmunizationPageHeader, 
-  ImmunizationTableHeader as HeaderCell, 
-  ImmunizationField as Field, 
-  immunizationInputClass, 
-  immunizationFilterInputClass, 
-  immunizationSelectClass,
-  ImmunizationEmptyState
-} from "./ui/immunization";
+  KpiCard, 
+  PageHeader, 
+  TableHeaderCell as HeaderCell, 
+  FormField as Field, 
+  inputClass, 
+  filterInputClass, 
+  EmptyState
+} from "./ui/kit";
 
 export const AnalysisExclusionsModule: React.FC = () => {
   const { user } = useAuth();
@@ -339,7 +338,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
   return (
     <div className="space-y-6 pb-12 animate-in fade-in duration-300">
       {/* Header */}
-      <ImmunizationPageHeader
+      <PageHeader
         title="Lista de Exclusiones de Medicamentos"
         description="Configure los medicamentos que su establecimiento omitirá automáticamente al ejecutar el Análisis de Requerimiento."
         icon={<Ban className="h-7 w-7 text-rose-500" />}
@@ -539,21 +538,21 @@ export const AnalysisExclusionsModule: React.FC = () => {
 
         {/* KPIs */}
         <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <ImmunizationKpiCard
+          <KpiCard
             label="Total Excluidos"
             value={totalCount}
             icon={<Ban className="h-5 w-5" />}
             tone={totalCount > 0 ? "warning" : "neutral"}
             hint="Medicamentos fuera del análisis"
           />
-          <ImmunizationKpiCard
+          <KpiCard
             label="Con Motivo Detallado"
             value={withReasonCount}
             icon={<FileText className="h-5 w-5" />}
             tone="info"
             hint="Registros fundamentados"
           />
-          <ImmunizationKpiCard
+          <KpiCard
             label="Última Actualización"
             value={lastUpdated}
             icon={<Layers className="h-5 w-5" />}
@@ -574,7 +573,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               placeholder="Buscar por código, descripción o motivo..."
-              className={immunizationFilterInputClass + " pl-9"}
+              className={filterInputClass + " pl-9"}
             />
             {searchTerm && (
               <button
@@ -627,7 +626,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
               ) : filteredExclusions.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-12">
-                    <ImmunizationEmptyState
+                    <EmptyState
                       title={searchTerm ? "No se encontraron coincidencias" : "Sin medicamentos excluidos"}
                       description={
                         searchTerm
@@ -742,7 +741,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
                       value={formData.sismedCode}
                       onChange={e => setFormData({ ...formData, sismedCode: e.target.value })}
                       placeholder="00000"
-                      className={immunizationInputClass + " font-mono font-bold uppercase"}
+                      className={inputClass + " font-mono font-bold uppercase"}
                       autoFocus
                     />
                   </Field>
@@ -754,7 +753,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
                       value={formData.presentation}
                       onChange={e => setFormData({ ...formData, presentation: e.target.value })}
                       placeholder="TABLETA / FRASCO..."
-                      className={immunizationInputClass + " uppercase"}
+                      className={inputClass + " uppercase"}
                     />
                   </Field>
                 </div>
@@ -767,7 +766,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
                   value={formData.description}
                   onChange={e => setFormData({ ...formData, description: e.target.value })}
                   placeholder="PARACETAMOL 500 MG..."
-                  className={immunizationInputClass + " uppercase font-bold"}
+                  className={inputClass + " uppercase font-bold"}
                 />
               </Field>
 

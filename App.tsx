@@ -7,8 +7,7 @@ import { analyzeInventoryWithAura } from './services/auraService';
 import { generateFullReportPDF } from './services/pdfService';
 import { 
   Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network,
-  BarChart2, FilterX, RefreshCw, Search, Database, Activity, Syringe, ClipboardList, Package,
-  PackageSearch, ArrowDownLeft, Truck, Receipt, RotateCcw, SlidersHorizontal, CalendarCheck,
+  BarChart2, FilterX, RefreshCw, Search, Database, Activity,
   Settings, Users, Shield, Building, FolderKanban, FileSpreadsheet, User, KeyRound, HardDriveDownload
 } from 'lucide-react';
 
@@ -41,19 +40,6 @@ import { BackupsSismedModule } from './components/BackupsSismedModule';
 import { BackupManagerProvider } from './contexts/BackupManagerContext';
 import { AssignedIpressStockModule } from './components/AssignedIpressStockModule';
 import { AnalysisExclusionsModule } from './components/AnalysisExclusionsModule';
-import { ImmunizationAdjustmentsModule } from './components/ImmunizationAdjustmentsModule';
-import { ImmunizationCatalogModule } from './components/ImmunizationCatalogModule';
-import { ImmunizationClosuresModule } from './components/ImmunizationClosuresModule';
-import { ImmunizationConsumptionModule } from './components/ImmunizationConsumptionModule';
-import { ImmunizationDistributionsModule } from './components/ImmunizationDistributionsModule';
-import { ImmunizationIncomesModule } from './components/ImmunizationIncomesModule';
-import { ImmunizationIncomeOriginsModule } from './components/ImmunizationIncomeOriginsModule';
-import { ImmunizationConfigModule } from './components/ImmunizationConfigModule';
-import { ImmunizationInitialInventoryModule } from './components/ImmunizationInitialInventoryModule';
-import { ImmunizationReportsModule } from './components/ImmunizationReportsModule';
-import { ImmunizationReturnsModule } from './components/ImmunizationReturnsModule';
-import { ImmunizationStockModule } from './components/ImmunizationStockModule';
-import { ImmunizationStockQueryModule } from './components/ImmunizationStockQueryModule';
 import { APP_BASE, moduleForPath, pathForModule } from './services/appRoutes';
 
 const SuspenseFallback = () => (
@@ -187,17 +173,6 @@ const AuthenticatedApp: React.FC = () => {
         if (isAuthenticated && !isLoading && user && !hasPermission(currentView)) {
             if (hasPermission('DASHBOARD')) setCurrentView('DASHBOARD');
             else if (hasPermission('ANALYSIS_EXCLUSIONS')) setCurrentView('ANALYSIS_EXCLUSIONS');
-            else if (hasPermission('IMMUNIZATION_STOCK')) setCurrentView('IMMUNIZATION_STOCK');
-                            else if (hasPermission('IMMUNIZATION_STOCK_QUERY')) setCurrentView('IMMUNIZATION_STOCK_QUERY');
-            else if (hasPermission('IMMUNIZATION_INCOMES')) setCurrentView('IMMUNIZATION_INCOMES');
-            else if (hasPermission('IMMUNIZATION_INCOME_ORIGINS')) setCurrentView('IMMUNIZATION_INCOME_ORIGINS');
-            else if (hasPermission('IMMUNIZATION_DISTRIBUTIONS')) setCurrentView('IMMUNIZATION_DISTRIBUTIONS');
-            else if (hasPermission('IMMUNIZATION_CONSUMPTION')) setCurrentView('IMMUNIZATION_CONSUMPTION');
-            else if (hasPermission('IMMUNIZATION_INITIAL_INVENTORY')) setCurrentView('IMMUNIZATION_INITIAL_INVENTORY');
-            else if (hasPermission('IMMUNIZATION_CATALOG')) setCurrentView('IMMUNIZATION_CATALOG');
-            else if (hasPermission('IMMUNIZATION_ADJUSTMENTS')) setCurrentView('IMMUNIZATION_ADJUSTMENTS');
-            else if (hasPermission('IMMUNIZATION_CLOSURES')) setCurrentView('IMMUNIZATION_CLOSURES');
-            else if (hasPermission('IMMUNIZATION_REPORTS')) setCurrentView('IMMUNIZATION_REPORTS');
             else if (hasPermission('IPRESS_STOCK')) setCurrentView('IPRESS_STOCK');
             else if (hasPermission('REDISTRIBUTION')) setCurrentView('REDISTRIBUTION');
             else if (hasPermission('SIG_SEARCH')) setCurrentView('SIG_SEARCH');
@@ -225,32 +200,6 @@ const AuthenticatedApp: React.FC = () => {
                 return { title: 'Consulta Stock', description: 'Buscador de existencias en el catálogo SIG', icon: <Search className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'IPRESS_STOCK':
                 return { title: 'Stock SISMED', description: 'Stock propio de la IPRESS, leído de la hoja de Google Sheets asignada (solo lectura)', icon: <Database className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_CATALOG':
-                return { title: 'Catálogo Biológico', description: 'Catálogo maestro de vacunas, jeringas y diluyentes', icon: <Syringe className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_INITIAL_INVENTORY':
-                return { title: 'Inventario Inicial', description: 'Carga el stock físico por lote de productos biológicos.', icon: <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_STOCK':
-                return { title: 'Stock Biológico', description: 'Stock de inmunizaciones agrupado por producto y detallado por lote', icon: <Package className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_STOCK_QUERY':
-                return { title: 'Consulta de Stock Biológico', description: 'Consulta territorial de solo lectura del stock de UNGET e IPRESS', icon: <PackageSearch className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_INCOMES':
-                return { title: 'Ingresos Regionales', description: 'Registro de ingresos nuevos de biológicos al almacén regional DIRESA', icon: <ArrowDownLeft className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_INCOME_ORIGINS':
-                return { title: 'Orígenes de Ingreso', description: 'Catálogo administrable de orígenes para ingresos regionales', icon: <Building2 className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_DISTRIBUTIONS':
-                return { title: 'Distribuciones', description: 'Distribución jerárquica de biológicos DIRESA -> UNGET -> IPRESS', icon: <Truck className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_CONSUMPTION':
-                return { title: 'Consumo IPRESS', description: 'Registro de consumos por comprobante con varios productos/lotes', icon: <Receipt className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_RETURNS':
-                return { title: 'Devoluciones y Bajas', description: 'Registro de bajas, devoluciones y transferencias IPRESS hacia UNGET', icon: <RotateCcw className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_ADJUSTMENTS':
-                return { title: 'Reajustes de Stock', description: 'Correcciones auditadas por conteo físico', icon: <SlidersHorizontal className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_CLOSURES':
-                return { title: 'Cierre Mensual', description: 'Precierre IPRESS y cierre definitivo mensual por UNGET', icon: <CalendarCheck className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_REPORTS':
-                return { title: 'Reportes Inmunizaciones', description: 'Reportes parciales y consolidados del movimiento biológico', icon: <FileText className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IMMUNIZATION_CONFIG':
-                return { title: 'Configuración Inmunizaciones', description: 'Configuraciones y catálogos auxiliares de inmunizaciones', icon: <Settings className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'ADMIN_USERS':
                 return { title: 'Gestión de Usuarios', description: 'Administración de cuentas de usuario y credenciales', icon: <Users className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
             case 'ADMIN_ROLES':
@@ -273,7 +222,7 @@ const AuthenticatedApp: React.FC = () => {
                 if (currentView.startsWith('ADMIN')) {
                     return { title: 'Panel de Administración', description: 'Módulo de administración y configuración', icon: <Shield className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
                 }
-                return { title: 'ToolKit SISMED', description: 'Sistema de Gestión de Inmunizaciones y Medicamentos', icon: <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
+                return { title: 'ToolKit SISMED', description: 'Sistema de Gestión de Medicamentos', icon: <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
         }
     }, [currentView]);
 
@@ -363,19 +312,6 @@ const AuthenticatedApp: React.FC = () => {
                                 {currentView === 'REDISTRIBUTION' && <RedistributionModule />}
                                 {currentView === 'SIG_SEARCH' && <SheetSearchModule />}
                                 {currentView === 'IPRESS_STOCK' && <AssignedIpressStockModule />}
-                                {currentView === 'IMMUNIZATION_CATALOG' && <ImmunizationCatalogModule />}
-                                {currentView === 'IMMUNIZATION_INITIAL_INVENTORY' && <ImmunizationInitialInventoryModule />}
-                                {currentView === 'IMMUNIZATION_STOCK' && <ImmunizationStockModule />}
-                                {currentView === 'IMMUNIZATION_STOCK_QUERY' && <ImmunizationStockQueryModule />}
-	                                {currentView === 'IMMUNIZATION_INCOMES' && <ImmunizationIncomesModule />}
-	                                {currentView === 'IMMUNIZATION_INCOME_ORIGINS' && <ImmunizationIncomeOriginsModule />}
-                                {currentView === 'IMMUNIZATION_DISTRIBUTIONS' && <ImmunizationDistributionsModule />}
-                                {currentView === 'IMMUNIZATION_CONSUMPTION' && <ImmunizationConsumptionModule />}
-                                {currentView === 'IMMUNIZATION_RETURNS' && <ImmunizationReturnsModule />}
-                                {currentView === 'IMMUNIZATION_ADJUSTMENTS' && <ImmunizationAdjustmentsModule />}
-                                {currentView === 'IMMUNIZATION_CLOSURES' && <ImmunizationClosuresModule />}
-                                {currentView === 'IMMUNIZATION_REPORTS' && <ImmunizationReportsModule />}
-                                {currentView === 'IMMUNIZATION_CONFIG' && <ImmunizationConfigModule />}
                                 {currentView === 'ADMIN_STOCK_ASSIGN' && <AdminStockAssignmentModule />}
                                 {currentView === 'ADMIN_SEND_KEYS' && <AdminSendKeysModule />}
                                 {currentView === 'ADMIN_BACKUPS' && <BackupsSismedModule />}

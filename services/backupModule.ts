@@ -7,7 +7,7 @@
  */
 
 import type { BackupQuota, OnlinePc, UsageItem, UsageReading } from "./backupConnection";
-import type { ImmunizationTone } from "../components/ui/immunization";
+import type { Tone } from "../components/ui/kit";
 
 export interface BackupOverviewRow {
   code: string;
@@ -143,7 +143,7 @@ export const summarizeBackups = (rows: BackupRowView[], now: number = Date.now()
 };
 
 /** Estado del plan gratuito para quien no es administrador: sin cifras de Cloudflare. */
-export const planState = (usage: UsageReading | null): { value: string; tone: ImmunizationTone; ratio: number | null; hint: string } => {
+export const planState = (usage: UsageReading | null): { value: string; tone: Tone; ratio: number | null; hint: string } => {
   const ratio = usage?.worst?.ratio ?? null;
   if (!usage || usage.level === "unknown") return { value: "Sin medición", tone: "neutral", ratio: null, hint: "aún no se pudo medir" };
   if (usage.level === "paused") return { value: "Pausado", tone: "danger", ratio, hint: "las descargas están en pausa" };
