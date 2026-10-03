@@ -3235,6 +3235,13 @@ const SheetSearchModuleContent: React.FC = () => {
     setViewLevel("sheets");
   }, [hayPanelRegional, scriptUrls.length, viewLevel, selectedUngetIndex]);
 
+  // Al cambiar de nivel se vuelve arriba. Desde que en el celular se desplaza la página
+  // entera, entrar a una UNGET conservaba lo bajado en el panel y dejaba fuera de la vista
+  // la cabecera y los KPIs del nuevo nivel.
+  useEffect(() => {
+    document.querySelector("main")?.scrollTo({ top: 0 });
+  }, [viewLevel, selectedUngetIndex, selectedSourceId]);
+
   /**
    * Lee el stock de una IPRESS sin tocar el estado: lectura directa de Google Sheets y,
    * si no es posible, Apps Script. La usan tanto "Consultar stock" como la precarga.
@@ -5771,10 +5778,25 @@ function processSheet(sheet) {
       )}
 
       <div
-        className={`bg-white sm:rounded-[1.25rem] border-y sm:border border-slate-200 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] flex flex-col sm:overflow-hidden mx-0 sm:mx-10 lg:mx-14 xl:mx-16 ${viewLevel === "data" ? "h-auto shrink-0 mb-8" : "sm:flex-1 sm:min-h-[300px]"}`}
+        className={`flex flex-col mx-0 sm:mx-10 lg:mx-14 xl:mx-16 ${
+          viewLevel === "data"
+            ? "bg-white sm:rounded-[1.25rem] border-y sm:border border-slate-200 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] sm:overflow-hidden h-auto shrink-0 mb-8"
+            : viewLevel === "sheets"
+              // Establecimientos: en el celular cada uno es su propia tarjeta, sin recuadro
+              // alrededor (así se ve como una app); en escritorio sigue el recuadro.
+              ? "md:bg-white md:rounded-[1.25rem] md:border md:border-slate-200 md:shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] md:overflow-hidden sm:flex-1 sm:min-h-[300px]"
+              // Panel regional: las UNGET sueltas, cada una en su tarjeta.
+              : ""
+        }`}
       >
         {/* TOOLBAR */}
-        <div className="sticky top-0 z-20 bg-white sm:static p-3 sm:p-5 border-b border-slate-100 flex flex-col gap-4">
+        <div className={`sticky z-20 flex flex-col gap-4 ${
+          viewLevel === "data"
+            ? "top-0 bg-white sm:static p-3 sm:p-5 border-b border-slate-100"
+            : viewLevel === "sheets"
+              ? "-top-2.5 bg-[#f6f7f9] px-4 py-2 md:static md:bg-white md:p-5 md:border-b md:border-slate-100"
+              : "-top-2.5 bg-[#f6f7f9] px-4 py-2 sm:static sm:px-0 sm:pt-0 sm:pb-4"
+        }`}>
           {/* Search & Actions */}
           <div className="flex gap-3 items-center justify-between w-full flex-row">
             <div className="relative flex-1 w-full md:max-w-[50%] group">
@@ -6087,7 +6109,7 @@ function processSheet(sheet) {
         </div>
 
         <div
-          className={`flex-1 bg-gray-50/30 scrollbar-thin ${viewLevel === "data" ? "overflow-visible" : "sm:overflow-auto"}`}
+          className={`flex-1 scrollbar-thin ${viewLevel === "data" ? "bg-gray-50/30 overflow-visible" : viewLevel === "sheets" ? "md:bg-gray-50/30 md:overflow-auto" : ""}`}
         >
           {isConfigLoading && scriptUrls.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-teal-600 gap-3 py-20">
@@ -6112,7 +6134,7 @@ function processSheet(sheet) {
             </div>
           ) : (
             <div
-              className={`p-4 sm:p-6 flex flex-col gap-6 ${viewLevel === "data" ? "pb-4 sm:pb-4" : "pb-32 sm:pb-6"}`}
+              className={`flex flex-col gap-6 ${viewLevel === "data" ? "p-4 sm:p-6 pb-4 sm:pb-4" : viewLevel === "sheets" ? "px-4 pt-2 pb-32 md:p-6" : "px-4 pt-2 pb-32 sm:p-0 sm:pb-6"}`}
             >
               {/* NIVEL 1: PANEL REGIONAL. Una tarjeta por UNGET (una fila en el celular) con
                   dónde está, cuántos establecimientos tiene y cómo están de actualizados.
@@ -6266,7 +6288,7 @@ function processSheet(sheet) {
                 return (
                   <>
                     {/* Celular: filas, como la lista de establecimientos. */}
-                    <ul className="-mx-4 -mt-4 divide-y divide-slate-100 border-y border-slate-100 bg-white md:hidden">
+                    <ul className="space-y-3 md:hidden">
                       {items.map((item) => (
                         <li
                           key={item.config.url}
@@ -6274,7 +6296,7 @@ function processSheet(sheet) {
                           tabIndex={0}
                           onClick={() => handleSelectUnget(item.originalIdx)}
                           onKeyDown={(e) => { if (e.key === "Enter") handleSelectUnget(item.originalIdx); }}
-                          className="cursor-pointer space-y-2 px-4 py-3 active:bg-slate-50"
+                          className="cursor-pointer space-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm active:bg-slate-50"
                         >
                           <div className="flex items-start gap-3">
                             <div className="min-w-0 flex-1">
@@ -7602,8 +7624,8 @@ function processSheet(sheet) {
                     if (filteredAndSortedSources.length === 0) return viewContent;
                     return (
                       <>
-                        <div className="-mx-4 -mt-4 md:hidden">
-                          <ul className="divide-y divide-slate-100 border-y border-slate-100 bg-white">
+                        <div className="md:hidden">
+                          <ul className="space-y-3">
                             {filteredAndSortedSources.slice(0, sheetsMobileList.count).map((sheet) => {
                               const sheetData = rowsForSource(sheet.id);
                               const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);

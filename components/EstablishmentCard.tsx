@@ -502,7 +502,7 @@ export const EstablishmentMobileRow: React.FC<EstablishmentCardProps> = ({
       tabIndex={0}
       onClick={open}
       onKeyDown={(e) => { if (e.key === "Enter") open(); }}
-      className={`cursor-pointer px-4 py-3 active:bg-slate-50 ${isCaptureMode && isSelected ? "bg-rose-50/50" : ""}`}
+      className={`cursor-pointer rounded-2xl border px-4 py-3 shadow-sm active:bg-slate-50 ${isCaptureMode && isSelected ? "border-rose-300 bg-rose-50/50" : "border-slate-200 bg-white"}`}
     >
       <div className="flex items-start justify-between gap-3">
         <p className="min-w-0 text-[14px] font-bold leading-snug text-slate-900">{name}</p>
@@ -513,7 +513,7 @@ export const EstablishmentMobileRow: React.FC<EstablishmentCardProps> = ({
         ) : (
           <span className={`inline-flex shrink-0 items-center gap-1.5 pt-0.5 text-[12px] font-bold ${statusText[status.color] || "text-slate-500"}`}>
             <span className={`h-2 w-2 rounded-full ${status.color}`} />
-            {status.label}
+            {status.label === "Actualizado recientemente" ? "Recién" : status.label}
           </span>
         )}
       </div>
