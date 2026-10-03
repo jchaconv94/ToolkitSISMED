@@ -49,3 +49,60 @@ body {
   -ms-overflow-style: none; /* IE y Edge */
   scrollbar-width: none; /* Firefox */
 }
+
+/*
+ * Animaciones del símbolo de la marca (components/ui/BrandLogo.tsx). Cada pieza crece desde
+ * su propio centro. La pantalla de arranque usa las mismas, copiadas en index.html porque
+ * se ve antes de que llegue esta hoja de estilos.
+ */
+.brand-mark .bm-piece {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.brand-mark--hover:hover .bm-piece,
+:hover > .brand-mark--hover .bm-piece {
+  animation: bm-hop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.brand-mark--hover:hover .bm-4,
+:hover > .brand-mark--hover .bm-4 {
+  animation-name: bm-hop-spin;
+}
+.brand-mark--loop .bm-piece {
+  animation: bm-pop 1.8s ease-in-out infinite both;
+}
+.brand-mark--loop .bm-4 {
+  animation-name: bm-pop-spin;
+}
+.brand-mark .bm-2 { animation-delay: 0.08s; }
+.brand-mark .bm-3 { animation-delay: 0.16s; }
+.brand-mark .bm-4 { animation-delay: 0.24s; }
+.brand-mark--loop .bm-2 { animation-delay: 0.15s; }
+.brand-mark--loop .bm-3 { animation-delay: 0.3s; }
+.brand-mark--loop .bm-4 { animation-delay: 0.45s; }
+
+@keyframes bm-hop {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.72); }
+  100% { transform: scale(1); }
+}
+@keyframes bm-hop-spin {
+  0% { transform: scale(1) rotate(0deg); }
+  40% { transform: scale(0.72) rotate(45deg); }
+  100% { transform: scale(1) rotate(90deg); }
+}
+@keyframes bm-pop {
+  0% { transform: scale(0.3); opacity: 0; }
+  15% { transform: scale(1.12); opacity: 1; }
+  25%, 70% { transform: scale(1); opacity: 1; }
+  88%, 100% { transform: scale(0.3); opacity: 0; }
+}
+@keyframes bm-pop-spin {
+  0% { transform: scale(0.3) rotate(0deg); opacity: 0; }
+  15% { transform: scale(1.12) rotate(0deg); opacity: 1; }
+  25% { transform: scale(1) rotate(0deg); opacity: 1; }
+  45%, 70% { transform: scale(1) rotate(90deg); opacity: 1; }
+  88%, 100% { transform: scale(0.3) rotate(90deg); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-mark .bm-piece { animation: none !important; }
+}

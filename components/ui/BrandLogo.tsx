@@ -20,12 +20,27 @@ export const BRAND_COLORS = {
 
 type Tone = "dark" | "light";
 
-export const BrandMark: React.FC<{ size?: number; tone?: Tone; className?: string }> = ({ size = 32, tone = "dark", className }) => (
-  <svg width={size} height={size} viewBox="0 0 64 64" className={className} role="img" aria-label="Toolkit SISMED">
-    <rect x="3" y="3" width="26" height="26" rx="7" fill={BRAND_COLORS.teal} />
-    <rect x="35" y="3" width="26" height="26" rx="7" fill={BRAND_COLORS.tealLight} />
-    <rect x="3" y="35" width="26" height="26" rx="7" fill={tone === "dark" ? "#ffffff" : BRAND_COLORS.navy} />
-    <g fill={BRAND_COLORS.orange}>
+/**
+ * Animaciones del símbolo (estilos en index.css; la de arranque, en index.html):
+ * - `hover`: al pasar el mouse, las piezas dan un salto escalonado y la cruz gira.
+ * - `loop`: las piezas aparecen una tras otra y se repiten mientras algo carga.
+ * Sin animación si el sistema pide reducir el movimiento.
+ */
+export type BrandMarkAnimation = "none" | "hover" | "loop";
+
+export const BrandMark: React.FC<{ size?: number; tone?: Tone; className?: string; animation?: BrandMarkAnimation }> = ({ size = 32, tone = "dark", className = "", animation = "none" }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 64 64"
+    className={`${animation === "none" ? "" : `brand-mark brand-mark--${animation}`} ${className}`}
+    role="img"
+    aria-label="Toolkit SISMED"
+  >
+    <rect className="bm-piece bm-1" x="3" y="3" width="26" height="26" rx="7" fill={BRAND_COLORS.teal} />
+    <rect className="bm-piece bm-2" x="35" y="3" width="26" height="26" rx="7" fill={BRAND_COLORS.tealLight} />
+    <rect className="bm-piece bm-3" x="3" y="35" width="26" height="26" rx="7" fill={tone === "dark" ? "#ffffff" : BRAND_COLORS.navy} />
+    <g className="bm-piece bm-4" fill={BRAND_COLORS.orange}>
       <rect x="43.25" y="35" width="9.5" height="26" rx="3.5" />
       <rect x="35" y="43.25" width="26" height="9.5" rx="3.5" />
     </g>
@@ -47,14 +62,15 @@ export const BrandWordmark: React.FC<{ size?: number; tone?: Tone; className?: s
  * Símbolo + nombre, con la proporción de la referencia aprobada: el símbolo mide unas
  * 1,3 veces el tamaño de letra (≈ 1,7 veces la altura de las mayúsculas).
  */
-export const BrandLogo: React.FC<{ size?: number; tone?: Tone; showName?: boolean; className?: string }> = ({
+export const BrandLogo: React.FC<{ size?: number; tone?: Tone; showName?: boolean; className?: string; animation?: BrandMarkAnimation }> = ({
   size = 18,
   tone = "dark",
   showName = true,
   className = "",
+  animation = "none",
 }) => (
   <span className={`inline-flex items-center ${className}`} style={{ gap: size * 0.45 }}>
-    <BrandMark size={Math.round(size * 1.3)} tone={tone} className="shrink-0" />
+    <BrandMark size={Math.round(size * 1.3)} tone={tone} className="shrink-0" animation={animation} />
     {showName && <BrandWordmark size={size} tone={tone} />}
   </span>
 );
