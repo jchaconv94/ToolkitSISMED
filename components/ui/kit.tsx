@@ -105,17 +105,17 @@ export const KpiCard: React.FC<{
     return (
       <Container
         {...(isInteractive ? { type: "button", onClick } : {})}
-        className={`relative flex flex-col justify-start overflow-hidden rounded-2xl border bg-gradient-to-br ${toneWatermark[tone].gradient} to-white p-4 text-left shadow-sm transition-all duration-200 ${
+        className={`relative flex flex-col justify-start overflow-hidden rounded-2xl border bg-gradient-to-br ${toneWatermark[tone].gradient} to-white p-3 text-left md:p-4 shadow-sm transition-all duration-200 ${
           active ? "border-teal-500 ring-2 ring-teal-500/20" : "border-slate-200/90"
         } ${isInteractive ? "cursor-pointer hover:-translate-y-0.5 hover:shadow-md" : ""}`}
       >
         <span className={`absolute inset-y-0 left-0 w-1 ${toneTopBar[tone]}`} />
-        <span className={`pointer-events-none absolute -bottom-4 -right-3 opacity-[0.09] [&>svg]:h-24 [&>svg]:w-24 ${toneWatermark[tone].icon}`}>
+        <span className={`pointer-events-none absolute -bottom-4 -right-3 hidden opacity-[0.09] md:block [&>svg]:h-24 [&>svg]:w-24 ${toneWatermark[tone].icon}`}>
           {icon || defaultToneIcons[tone]}
         </span>
         <div className="relative min-w-0">
-          <p className="line-clamp-2 text-[11px] font-black uppercase leading-tight tracking-wider text-slate-500 sm:truncate">{label}</p>
-          <p className={`mt-1 truncate text-2xl font-black leading-tight sm:text-[28px] ${toneWatermark[tone].value}`}>{value}</p>
+          <p className="truncate text-[10px] font-black uppercase leading-tight tracking-wider text-slate-500 md:text-[11px]">{label}</p>
+          <p className={`mt-0.5 truncate text-xl font-black leading-tight md:mt-1 md:text-[28px] ${toneWatermark[tone].value}`}>{value}</p>
           {progress !== undefined && (
             <div
               className="relative mb-1.5 mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200/70"
@@ -132,7 +132,8 @@ export const KpiCard: React.FC<{
               ))}
             </div>
           )}
-          {hint && <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">{hint}</p>}
+          {/* En el celular el indicador va compacto: sin la pista, para que la lista quede a la vista. */}
+          {hint && <p className="mt-0.5 hidden truncate text-[11px] font-semibold text-slate-400 md:block">{hint}</p>}
         </div>
       </Container>
     );
@@ -230,11 +231,12 @@ export const KpiCard: React.FC<{
 
 /**
  * Fila de tarjetas KPI. En escritorio es una cuadrícula (`cols`, p. ej. "md:grid-cols-4");
- * en el celular, una sola fila que se desliza con el dedo, para que la tabla quede a la vista.
+ * en el celular, una sola fila de tarjetas compactas (unas dos y media a la vista) que se
+ * desliza con el dedo, para que la lista quede a la vista.
  */
 export const KpiStrip: React.FC<{ children: React.ReactNode; cols: string }> = ({ children, cols }) => (
   <div
-    className={`-mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-1 md:mx-0 md:grid md:overflow-visible md:px-0 md:pb-0 ${cols} [&>*]:min-w-[72%] [&>*]:shrink-0 [&>*]:snap-start md:[&>*]:min-w-0`}
+    className={`-mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-1 md:mx-0 md:grid md:overflow-visible md:px-0 md:pb-0 ${cols} [&>*]:min-w-[40%] [&>*]:shrink-0 [&>*]:snap-start md:[&>*]:min-w-0`}
   >
     {children}
   </div>
