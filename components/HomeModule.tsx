@@ -48,7 +48,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
           />
         </div>
       ) : (
-        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-2">
+        <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-2">
           {sections.map((section, index) => {
             const tint = NAV_TINT_CLASSES[section.tint];
             const SectionIcon = section.icon;
@@ -76,14 +76,14 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
                         key={item.module}
                         type="button"
                         onClick={() => onNavigate(item.module)}
-                        className="group relative flex min-w-0 flex-col items-start rounded-xl border border-slate-100 bg-slate-50/60 p-3.5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-200 hover:bg-white hover:shadow-md hover:shadow-slate-900/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2"
+                        className="group relative flex h-[138px] min-w-0 flex-col items-start overflow-hidden rounded-xl border border-slate-100 bg-slate-50/60 p-3.5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-200 hover:bg-white hover:shadow-md hover:shadow-slate-900/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2"
                       >
                         <span className={`mb-2.5 grid h-9 w-9 place-items-center rounded-xl transition-colors ${tint.chip} ${tint.chipHover}`}>
                           <Icon className="h-[18px] w-[18px]" />
                         </span>
                         <ArrowUpRight className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-300 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
-                        <span className="max-w-full break-words text-[13px] font-bold leading-tight text-slate-800">{item.label}</span>
-                        <span className="mt-1 text-[11.5px] leading-snug text-slate-500">{item.description}</span>
+                        <span className="line-clamp-2 max-w-full break-words text-[13px] font-bold leading-tight text-slate-800">{item.label}</span>
+                        <span className="mt-1 line-clamp-2 text-[11.5px] leading-snug text-slate-500">{item.description}</span>
                       </button>
                     );
                   })}
