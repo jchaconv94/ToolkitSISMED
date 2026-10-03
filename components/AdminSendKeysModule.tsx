@@ -190,25 +190,6 @@ export const AdminSendKeysModule: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Una sola pestaña: no se muestra. En escritorio quedan arriba las versiones vigentes y la campana. */}
-      <div className="hidden items-center gap-2 md:flex">
-        {tab === "establishments" && (
-          <div className="ml-auto hidden items-center gap-2 sm:flex">
-            {latest && (
-              <span title="Última versión publicada del Toolkit" className="hidden h-[42px] items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs text-teal-800 lg:flex">
-                <Download className="h-4 w-4" /> Toolkit vigente <b>v{latest}</b>
-              </span>
-            )}
-            {latestSismed && (
-              <span title="La más alta que reporta alguna PC" className="hidden h-[42px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 lg:flex">
-                <Database className="h-4 w-4 text-slate-400" /> SISMED vigente <b>v{latestSismed}</b>
-              </span>
-            )}
-            {bell}
-          </div>
-        )}
-      </div>
-
       {tab === "establishments" && (
         loading ? (
           <div className="flex h-64 items-center justify-center gap-2 text-sm font-semibold text-slate-500">
@@ -232,7 +213,8 @@ export const AdminSendKeysModule: React.FC = () => {
             onGenerate={(row) => void generate(row)}
             onIgnore={(row) => void ignore(row)}
             onPending={setPending}
-            mobileBell={bell}
+            alerts={alerts}
+            onIgnoreAll={() => void ignoreAll()}
           />
         )
       )}
@@ -361,8 +343,9 @@ const EstablishmentsPanel: React.FC<{
   onGenerate: (row: SendKeyRow) => void;
   onIgnore: (row: SendKeyRow) => void;
   onPending: (action: PendingAction) => void;
-  mobileBell: React.ReactNode;
-}> = ({ rows, latest, latestSismed, busy, onGenerate, onIgnore, onPending, mobileBell }) => {
+  alerts: SendKeyRow[];
+  onIgnoreAll: () => void;
+}> = ({ rows, latest, latestSismed, busy, onGenerate, onIgnore, onPending, alerts, onIgnoreAll }) => {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<EstablishmentFilter>("all");
   const [sismedFilter, setSismedFilter] = useState<SismedFilter>("all");
@@ -410,7 +393,7 @@ const EstablishmentsPanel: React.FC<{
   const toggle = (next: EstablishmentFilter) => setFilter(filter === next ? "all" : next);
 
   return (
-    <div className="space-y-4 pb-6 max-md:!mt-0">
+    <div className="space-y-4 pb-6">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
         <KpiCard watermark tone="success" icon={<ShieldCheck />} label="Protegidos" value={`${summary.protectedCount} / ${summary.total}`} hint="con clave de envío" onClick={() => toggle("protected")} active={filter === "protected"} />
         <KpiCard watermark tone="neutral" icon={<ShieldOff />} label="Sin clave" value={summary.none} hint={summary.waiting ? `${summary.waiting} esperando primer envío` : "envían desde cualquier PC"} onClick={() => toggle("none")} active={filter === "none"} />
@@ -419,17 +402,27 @@ const EstablishmentsPanel: React.FC<{
       </KpiStrip>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {/* Intentos bloqueados: solo aparece si hay alguno sin revisar. Cada uno se resuelve en su detalle. */}
+        {alerts.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-red-100 bg-red-50/70 px-4 py-2.5 text-[12.5px] text-red-800">
+            <ShieldAlert className="h-4 w-4 shrink-0 text-red-600" />
+            <span className="font-semibold">{alerts.length === 1 ? "1 intento de envío bloqueado sin revisar" : `${alerts.length} intentos de envío bloqueados sin revisar`}</span>
+            <span className="ml-auto flex items-center gap-3">
+              <button type="button" onClick={() => setFilter("alerts")} className="font-bold text-red-700 hover:underline">Ver</button>
+              <button type="button" disabled={busy} onClick={onIgnoreAll} className="font-bold text-slate-500 hover:underline disabled:opacity-60">Ignorar todos</button>
+            </span>
+          </div>
+        )}
         <div className="flex items-center gap-2 border-b border-slate-100 p-3 md:px-4">
           <div className="relative min-w-0 flex-1 md:max-w-xs">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${filterInputClass} pl-9`} />
           </div>
-          {/* Celular: un botón abre los filtros abajo; la campana de intentos va al lado. */}
+          {/* Celular: un botón abre los filtros abajo. */}
           <button type="button" onClick={() => setFiltersOpen(true)} aria-label="Filtros" className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 md:hidden">
             <SlidersHorizontal className="h-4 w-4" />
             {(filter !== "all" || sismedFilter !== "all") && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />}
           </button>
-          <span className="md:hidden">{mobileBell}</span>
           <div className="ml-auto hidden gap-2 md:flex">
             <select value={filter} onChange={(e) => setFilter(e.target.value as EstablishmentFilter)} aria-label="Estado" className={`${filterInputClass} sm:w-60`}>
               {FILTER_ORDER.map((f) => (
