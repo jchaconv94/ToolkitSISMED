@@ -29,6 +29,7 @@ import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { BottomSheet } from "./ui/BottomSheet";
+import { FloatingActionButton } from "./ui/FloatingActionButton";
 import { noticeWhen } from "../services/notifications";
 import { 
   KpiCard, 
@@ -350,7 +351,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4 pb-12 animate-in fade-in duration-300">
+    <div className="space-y-4 pb-24 animate-in fade-in duration-300 md:pb-12">
       {/* Sin cabecera propia: el título ya está en la cabecera de la app. */}
       <KpiStrip cols="md:grid-cols-3">
         <KpiCard watermark tone={totalCount > 0 ? "warning" : "neutral"} icon={<Ban />} label="Total excluidos" value={totalCount} hint="medicamentos fuera del análisis" />
@@ -545,10 +546,8 @@ export const AnalysisExclusionsModule: React.FC = () => {
             </button>
           </div>
 
-          {/* Celular: «+» agrega; «…» abre el resto de acciones abajo. */}
-          <button type="button" onClick={handleOpenNewItem} aria-label="Nuevo medicamento" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white md:hidden">
-            <Plus className="h-5 w-5" />
-          </button>
+          {/* Celular: el botón principal es flotante (abajo); «…» abre el resto de acciones. */}
+          <FloatingActionButton icon={<Plus />} label="Nuevo medicamento" onClick={handleOpenNewItem} />
           <button type="button" onClick={() => setActionsOpen(true)} aria-label="Más acciones" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 md:hidden">
             <MoreHorizontal className="h-5 w-5" />
           </button>
@@ -767,24 +766,28 @@ export const AnalysisExclusionsModule: React.FC = () => {
           ) : filteredExclusions.length === 0 ? (
             <EmptyState
               title={searchTerm ? "No se encontraron coincidencias" : "Sin medicamentos excluidos"}
-              description={searchTerm ? "Intente con otro término de búsqueda." : "Agregue un medicamento con «+» o desde la carga masiva."}
+              description={searchTerm ? "Intente con otro término de búsqueda." : "Agregue un medicamento con el botón «+» o desde la carga masiva."}
             />
           ) : (
             <>
               <ul className="divide-y divide-slate-100">
                 {filteredExclusions.slice(0, mobileList.count).map(item => (
-                  <li key={item.id || item.sismedCode} className="flex items-start gap-3 px-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <span className="font-mono text-[11px] text-teal-700">{item.sismedCode}</span>
-                      <p className="text-[14px] font-bold leading-snug text-slate-900">{item.description}</p>
-                      <p className="mt-0.5 text-[12px] text-slate-500">
-                        {[item.presentation, item.createdAt ? formatDate(item.createdAt) : ""].filter(Boolean).join(" · ")}
-                      </p>
-                      {item.reason && <p className="mt-1 text-[12px] italic text-slate-500">«{item.reason}»</p>}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button onClick={() => handleOpenEditItem(item)} aria-label="Editar" className="rounded-lg p-2 text-slate-400 hover:bg-teal-50 hover:text-teal-600"><Edit3 className="h-4 w-4" /></button>
-                      <button onClick={() => setDeleteTarget(item)} aria-label="Eliminar" className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                  <li key={item.id || item.sismedCode} className="px-4 py-3">
+                    {/* Sin fecha de registro: en el celular se confundía con la de vencimiento. */}
+                    <p className="text-[14px] font-bold leading-snug text-slate-900">{item.description}</p>
+                    <p className="mt-0.5 text-[12px] text-slate-500">
+                      <span className="font-mono text-teal-700">{item.sismedCode}</span>
+                      {item.presentation && <> · {item.presentation}</>}
+                    </p>
+                    {item.reason && <p className="mt-1 text-[12px] italic text-slate-500">«{item.reason}»</p>}
+                    {/* Acciones grandes y separadas, fáciles de tocar. */}
+                    <div className="mt-2.5 grid grid-cols-2 gap-2">
+                      <button onClick={() => handleOpenEditItem(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 text-[13px] font-bold text-slate-700 active:bg-slate-50">
+                        <Edit3 className="h-4 w-4 text-teal-600" /> Editar
+                      </button>
+                      <button onClick={() => setDeleteTarget(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-rose-200 text-[13px] font-bold text-rose-600 active:bg-rose-50">
+                        <Trash2 className="h-4 w-4" /> Eliminar
+                      </button>
                     </div>
                   </li>
                 ))}

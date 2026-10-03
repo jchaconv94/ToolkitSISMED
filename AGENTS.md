@@ -239,7 +239,7 @@ justamente porque cuando estaba repetida solo se actualizó uno.
 - **Modales:** header fijo + body con scroll interno + footer fijo; sin scroll horizontal; `max-w-3xl` formulario simple, `max-w-5xl` operación con lista, `max-w-6xl` comparación compleja.
 - **Botón principal: teal** (`bg-teal-600 hover:bg-teal-700 text-white`, como «Descargar» o «Generar clave»). Nada de botones negros (`bg-slate-900`), pedido del usuario el 2026-10-03.
 - **Nunca `window.confirm` / `alert`.** Usar modal propio (`components/ui/ConfirmationDialog.tsx`) para toda acción irreversible.
-- **Móvil:** tablas → tarjetas; filtros → bottom sheet; footer sticky en modales.
+- **Móvil:** tablas → tarjetas; filtros → bottom sheet; footer sticky en modales; **el botón principal es flotante** (`FloatingActionButton`, abajo a la derecha sobre la barra de secciones; el módulo deja `pb-24` en el celular).
 - **Acentos:** cuidado con mojibake. `Catálogo`, `Código`, `Redistribución` deben renderizarse correctos en pantalla **y en PDF/Excel** (ver `services/pdfUnicodeFont.ts`).
 
 ### Qué reutilizar — mira aquí ANTES de escribir nada nuevo
@@ -263,7 +263,7 @@ La capa de componentes comunes **ya existe**. Antes existían cinco `HeaderCell`
 | Número `21 300` / `2 193,5` (miles con espacio, coma decimal) | `formatNumber` en `services/numberFormat.ts` |
 | Tipo de tono | `Tone` |
 
-Otras piezas compartidas en `components/ui/`: `ConfirmationDialog`, `CustomSelect`, `TablePagination`, `IncrementalList` (listas del celular que cargan al bajar), `BottomSheet` (filtros del celular: un botón junto al buscador abre el panel inferior), `PharmacyCodeCell`, `ModuleHeaderSlot`.
+Otras piezas compartidas en `components/ui/`: `ConfirmationDialog`, `CustomSelect`, `TablePagination`, `IncrementalList` (listas del celular que cargan al bajar), `BottomSheet` (filtros del celular: un botón junto al buscador abre el panel inferior), `FloatingActionButton` (botón principal del celular), `PharmacyCodeCell`, `ModuleHeaderSlot`.
 
 **Los tonos se nombran por significado, nunca por color:** `success`, `warning`, `danger`, `info`, `locked`, `neutral`. Si escribes `bg-emerald-100` a mano en un módulo, casi siempre querías un `tone`.
 
