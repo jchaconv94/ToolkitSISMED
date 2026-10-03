@@ -98,29 +98,6 @@ const Signal: React.FC<{ row: BackupRowView; align?: "left" | "right" }> = ({ ro
   </div>
 );
 
-/** La PC del establecimiento: si está en línea, cuál es y qué Toolkit tiene. */
-const Equipo: React.FC<{ row: BackupRowView }> = ({ row }) => (
-  row.online ? (
-    <div className="min-w-0">
-      <div className="flex items-center gap-1.5 font-semibold text-slate-700"><span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" title="En línea" /><span className="truncate">{row.equipo || "PC en línea"}</span></div>
-      <div className="mt-0.5 text-[11px] text-slate-400">En línea · Toolkit v{row.version || "?"}{row.lastSeen ? ` · ${relativeTime(new Date(row.lastSeen).toISOString()).toLowerCase()}` : ""}</div>
-    </div>
-  ) : (
-    <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-slate-400"><WifiOff className="h-3.5 w-3.5" />Desconectada</span>
-  )
-);
-
-/** Estado del pedido: el chip cuando hay algo que decir y, debajo, el detalle. */
-const Estado: React.FC<{ row: BackupRowView }> = ({ row }) => {
-  const chip = chipFor(row);
-  return (
-    <div className="min-w-0 space-y-1">
-      {chip && <StatusChip label={chip.label} tone={chip.tone} />}
-      <Detail row={row} />
-    </div>
-  );
-};
-
 type Tab = "backups" | "consumo";
 
 export const BackupsSismedModule: React.FC = () => {
@@ -313,21 +290,28 @@ export const BackupsSismedModule: React.FC = () => {
                       <tr>
                         <TableHeaderCell>Establecimiento</TableHeaderCell>
                         <TableHeaderCell>Equipo</TableHeaderCell>
+                        <TableHeaderCell>Señal</TableHeaderCell>
                         <TableHeaderCell>Estado</TableHeaderCell>
+                        <TableHeaderCell>Backup</TableHeaderCell>
                         <TableHeaderCell>Último descargado</TableHeaderCell>
                         <TableHeaderCell align="right"><span className="sr-only">Acciones</span></TableHeaderCell>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {pageRows.map((row) => {
+                        const chip = chipFor(row);
                         return (
                           <tr key={row.code} className={`h-[60px] ${row.online ? "" : "bg-slate-50/50"}`}>
                             <td className="px-4 py-2">
                               <div className="font-bold text-slate-800">{row.name}</div>
                               <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
                             </td>
-                            <td className="px-4 py-2"><Equipo row={row} /></td>
-                            <td className="px-4 py-2"><Estado row={row} /></td>
+                            <td className="px-4 py-2">
+                              {row.equipo ? <><div className="font-semibold text-slate-700">{row.equipo}</div><div className="font-mono text-[11px] text-slate-400">Toolkit v{row.version || "?"}</div></> : <span className="text-slate-400">—</span>}
+                            </td>
+                            <td className="px-4 py-2"><Signal row={row} /></td>
+                            <td className="px-4 py-2">{chip ? <StatusChip label={chip.label} tone={chip.tone} /> : <span className="text-slate-300">—</span>}</td>
+                            <td className="px-4 py-2"><Detail row={row} /></td>
                             <td className="px-4 py-2 text-[12px] text-slate-500">
                               {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}
                             </td>
@@ -349,6 +333,7 @@ export const BackupsSismedModule: React.FC = () => {
                           <div className="min-w-0">
                             <div className="truncate font-black text-slate-800">{row.name}</div>
                             <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
+                            {row.equipo && <div className="truncate text-[11.5px] text-slate-500"><span className="font-semibold text-slate-700">{row.equipo}</span> · Toolkit v{row.version || "?"}</div>}
                           </div>
                           {chip ? <StatusChip label={chip.label} tone={chip.tone} /> : <Signal row={row} align="right" />}
                         </div>
