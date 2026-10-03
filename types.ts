@@ -120,6 +120,7 @@ export interface ChartDataPoint {
 export type UserRole = string;
 
 export type AppModule =
+  | 'HOME'
   | 'DASHBOARD'
   | 'ANALYSIS'
   | 'ANALYSIS_EXCLUSIONS'
@@ -137,6 +138,7 @@ export type AppModule =
   | 'ADMIN_BACKUPS';
 
 export const AVAILABLE_MODULES: { id: AppModule; label: string; description: string }[] = [
+  { id: 'HOME', label: 'Inicio', description: 'Pantalla de inicio con acceso a todas las herramientas' },
   { id: 'DASHBOARD', label: 'Análisis de Requerimiento', description: 'Vista principal y resumen de indicadores' },
   { id: 'ANALYSIS_EXCLUSIONS', label: 'Lista de Exclusiones', description: 'Medicamentos excluidos del análisis por establecimiento' },
   { id: 'ANALYSIS', label: 'Análisis Inteligente', description: 'Módulo de análisis de requerimientos' },

@@ -14,6 +14,7 @@ import { AppModule } from "../types";
 export const APP_BASE = "/ToolkitSISMED";
 
 const RUTAS: Record<AppModule, string> = {
+  HOME: "/inicio",
   DASHBOARD: "/analisis",
   ANALYSIS: "/analisis-inteligente",
   ANALYSIS_EXCLUSIONS: "/analisis/exclusiones",
@@ -43,18 +44,18 @@ const normalizar = (ruta: string) => {
 };
 
 /** Dirección completa de un módulo, lista para el navegador. */
-export const pathForModule = (module: AppModule): string => `${APP_BASE}${RUTAS[module] || RUTAS.DASHBOARD}`;
+export const pathForModule = (module: AppModule): string => `${APP_BASE}${RUTAS[module] || RUTAS.HOME}`;
 
 /**
  * Módulo que corresponde a una dirección, o `null` si no reconoce ninguna.
  *
  * Acepta la dirección con o sin el prefijo de publicación, porque en desarrollo y en
- * producción la aplicación cuelga de rutas distintas.
+ * producción la aplicación cuelga de rutas distintas. La raíz es Inicio.
  */
 export const moduleForPath = (pathname: string): AppModule | null => {
   let ruta = normalizar(pathname);
-  if (ruta === APP_BASE || ruta === "") return null;
   if (ruta.startsWith(`${APP_BASE}/`)) ruta = ruta.slice(APP_BASE.length);
+  if (ruta === APP_BASE || ruta === "" || ruta === "/") return "HOME";
   return MODULOS_POR_RUTA.get(ruta) || null;
 };
 
