@@ -40,6 +40,7 @@ import {
   Hospital,
   Monitor,
   Package,
+  CalendarClock,
   Wifi,
   WifiOff,
   FileClock,
@@ -127,6 +128,13 @@ import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
 } from "./DeficiencyCaptureModal";
+import { noticeSettingsApi } from "../services/noticeSettings";
+import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
+import { getExpirationState } from "../services/assignedIpressStock";
+import { KpiCard, KpiStrip, TableHeaderCell as HeaderCell } from "./ui/kit";
+import { TablePagination } from "./ui/TablePagination";
+import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
+import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
 import { DeficiencyCaptureBar } from "./DeficiencyCaptureBar";
 import { EstablishmentCard } from "./EstablishmentCard";
 
@@ -898,9 +906,30 @@ const getAlmCodeForSheet = (
   return deMetadata ? formatAlmCode(deMetadata) : "";
 };
 
+/**
+ * Ventana de «por vencer», en días: el mismo parámetro de Parámetros del Sistema que usan
+ * la campana y Stock SISMED, para que los tres cuenten los mismos lotes. Se lee una vez,
+ * antes de montar el módulo (ver `SheetSearchModule` al final), para que todos los cálculos
+ * de abajo la usen sin tener que pasarla por cada uno.
+ */
+let expiryWindowDays = DEFAULT_NOTICE_THRESHOLDS.expiryDays;
+let staleDaysThreshold = DEFAULT_NOTICE_THRESHOLDS.staleDays;
+let expiryWindowLoaded = false;
+
+/**
+ * Vencidos y por vencer de unas filas con saldo.
+ *
+ * `expiringThisMonth` conserva su nombre por los muchos sitios que lo usan, pero desde el
+ * 2026-10-03 es «vence dentro de la ventana» (90 días por omisión), no «este mes».
+ * `expiringCalendarMonth` y `expiringNextMonth` siguen siendo por mes calendario: son las
+ * columnas del reporte en Excel, que se titulan así.
+ */
 const getExpirationStats = (records: SIGData[]) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const windowEnd = new Date(today);
+  windowEnd.setDate(windowEnd.getDate() + expiryWindowDays);
+  windowEnd.setHours(23, 59, 59, 999);
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
   const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
@@ -908,6 +937,7 @@ const getExpirationStats = (records: SIGData[]) => {
 
   const expired: SIGData[] = [];
   const expiringThisMonth: SIGData[] = [];
+  const expiringCalendarMonth: SIGData[] = [];
   const expiringNextMonth: SIGData[] = [];
 
   records.forEach((r) => {
@@ -953,10 +983,10 @@ const getExpirationStats = (records: SIGData[]) => {
 
         if (expDate < today) {
           expired.push(r);
-        } else if (month === currentMonth && year === currentYear) {
-          expiringThisMonth.push(r);
-        } else if (month === nextMonth && year === nextMonthYear) {
-          expiringNextMonth.push(r);
+        } else {
+          if (expDate <= windowEnd) expiringThisMonth.push(r);
+          if (month === currentMonth && year === currentYear) expiringCalendarMonth.push(r);
+          else if (month === nextMonth && year === nextMonthYear) expiringNextMonth.push(r);
         }
       }
     } else if (parts.length === 2) {
@@ -970,10 +1000,10 @@ const getExpirationStats = (records: SIGData[]) => {
         const expDate = new Date(year, month + 1, 0, 23, 59, 59, 999);
         if (expDate < today) {
           expired.push(r);
-        } else if (month === currentMonth && year === currentYear) {
-          expiringThisMonth.push(r);
-        } else if (month === nextMonth && year === nextMonthYear) {
-          expiringNextMonth.push(r);
+        } else {
+          if (expDate <= windowEnd) expiringThisMonth.push(r);
+          if (month === currentMonth && year === currentYear) expiringCalendarMonth.push(r);
+          else if (month === nextMonth && year === nextMonthYear) expiringNextMonth.push(r);
         }
       }
     }
@@ -982,14 +1012,16 @@ const getExpirationStats = (records: SIGData[]) => {
   return {
     expired,
     expiringThisMonth,
+    expiringCalendarMonth,
     expiringNextMonth,
     expiredCount: expired.length,
     expiringThisMonthCount: expiringThisMonth.length,
+    expiringCalendarMonthCount: expiringCalendarMonth.length,
     expiringNextMonthCount: expiringNextMonth.length,
   };
 };
 
-export const SheetSearchModule: React.FC = () => {
+const SheetSearchModuleContent: React.FC = () => {
   const { user, hasPermission } = useAuth();
   const canAccess = hasPermission("SIG_SEARCH");
 
@@ -1349,7 +1381,8 @@ export const SheetSearchModule: React.FC = () => {
       const status = getUpdateStatus(sheet.lastUpdateTime);
 
       const sheetData = rowsForSource(sheet.id);
-      const { expiredCount, expiringThisMonthCount, expiringNextMonthCount } =
+      // Reporte formal: sus columnas son «este mes» y «próximo mes» calendario.
+      const { expiredCount, expiringCalendarMonthCount: expiringThisMonthCount, expiringNextMonthCount } =
         getExpirationStats(sheetData);
 
       let bgArgb = "FFFFFF";
@@ -4159,6 +4192,13 @@ function processSheet(sheet) {
     [filteredData],
   );
 
+  // Lotes de la hoja: páginas numeradas en escritorio, lista que crece al bajar en el celular.
+  const DATA_PAGE_SIZE = 50;
+  const [dataPage, setDataPage] = useState(1);
+  useEffect(() => { setDataPage(1); }, [filteredData]);
+  const dataPageRows = filteredData.slice((dataPage - 1) * DATA_PAGE_SIZE, dataPage * DATA_PAGE_SIZE);
+  const dataMobileList = useIncrementalCount(filteredData.length, filteredData, 50);
+
   const availableTipsums = useMemo(() => {
     const currentData = selectedSourceId
       ? rowsForSource(selectedSourceId)
@@ -4696,56 +4736,8 @@ function processSheet(sheet) {
 
           {/* Connection KPIs (Cards) */}
           {(() => {
-            if (viewLevel === "data") {
-              return (
-                <div className="flex flex-row items-center gap-2 sm:gap-4 overflow-x-auto hide-scrollbar w-full justify-start pb-1 animate-in fade-in duration-200">
-                  {/* Total Productos */}
-                  <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                    <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
-                      <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-600" />
-                    </div>
-                    <div className="flex flex-col justify-center gap-0.5 pr-2">
-                      <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                        {filteredData.length}
-                      </span>
-                      <span className="text-[9px] sm:text-[10px] font-bold text-teal-600 leading-none uppercase">
-                        Lotes
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Por Vencer */}
-                  <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                    <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-amber-50 flex items-center justify-center shrink-0 border border-amber-100/50">
-                      <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-600" />
-                    </div>
-                    <div className="flex flex-col justify-center gap-0.5 pr-2">
-                      <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                        {filteredDataExpirationInfo.expiringThisMonthCount}
-                      </span>
-                      <span className="text-[9px] sm:text-[10px] font-bold text-amber-600 leading-none uppercase">
-                        Por Vencer
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Vencidos */}
-                  <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                    <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-red-50 flex items-center justify-center shrink-0 border border-red-100/50">
-                      <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500" />
-                    </div>
-                    <div className="flex flex-col justify-center gap-0.5 pr-2">
-                      <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                        {filteredDataExpirationInfo.expiredCount}
-                      </span>
-                      <span className="text-[9px] sm:text-[10px] font-bold text-red-500 leading-none uppercase">
-                        Vencidos
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            }
+            // En una hoja, los indicadores van en su propia fila a todo el ancho (abajo).
+            if (viewLevel === "data") return null;
 
             const currentSummary =
               viewLevel === "sheets"
@@ -4943,6 +4935,26 @@ function processSheet(sheet) {
           </div>
         </div>
       </div>
+
+      {/* Indicadores de la hoja abierta: el modelo único de KPIs, como en Stock SISMED. Siguen
+          al selector de establecimiento (puestos comunales), no al buscador; tocarlos filtra. */}
+      {viewLevel === "data" && (() => {
+        const lastUpdate = sources.find((s) => s.id === selectedSourceId)?.lastUpdateTime;
+        const lastUpdateAt = lastUpdate ? new Date(lastUpdate).getTime() : 0;
+        const stale = lastUpdateAt > 0 && Date.now() - lastUpdateAt >= staleDaysThreshold * DAY_MS;
+        const lots = activeSheetData.filter((row) => rowMatchesPharmacy(readAlmCode(row), dataFilterPharmacy)).length;
+        const toggle = (value: string) => setDataFilterExpiration(dataFilterExpiration === value ? "all" : value);
+        return (
+          <div className="mb-4 px-4 sm:px-10 lg:px-14 xl:px-16">
+            <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
+              <KpiCard watermark tone="info" icon={<Package />} label="Lotes" value={lots.toLocaleString("es-PE")} hint="en la hoja del establecimiento" onClick={() => setDataFilterExpiration("all")} active={dataFilterExpiration === "all"} />
+              <KpiCard watermark tone="warning" icon={<Clock />} label="Por vencer" value={activeSheetExpirationInfo.expiringThisMonthCount.toLocaleString("es-PE")} hint={`en los próximos ${expiryWindowDays} días`} onClick={() => toggle("expiring")} active={dataFilterExpiration === "expiring"} />
+              <KpiCard watermark tone="danger" icon={<AlertTriangle />} label="Vencidos" value={activeSheetExpirationInfo.expiredCount.toLocaleString("es-PE")} hint="todavía con saldo" onClick={() => toggle("expired")} active={dataFilterExpiration === "expired"} />
+              <KpiCard watermark tone={stale ? "warning" : "neutral"} icon={<CalendarClock />} label="Última actualización" value={lastUpdate ? new Date(lastUpdate).toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—"} hint={lastUpdate ? `a las ${new Date(lastUpdate).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })} · ${noticeWhen(lastUpdateAt)}` : "sin fecha en la hoja"} />
+            </KpiStrip>
+          </div>
+        );
+      })()}
 
       {isConfigOpen && canManageConfigs && (
         <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -5947,35 +5959,6 @@ function processSheet(sheet) {
             <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 pt-1 md:pt-0 md:ml-auto pb-1 relative z-30">
               {viewLevel === "data" && (
                 <>
-                  {activeSheetExpirationInfo.expiredCount > 0 && (
-                    <button
-                      onClick={() => {
-                        setExpirationModalType("expired");
-                        setIsExpirationModalOpen(true);
-                      }}
-                      className="flex items-center gap-1.5 bg-white hover:bg-red-50 text-red-600 px-3 py-2 rounded-lg border border-red-100 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
-                    >
-                      <AlertTriangle className="h-3.5 w-3.5 text-red-500 animate-pulse shrink-0" />
-                      <span>
-                        {activeSheetExpirationInfo.expiredCount} Vencidos
-                      </span>
-                    </button>
-                  )}
-                  {activeSheetExpirationInfo.expiringThisMonthCount > 0 && (
-                    <button
-                      onClick={() => {
-                        setExpirationModalType("expiring");
-                        setIsExpirationModalOpen(true);
-                      }}
-                      className="flex items-center gap-1.5 bg-white hover:bg-amber-50 text-amber-600 px-3 py-2 rounded-lg border border-amber-100 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
-                    >
-                      <Clock className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                      <span>
-                        {activeSheetExpirationInfo.expiringThisMonthCount} Por
-                        vencer
-                      </span>
-                    </button>
-                  )}
                   {/* Con puestos comunales y «Todos», se elige cómo armar el Excel. Con un
                       establecimiento elegido, o en una hoja de una sola farmacia, no hay nada
                       que consolidar y el botón descarga directamente. */}
@@ -7744,198 +7727,83 @@ function processSheet(sheet) {
                 </div>
               )}
 
-              {/* LEVEL 3: DATA TABLE */}
+              {/* LEVEL 3: DATA TABLE — mismo diseño que Stock SISMED (piezas en StockLotParts). */}
               {viewLevel === "data" && (
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 -mx-4 md:-mx-6 -mt-4 md:-mt-6 font-sans">
-                  <div className="bg-transparent sm:bg-white sm:border-t border-gray-100 overflow-y-auto overflow-x-auto max-h-[calc(100vh-420px)] custom-scrollbar pb-4 px-4 sm:px-0 pt-4 sm:pt-0 relative block">
-                    <table className="min-w-full block sm:table">
-                      <thead className="hidden sm:table-header-group sticky top-0 z-30 shadow-xs border-b border-slate-200">
-                        <tr className="bg-slate-50">
-                          {showsPharmacyInData && (
-                            <th
-                              scope="col"
-                              className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                            >
-                              Código IPRESS
-                            </th>
-                          )}
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            Cód. SISMED / SIGA
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider min-w-[250px] bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            Descripción del Producto
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-right text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            Saldo
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            Lote / Venc.
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            Tipo Sum.
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            F. Finan.
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="block sm:table-row-group bg-transparent sm:bg-white">
-                        {filteredData.length > 0 ? (
-                          filteredData.map((row, i) => (
-                            <tr
-                              key={i}
-                              onClick={() => setSelectedRecord(row)}
-                              className="block sm:table-row bg-white rounded-xl sm:rounded-none shadow-sm sm:shadow-none border border-gray-200 sm:border-0 border-b-gray-100 p-4 sm:p-0 hover:bg-teal-50/50 transition-colors cursor-pointer group mb-3 sm:mb-0 relative"
-                            >
-                              {/* Mobile Card Layout */}
-                              <td className="block sm:hidden">
-                                {showsPharmacyInData && (
-                                  <div className="mb-2 border-b border-gray-100 pb-2">
-                                    <PharmacyCodeCell label={pharmacyLabelOf(row)} />
-                                  </div>
-                                )}
-                                <div className="flex justify-between items-start mb-2">
-                                  <div className="flex flex-col">
-                                    <span className="text-xs font-black text-teal-700 bg-teal-50 px-2 py-0.5 rounded w-fit mb-1 border border-teal-100">
-                                      {row.ID_Producto || "-"}
-                                    </span>
-                                    <span className="text-[10px] text-gray-400 font-bold">
-                                      {row.CODIGO_SIG || "-"}
-                                    </span>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="text-[10px] text-gray-400 font-black uppercase block mb-0.5">
-                                      Saldo
-                                    </span>
-                                    <span className="text-xl font-black text-teal-600 leading-none">
-                                      {!isNaN(parseInt(String(row.Saldo), 10))
-                                        ? parseInt(String(row.Saldo), 10)
-                                        : 0}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="text-sm font-bold text-gray-900 mb-2 leading-snug">
-                                  {row.Nombre || "-"}
-                                </div>
-                                <div className="flex justify-between items-center text-[10px]">
-                                  <div className="flex flex-col gap-0.5 w-full">
-                                    <span className="text-gray-500 font-mono">
-                                      <span className="font-bold text-gray-400">
-                                        Lote:
-                                      </span>{" "}
-                                      {row.Lote || "-"}
-                                    </span>
-                                    <div className="flex justify-between items-center">
-                                      <span className="text-gray-500 font-mono">
-                                        <span className="font-bold text-gray-400">
-                                          Vence:
-                                        </span>{" "}
-                                        {formatDate(row.Fec_Vencim) || "-"}
-                                      </span>
-                                      <div className="flex items-center gap-1.5">
-                                        <span
-                                          className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-100 font-bold uppercase truncate max-w-[80px]"
-                                          title={row.TIPSUM}
-                                        >
-                                          {row.TIPSUM || "-"}
-                                        </span>
-                                        <span
-                                          className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-100 font-bold uppercase truncate max-w-[80px]"
-                                          title={row.FFINAN}
-                                        >
-                                          {row.FFINAN || "-"}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              </td>
+                <div className="animate-in fade-in duration-300 -mx-4 md:-mx-6 -mt-4 md:-mt-6 font-sans">
+                  {filteredData.length === 0 ? (
+                    <div className="px-4 py-12 text-center text-sm text-slate-500">No se encontraron coincidencias para su búsqueda.</div>
+                  ) : (
+                    <>
+                      {/* Celular: tarjetas compactas; al tocar, el detalle. */}
+                      <ul className="divide-y divide-slate-100 bg-white sm:hidden">
+                        {filteredData.slice(0, dataMobileList.count).map((row, i) => (
+                          <LotMobileItem
+                            key={`${row.ID_Producto}-${row.Lote}-${i}`}
+                            row={row}
+                            state={getExpirationState(row, expiryWindowDays)}
+                            onOpen={() => setSelectedRecord(row)}
+                            pharmacy={showsPharmacyInData ? pharmacyLabelOf(row) : null}
+                          />
+                        ))}
+                      </ul>
+                      <div className="bg-white sm:hidden">
+                        <LoadMoreSentinel hasMore={dataMobileList.hasMore} onLoadMore={dataMobileList.loadMore} shown={dataMobileList.count} total={filteredData.length} itemLabel="lotes" />
+                      </div>
 
-                              {/* Desktop Table Cells */}
-                              {showsPharmacyInData && (
-                                <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap align-top">
-                                  <PharmacyCodeCell label={pharmacyLabelOf(row)} />
-                                </td>
-                              )}
-                              <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm text-gray-500 font-mono group-hover:text-teal-700">
-                                <div className="font-bold">
-                                  {row.ID_Producto || "-"}
-                                </div>
-                                <div className="text-[10px] text-gray-400 mt-0.5">
-                                  {row.CODIGO_SIG || "-"}
-                                </div>
-                              </td>
-                              <td className="hidden sm:table-cell px-4 py-3 text-sm text-gray-900 font-medium">
-                                {row.Nombre || "-"}
-                                <div
-                                  className="text-[10px] text-gray-400 font-normal mt-0.5 max-w-sm truncate"
-                                  title={row.Reg_Sanitario}
-                                >
-                                  RS: {row.Reg_Sanitario || "S/N"}
-                                </div>
-                              </td>
-                              <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm text-right font-bold text-gray-900">
-                                {!isNaN(parseInt(String(row.Saldo), 10))
-                                  ? parseInt(String(row.Saldo), 10)
-                                  : 0}
-                              </td>
-                              <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                                <span className="font-mono text-gray-700">
-                                  {row.Lote || "-"}
-                                </span>
-                                <div className="text-[10px] mt-0.5">
-                                  Vence: {formatDate(row.Fec_Vencim) || "-"}
-                                </div>
-                              </td>
-                              <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm">
-                                <span
-                                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 uppercase"
-                                  title={row.DESC_TIPSUM}
-                                >
-                                  {row.TIPSUM || "-"}
-                                </span>
-                              </td>
-                              <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm">
-                                <span
-                                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100 uppercase"
-                                  title={row.DESC_FFINAN}
-                                >
-                                  {row.FFINAN || "-"}
-                                </span>
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr className="block sm:table-row">
-                            <td
-                              colSpan={showsPharmacyInData ? 7 : 6}
-                              className="block sm:table-cell px-4 py-12 text-center text-sm text-gray-500"
-                            >
-                              No se encontraron coincidencias para su búsqueda.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                      {/* Escritorio: tabla paginada; al tocar una fila, el detalle. */}
+                      <div className="hidden bg-white sm:block">
+                        <div className="max-h-[calc(100vh-420px)] min-h-[320px] overflow-auto custom-scrollbar">
+                          <table className="min-w-full text-left">
+                            <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_rgb(226_232_240)]">
+                              <tr>
+                                {showsPharmacyInData && <HeaderCell>Código IPRESS</HeaderCell>}
+                                <HeaderCell>Cód. SISMED / SIGA</HeaderCell>
+                                <HeaderCell>Descripción del producto</HeaderCell>
+                                <HeaderCell align="right">Saldo</HeaderCell>
+                                <HeaderCell>Lote / Vencimiento</HeaderCell>
+                                <HeaderCell>Tipo sum.</HeaderCell>
+                                <HeaderCell>F. finan.</HeaderCell>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {dataPageRows.map((row, i) => {
+                                const state = getExpirationState(row, expiryWindowDays);
+                                const saldo = parseInt(String(row.Saldo), 10);
+                                return (
+                                  <tr
+                                    key={`${row.ID_Producto}-${row.Lote}-${i}`}
+                                    tabIndex={0}
+                                    onClick={() => setSelectedRecord(row)}
+                                    onKeyDown={(e) => { if (e.key === "Enter") setSelectedRecord(row); }}
+                                    title="Ver el detalle del lote"
+                                    className="cursor-pointer hover:bg-teal-50/40 focus:bg-teal-50/40 focus:outline-none"
+                                  >
+                                    {showsPharmacyInData && <td className="whitespace-nowrap px-4 py-3"><PharmacyCodeCell label={pharmacyLabelOf(row)} /></td>}
+                                    <td className="whitespace-nowrap px-4 py-3">
+                                      <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[12px] font-bold text-slate-700">{row.ID_Producto || "—"}</span>
+                                      {row.CODIGO_SIG ? <div className="mt-1 font-mono text-[11px] text-slate-400">{row.CODIGO_SIG}</div> : null}
+                                    </td>
+                                    <td className="min-w-[280px] px-4 py-3">
+                                      <p className="text-[13.5px] font-semibold text-slate-900">{row.Nombre || "—"}</p>
+                                      {row.Reg_Sanitario ? <p className="mt-0.5 max-w-sm truncate text-[11px] text-slate-400" title={row.Reg_Sanitario}>RS: {row.Reg_Sanitario}</p> : null}
+                                    </td>
+                                    <td className={`whitespace-nowrap px-4 py-3 text-right text-[15px] font-black ${state === "EXPIRED" ? "text-red-600" : "text-slate-900"}`}>{isNaN(saldo) ? 0 : saldo.toLocaleString("es-PE")}</td>
+                                    <td className="whitespace-nowrap px-4 py-3 text-[13px]">
+                                      <span className="font-mono text-slate-700">{row.Lote || "—"}</span>
+                                      <div className="mt-1 text-[12px] text-slate-500"><ExpiryDate value={row.Fec_Vencim} state={state} /></div>
+                                    </td>
+                                    <td className="max-w-[160px] truncate px-4 py-3 text-[12px] text-slate-600" title={row.DESC_TIPSUM || ""}>{row.TIPSUM || row.DESC_TIPSUM || <span className="text-slate-300">—</span>}</td>
+                                    <td className="max-w-[160px] truncate px-4 py-3 text-[12px] text-slate-600" title={row.DESC_FFINAN || ""}>{row.FFINAN || row.DESC_FFINAN || <span className="text-slate-300">—</span>}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                        <TablePagination page={dataPage} pageSize={DATA_PAGE_SIZE} total={filteredData.length} onPageChange={setDataPage} itemLabel="lotes" />
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -8199,215 +8067,13 @@ function processSheet(sheet) {
         </div>
       )}
 
-      {/* Modal de Detalle */}
-      {selectedRecord && (
-        <div
-          className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-in fade-in duration-200"
-          onClick={() => setSelectedRecord(null)}
-        >
-          <div
-            className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header Minimalista y Elegante */}
-            <div className="px-5 sm:px-8 pt-6 sm:pt-8 pb-5 sm:pb-6 bg-gradient-to-b from-teal-50/50 to-white flex justify-between items-start relative border-b border-gray-100">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-teal-400 to-blue-500"></div>
-              <div className="pr-10 sm:pr-12 w-full">
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                  <span className="inline-flex items-center justify-center h-7 sm:h-8 px-3 rounded-full text-[10px] sm:text-xs font-black bg-teal-100 text-teal-800 shadow-sm border border-teal-200/50 whitespace-nowrap">
-                    COD: {selectedRecord.ID_Producto || "S/ID"}
-                  </span>
-                  <span className="text-[10px] sm:text-[11px] font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
-                    SIGA: {selectedRecord.CODIGO_SIG || "-"}
-                  </span>
-                </div>
-                <h3 className="text-xl sm:text-2xl font-black text-gray-900 leading-tight tracking-tight break-words">
-                  {selectedRecord.Nombre || "Sin Descripción"}
-                </h3>
-              </div>
-              <button
-                onClick={() => setSelectedRecord(null)}
-                className="absolute top-4 sm:top-6 right-4 sm:right-6 text-gray-400 hover:text-gray-900 hover:bg-gray-100 p-2 sm:p-2.5 rounded-full transition-all"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="px-5 sm:px-8 pb-5 sm:pb-8 overflow-y-auto max-h-[70vh] custom-scrollbar">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8 mt-5 sm:mt-6">
-                {/* Estado y Ubicación - Destacado */}
-                <div className="col-span-full bg-gray-50/80 rounded-2xl p-4 sm:p-5 border border-gray-100/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
-                  <div className="w-full sm:w-auto">
-                    <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black mb-1">
-                      Establecimiento
-                    </p>
-                    <p className="text-sm border-b border-gray-100/50 pb-2 sm:border-0 sm:pb-0 font-bold text-gray-900 leading-snug">
-                      {(selectedRecord.DESC_ALM || "-").replace(
-                        /^FARM\s*-\s*/i,
-                        "",
-                      )}{" "}
-                      <span className="text-gray-400 font-medium whitespace-nowrap">
-                        ({formatAlmCode(readAlmCode(selectedRecord))})
-                      </span>
-                    </p>
-                  </div>
-                  <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start w-full sm:w-auto bg-white sm:bg-transparent p-3 sm:p-0 rounded-xl sm:rounded-none border sm:border-0 border-gray-100 mt-2 sm:mt-0">
-                    <p className="text-[10px] sm:text-[10px] text-gray-500 uppercase tracking-widest font-black mb-0 sm:mb-1">
-                      Saldo Actual
-                    </p>
-                    <p
-                      className={`text-2xl sm:text-3xl font-black leading-none ${parseFloat(String(selectedRecord.Saldo || "0").replace(/,/g, "")) <= 0 ? "text-red-500" : "text-teal-600"}`}
-                    >
-                      {!isNaN(parseInt(String(selectedRecord.Saldo), 10))
-                        ? parseInt(String(selectedRecord.Saldo), 10)
-                        : 0}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Bloque de Datos Lote/Vencimiento */}
-                <div className="space-y-5">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Clock className="w-4 h-4 text-gray-400" />
-                    <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">
-                      Control de Calidad
-                    </h4>
-                  </div>
-                  <div className="bg-white space-y-4">
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        Lote
-                      </p>
-                      <p className="text-sm font-mono font-bold text-gray-800">
-                        {selectedRecord.Lote || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        Fecha de Vencimiento
-                      </p>
-                      <p
-                        className={`text-sm font-black ${(() => {
-                          if (!selectedRecord.Fec_Vencim)
-                            return "text-gray-800";
-                          const today = new Date();
-                          today.setHours(0, 0, 0, 0);
-                          const parts =
-                            selectedRecord.Fec_Vencim.split(/[\/\-]/);
-                          if (parts.length === 3) {
-                            const m = parseInt(parts[1], 10) - 1;
-                            const y = parseInt(parts[2], 10);
-                            const d = parseInt(parts[0], 10);
-                            const fy = y < 100 ? y + 2000 : y;
-                            const exp = new Date(fy, m, d);
-                            if (exp < today) return "text-red-600";
-                            if (
-                              m === today.getMonth() &&
-                              fy === today.getFullYear()
-                            )
-                              return "text-amber-600";
-                          }
-                          return "text-gray-800";
-                        })()}`}
-                      >
-                        {formatDate(selectedRecord.Fec_Vencim) || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        Registro Sanitario
-                      </p>
-                      <p className="text-sm font-medium text-gray-800 uppercase">
-                        {selectedRecord.Reg_Sanitario || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        Última Actualización
-                      </p>
-                      <p className="text-xs font-medium text-gray-500">
-                        {formatDate(selectedRecord.Ultima_Actualizacion) || "-"}
-                      </p>
-                    </div>
-                    {selectedRecord.FECHA_DEL_EQUIPO && (
-                      <div>
-                        <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                          Fecha del Equipo
-                        </p>
-                        <p
-                          className={`text-xs font-medium ${selectedRecord.FECHA_DEL_EQUIPO !== selectedRecord.Ultima_Actualizacion ? "text-red-500" : "text-slate-400"}`}
-                        >
-                          {formatDate(selectedRecord.FECHA_DEL_EQUIPO)}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Bloque de Clasificación y Financiamiento */}
-                <div className="space-y-5">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Database className="w-4 h-4 text-gray-400" />
-                    <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">
-                      Clasificación
-                    </h4>
-                  </div>
-                  <div className="bg-white space-y-4">
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        Tipo de Suministro
-                      </p>
-                      <p className="text-sm font-medium text-gray-800">
-                        {selectedRecord.DESC_TIPSUM || "-"}{" "}
-                        <span className="text-gray-400 font-bold text-[10px] uppercase ml-1 px-1.5 py-0.5 bg-gray-100 rounded">
-                          {selectedRecord.TIPSUM || "-"}
-                        </span>
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        F. Financiamiento
-                      </p>
-                      <p className="text-sm font-medium text-gray-800">
-                        {selectedRecord.DESC_FFINAN || "-"}{" "}
-                        <span className="text-gray-400 font-bold text-[10px] uppercase ml-1 px-1.5 py-0.5 bg-gray-100 rounded">
-                          {selectedRecord.FFINAN || "-"}
-                        </span>
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 pt-2">
-                      <div>
-                        <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                          Precio Compra
-                        </p>
-                        <p className="text-sm font-black text-gray-900">
-                          S/ {selectedRecord.Precio_Det || "-"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                          Precio Referencial
-                        </p>
-                        <p className="text-sm font-bold text-gray-500">
-                          S/ {selectedRecord.Precio_Cab || "-"}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="px-8 py-5 bg-gray-50/80 border-t border-gray-100 flex justify-end">
-              <button
-                onClick={() => setSelectedRecord(null)}
-                className="bg-white border border-gray-200 text-gray-700 px-6 py-2.5 rounded-xl font-bold text-sm hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
-              >
-                Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Detalle del lote: el mismo de Stock SISMED (abajo en el celular, centrado en escritorio). */}
+      <LotDetailSheet
+        row={selectedRecord}
+        state={selectedRecord ? getExpirationState(selectedRecord, expiryWindowDays) : "NORMAL"}
+        onClose={() => setSelectedRecord(null)}
+        pharmacy={selectedRecord && showsPharmacyInData ? pharmacyLabelOf(selectedRecord) : null}
+      />
 
       {/* Modal de Expiración */}
       {isExpirationModalOpen && expirationModalType && (
@@ -8436,7 +8102,7 @@ function processSheet(sheet) {
                   <h3 className="text-lg font-black text-gray-900">
                     {expirationModalType === "expired"
                       ? `Productos Vencidos (al ${String(new Date().getDate()).padStart(2, "0")}/${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()})`
-                      : "Productos por Vencer (Este Mes)"}
+                      : `Productos por Vencer (próximos ${expiryWindowDays} días)`}
                   </h3>
                   <p className="text-sm text-gray-500">
                     {expirationModalType === "expired"
@@ -8639,7 +8305,7 @@ function processSheet(sheet) {
                         {
                           value: "expiring",
                           label: "Por vencer",
-                          desc: "Este mes",
+                          desc: `En ${expiryWindowDays} días`,
                         },
                         { value: "ok", label: "Vigentes", desc: "Buen estado" },
                       ].map((opt) => (
@@ -10352,4 +10018,31 @@ function processSheet(sheet) {
       />
     </div>
   );
+};
+
+/**
+ * Lee la ventana de «por vencer» antes de montar el módulo, para que todos sus cálculos la
+ * usen desde el primer dibujo. Si la lectura falla se usa el valor por omisión (90 días).
+ */
+export const SheetSearchModule: React.FC = () => {
+  const [ready, setReady] = useState(expiryWindowLoaded);
+  useEffect(() => {
+    if (expiryWindowLoaded) return;
+    let vigente = true;
+    void noticeSettingsApi.getOrDefault().then((value) => {
+      expiryWindowDays = value.expiryDays;
+      staleDaysThreshold = value.staleDays;
+      expiryWindowLoaded = true;
+      if (vigente) setReady(true);
+    });
+    return () => { vigente = false; };
+  }, []);
+  if (!ready) {
+    return (
+      <div className="flex h-64 items-center justify-center gap-2 text-sm font-semibold text-slate-500">
+        <RefreshCw className="h-5 w-5 animate-spin text-teal-600" /> Cargando…
+      </div>
+    );
+  }
+  return <SheetSearchModuleContent />;
 };
