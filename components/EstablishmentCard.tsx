@@ -454,11 +454,26 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
   );
 };
 
+/** Fecha corta para la fila del celular: «02/10 12:54». */
+const shortDateTime = (timestamp?: number | null): string => {
+  if (!timestamp) return "";
+  const d = new Date(timestamp);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${two(d.getDate())}/${two(d.getMonth() + 1)} ${two(d.getHours())}:${two(d.getMinutes())}`;
+};
+
+const statusText: Record<string, string> = {
+  "bg-emerald-500": "text-emerald-700",
+  "bg-amber-500": "text-amber-700",
+  "bg-red-500": "text-rose-700",
+};
+
 /**
- * Versión del celular de la tarjeta de establecimiento: los mismos datos que la de escritorio
- * —estado de conexión, hora de actualización y del equipo (en rojo si no coinciden), últimos
- * movimientos, ítems, vencidos y por vencer— en una fila compacta para ver muchos a la vez.
- * Al tocarla se abre el stock; el chip de movimientos abre el historial.
+ * Fila de establecimiento del celular, en tres líneas fijas:
+ * 1. nombre y hace cuánto se conectó;
+ * 2. código, última actualización e ítems;
+ * 3. movimientos (abre el historial) y lotes por vencer o vencidos.
+ * La fecha del equipo solo aparece cuando no coincide con la actualización.
  */
 export const EstablishmentMobileRow: React.FC<EstablishmentCardProps> = ({
   data,
@@ -469,12 +484,17 @@ export const EstablishmentMobileRow: React.FC<EstablishmentCardProps> = ({
   onShowHistory,
 }) => {
   const {
-    name, code, lastUpdate, lastUpdateTime, equipmentDate, equipmentDateTime,
+    name, code, lastUpdateTime, equipmentDateTime,
     expiredCount, expiringThisMonthCount, totalItems, syncRecordDate, hasSyncRecord, isCheckingSync,
   } = data;
   const isMismatch = !checkDatesMatch(lastUpdateTime, equipmentDateTime);
+  const status = getCardUpdateStatus(lastUpdateTime);
   const open = () => (isCaptureMode ? onToggleSelect?.() : onClick?.());
-  const chip = "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold";
+  const movement = isCheckingSync
+    ? "Comprobando…"
+    : syncRecordDate
+      ? `Movimiento ${getCardUpdateStatus(new Date(syncRecordDate).getTime()).label.toLowerCase()}`
+      : hasSyncRecord ? "Sin movimientos" : "Historial sin verificar";
 
   return (
     <li
@@ -482,46 +502,40 @@ export const EstablishmentMobileRow: React.FC<EstablishmentCardProps> = ({
       tabIndex={0}
       onClick={open}
       onKeyDown={(e) => { if (e.key === "Enter") open(); }}
-      className={`relative cursor-pointer px-4 py-3 active:bg-slate-50 ${isCaptureMode && isSelected ? "bg-rose-50/50" : ""}`}
+      className={`cursor-pointer px-4 py-3 active:bg-slate-50 ${isCaptureMode && isSelected ? "bg-rose-50/50" : ""}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          {code && <span className="font-mono text-[11px] font-bold text-teal-700">{code}</span>}
-          <p className="text-[14px] font-bold leading-snug text-slate-900">{name}</p>
-        </div>
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 text-[14px] font-bold leading-snug text-slate-900">{name}</p>
         {isCaptureMode ? (
-          <span className={`mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${isSelected ? "border-rose-600 bg-rose-600 text-white" : "border-slate-300 bg-white"}`}>
+          <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${isSelected ? "border-rose-600 bg-rose-600 text-white" : "border-slate-300 bg-white"}`}>
             {isSelected && <Check className="h-4 w-4" />}
           </span>
         ) : (
-          <span className="mt-0.5 shrink-0">{renderCardSyncStatusPill(lastUpdateTime)}</span>
+          <span className={`inline-flex shrink-0 items-center gap-1.5 pt-0.5 text-[12px] font-bold ${statusText[status.color] || "text-slate-500"}`}>
+            <span className={`h-2 w-2 rounded-full ${status.color}`} />
+            {status.label}
+          </span>
         )}
       </div>
 
-      {(lastUpdate || lastUpdateTime) && (
-        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11.5px] text-slate-500">
-          <span className="inline-flex items-center gap-1"><RefreshCw className="h-3 w-3 text-slate-400" />Act. <b className="font-semibold text-slate-700">{formatCardFullDate(lastUpdate || lastUpdateTime)}</b></span>
-          {(equipmentDate || equipmentDateTime) && (
-            <span className={`inline-flex items-center gap-1 ${isMismatch ? "font-semibold text-rose-600" : ""}`} title={isMismatch ? "La fecha del equipo no coincide con la actualización" : undefined}>
-              <Monitor className="h-3 w-3" />Equipo <b className={isMismatch ? "font-bold" : "font-semibold text-slate-700"}>{formatCardFullDate(equipmentDate || equipmentDateTime)}</b>
-            </span>
-          )}
-        </p>
-      )}
+      <p className="mt-0.5 truncate text-[12px] text-slate-500">
+        {code && <span className="font-mono font-bold text-teal-700">{code}</span>}
+        {lastUpdateTime ? <>{code && " · "}Act. {shortDateTime(lastUpdateTime)}</> : null}
+        {" · "}{totalItems.toLocaleString("es-PE")} ítems
+      </p>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <span className={`${chip} border-slate-200 bg-slate-50 text-slate-600`}><Package className="h-3 w-3" />{totalItems.toLocaleString("es-PE")} ítems</span>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] font-semibold">
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onShowHistory?.(e); }}
-          className={`${chip} ${syncRecordDate ? "border-teal-200 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-500"}`}
+          className={`inline-flex items-center gap-1 ${syncRecordDate ? "text-teal-700" : "text-slate-400"}`}
           title="Historial de cambios del stock"
         >
-          <FileClock className="h-3 w-3" />
-          {isCheckingSync ? "Comprobando…" : syncRecordDate ? `Movimiento ${getCardUpdateStatus(new Date(syncRecordDate).getTime()).label.toLowerCase()}` : hasSyncRecord ? "Sin movimientos" : "Historial sin verificar"}
+          <FileClock className="h-3.5 w-3.5" />{movement}
         </button>
-        {expiredCount > 0 && <span className={`${chip} border-rose-200 bg-rose-50 text-rose-700`}><AlertTriangle className="h-3 w-3" />{expiredCount} vencido{expiredCount !== 1 ? "s" : ""}</span>}
-        {expiringThisMonthCount > 0 && <span className={`${chip} border-amber-200 bg-amber-50 text-amber-700`}><Clock className="h-3 w-3" />{expiringThisMonthCount} por vencer</span>}
+        {expiringThisMonthCount > 0 && <span className="inline-flex items-center gap-1 text-amber-700"><Clock className="h-3.5 w-3.5" />{expiringThisMonthCount} por vencer</span>}
+        {expiredCount > 0 && <span className="inline-flex items-center gap-1 text-rose-700"><AlertTriangle className="h-3.5 w-3.5" />{expiredCount} vencido{expiredCount !== 1 ? "s" : ""}</span>}
+        {isMismatch && <span className="inline-flex items-center gap-1 text-rose-700" title="La fecha del equipo no coincide con la actualización"><Monitor className="h-3.5 w-3.5" />Equipo {shortDateTime(equipmentDateTime)}</span>}
       </div>
     </li>
   );

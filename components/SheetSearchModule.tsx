@@ -132,7 +132,7 @@ import {
 import { noticeSettingsApi } from "../services/noticeSettings";
 import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
 import { getExpirationState } from "../services/assignedIpressStock";
-import { KpiCard, KpiStrip, TableHeaderCell as HeaderCell } from "./ui/kit";
+import { KpiCard, KpiStrip, StatusChip, TableHeaderCell as HeaderCell } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
@@ -4876,12 +4876,15 @@ function processSheet(sheet) {
             setFilter_gray(all || redGray);
           };
           const allOn = filter_emerald && filter_amber && filter_red && filter_gray;
+          // En el panel regional solo informan: el filtro de estado se aplica a
+          // establecimientos, y pulsarlos aquí no cambiaba nada a la vista.
+          const clickable = viewLevel === "sheets";
           return (
             <div className="mt-2 sm:mt-3">
               <KpiStrip cols="md:grid-cols-3">
-                <KpiCard watermark tone="success" icon={<Wifi />} label="En línea" value={summary.online} hint="actualizados en la última hora" onClick={() => only(true, false, false)} active={!allOn && filter_emerald && !filter_amber && !filter_red} />
-                <KpiCard watermark tone="warning" icon={<FileClock />} label="Desconectados" value={summary.delayed} hint="entre 1 y 24 horas sin actualizar" onClick={() => only(false, true, false)} active={!allOn && !filter_emerald && filter_amber && !filter_red} />
-                <KpiCard watermark tone="danger" icon={<WifiOff />} label="Fuera de línea" value={summary.offline} hint="más de un día o sin datos" onClick={() => only(false, false, true)} active={!allOn && !filter_emerald && !filter_amber && filter_red} />
+                <KpiCard watermark tone="success" icon={<Wifi />} label="En línea" value={summary.online} hint="actualizados en la última hora" onClick={clickable ? () => only(true, false, false) : undefined} active={clickable && !allOn && filter_emerald && !filter_amber && !filter_red} />
+                <KpiCard watermark tone="warning" icon={<FileClock />} label="Desconectados" value={summary.delayed} hint="entre 1 y 24 horas sin actualizar" onClick={clickable ? () => only(false, true, false) : undefined} active={clickable && !allOn && !filter_emerald && filter_amber && !filter_red} />
+                <KpiCard watermark tone="danger" icon={<WifiOff />} label="Fuera de línea" value={summary.offline} hint="más de un día o sin datos" onClick={clickable ? () => only(false, false, true) : undefined} active={clickable && !allOn && !filter_emerald && !filter_amber && filter_red} />
               </KpiStrip>
             </div>
           );
@@ -5768,12 +5771,12 @@ function processSheet(sheet) {
       )}
 
       <div
-        className={`bg-white sm:rounded-[1.25rem] border-y sm:border border-slate-200 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden mx-0 sm:mx-10 lg:mx-14 xl:mx-16 ${viewLevel === "data" ? "h-auto shrink-0 mb-8" : "flex-1 min-h-[300px]"}`}
+        className={`bg-white sm:rounded-[1.25rem] border-y sm:border border-slate-200 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] flex flex-col sm:overflow-hidden mx-0 sm:mx-10 lg:mx-14 xl:mx-16 ${viewLevel === "data" ? "h-auto shrink-0 mb-8" : "sm:flex-1 sm:min-h-[300px]"}`}
       >
         {/* TOOLBAR */}
-        <div className="p-3 sm:p-5 border-b border-slate-100 flex flex-col gap-4">
+        <div className="sticky top-0 z-20 bg-white sm:static p-3 sm:p-5 border-b border-slate-100 flex flex-col gap-4">
           {/* Search & Actions */}
-          <div className={`flex gap-3 items-center justify-between w-full ${viewLevel === "ungets" ? "flex-col md:flex-row" : "flex-row"}`}>
+          <div className="flex gap-3 items-center justify-between w-full flex-row">
             <div className="relative flex-1 w-full md:max-w-[50%] group">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
@@ -5908,7 +5911,7 @@ function processSheet(sheet) {
               </div>
             )}
 
-            <div className={`flex items-center gap-2 overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 md:ml-auto relative z-30 ${viewLevel === "ungets" ? "w-full md:w-auto pt-1 md:pt-0 pb-1" : "w-auto"}`}>
+            <div className="flex items-center gap-2 overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 md:ml-auto relative z-30 w-auto">
               {viewLevel === "data" && (
                 <>
                   {/* Con puestos comunales y «Todos», se elige cómo armar el Excel. Con un
@@ -6072,10 +6075,11 @@ function processSheet(sheet) {
                 sources.length > 0 && (
                   <button
                     onClick={exportAllUngetsToExcel}
-                    className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap shadow-sm"
+                    aria-label="Exportar stock"
+                    className="flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap shadow-sm"
                   >
-                    <Download className="h-4 w-4 text-emerald-600 shrink-0" />{" "}
-                    Exportar Stock
+                    <Download className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span className="hidden sm:inline">Exportar Stock</span>
                   </button>
                 )}
             </div>
@@ -6083,7 +6087,7 @@ function processSheet(sheet) {
         </div>
 
         <div
-          className={`flex-1 bg-gray-50/30 scrollbar-thin ${viewLevel === "data" ? "overflow-visible" : "overflow-auto"}`}
+          className={`flex-1 bg-gray-50/30 scrollbar-thin ${viewLevel === "data" ? "overflow-visible" : "sm:overflow-auto"}`}
         >
           {isConfigLoading && scriptUrls.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-teal-600 gap-3 py-20">
@@ -6110,299 +6114,215 @@ function processSheet(sheet) {
             <div
               className={`p-4 sm:p-6 flex flex-col gap-6 ${viewLevel === "data" ? "pb-4 sm:pb-4" : "pb-32 sm:pb-6"}`}
             >
-              {/* LEVEL 1: UNGET CARDS */}
-              {viewLevel === "ungets" && (
-                <div className="animate-in fade-in zoom-in-95 duration-300">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-                    {filteredUngets.length > 0 ? (
-                      filteredUngets.map((config, idx) => {
-                        // Encontrar el índice original en scriptUrls para las funciones de edición/borrado
-                        const originalIdx = scriptUrls.findIndex(
-                          (u) => u.url === config.url && u.name === config.name,
-                        );
-                        const isSupabaseVirtual = config.url === "SUPABASE_NATIVE" || config.url.startsWith("SUPABASE_VIRTUAL_");
-                        const ungetSourceCount = sources.filter((s) => s.urlIndex === originalIdx).length;
-                        // Apps Script puede tardar 10-40 s en responder: sin tarjetas guardadas y sin
-                        // error todavía, la UNGET está conectando, no "vacía".
-                        const isConnecting =
-                          ungetSourceCount === 0 &&
-                          !connectionErrors[config.url] &&
-                          (isLoading || isSilentSyncing || !!retryingUrls[config.url]);
+              {/* NIVEL 1: PANEL REGIONAL. Una tarjeta por UNGET (una fila en el celular) con
+                  dónde está, cuántos establecimientos tiene y cómo están de actualizados.
+                  Se quitaron el código inventado (UNG-xxxx), los conteos por tipo y el enlace
+                  del script: el enlace se ve en el engranaje. */}
+              {viewLevel === "ungets" && (() => {
+                if (filteredUngets.length === 0) {
+                  return (
+                    <div className="py-20 text-center">
+                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Settings className="h-8 w-8 text-gray-400" />
+                      </div>
+                      <h3 className="text-xl font-bold text-gray-800">No hay UNGETs que coincidan</h3>
+                      <p className="text-gray-500 mt-2">Intente con otro término de búsqueda.</p>
+                    </div>
+                  );
+                }
 
-                        // Encontrar la UNGET en allUngets para obtener su DIRESA y OGESS asignados
-                        const configNorm = normalizeName(config.name);
-                        const matchingUnget = allUngets.find((u) => 
-                          (config.ungetId && String(u.id) === String(config.ungetId)) || 
-                          u.name === config.name || 
-                          normalizeName(u.name) === configNorm
-                        );
-                        let diresaName = "";
-                        let ogessName = "";
-                        if (matchingUnget) {
-                          if (matchingUnget.diresaId) {
-                            const foundD = allDiresas.find((d) => d.id === matchingUnget.diresaId);
-                            if (foundD) diresaName = foundD.name;
-                          }
-                          if (matchingUnget.ogessId) {
-                            const foundO = allOgess.find((o) => o.id === matchingUnget.ogessId);
-                            if (foundO) ogessName = foundO.name;
-                          }
-                        }
+                const items = filteredUngets.map((config) => {
+                  // Índice original en scriptUrls, que es el que usan edición, borrado y fuentes.
+                  const originalIdx = scriptUrls.findIndex((u) => u.url === config.url && u.name === config.name);
+                  const isSupabaseVirtual = config.url === "SUPABASE_NATIVE" || config.url.startsWith("SUPABASE_VIRTUAL_");
+                  const ungetSources = sources.filter((s) => s.urlIndex === originalIdx);
+                  const status = { online: 0, delayed: 0, offline: 0 };
+                  ungetSources.forEach((s) => {
+                    const color = getUpdateStatus(s.lastUpdateTime).color;
+                    if (color === "bg-emerald-500") status.online++;
+                    else if (color === "bg-amber-500") status.delayed++;
+                    else status.offline++;
+                  });
+                  // Apps Script puede tardar 10-40 s en responder: sin tarjetas guardadas y sin
+                  // error todavía, la UNGET está conectando, no "vacía".
+                  const isConnecting =
+                    ungetSources.length === 0 &&
+                    !connectionErrors[config.url] &&
+                    (isLoading || isSilentSyncing || !!retryingUrls[config.url]);
 
-                        // La conexión es de su informático: aquí solo se puede mirar y
-                        // probar. Ofrecer «eliminar» era engañar, porque el guardado nunca
-                        // retira filas ajenas y la tarjeta reaparecía a la siguiente carga.
-                        // La excepción es la conexión sin responsable: esa sí se adopta.
-                        const sinResponsable = isConnectionOrphaned(config, cuentasActivas);
-                        const esConexionPropia = canEditConnection(config, user?.username, cuentasActivas);
+                  const configNorm = normalizeName(config.name);
+                  const matchingUnget = allUngets.find((u) =>
+                    (config.ungetId && String(u.id) === String(config.ungetId)) ||
+                    u.name === config.name ||
+                    normalizeName(u.name) === configNorm
+                  );
+                  const diresaName = matchingUnget?.diresaId ? allDiresas.find((d) => d.id === matchingUnget.diresaId)?.name || "" : "";
+                  const ogessName = matchingUnget?.ogessId ? allOgess.find((o) => o.id === matchingUnget.ogessId)?.name || "" : "";
 
-                        return (
-                          <div
-                            key={idx}
-                            onClick={() => handleSelectUnget(originalIdx)}
-                            className={`group p-4 sm:p-6 rounded-xl sm:rounded-2xl shadow-sm transition-all text-left flex flex-row sm:flex-col items-center sm:items-start gap-4 sm:gap-0 h-full cursor-pointer relative overflow-hidden border ${
-                              isSupabaseVirtual
-                                ? "bg-gradient-to-b from-white to-slate-50 border-slate-200 hover:bg-white hover:border-teal-500 hover:shadow-md"
-                                : "bg-white border-gray-200 hover:shadow-md hover:border-teal-500"
-                            }`}
+                  // La conexión es de su informático: aquí solo se puede mirar y probar. Ofrecer
+                  // «eliminar» era engañar, porque el guardado nunca retira filas ajenas y la
+                  // tarjeta reaparecía a la siguiente carga. La excepción es la conexión sin
+                  // responsable: esa sí se adopta.
+                  const sinResponsable = isConnectionOrphaned(config, cuentasActivas);
+                  const esConexionPropia = canEditConnection(config, user?.username, cuentasActivas);
+
+                  return {
+                    config, originalIdx, isSupabaseVirtual, total: ungetSources.length, status, isConnecting,
+                    name: formatDisplayName(matchingUnget ? matchingUnget.name : config.name),
+                    ogessName, diresaName,
+                    sinResponsable, esConexionPropia,
+                    canManage: canManageConfigs && !isSupabaseVirtual,
+                    error: connectionErrors[config.url],
+                  };
+                });
+
+                // La DIRESA solo se nombra si a la vista hay más de una: si no, se repite en todas.
+                const variasDiresas = new Set(items.map((i) => i.diresaName).filter(Boolean)).size > 1;
+                const territoryOf = (item: (typeof items)[number]) =>
+                  [item.ogessName, variasDiresas ? item.diresaName : ""].filter(Boolean).map((t) => formatDisplayName(t)).join(" · ");
+                type UngetItem = (typeof items)[number];
+
+                const actions = (item: UngetItem) =>
+                  item.canManage && (
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenQuickFix(item.config, e)}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-teal-300 hover:text-teal-700"
+                        title={item.esConexionPropia ? "Configurar / Probar enlace Web App" : `Probar el enlace (la mantiene ${connectionOwner(item.config)})`}
+                        aria-label="Configurar conexión"
+                      >
+                        <Settings className="h-4 w-4" />
+                      </button>
+                      {item.esConexionPropia && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDirectDelete(item.originalIdx, e); }}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-red-200 hover:text-red-600"
+                          title="Eliminar conexión"
+                          aria-label="Eliminar conexión"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  );
+
+                const badges = (item: UngetItem) => (item.sinResponsable || item.isSupabaseVirtual || item.error) ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {item.isSupabaseVirtual && <StatusChip label="Virtual" tone="info" />}
+                    {item.sinResponsable && (
+                      <span title={`${connectionOwner(item.config)} ya no está activo. Al guardar esta conexión pasará a su nombre.`}>
+                        <StatusChip label="Sin responsable" tone="warning" />
+                      </span>
+                    )}
+                    {item.error && (() => {
+                      const { label, tone } = getGasErrorLabel(item.error);
+                      return (
+                        <>
+                          <span title={item.error}><StatusChip label={label} tone={tone === "warning" ? "warning" : "danger"} /></span>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); retrySingleUrl(item.config); }}
+                            disabled={retryingUrls[item.config.url]}
+                            className="inline-flex items-center gap-1 rounded-full bg-teal-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-teal-700 disabled:opacity-50"
                           >
-                            {/* Botones de acción rápidos */}
-                            {canManageConfigs && !isSupabaseVirtual && (
-                              <div className="absolute top-4 right-4 flex items-center gap-1.5 opacity-100 sm:opacity-60 group-hover:opacity-100 transition-opacity z-10">
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleOpenQuickFix(config, e)}
-                                  className="p-1.5 sm:p-2 bg-white/90 backdrop-blur-sm shadow-sm border border-gray-200 rounded-lg text-gray-600 hover:text-teal-700 hover:border-teal-300 transition-all cursor-pointer"
-                                  title={
-                                    esConexionPropia
-                                      ? "Configurar / Probar enlace Web App"
-                                      : `Probar el enlace (la mantiene ${connectionOwner(config)})`
-                                  }
-                                >
-                                  <Settings className="h-4 w-4" />
-                                </button>
-                                {esConexionPropia && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleDirectDelete(originalIdx, e);
-                                  }}
-                                  className="p-1.5 sm:p-2 bg-white/90 backdrop-blur-sm shadow-sm border border-gray-100 rounded-lg text-gray-500 hover:text-red-600 hover:border-red-200 transition-all cursor-pointer"
-                                  title="Eliminar conexión"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                                )}
-                              </div>
-                            )}
+                            <RefreshCw className={`h-3 w-3 ${retryingUrls[item.config.url] ? "animate-spin" : ""}`} />
+                            {retryingUrls[item.config.url] ? "Cargando..." : "Reintentar"}
+                          </button>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : null;
 
-                            {isSupabaseVirtual && (
-                              <div className="absolute top-4 right-4 z-10">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-100">
-                                  UNGET
-                                </span>
-                              </div>
-                            )}
+                /** Cómo están de actualizados sus establecimientos: barra y leyenda. */
+                const statusSummary = (item: UngetItem) => {
+                  if (item.isConnecting) {
+                    return (
+                      <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                        <RefreshCw className="h-3 w-3 animate-spin text-teal-500" /> Conectando con Google Sheets...
+                      </p>
+                    );
+                  }
+                  if (item.total === 0) return null;
+                  const pct = (n: number) => `${(n / item.total) * 100}%`;
+                  return (
+                    <div className="space-y-1.5">
+                      <div className="flex h-1.5 overflow-hidden rounded-full bg-slate-100">
+                        <span className="bg-emerald-500" style={{ width: pct(item.status.online) }} />
+                        <span className="bg-amber-400" style={{ width: pct(item.status.delayed) }} />
+                        <span className="bg-red-500" style={{ width: pct(item.status.offline) }} />
+                      </div>
+                      <p className="flex flex-wrap gap-x-3 text-[12px] font-semibold text-slate-600">
+                        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />{item.status.online} en línea</span>
+                        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400" />{item.status.delayed} desconectados</span>
+                        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />{item.status.offline} fuera de línea</span>
+                      </p>
+                    </div>
+                  );
+                };
 
-                            <div className={`w-12 h-12 shrink-0 rounded-xl flex items-center justify-center sm:mb-4 group-hover:bg-teal-600 group-hover:text-white transition-colors ${
-                              "bg-teal-50 text-teal-600"
-                            }`}>
-                              {isSupabaseVirtual ? (
-                                <Building2 className="h-6 w-6" />
-                              ) : (
-                                <Building2 className="h-6 w-6" />
-                              )}
+                return (
+                  <>
+                    {/* Celular: filas, como la lista de establecimientos. */}
+                    <ul className="-mx-4 -mt-4 divide-y divide-slate-100 border-y border-slate-100 bg-white md:hidden">
+                      {items.map((item) => (
+                        <li
+                          key={item.config.url}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => handleSelectUnget(item.originalIdx)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleSelectUnget(item.originalIdx); }}
+                          className="cursor-pointer space-y-2 px-4 py-3 active:bg-slate-50"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[14px] font-bold leading-snug text-slate-900">{item.name}</p>
+                              <p className="mt-0.5 truncate text-[12px] text-slate-500">
+                                {[territoryOf(item), item.isConnecting ? "" : `${item.total} establecimientos`].filter(Boolean).join(" · ")}
+                              </p>
                             </div>
+                            {actions(item)}
+                          </div>
+                          {badges(item)}
+                          {statusSummary(item)}
+                        </li>
+                      ))}
+                    </ul>
 
-                            <div className="flex-1 min-w-0 pr-16 sm:pr-0">
-                              {matchingUnget && (
-                                <div className="text-[9px] font-black text-teal-600 uppercase tracking-widest leading-none mb-1 sm:mb-1.5 flex items-center gap-1.5 flex-wrap">
-                                  <span>CÓDIGO: UNG-{matchingUnget.id.substring(0, 5).toUpperCase()}</span>
-                                  {isSupabaseVirtual && (
-                                    <span className="text-[7.5px] font-extrabold bg-teal-100 text-teal-800 px-1 py-0.2 rounded uppercase">
-                                      Virtual
-                                    </span>
-                                  )}
-                                  {sinResponsable && (
-                                    <span
-                                      className="text-[7.5px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200/70 px-1 py-0.2 rounded uppercase"
-                                      title={`${connectionOwner(config)} ya no está activo. Al guardar esta conexión pasará a su nombre.`}
-                                    >
-                                      Sin responsable
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                              <h3 className="text-sm sm:text-lg font-black text-gray-900 sm:mb-2 group-hover:text-teal-700 transition-colors uppercase tracking-tight truncate sm:whitespace-normal">
-                                {formatDisplayName(matchingUnget ? matchingUnget.name : config.name)}
-                              </h3>
-                              {connectionErrors[config.url] && (
-                                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                  {(() => {
-                                    const { label, tone } = getGasErrorLabel(connectionErrors[config.url]);
-                                    return (
-                                      <div
-                                        className={`text-[9px] font-black px-2 py-0.5 rounded-md border inline-flex items-center gap-1 uppercase ${
-                                          tone === "warning"
-                                            ? "bg-amber-50 text-amber-700 border-amber-200"
-                                            : "bg-red-50 text-red-700 border-red-200"
-                                        }`}
-                                        title={connectionErrors[config.url]}
-                                      >
-                                        <AlertCircle
-                                          className={`h-3 w-3 shrink-0 ${tone === "warning" ? "text-amber-500" : "text-red-500"}`}
-                                        />
-                                        {label}
-                                      </div>
-                                    );
-                                  })()}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      retrySingleUrl(config);
-                                    }}
-                                    disabled={retryingUrls[config.url]}
-                                    className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white inline-flex items-center gap-1 uppercase transition-all shadow-xs disabled:opacity-50 cursor-pointer"
-                                    title="Reintentar la consulta de esta UNGET"
-                                  >
-                                    <RefreshCw className={`h-2.5 w-2.5 ${retryingUrls[config.url] ? "animate-spin" : ""}`} />
-                                    {retryingUrls[config.url] ? "Cargando..." : "Reintentar"}
-                                  </button>
-                                  {canManageConfigs && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => handleOpenQuickFix(config, e)}
-                                      className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white inline-flex items-center gap-1 uppercase transition-all shadow-xs cursor-pointer"
-                                      title="Corregir enlace o probar conexión"
-                                    >
-                                      <Settings className="h-2.5 w-2.5" />
-                                      Editar Enlace
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-
-                              <div className="sm:hidden text-[10px] sm:text-xs font-bold text-gray-500 mt-0.5 mb-1.5">
-                                {isConnecting ? "Conectando..." : `${ungetSourceCount} Estab.`}
-                              </div>
-
-                              {/* Resumen de establecimientos por tipo */}
-                              {allUngetSummaries[originalIdx] && (
-                                <div className="flex flex-wrap gap-1 mb-2 sm:mb-4">
-                                  {allUngetSummaries[originalIdx].cs > 0 && (
-                                    <span
-                                      className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100 uppercase"
-                                      title="Centros de Salud"
-                                    >
-                                      C.S: {allUngetSummaries[originalIdx].cs}
-                                    </span>
-                                  )}
-                                  {allUngetSummaries[originalIdx].ps > 0 && (
-                                    <span
-                                      className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-100 uppercase"
-                                      title="Puestos de Salud"
-                                    >
-                                      P.S: {allUngetSummaries[originalIdx].ps}
-                                    </span>
-                                  )}
-                                  {allUngetSummaries[originalIdx].alm > 0 && (
-                                    <span
-                                      className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-teal-50 text-teal-700 border border-teal-100 uppercase"
-                                      title="Almacenes"
-                                    >
-                                      ALM: {allUngetSummaries[originalIdx].alm}
-                                    </span>
-                                  )}
-                                  {allUngetSummaries[originalIdx].hosp > 0 && (
-                                    <span
-                                      className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-violet-50 text-violet-700 border border-violet-100 uppercase"
-                                      title="Hospitales"
-                                    >
-                                      HOSP:{" "}
-                                      {allUngetSummaries[originalIdx].hosp}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-
-                              {(matchingUnget || isSupabaseVirtual) ? (
-                                <div className="mt-auto pt-2 border-t border-gray-100 flex flex-col gap-1 w-full shrink-0">
-                                  {diresaName ? (
-                                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-500 truncate">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
-                                      <span className="truncate" title={diresaName}>
-                                        DIRESA: {diresaName}
-                                      </span>
-                                    </div>
-                                  ) : null}
-                                  {ogessName ? (
-                                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-500 truncate">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0"></span>
-                                      <span className="truncate" title={ogessName}>
-                                        OGESS: {ogessName}
-                                      </span>
-                                    </div>
-                                  ) : null}
-                                  {!isSupabaseVirtual && (
-                                    <div className="flex items-center gap-1.5 text-[9px] text-gray-400 mt-1 pt-1 border-t border-dashed border-gray-100 italic">
-                                      <LinkIcon className="h-2.5 w-2.5 shrink-0 text-slate-300" />
-                                      <span className="truncate max-w-[120px] sm:max-w-[150px]" title={describeConfigUrl(config)}>
-                                        {describeConfigUrl(config)}
-                                      </span>
-                                    </div>
-                                  )}
-                                  {!diresaName && !ogessName && isSupabaseVirtual ? (
-                                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-400 italic shrink-0">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0"></span>
-                                      <span>Sin territorio superior</span>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1.5 text-[9px] sm:text-xs text-gray-400 mt-auto">
-                                  <LinkIcon className="h-3 w-3 shrink-0" />
-                                  <span className="truncate max-w-[120px] sm:max-w-[150px]">
-                                    {describeConfigUrl(config)}
-                                  </span>
-                                </div>
-                              )}
+                    {/* Escritorio: tarjetas. */}
+                    <div className="hidden grid-cols-2 gap-4 animate-in fade-in duration-300 md:grid xl:grid-cols-3">
+                      {items.map((item) => (
+                        <div
+                          key={item.config.url}
+                          onClick={() => handleSelectUnget(item.originalIdx)}
+                          className="group flex cursor-pointer flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-teal-500 hover:shadow-md"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600 transition-colors group-hover:bg-teal-600 group-hover:text-white">
+                              <Building2 className="h-5 w-5" />
                             </div>
-
-                            <div className="hidden sm:flex items-center justify-between w-full mt-4 pt-4 border-t border-gray-50">
-                              <span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase tracking-wider inline-flex items-center gap-1.5">
-                                {isConnecting ? (
-                                  <>
-                                    <RefreshCw className="h-3 w-3 animate-spin text-teal-500" />
-                                    Conectando con Google Sheets...
-                                  </>
-                                ) : (
-                                  `${ungetSourceCount} Establecimientos`
-                                )}
-                              </span>
-                              <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-teal-500 group-hover:translate-x-1 transition-all" />
+                            <div className="min-w-0 flex-1">
+                              <h3 className="text-[15px] font-black uppercase leading-tight text-slate-900 group-hover:text-teal-700">{item.name}</h3>
+                              {territoryOf(item) && <p className="mt-0.5 truncate text-xs text-slate-500" title={territoryOf(item)}>{territoryOf(item)}</p>}
                             </div>
                           </div>
-                        );
-                      })
-                    ) : (
-                      <div className="col-span-full py-20 text-center">
-                        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                          <Settings className="h-8 w-8 text-gray-400" />
+                          {badges(item)}
+                          <div className="mt-auto">{statusSummary(item)}</div>
+                          <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-bold text-slate-500">
+                            <span className="whitespace-nowrap">{item.isConnecting ? "Conectando..." : `${item.total} establecimientos`}</span>
+                            <div className="flex items-center gap-2">
+                              {actions(item)}
+                              <ChevronRight className="h-4 w-4 text-slate-300 transition-all group-hover:translate-x-1 group-hover:text-teal-500" />
+                            </div>
+                          </div>
                         </div>
-                        <h3 className="text-xl font-bold text-gray-800">
-                          No hay UNGETs que coincidan
-                        </h3>
-                        <p className="text-gray-500 mt-2">
-                          Intente con otro término de búsqueda.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
 
               {/* LEVEL 2: SHEET CARDS */}
               {viewLevel === "sheets" && (
