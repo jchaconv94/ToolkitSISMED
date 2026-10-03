@@ -92,6 +92,7 @@ contexts/AuthContext.tsx    Sesión, rol, hasPermission()
 contexts/BackupManagerContext.tsx  Descargas de backups que siguen al cambiar de módulo
 components/                 Un archivo .tsx por módulo (componentes grandes, sin subcarpetas por dominio)
 components/navigation.ts    Secciones del menú (Farmacia, Stock, Herramientas, Administración): fuente única de la barra lateral, del Inicio y de la navegación del teléfono
+components/ToolSearch.tsx   Buscador de herramientas (campo de la cabecera, lupa en el teléfono, Ctrl+K); filtra con components/toolSearchFilter.ts
 components/ui/              Kit compartido: kit.tsx, ConfirmationDialog, CustomSelect, TablePagination
 services/                   Acceso a datos, reglas de dominio y generación de documentos
 docs/                       Toda la documentación (auditorías, planes). Solo README y AGENTS viven en la raíz

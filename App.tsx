@@ -7,7 +7,7 @@ import { analyzeInventoryWithAura } from './services/auraService';
 import { generateFullReportPDF } from './services/pdfService';
 import { 
   Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network,
-  ChevronRight, ArrowLeft, Home, UserCircle2
+  ChevronRight, ArrowLeft, Home, UserCircle2, Search
 } from 'lucide-react';
 
 // NEW IMPORTS
@@ -31,6 +31,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { MODULE_HEADER_SLOT_ID } from './components/ui/ModuleHeaderSlot';
 import { HomeModule } from './components/HomeModule';
 import { UserMenu } from './components/UserMenu';
+import { ToolSearchDialog, ToolSearchTrigger, useToolSearchShortcut } from './components/ToolSearch';
 import { findNavItem, findNavSection, findVisibleNavSection, NAV_TINT_CLASSES, visibleNavSections } from './components/navigation';
 import { BrandLogo } from './components/ui/BrandLogo';
 import { UserProfile } from './components/UserProfile';
@@ -156,6 +157,13 @@ const AuthenticatedApp: React.FC = () => {
         if (typeof window.history.state?.paso === 'number' && window.history.state.paso > 0) window.history.back();
         else setCurrentView('HOME');
     }, [setCurrentView]);
+
+    // Buscador de herramientas: campo de la cabecera, lupa en el teléfono y Ctrl+K.
+    const [buscadorAbierto, setBuscadorAbierto] = useState(false);
+    const abrirBuscador = useCallback(() => {
+        if (isAuthenticated) setBuscadorAbierto(true);
+    }, [isAuthenticated]);
+    useToolSearchShortcut(abrirBuscador);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     
     const wasSidebarCollapsedRef = React.useRef(false);
@@ -262,7 +270,7 @@ const AuthenticatedApp: React.FC = () => {
 
             <div className="flex-1 flex flex-col h-[100dvh] overflow-hidden relative">
                 {/* Cabecera: miga de pan, acciones del módulo y el usuario */}
-                <header className="sticky top-0 z-[1000] flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm sm:px-6 md:h-16 lg:px-8">
+                <header className="sticky top-0 z-[1000] flex h-14 shrink-0 items-center gap-x-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm sm:px-6 md:h-16 lg:px-8">
                     {/* Teléfono, en Inicio: la marca; con una sección abierta, su nombre y la flecha. */}
                     {currentView === 'HOME' && (
                         <div className="flex min-w-0 items-center gap-2 md:hidden">
@@ -312,13 +320,31 @@ const AuthenticatedApp: React.FC = () => {
                         )}
                         <h2 className="truncate text-base font-black text-slate-900 sm:text-[18px]">{headerTitle}</h2>
                     </div>
-                    <div className="ml-auto flex shrink-0 items-center gap-3">
+                    <div className="mx-4 hidden min-w-0 flex-1 justify-center md:flex">
+                        <ToolSearchTrigger onOpen={abrirBuscador} className="w-full max-w-[420px]" />
+                    </div>
+                    <div className="ml-auto flex shrink-0 items-center gap-3 md:ml-0">
                         <div id={MODULE_HEADER_SLOT_ID} className="flex shrink-0 items-center gap-2 empty:hidden" />
+                        <button
+                                type="button"
+                                onClick={abrirBuscador}
+                                aria-label="Buscar herramienta"
+                                title="Buscar herramienta"
+                                className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 md:hidden"
+                            >
+                                <Search className="h-5 w-5" />
+                            </button>
                         {user && (
                             <UserMenu user={user} onOpenProfile={() => setCurrentView('PROFILE')} onLogout={logout} />
                         )}
                     </div>
                 </header>
+                <ToolSearchDialog
+                    open={buscadorAbierto}
+                    onClose={() => setBuscadorAbierto(false)}
+                    onNavigate={setCurrentView}
+                    hasPermission={hasPermission}
+                />
 
                 {/* CONTENT AREA SWITCHER */}
                 <main className="flex-1 overflow-y-auto w-full px-3 sm:px-5 2xl:px-6 pt-2.5 sm:pt-3 pb-6">
