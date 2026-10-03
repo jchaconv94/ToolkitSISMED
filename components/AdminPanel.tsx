@@ -12,6 +12,9 @@ import * as XLSX from 'xlsx';
 import { AdminOrganizationModule } from './AdminOrganizationModule';
 import { AdminCatalogsModule } from './AdminCatalogsModule';
 import { backupSettingsApi } from '../services/backupConnection';
+import { noticeSettingsApi } from '../services/noticeSettings';
+import { DEFAULT_NOTICE_THRESHOLDS, NoticeThresholds } from '../services/notifications';
+import { NoticeSettingsCard } from './NoticeSettingsCard';
 import { CustomSelect } from './ui/CustomSelect';
 
 export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) => {
@@ -74,6 +77,8 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   // Backups SISMED: el límite vive en su propia tabla, que solo escribe el administrador.
   const [backupLimit, setBackupLimit] = useState<{ saved: number | null; value: number; error: string | null }>({ saved: null, value: 1, error: null });
+  // Umbrales de la campanita de avisos: también en su propia tabla (SUPABASE_AVISOS_PARAMETROS.sql).
+  const [noticeLimits, setNoticeLimits] = useState<{ saved: NoticeThresholds | null; value: NoticeThresholds; error: string | null }>({ saved: null, value: DEFAULT_NOTICE_THRESHOLDS, error: null });
   const [isRefreshingUsers, setIsRefreshingUsers] = useState(false);
 
   // --- USER DIRECTORY SEARCH & FILTERS STATE ---
@@ -678,6 +683,9 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       backupSettingsApi.get()
           .then((s) => setBackupLimit({ saved: s.dailyLimit, value: s.dailyLimit, error: null }))
           .catch((e: any) => setBackupLimit((prev) => ({ ...prev, error: e?.message || 'No se pudo leer el límite.' })));
+      noticeSettingsApi.get()
+          .then(({ staleDays, expiryDays }) => setNoticeLimits({ saved: { staleDays, expiryDays }, value: { staleDays, expiryDays }, error: null }))
+          .catch((e: any) => setNoticeLimits((prev) => ({ ...prev, error: `${e?.message || 'No se pudieron leer los avisos.'} Mientras tanto se usan ${DEFAULT_NOTICE_THRESHOLDS.staleDays} y ${DEFAULT_NOTICE_THRESHOLDS.expiryDays} días.` })));
   }, [activeTab, currentUser?.role]);
 
   const handleSaveConfig = async () => {
@@ -690,6 +698,18 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
               setBackupLimit((prev) => ({ ...prev, saved: prev.value, error: null }));
           } catch (e: any) {
               toast.error(e?.message || 'No se pudo guardar el límite de backups.', { id: toastId });
+              setIsSavingConfig(false);
+              return;
+          }
+      }
+
+      const { saved: noticeSaved, value: noticeValue } = noticeLimits;
+      if (noticeSaved && (noticeValue.staleDays !== noticeSaved.staleDays || noticeValue.expiryDays !== noticeSaved.expiryDays)) {
+          try {
+              await noticeSettingsApi.save(noticeValue);
+              setNoticeLimits((prev) => ({ ...prev, saved: prev.value, error: null }));
+          } catch (e: any) {
+              toast.error(e?.message || 'No se pudieron guardar los avisos.', { id: toastId });
               setIsSavingConfig(false);
               return;
           }
@@ -1885,6 +1905,16 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                 <p className="text-xs text-amber-700 mt-2">{backupLimit.error}</p>
                             )}
                         </div>
+                        )}
+
+                        {/* AVISOS (campanita) */}
+                        {currentUser?.role === 'ADMIN' && (
+                            <NoticeSettingsCard
+                                value={noticeLimits.value}
+                                disabled={noticeLimits.saved == null}
+                                error={noticeLimits.error}
+                                onChange={(value) => setNoticeLimits((prev) => ({ ...prev, value }))}
+                            />
                         )}
 
                         <div className="flex items-center gap-4">

@@ -18,28 +18,25 @@ import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../services/api";
 import {
-  findConnectionForAssignment,
-  readAssignedSheetRows,
-} from "../services/assignedSheetReader";
+  formatStockDate,
+  getExpirationState,
+  loadAssignedIpressStock,
+  parseStockNumber,
+  type StockRow,
+} from "../services/assignedIpressStock";
 import {
   describePharmacyCode,
-  isLinkedToSheet,
-  resolveFacilitySheet,
-  rowsBelongingToFacility,
   showsPharmacyColumn,
   type FacilitySheetLink,
 } from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
-import { listUngetSheets } from "../services/ungetSheetCatalog";
 import {
   DEFAULT_STOCK_COLUMN_KEYS,
   STOCK_COLUMNS,
 } from "../services/stockColumns";
-import { pickOneConnectionPerUnget } from "../services/ungetConnections";
 import { StockAssignment } from "../types";
 
 type ExpirationFilter = "ALL" | "EXPIRED" | "EXPIRING";
-type StockRow = Record<string, unknown>;
 
 const EXPIRATION_FILTER_OPTIONS: Array<{ value: ExpirationFilter; label: string }> = [
   { value: "ALL", label: "Todos los registros" },
@@ -49,67 +46,9 @@ const EXPIRATION_FILTER_OPTIONS: Array<{ value: ExpirationFilter; label: string 
 
 const normalizeKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-const readValue = (row: StockRow, aliases: string[]) => {
-  for (const alias of aliases) {
-    if (row[alias] !== undefined && row[alias] !== null) return row[alias];
-  }
-  const keys = Object.keys(row);
-  for (const alias of aliases) {
-    const normalizedAlias = normalizeKey(alias);
-    const matchingKey = keys.find(key => normalizeKey(key) === normalizedAlias);
-    if (matchingKey && row[matchingKey] !== undefined && row[matchingKey] !== null) return row[matchingKey];
-  }
-  return "";
-};
-
-const normalizeRow = (row: StockRow): StockRow => ({
-  ...Object.fromEntries(STOCK_COLUMNS.map(column => [column.key, readValue(row, column.aliases)])),
-  TIPSUM: readValue(row, ["TIPSUM", "tipsum"]),
-  FFINAN: readValue(row, ["FFINAN", "ffinan"])
-});
-
-const parseNumber = (value: unknown) => {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  const normalized = String(value ?? "")
-    .trim()
-    .replace(/\s/g, "")
-    .replace(/,(?=\d{1,2}$)/, ".")
-    .replace(/,/g, "");
-  const result = Number(normalized);
-  return Number.isFinite(result) ? result : 0;
-};
-
-const formatStockDate = (value: unknown) => {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "—";
-  const parts = raw.split(/[\/-]/).map(part => Number(part));
-  if (parts.length !== 3 || parts.some(Number.isNaN)) return raw;
-  const [first, second, third] = parts;
-  if (first > 1000) return `${String(third).padStart(2, "0")}/${String(second).padStart(2, "0")}/${first}`;
-  return `${String(first).padStart(2, "0")}/${String(second).padStart(2, "0")}/${third < 100 ? third + 2000 : third}`;
-};
-
-const getExpirationState = (row: StockRow): Exclude<ExpirationFilter, "ALL"> | "NORMAL" => {
-  if (parseNumber(row.Saldo) <= 0) return "NORMAL";
-  const raw = String(row.Fec_Vencim ?? "").trim();
-  const parts = raw.split(/[\/-]/).map(part => Number(part));
-  if (parts.length !== 3 || parts.some(Number.isNaN)) return "NORMAL";
-
-  const [first, second, third] = parts;
-  const year = first > 1000 ? first : third < 100 ? third + 2000 : third;
-  const month = second - 1;
-  const day = first > 1000 ? third : first;
-  const expiration = new Date(year, month, day, 23, 59, 59, 999);
-  if (Number.isNaN(expiration.getTime())) return "NORMAL";
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (expiration < today) return "EXPIRED";
-  if (expiration.getMonth() === today.getMonth() && expiration.getFullYear() === today.getFullYear()) return "EXPIRING";
-  return "NORMAL";
-};
-
-
+// La lectura y el formato de las filas viven en services/assignedIpressStock.ts: los avisos
+// de la campana leen el mismo stock por el mismo camino.
+const parseNumber = parseStockNumber;
 
 export const AssignedIpressStockModule: React.FC = () => {
   const { user } = useAuth();
@@ -148,90 +87,25 @@ export const AssignedIpressStockModule: React.FC = () => {
     setPage(1);
     setErrorMessage("");
     try {
-      const [assignments, conexiones] = await Promise.all([
-        api.getMyStockAssignments(facilityCode),
-        // La conexión vigente de la UNGET: su URL puede haber cambiado desde que se
-        // creó la asignación, o puede que ya solo lea por hoja de cálculo.
-        api.getAllUngetConfigs()
-      ]);
-
       // Los nombres de las farmacias son un adorno de la tabla: si no se pueden leer, la
       // columna muestra solo el código en vez de impedir que se vea el stock.
       api.getFacilities()
         .then(lista => setFacilities(lista || []))
         .catch(err => console.warn("No se pudo leer el registro de establecimientos:", err));
-      const currentAssignment = (assignments[0] || null) as StockAssignment | null;
-      setAssignment(currentAssignment);
       setLink(null);
 
-      // La conexión es la de **su** UNGET, no la que quedó guardada en la asignación: así el
-      // establecimiento encuentra su hoja aunque nadie le haya asignado nada.
-      const conexion =
-        pickOneConnectionPerUnget(conexiones).find(
-          c => ungetId && String(c.ungetId || "") === String(ungetId),
-        ) || findConnectionForAssignment(currentAssignment, conexiones);
-
-      if (!conexion && !currentAssignment) {
-        setRows([]);
-        setLoadedSheet("");
-        setLastUpdate("");
-        setErrorMessage(
-          "La UNGET de este establecimiento no tiene una conexión de stock configurada.",
-        );
+      // Conexión de su UNGET, pestaña que le corresponde y filas propias: ver
+      // services/assignedIpressStock.ts.
+      const result = await loadAssignedIpressStock(facilityCode, ungetId);
+      setAssignment(result.assignment);
+      setLink(result.link);
+      setRows(result.rows);
+      setLoadedSheet(result.sheetName);
+      setLastUpdate(result.lastUpdate);
+      if (result.message) {
+        setErrorMessage(result.message);
         return;
       }
-
-      // El vínculo se deduce del código: la pestaña cuyo código coincide con el del
-      // establecimiento. Ver services/facilitySheetLink.ts.
-      let vinculo: FacilitySheetLink | null = null;
-      try {
-        vinculo = resolveFacilitySheet(facilityCode, await listUngetSheets(conexion, { withRowCounts: false }));
-      } catch (err) {
-        // Sin catálogo de pestañas no hay vínculo que deducir; queda la asignación guardada.
-        console.warn("No se pudieron listar las hojas de la UNGET:", err);
-      }
-      setLink(vinculo);
-
-      // La asignación guardada solo sirve de red cuando **no se pudo deducir nada**, es
-      // decir cuando no hubo forma de leer las pestañas. Si las pestañas se leyeron y
-      // ninguna es suya, la hoja guardada es justamente la que no hay que abrir: era de
-      // otro establecimiento, y leerla le enseñaría el stock ajeno como si fuera el propio.
-      const sheetName = vinculo
-        ? (isLinkedToSheet(vinculo) ? vinculo.sheet?.name || "" : "")
-        : currentAssignment?.sheetName || "";
-
-      if (!sheetName) {
-        setRows([]);
-        setLoadedSheet("");
-        setLastUpdate("");
-        setErrorMessage(
-          vinculo?.message ||
-            "Este establecimiento todavía no tiene una hoja de cálculo que le corresponda.",
-        );
-        return;
-      }
-
-      const sheetRows = (await readAssignedSheetRows(
-        { sheetName, sheetUrl: currentAssignment?.sheetUrl, ungetId: ungetId || currentAssignment?.ungetId },
-        conexion,
-      )) as StockRow[];
-      if (sheetRows.length === 0) {
-        throw new Error(`No se encontró la hoja “${sheetName}” o no contiene registros.`);
-      }
-
-      // La IPRESS ve su hoja entera —sus puestos comunales son suyos—; un puesto comunal
-      // solo las filas de su propio ALMCOD.
-      const propias = rowsBelongingToFacility(sheetRows, facilityCode, row =>
-        String(readValue(row, ["ALMCOD", "almcod"]) ?? ""),
-      );
-
-      setRows(propias.map(normalizeRow));
-      setLoadedSheet(sheetName);
-      const updateTimes = propias
-        .map(row => String(readValue(row, ["ULTIMA_ACTUALIZACION", "Ultima_Actualizacion", "FECHA_DEL_EQUIPO"])))
-        .filter(Boolean)
-        .sort();
-      setLastUpdate(updateTimes.at(-1) || "");
       if (showSuccess) toast.success("Hoja actualizada");
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo cargar el stock asignado.";

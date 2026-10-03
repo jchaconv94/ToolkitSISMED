@@ -24,7 +24,8 @@ export const filterInputClass =
  */
 export type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "locked";
 
-const toneIcon: Record<Tone, string> = {
+/** Fondo y color del ícono de un tono (chips de ícono, avisos). */
+export const toneIconClass: Record<Tone, string> = {
   neutral: "bg-slate-100 text-slate-700 ring-1 ring-slate-200/80",
   success: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80",
   warning: "bg-amber-50 text-amber-700 ring-1 ring-amber-200/80",
@@ -172,7 +173,7 @@ export const KpiCard: React.FC<{
             </p>
           </div>
           {renderIcon && (
-            <div className={`shrink-0 rounded-lg p-1.5 shadow-2xs ${toneIcon[tone]}`}>
+            <div className={`shrink-0 rounded-lg p-1.5 shadow-2xs ${toneIconClass[tone]}`}>
               <div className="[&>svg]:h-4 [&>svg]:w-4">{renderIcon}</div>
             </div>
           )}
@@ -212,7 +213,7 @@ export const KpiCard: React.FC<{
         </div>
 
         {renderIcon && (
-          <div className={`shrink-0 rounded-xl p-2.5 shadow-2xs transition-transform duration-200 group-hover:scale-105 ${toneIcon[tone]}`}>
+          <div className={`shrink-0 rounded-xl p-2.5 shadow-2xs transition-transform duration-200 group-hover:scale-105 ${toneIconClass[tone]}`}>
             {renderIcon}
           </div>
         )}
@@ -255,7 +256,7 @@ export const PageHeader: React.FC<{
   <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
     <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
       <div className="flex items-start gap-4 min-w-0">
-        <div className={`rounded-2xl p-3 shrink-0 ${toneIcon[tone]}`}>{icon}</div>
+        <div className={`rounded-2xl p-3 shrink-0 ${toneIconClass[tone]}`}>{icon}</div>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-2xl font-black text-slate-900">{title}</h2>

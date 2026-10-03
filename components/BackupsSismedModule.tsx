@@ -9,6 +9,7 @@ import { backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import {
   ActivityItem, ActivityKind, BackupActivityRow, BackupOverviewRow, BackupRowView, SHOW_FILTER_LABEL, ShowFilter,
   activityFromRequest, buildBackupRows, filterBackupRows, isActive, limaDay, planState, showFilterCounts, summarizeBackups, whoLabel,
+  BACKUPS_TAB_EVENT, takeRequestedBackupsTab,
 } from "../services/backupModule";
 import { relativeTime } from "../services/sendKeys";
 import {
@@ -103,7 +104,13 @@ export const BackupsSismedModule: React.FC = () => {
   // La pestaña sale del rol de la sesión, no de lo que diga el servicio: así no aparece
   // ni desaparece al conectar. Los datos de Consumo los sigue protegiendo Supabase.
   const isAdmin = useAuth().user?.role === "ADMIN";
-  const [tab, setTab] = useState<Tab>("backups");
+  // La campana de avisos puede pedir abrir directamente «Consumo».
+  const [tab, setTab] = useState<Tab>(() => takeRequestedBackupsTab() || "backups");
+  useEffect(() => {
+    const open = () => { const requested = takeRequestedBackupsTab(); if (requested) setTab(requested); };
+    window.addEventListener(BACKUPS_TAB_EVENT, open);
+    return () => window.removeEventListener(BACKUPS_TAB_EVENT, open);
+  }, []);
   const [overview, setOverview] = useState<BackupOverviewRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
