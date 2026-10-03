@@ -9,7 +9,6 @@ import {
   ChevronDown,
   UserCircle,
   LogOut,
-  Layers,
   Database,
   FileSpreadsheet,
   Users,
@@ -22,6 +21,7 @@ import {
   HardDriveDownload
 } from 'lucide-react';
 import { AppModule, User } from '../types';
+import { BrandLogo } from './ui/BrandLogo';
 
 interface SidebarProps {
   currentView: AppModule;
@@ -83,19 +83,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Branding Header */}
       <div className={`flex items-center h-16 border-b border-white/5 mx-1 mt-2 transition-all duration-300 ${isCollapsed ? 'justify-center' : 'justify-between px-3'}`}>
         <div className="flex items-center gap-2 overflow-hidden shrink-0">
-          <div className="relative shrink-0 flex items-center justify-center">
-            <Layers className="h-7 w-7 text-cyan-400" strokeWidth={2.5} />
-          </div>
-          {!isCollapsed && (
-            <div className="flex flex-col whitespace-nowrap justify-center mt-0.5 animate-in fade-in duration-300">
-              <div className="flex items-center gap-1 mt-0.5">
-                <h1 className="text-[16px] font-black text-white tracking-tight leading-none flex items-baseline">
-                  ToolKit <span className="font-bold text-gray-400 ml-1">SISMED</span>
-                </h1>
-                <span className="text-[8px] font-bold text-cyan-400 px-1 py-0.5 bg-cyan-500/10 rounded border border-cyan-500/20 leading-none self-center ml-0.5 shrink-0">WEB</span>
-              </div>
-            </div>
-          )}
+          <BrandLogo size={17} tone="dark" showName={!isCollapsed} />
         </div>
         
         {/* Toggle Button */}

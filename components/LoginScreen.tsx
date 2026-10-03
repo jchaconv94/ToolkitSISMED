@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Lock, User, ArrowRight, Phone, ShieldCheck, Layers, Eye, EyeOff } from 'lucide-react';
+import { Lock, User, ArrowRight, Phone, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { BrandLogo, BrandMark, BrandWordmark } from './ui/BrandLogo';
 
 export const LoginScreen: React.FC = () => {
   const { login } = useAuth();
@@ -59,18 +60,16 @@ export const LoginScreen: React.FC = () => {
             <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-teal-500/10 rounded-full blur-[128px]"></div>
             
             <div className="relative z-10 flex flex-col items-center text-center p-12 max-w-lg">
-                <div className="bg-white/5 p-4 rounded-3xl mb-8 backdrop-blur-sm border border-white/10 shadow-2xl">
-                    <div className="bg-gray-900 p-4 rounded-2xl flex items-center justify-center">
-                        <Layers className="h-12 w-12 text-cyan-400" strokeWidth={2.5} />
-                    </div>
+                <div className="bg-white/5 p-5 rounded-3xl mb-8 backdrop-blur-sm border border-white/10 shadow-2xl">
+                    <BrandMark size={72} tone="dark" />
                 </div>
                 
-                <h1 className="text-4xl xl:text-5xl font-black text-white mb-6 tracking-tight leading-tight flex items-center gap-3">
-                    <span>ToolKit</span> <span className="text-gray-300">SISMED</span> <span className="text-lg font-bold text-cyan-400 px-2 py-1 bg-cyan-500/10 rounded-lg border border-cyan-500/20 self-start mt-1">WEB</span>
+                <h1 className="mb-6">
+                    <BrandWordmark size={46} tone="dark" />
                 </h1>
                 
                 <p className="text-lg text-teal-100 font-medium leading-relaxed opacity-90 mb-10">
-                    ToolKit SISMED automatiza y simplifica la gestión operativa del SISMED en una sola plataforma.
+                    Toolkit SISMED automatiza y simplifica la gestión operativa del SISMED en una sola plataforma.
                 </p>
                 
                 <div className="w-16 h-1 bg-teal-500/50 rounded-full mb-10"></div>
@@ -80,7 +79,7 @@ export const LoginScreen: React.FC = () => {
                     <span>Gestión Eficiente de información Farmacéutica</span>
                 </div>
                 <div className="mt-2 text-xs text-gray-500 font-mono">
-                    ToolKit SISMED © {new Date().getFullYear()}
+                    Toolkit SISMED © {new Date().getFullYear()}
                 </div>
             </div>
         </div>
@@ -104,11 +103,8 @@ export const LoginScreen: React.FC = () => {
                 
                 {/* Mobile Header */}
                 <div className="lg:hidden mb-10 flex flex-col items-center justify-center">
-                    <div className="bg-gray-900 p-3 rounded-2xl mb-4 shadow-lg flex items-center justify-center">
-                        <Layers className="h-8 w-8 text-cyan-400" strokeWidth={2.5} />
-                    </div>
-                    <h1 className="text-2xl font-black text-gray-900 mb-1 tracking-tight flex items-baseline gap-1">
-                        ToolKit <span className="text-gray-600">SISMED</span> <span className="text-[10px] font-bold text-cyan-600 px-1 py-0.5 bg-cyan-50 rounded border border-cyan-200 self-center ml-1">WEB</span>
+                    <h1 className="mb-2">
+                        <BrandLogo size={26} tone="light" />
                     </h1>
                     <p className="text-sm font-medium text-gray-500">Gestión Farmacéutica</p>
                 </div>
