@@ -40,6 +40,8 @@ import {
   Hospital,
   Monitor,
   Package,
+  CalendarClock,
+  MoreHorizontal,
   Wifi,
   WifiOff,
   FileClock,
@@ -127,6 +129,14 @@ import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
 } from "./DeficiencyCaptureModal";
+import { noticeSettingsApi } from "../services/noticeSettings";
+import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
+import { getExpirationState } from "../services/assignedIpressStock";
+import { KpiCard, KpiStrip, TableHeaderCell as HeaderCell } from "./ui/kit";
+import { TablePagination } from "./ui/TablePagination";
+import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
+import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
+import { BottomSheet } from "./ui/BottomSheet";
 import { DeficiencyCaptureBar } from "./DeficiencyCaptureBar";
 import { EstablishmentCard } from "./EstablishmentCard";
 
@@ -898,9 +908,30 @@ const getAlmCodeForSheet = (
   return deMetadata ? formatAlmCode(deMetadata) : "";
 };
 
+/**
+ * Ventana de «por vencer», en días: el mismo parámetro de Parámetros del Sistema que usan
+ * la campana y Stock SISMED, para que los tres cuenten los mismos lotes. Se lee una vez,
+ * antes de montar el módulo (ver `SheetSearchModule` al final), para que todos los cálculos
+ * de abajo la usen sin tener que pasarla por cada uno.
+ */
+let expiryWindowDays = DEFAULT_NOTICE_THRESHOLDS.expiryDays;
+let staleDaysThreshold = DEFAULT_NOTICE_THRESHOLDS.staleDays;
+let expiryWindowLoaded = false;
+
+/**
+ * Vencidos y por vencer de unas filas con saldo.
+ *
+ * `expiringThisMonth` conserva su nombre por los muchos sitios que lo usan, pero desde el
+ * 2026-10-03 es «vence dentro de la ventana» (90 días por omisión), no «este mes».
+ * `expiringCalendarMonth` y `expiringNextMonth` siguen siendo por mes calendario: son las
+ * columnas del reporte en Excel, que se titulan así.
+ */
 const getExpirationStats = (records: SIGData[]) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const windowEnd = new Date(today);
+  windowEnd.setDate(windowEnd.getDate() + expiryWindowDays);
+  windowEnd.setHours(23, 59, 59, 999);
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
   const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
@@ -908,6 +939,7 @@ const getExpirationStats = (records: SIGData[]) => {
 
   const expired: SIGData[] = [];
   const expiringThisMonth: SIGData[] = [];
+  const expiringCalendarMonth: SIGData[] = [];
   const expiringNextMonth: SIGData[] = [];
 
   records.forEach((r) => {
@@ -953,10 +985,10 @@ const getExpirationStats = (records: SIGData[]) => {
 
         if (expDate < today) {
           expired.push(r);
-        } else if (month === currentMonth && year === currentYear) {
-          expiringThisMonth.push(r);
-        } else if (month === nextMonth && year === nextMonthYear) {
-          expiringNextMonth.push(r);
+        } else {
+          if (expDate <= windowEnd) expiringThisMonth.push(r);
+          if (month === currentMonth && year === currentYear) expiringCalendarMonth.push(r);
+          else if (month === nextMonth && year === nextMonthYear) expiringNextMonth.push(r);
         }
       }
     } else if (parts.length === 2) {
@@ -970,10 +1002,10 @@ const getExpirationStats = (records: SIGData[]) => {
         const expDate = new Date(year, month + 1, 0, 23, 59, 59, 999);
         if (expDate < today) {
           expired.push(r);
-        } else if (month === currentMonth && year === currentYear) {
-          expiringThisMonth.push(r);
-        } else if (month === nextMonth && year === nextMonthYear) {
-          expiringNextMonth.push(r);
+        } else {
+          if (expDate <= windowEnd) expiringThisMonth.push(r);
+          if (month === currentMonth && year === currentYear) expiringCalendarMonth.push(r);
+          else if (month === nextMonth && year === nextMonthYear) expiringNextMonth.push(r);
         }
       }
     }
@@ -982,14 +1014,16 @@ const getExpirationStats = (records: SIGData[]) => {
   return {
     expired,
     expiringThisMonth,
+    expiringCalendarMonth,
     expiringNextMonth,
     expiredCount: expired.length,
     expiringThisMonthCount: expiringThisMonth.length,
+    expiringCalendarMonthCount: expiringCalendarMonth.length,
     expiringNextMonthCount: expiringNextMonth.length,
   };
 };
 
-export const SheetSearchModule: React.FC = () => {
+const SheetSearchModuleContent: React.FC = () => {
   const { user, hasPermission } = useAuth();
   const canAccess = hasPermission("SIG_SEARCH");
 
@@ -1349,7 +1383,8 @@ export const SheetSearchModule: React.FC = () => {
       const status = getUpdateStatus(sheet.lastUpdateTime);
 
       const sheetData = rowsForSource(sheet.id);
-      const { expiredCount, expiringThisMonthCount, expiringNextMonthCount } =
+      // Reporte formal: sus columnas son «este mes» y «próximo mes» calendario.
+      const { expiredCount, expiringCalendarMonthCount: expiringThisMonthCount, expiringNextMonthCount } =
         getExpirationStats(sheetData);
 
       let bgArgb = "FFFFFF";
@@ -1450,6 +1485,8 @@ export const SheetSearchModule: React.FC = () => {
   const [isShareHelpOpen, setIsShareHelpOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<SIGData | null>(null);
+  /** Celular: las acciones de la cabecera van juntas en un botón de tres puntos. */
+  const [headerActionsOpen, setHeaderActionsOpen] = useState(false);
 
   // Modal para vencimientos en tabla
   const [isExpirationModalOpen, setIsExpirationModalOpen] = useState(false);
@@ -4159,6 +4196,13 @@ function processSheet(sheet) {
     [filteredData],
   );
 
+  // Lotes de la hoja: páginas numeradas en escritorio, lista que crece al bajar en el celular.
+  const DATA_PAGE_SIZE = 50;
+  const [dataPage, setDataPage] = useState(1);
+  useEffect(() => { setDataPage(1); }, [filteredData]);
+  const dataPageRows = filteredData.slice((dataPage - 1) * DATA_PAGE_SIZE, dataPage * DATA_PAGE_SIZE);
+  const dataMobileList = useIncrementalCount(filteredData.length, filteredData, 50);
+
   const availableTipsums = useMemo(() => {
     const currentData = selectedSourceId
       ? rowsForSource(selectedSourceId)
@@ -4488,6 +4532,9 @@ function processSheet(sheet) {
     setSelectedCaptureIds(new Set());
   };
 
+  // Celular: la lista de establecimientos crece al bajar.
+  const sheetsMobileList = useIncrementalCount(filteredAndSortedSources.length, filteredAndSortedSources, 30);
+
   const handleAutoSelectDeficiencies = () => {
     const deficientIds = new Set<string>();
     filteredAndSortedSources.forEach((sheet) => {
@@ -4668,281 +4715,198 @@ function processSheet(sheet) {
     <div
       className={`flex flex-col h-full transition-all duration-300 ${isAdvancedFiltersSidebarOpen && viewLevel === "sheets" ? "md:pr-[380px] xl:pr-[420px]" : ""}`}
     >
-      {/* Minimalist Top Header */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center px-4 sm:px-10 lg:px-14 xl:px-16 py-4 sm:py-8 gap-4 sm:gap-6">
-        {/* Left Side: Title & KPIs underneath */}
-        <div className="w-full xl:w-auto flex flex-col gap-3 sm:gap-4 overflow-hidden">
-          {/* Title */}
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            {/* La ruta de arriba a la derecha es pequeña y no parece pulsable: la gente se
-                quedaba dentro de una hoja sin saber cómo salir. El botón va a la izquierda
-                del título, que es donde se mira, y dice a dónde lleva. */}
-            {destinoDeVolver && (
+      {/* Cabecera del módulo en una sola fila (2026-10-03): volver, dónde estoy y las acciones.
+          El título «Reporte de Stock detallado SISMED» se quitó: lo dice la cabecera de la app. */}
+      <div className="px-4 pb-3 pt-4 sm:px-10 sm:pt-6 lg:px-14 xl:px-16">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* La flecha está a la izquierda, donde se mira, y dice a dónde lleva. */}
+          {destinoDeVolver && (
+            <button
+              type="button"
+              onClick={volverUnNivel}
+              title={`Volver a ${destinoDeVolver}`}
+              aria-label={`Volver a ${destinoDeVolver}`}
+              className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:border-teal-300 hover:text-teal-700"
+            >
+              <ArrowLeft className="h-[18px] w-[18px] transition-transform group-hover:-translate-x-0.5" />
+            </button>
+          )}
+
+          {/* Dónde estoy: arriba, pequeño y pulsable, el nivel anterior; abajo, el actual. */}
+          <div className="min-w-0 flex-1">
+            {viewLevel === "data" && selectedUngetIndex !== null && (
               <button
                 type="button"
-                onClick={volverUnNivel}
-                title={`Volver a ${destinoDeVolver}`}
-                aria-label={`Volver a ${destinoDeVolver}`}
-                className="group flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center shrink-0 rounded-xl border border-slate-200 bg-white text-slate-500 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] transition-all hover:border-teal-300 hover:text-teal-700 hover:shadow-md cursor-pointer"
+                onClick={() => { setViewLevel("sheets"); setSelectedSourceId(""); }}
+                className="block max-w-full truncate text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-teal-700"
               >
-                <ArrowLeft className="h-4 w-4 sm:h-[18px] sm:w-[18px] transition-transform group-hover:-translate-x-0.5" />
+                {formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "Documento")}
               </button>
             )}
-            <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 sm:gap-2.5 min-w-0">
-              <Database className="h-5 w-5 text-teal-600 shrink-0" />
-              <span className="truncate">Reporte de Stock detallado SISMED</span>
-            </h2>
-          </div>
-
-          {/* Connection KPIs (Cards) */}
-          {(() => {
-            if (viewLevel === "data") {
-              return (
-                <div className="flex flex-row items-center gap-2 sm:gap-4 overflow-x-auto hide-scrollbar w-full justify-start pb-1 animate-in fade-in duration-200">
-                  {/* Total Productos */}
-                  <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                    <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
-                      <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-600" />
-                    </div>
-                    <div className="flex flex-col justify-center gap-0.5 pr-2">
-                      <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                        {filteredData.length}
-                      </span>
-                      <span className="text-[9px] sm:text-[10px] font-bold text-teal-600 leading-none uppercase">
-                        Lotes
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Por Vencer */}
-                  <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                    <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-amber-50 flex items-center justify-center shrink-0 border border-amber-100/50">
-                      <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-600" />
-                    </div>
-                    <div className="flex flex-col justify-center gap-0.5 pr-2">
-                      <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                        {filteredDataExpirationInfo.expiringThisMonthCount}
-                      </span>
-                      <span className="text-[9px] sm:text-[10px] font-bold text-amber-600 leading-none uppercase">
-                        Por Vencer
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Vencidos */}
-                  <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                    <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-red-50 flex items-center justify-center shrink-0 border border-red-100/50">
-                      <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500" />
-                    </div>
-                    <div className="flex flex-col justify-center gap-0.5 pr-2">
-                      <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                        {filteredDataExpirationInfo.expiredCount}
-                      </span>
-                      <span className="text-[9px] sm:text-[10px] font-bold text-red-500 leading-none uppercase">
-                        Vencidos
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            }
-
-            const currentSummary =
-              viewLevel === "sheets"
-                ? establishmentSummary
-                : viewLevel === "ungets"
-                  ? globalUngetSummary
-                  : null;
-            if (!currentSummary) return null;
-            return (
-              <div className="flex flex-row items-center gap-2 sm:gap-4 overflow-x-auto hide-scrollbar w-full justify-start pb-1">
-                {/* En Línea */}
-                <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                  <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
-                    <Wifi className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-600" />
-                  </div>
-                  <div className="flex flex-col justify-center gap-0.5 pr-2">
-                    <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                      {currentSummary.online}
-                    </span>
-                    <span className="text-[9px] sm:text-[10px] font-bold text-teal-600 leading-none uppercase">
-                      En Línea
-                    </span>
-                  </div>
-                </div>
-
-                {/* Desconectados */}
-                <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                  <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-amber-50 flex items-center justify-center shrink-0 border border-amber-100/50">
-                    <FileClock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-600" />
-                  </div>
-                  <div className="flex flex-col justify-center gap-0.5 pr-2">
-                    <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                      {currentSummary.delayed}
-                    </span>
-                    <span className="text-[9px] sm:text-[10px] font-bold text-amber-600 leading-none uppercase">
-                      Desconectados
-                    </span>
-                  </div>
-                </div>
-
-                {/* Fuera de Línea */}
-                <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                  <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-red-50 flex items-center justify-center shrink-0 border border-red-100/50">
-                    <WifiOff className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500" />
-                  </div>
-                  <div className="flex flex-col justify-center gap-0.5 pr-2">
-                    <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                      {currentSummary.offline}
-                    </span>
-                    <span className="text-[9px] sm:text-[10px] font-bold text-red-500 leading-none uppercase">
-                      Fuera Línea
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* Right Side: Navigation Breadcrumbs (top-right) + Action Buttons (bottom-right) */}
-        <div className="flex flex-col gap-3 sm:gap-4 w-full xl:w-auto items-start xl:items-end justify-start overflow-hidden">
-          {/* Navigation Tabs (Breadcrumbs) aligned to the right */}
-          <div className="flex items-center text-[10px] sm:text-[12px] font-bold text-slate-500 overflow-x-auto hide-scrollbar shrink-0 uppercase tracking-widest gap-1 self-stretch xl:self-auto justify-start xl:justify-end pb-1 sm:pb-0">
-            {/* Con una sola UNGET a la vista no hay panel al que volver, así que la
-                migaja empieza directamente en su nombre. */}
-            {hayPanelRegional && (
-            <button
-              onClick={() => {
-                setViewLevel("ungets");
-                setSelectedUngetIndex(null);
-                setSelectedSourceId("");
-              }}
-              className={`flex items-center gap-1.5 sm:gap-2 transition-colors shrink-0 ${viewLevel === "ungets" ? "text-teal-600 font-black" : "hover:text-slate-800"}`}
-            >
-              <Building2
-                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${viewLevel === "ungets" ? "text-teal-600" : "text-slate-400"}`}
-              />
-              <span
-                className={
-                  viewLevel === "ungets" ? "font-black text-teal-600" : ""
-                }
+            {viewLevel === "sheets" && hayPanelRegional && (
+              <button
+                type="button"
+                onClick={() => { setViewLevel("ungets"); setSelectedUngetIndex(null); setSelectedSourceId(""); }}
+                className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-teal-700"
               >
-                PANEL REGIONAL
-              </span>
-            </button>
+                Panel regional
+              </button>
             )}
-
-            {selectedUngetIndex !== null && (
-              <>
-                {hayPanelRegional && (
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-350 mx-0.5 sm:mx-1 shrink-0" />
-                )}
-                <button
-                  onClick={() => {
-                    setViewLevel("sheets");
-                    setSelectedSourceId("");
-                  }}
-                  className={`flex items-center gap-1.5 sm:gap-2 transition-colors shrink-0 ${viewLevel === "sheets" ? "text-teal-600 font-black" : "hover:text-slate-800"}`}
-                >
-                  <FileSpreadsheet
-                    className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${viewLevel === "sheets" ? "text-teal-600" : "text-slate-400"}`}
-                  />
-                  <span
-                    className={`truncate max-w-[120px] sm:max-w-[150px] md:max-w-[200px] ${viewLevel === "sheets" ? "font-black text-teal-600" : ""}`}
-                  >
-                    {formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "Documento")}
-                  </span>
-                </button>
-              </>
-            )}
-
-            {selectedSourceId && (
-              <>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-350 mx-0.5 sm:mx-1 shrink-0" />
-                <div className="flex items-center gap-1.5 sm:gap-2 text-teal-600 shrink-0">
-                  <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-500" />
-                  <span className="font-black truncate max-w-[120px] sm:max-w-[150px] md:max-w-[250px]">
-                    {(() => {
-                      const name =
-                        sources.find((s) => s.id === selectedSourceId)?.name ||
-                        "Hoja";
-                      const desc = describeSheetName(name);
-                      const code = selectedSourceId
-                        ? codeForSheet(selectedSourceId)
-                        : "";
-                      return code ? `${desc} (${code})` : desc;
-                    })()}
-                  </span>
-                </div>
-              </>
-            )}
+            <p className="truncate text-[15px] font-black text-slate-900 sm:text-base">
+              {viewLevel === "data"
+                ? (() => {
+                    const name = sources.find((s) => s.id === selectedSourceId)?.name || "Hoja";
+                    const code = selectedSourceId ? codeForSheet(selectedSourceId) : "";
+                    return (
+                      <>
+                        {describeSheetName(name)}
+                        {code && <span className="ml-2 font-mono text-xs font-bold text-slate-400">{code}</span>}
+                      </>
+                    );
+                  })()
+                : viewLevel === "sheets" && selectedUngetIndex !== null
+                  ? formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "Documento")
+                  : "Panel regional"}
+            </p>
           </div>
 
-          {/* Action Buttons underneath breadcrumbs */}
-          <div className="flex items-center gap-2 sm:gap-2.5 w-full md:w-auto overflow-x-auto pb-1 sm:pb-0 hide-scrollbar justify-start xl:justify-end shrink-0">
-            {/* Buscar un producto en todas las hojas de la UNGET, sin abrirlas una por una.
-                Solo con una UNGET abierta, que es cuando hay dónde buscar. */}
+          {/* Celular: un solo botón de tres puntos abre todas las acciones abajo. */}
+          <button
+            type="button"
+            onClick={() => setHeaderActionsOpen(true)}
+            aria-label="Más acciones"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 sm:hidden"
+          >
+            {isLoading || isSilentSyncing ? <RefreshCw className="h-5 w-5 animate-spin text-teal-600" /> : <MoreHorizontal className="h-5 w-5" />}
+          </button>
+          <BottomSheet open={headerActionsOpen} title="Acciones" onClose={() => setHeaderActionsOpen(false)}>
+            <div className="space-y-1">
+              <button
+                type="button"
+                disabled={isLoading || isSilentSyncing}
+                onClick={() => { setHeaderActionsOpen(false); void fetchData(); }}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              >
+                <RefreshCw className="h-5 w-5 text-teal-600" />
+                {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
+              </button>
+              {selectedUngetIndex !== null && (
+                <button
+                  type="button"
+                  onClick={() => { setHeaderActionsOpen(false); setIsNetworkSearchOpen(true); }}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <Search className="h-5 w-5 text-teal-600" />
+                  Buscar un producto en todos los establecimientos
+                </button>
+              )}
+              {canManageConfigs && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHeaderActionsOpen(false);
+                    if (user) setTempUrls([...scriptUrls]);
+                    setIsConfigOpen(true);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <Settings className="h-5 w-5 text-slate-500" />
+                  Configurar conexiones de stock
+                </button>
+              )}
+            </div>
+          </BottomSheet>
+
+          {/* Escritorio: lupa, Configurar y Sincronizar a la vista. */}
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
             {selectedUngetIndex !== null && (
-              /* Solo el icono, y al pasar el ratón se estira y dice cómo se llama. Ocupa lo
-                 que ocupa un icono en una barra donde los otros dos botones ya llevan texto,
-                 y el nombre sigue estando para quien lo necesite: también al tabular, que en
-                 una pantalla táctil es la única forma de que aparezca. */
               <button
                 type="button"
                 onClick={() => setIsNetworkSearchOpen(true)}
                 title="Buscar un producto en todos los establecimientos (Ctrl+K)"
                 aria-label="Búsqueda avanzada"
                 aria-keyshortcuts="Control+K"
-                className="group bg-white border border-teal-200 text-teal-700 h-[34px] sm:h-[42px] rounded-full font-bold text-xs sm:text-sm hover:border-teal-400 hover:bg-teal-50 focus-visible:border-teal-500 focus-visible:bg-teal-50 focus-visible:outline-none transition-all duration-300 flex items-center overflow-hidden shadow-sm whitespace-nowrap shrink-0 cursor-pointer"
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
               >
-                {/* El icono ocupa una caja tan ancha como alta, para que en reposo el botón
-                    sea un círculo y no un óvalo. Nada de relleno horizontal en el botón. */}
-                <span className="flex h-full w-8 shrink-0 items-center justify-center sm:w-10">
-                  <Search className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-teal-600" />
-                </span>
-                {/* `max-w` porque un ancho automático no se puede animar. Con `border-box`
-                    el relleno se recoge con él, así que en reposo no ocupa nada. */}
-                <span className="flex max-w-0 items-center overflow-hidden pr-0 opacity-0 transition-all duration-300 group-hover:max-w-[15rem] group-hover:pr-4 group-hover:opacity-100 group-focus-visible:max-w-[15rem] group-focus-visible:pr-4 group-focus-visible:opacity-100">
-                  Búsqueda avanzada
-                  <kbd className="hidden lg:inline ml-2 rounded border border-teal-200 bg-teal-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-teal-600">
-                    Ctrl K
-                  </kbd>
-                </span>
+                <Search className="h-4 w-4" />
               </button>
             )}
             {canManageConfigs && (
               <button
+                type="button"
                 onClick={() => {
-                  if (user) {
-                    setTempUrls([...scriptUrls]);
-                  }
+                  if (user) setTempUrls([...scriptUrls]);
                   setIsConfigOpen(!isConfigOpen);
                 }}
-                className="bg-white border border-slate-200 text-slate-700 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm whitespace-nowrap shrink-0"
+                title="Conexiones de stock"
+                aria-label="Configurar"
+                className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 sm:px-3.5"
               >
-                <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-slate-500" />
-                Configurar
+                <Settings className="h-4 w-4 text-slate-500" />
+                <span className="hidden sm:inline">Configurar</span>
               </button>
             )}
             <button
               id="sync-btn"
+              type="button"
               onClick={() => fetchData()}
               disabled={isLoading || isSilentSyncing}
-              className="flex-1 sm:flex-none bg-teal-600 text-white px-4 py-2 sm:py-2.5 rounded-full font-bold text-xs sm:text-sm hover:bg-teal-700 hover:shadow-md transition-all disabled:opacity-50 disabled:hover:shadow-none flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm whitespace-nowrap"
+              aria-label="Sincronizar"
+              className="flex h-10 items-center justify-center gap-2 rounded-xl bg-teal-600 px-2.5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-50 sm:px-4"
             >
-              <RefreshCw
-                className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`}
-              />
-              {isLoading
-                ? "Sincronizando..."
-                : isSilentSyncing
-                  ? "Verificando..."
-                  : "Sincronizar"}
+              <RefreshCw className={`h-4 w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">
+                {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
+              </span>
             </button>
           </div>
         </div>
+
+        {/* Indicadores de la lista (establecimientos o UNGET): el modelo único de KPIs. Tocar
+            uno deja a la vista solo ese estado de actualización; tocarlo otra vez, todos. */}
+        {viewLevel !== "data" && (() => {
+          const summary = viewLevel === "sheets" ? establishmentSummary : viewLevel === "ungets" ? globalUngetSummary : null;
+          if (!summary) return null;
+          const only = (emerald: boolean, amber: boolean, redGray: boolean) => {
+            const isActive = filter_emerald === emerald && filter_amber === amber && filter_red === redGray && filter_gray === redGray;
+            const all = isActive;
+            setFilter_emerald(all || emerald);
+            setFilter_amber(all || amber);
+            setFilter_red(all || redGray);
+            setFilter_gray(all || redGray);
+          };
+          const allOn = filter_emerald && filter_amber && filter_red && filter_gray;
+          return (
+            <div className="mt-3">
+              <KpiStrip cols="md:grid-cols-3">
+                <KpiCard watermark tone="success" icon={<Wifi />} label="En línea" value={summary.online} hint="actualizados en la última hora" onClick={() => only(true, false, false)} active={!allOn && filter_emerald && !filter_amber && !filter_red} />
+                <KpiCard watermark tone="warning" icon={<FileClock />} label="Desconectados" value={summary.delayed} hint="entre 1 y 24 horas sin actualizar" onClick={() => only(false, true, false)} active={!allOn && !filter_emerald && filter_amber && !filter_red} />
+                <KpiCard watermark tone="danger" icon={<WifiOff />} label="Fuera de línea" value={summary.offline} hint="más de un día o sin datos" onClick={() => only(false, false, true)} active={!allOn && !filter_emerald && !filter_amber && filter_red} />
+              </KpiStrip>
+            </div>
+          );
+        })()}
       </div>
+
+      {/* Indicadores de la hoja abierta: el modelo único de KPIs, como en Stock SISMED. Siguen
+          al selector de establecimiento (puestos comunales), no al buscador; tocarlos filtra. */}
+      {viewLevel === "data" && (() => {
+        const lastUpdate = sources.find((s) => s.id === selectedSourceId)?.lastUpdateTime;
+        const lastUpdateAt = lastUpdate ? new Date(lastUpdate).getTime() : 0;
+        const stale = lastUpdateAt > 0 && Date.now() - lastUpdateAt >= staleDaysThreshold * DAY_MS;
+        const lots = activeSheetData.filter((row) => rowMatchesPharmacy(readAlmCode(row), dataFilterPharmacy)).length;
+        const toggle = (value: string) => setDataFilterExpiration(dataFilterExpiration === value ? "all" : value);
+        return (
+          <div className="mb-4 px-4 sm:px-10 lg:px-14 xl:px-16">
+            <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
+              <KpiCard watermark tone="info" icon={<Package />} label="Lotes" value={lots.toLocaleString("es-PE")} hint="en la hoja del establecimiento" onClick={() => setDataFilterExpiration("all")} active={dataFilterExpiration === "all"} />
+              <KpiCard watermark tone="warning" icon={<Clock />} label="Por vencer" value={activeSheetExpirationInfo.expiringThisMonthCount.toLocaleString("es-PE")} hint={`en los próximos ${expiryWindowDays} días`} onClick={() => toggle("expiring")} active={dataFilterExpiration === "expiring"} />
+              <KpiCard watermark tone="danger" icon={<AlertTriangle />} label="Vencidos" value={activeSheetExpirationInfo.expiredCount.toLocaleString("es-PE")} hint="todavía con saldo" onClick={() => toggle("expired")} active={dataFilterExpiration === "expired"} />
+              <KpiCard watermark tone={stale ? "warning" : "neutral"} icon={<CalendarClock />} label="Última actualización" value={lastUpdate ? new Date(lastUpdate).toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—"} hint={lastUpdate ? `a las ${new Date(lastUpdate).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })} · ${noticeWhen(lastUpdateAt)}` : "sin fecha en la hoja"} />
+            </KpiStrip>
+          </div>
+        );
+      })()}
 
       {isConfigOpen && canManageConfigs && (
         <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -5809,7 +5773,7 @@ function processSheet(sheet) {
         {/* TOOLBAR */}
         <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col gap-4">
           {/* Search & Actions */}
-          <div className="flex flex-col md:flex-row gap-3 items-center justify-between w-full">
+          <div className={`flex gap-3 items-center justify-between w-full ${viewLevel === "ungets" ? "flex-col md:flex-row" : "flex-row"}`}>
             <div className="relative flex-1 w-full md:max-w-[50%] group">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
@@ -5944,38 +5908,9 @@ function processSheet(sheet) {
               </div>
             )}
 
-            <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 pt-1 md:pt-0 md:ml-auto pb-1 relative z-30">
+            <div className={`flex items-center gap-2 overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 md:ml-auto relative z-30 ${viewLevel === "ungets" ? "w-full md:w-auto pt-1 md:pt-0 pb-1" : "w-auto"}`}>
               {viewLevel === "data" && (
                 <>
-                  {activeSheetExpirationInfo.expiredCount > 0 && (
-                    <button
-                      onClick={() => {
-                        setExpirationModalType("expired");
-                        setIsExpirationModalOpen(true);
-                      }}
-                      className="flex items-center gap-1.5 bg-white hover:bg-red-50 text-red-600 px-3 py-2 rounded-lg border border-red-100 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
-                    >
-                      <AlertTriangle className="h-3.5 w-3.5 text-red-500 animate-pulse shrink-0" />
-                      <span>
-                        {activeSheetExpirationInfo.expiredCount} Vencidos
-                      </span>
-                    </button>
-                  )}
-                  {activeSheetExpirationInfo.expiringThisMonthCount > 0 && (
-                    <button
-                      onClick={() => {
-                        setExpirationModalType("expiring");
-                        setIsExpirationModalOpen(true);
-                      }}
-                      className="flex items-center gap-1.5 bg-white hover:bg-amber-50 text-amber-600 px-3 py-2 rounded-lg border border-amber-100 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
-                    >
-                      <Clock className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                      <span>
-                        {activeSheetExpirationInfo.expiringThisMonthCount} Por
-                        vencer
-                      </span>
-                    </button>
-                  )}
                   {/* Con puestos comunales y «Todos», se elige cómo armar el Excel. Con un
                       establecimiento elegido, o en una hoja de una sola farmacia, no hay nada
                       que consolidar y el botón descarga directamente. */}
@@ -5984,10 +5919,11 @@ function processSheet(sheet) {
                   ) : (
                     <button
                       onClick={() => exportCurrentSheetToExcel()}
-                      className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
+                      aria-label="Exportar stock"
+                      className="flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
                     >
-                      <Download className="h-4 w-4 text-emerald-600 shrink-0" />{" "}
-                      Exportar Stock
+                      <Download className="h-4 w-4 text-emerald-600 shrink-0" />
+                      <span className="hidden sm:inline">Exportar Stock</span>
                     </button>
                   )}
                 </>
@@ -5997,7 +5933,7 @@ function processSheet(sheet) {
                 <>
                   {lastGlobalSync && (
                     <div
-                      className="flex items-center gap-1.5 bg-slate-50/80 border border-slate-200/80 text-slate-500 px-3 py-2 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all shrink-0 shadow-xs h-full"
+                      className="hidden items-center gap-1.5 bg-slate-50/80 border border-slate-200/80 text-slate-500 px-3 py-2 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all shrink-0 shadow-xs h-full lg:flex"
                       title="Última comprobación global del sistema"
                     >
                       <RefreshCw className="h-3 w-3 text-slate-400 shrink-0" />
@@ -6040,12 +5976,13 @@ function processSheet(sheet) {
                       onClick={() =>
                         setIsExportDropdownOpen(!isExportDropdownOpen)
                       }
-                      className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 shadow-sm whitespace-nowrap group cursor-pointer"
+                      aria-label="Exportar reportes"
+                      className="flex h-[42px] items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 shadow-sm whitespace-nowrap group cursor-pointer"
                     >
                       <Download className="h-4 w-4 text-emerald-600 shrink-0 transition-transform group-hover:translate-y-0.5" />
-                      <span>Exportar Reportes</span>
+                      <span className="hidden sm:inline">Exportar Reportes</span>
                       <ChevronDown
-                        className={`h-4 w-4 text-slate-400 shrink-0 transition-transform duration-200 ${isExportDropdownOpen ? "rotate-180" : ""}`}
+                        className={`hidden h-4 w-4 text-slate-400 shrink-0 transition-transform duration-200 sm:block ${isExportDropdownOpen ? "rotate-180" : ""}`}
                       />
                     </button>
 
@@ -6470,7 +6407,8 @@ function processSheet(sheet) {
               {/* LEVEL 2: SHEET CARDS */}
               {viewLevel === "sheets" && (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-gray-200/50 pb-3 mb-4 sm:mb-6 gap-4">
+                  {/* En el celular sobra: los KPIs y la lista ya dicen cuántos hay y de qué tipo. */}
+                  <div className="hidden md:flex flex-col lg:flex-row lg:items-center justify-between border-b border-gray-200/50 pb-3 mb-4 sm:mb-6 gap-4">
                     <div className="flex flex-col gap-2.5">
                       {/* Title and Counter Pill */}
                       <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -6492,7 +6430,7 @@ function processSheet(sheet) {
 
                       {/* Beautiful Premium Type KPIs */}
                       {establishmentSummary && (
-                        <div className="flex flex-wrap gap-2 pt-0.5">
+                        <div className="hidden flex-wrap gap-2 pt-0.5 sm:flex">
                           <div
                             className="flex items-center gap-1.5 bg-sky-50/70 border border-sky-100/50 text-sky-800 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-xs"
                             title="Centros de Salud"
@@ -6546,7 +6484,7 @@ function processSheet(sheet) {
                     </div>
 
                     {/* Selector de tipo de Visualización */}
-                    <div className="flex flex-wrap items-center gap-2 shrink-0 overflow-x-auto pb-1 -mb-1 max-w-full no-scrollbar">
+                    <div className="hidden flex-wrap items-center gap-2 shrink-0 overflow-x-auto pb-1 -mb-1 max-w-full no-scrollbar md:flex">
                       <div className="flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-xl border border-slate-200/60 shadow-[inset_0_1px_1.5px_rgba(0,0,0,0.02)] shrink-0 pr-1 lg:pr-0.5">
                         <button
                           type="button"
@@ -6610,7 +6548,7 @@ function processSheet(sheet) {
                           }
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs border ${
                             isTableFullscreen
-                              ? "bg-slate-800 border-slate-700 text-white hover:bg-slate-700"
+                              ? "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"
                               : "bg-teal-50 border-teal-100 text-teal-850 hover:bg-teal-100 hover:text-teal-900 hover:border-teal-200"
                           }`}
                           title="Pantalla Completa"
@@ -7739,203 +7677,143 @@ function processSheet(sheet) {
                       );
                     }
 
-                    return viewContent;
+                    // Celular: filas compactas (código, nombre, actualización e ítems); al tocar,
+                    // su stock. En escritorio siguen la cuadrícula y los demás modos de vista.
+                    if (filteredAndSortedSources.length === 0) return viewContent;
+                    return (
+                      <>
+                        <div className="-mx-4 -mt-4 md:hidden">
+                          <ul className="divide-y divide-slate-100 border-y border-slate-100 bg-white">
+                            {filteredAndSortedSources.slice(0, sheetsMobileList.count).map((sheet) => {
+                              const sheetData = rowsForSource(sheet.id);
+                              const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);
+                              const code = codeForSheet(sheet.id);
+                              const status = getUpdateStatus(sheet.lastUpdateTime);
+                              const items = sheetData.length > 0 ? sheetData.length : sheet.rowCount || 0;
+                              const selected = selectedCaptureIds.has(sheet.id);
+                              return (
+                                <li
+                                  key={sheet.id}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => (isCaptureMode ? toggleCardSelection(sheet.id) : handleSelectSheet(sheet.id))}
+                                  onKeyDown={(e) => { if (e.key === "Enter") (isCaptureMode ? toggleCardSelection(sheet.id) : handleSelectSheet(sheet.id)); }}
+                                  className={`flex cursor-pointer items-center gap-3 px-4 py-3 active:bg-slate-50 ${selected ? "bg-teal-50/60" : ""}`}
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    {code && <span className="font-mono text-[11px] text-teal-700">{code}</span>}
+                                    <p className="truncate text-[14px] font-bold text-slate-900">{describeSheetName(sheet.name)}</p>
+                                    <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-slate-500">
+                                      <span className={`h-2 w-2 shrink-0 rounded-full ${status.color}`} />
+                                      <span>{status.label}</span>
+                                      <span className="text-slate-300">·</span>
+                                      <span>{items.toLocaleString("es-PE")} ítems</span>
+                                    </p>
+                                    {(expiredCount > 0 || expiringThisMonthCount > 0) && (
+                                      <p className="mt-0.5 text-[12px] font-semibold">
+                                        {expiredCount > 0 && <span className="text-red-600">{expiredCount} vencidos</span>}
+                                        {expiredCount > 0 && expiringThisMonthCount > 0 && <span className="text-slate-300"> · </span>}
+                                        {expiringThisMonthCount > 0 && <span className="text-amber-700">{expiringThisMonthCount} por vencer</span>}
+                                      </p>
+                                    )}
+                                  </div>
+                                  {isCaptureMode ? (
+                                    <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${selected ? "border-teal-600 bg-teal-600 text-white" : "border-slate-300 bg-white"}`}>
+                                      {selected && <Check className="h-4 w-4" />}
+                                    </span>
+                                  ) : (
+                                    <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          <LoadMoreSentinel hasMore={sheetsMobileList.hasMore} onLoadMore={sheetsMobileList.loadMore} shown={sheetsMobileList.count} total={filteredAndSortedSources.length} itemLabel="establecimientos" />
+                        </div>
+                        <div className="hidden md:block">{viewContent}</div>
+                      </>
+                    );
                   })()}
                 </div>
               )}
 
-              {/* LEVEL 3: DATA TABLE */}
+              {/* LEVEL 3: DATA TABLE — mismo diseño que Stock SISMED (piezas en StockLotParts). */}
               {viewLevel === "data" && (
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 -mx-4 md:-mx-6 -mt-4 md:-mt-6 font-sans">
-                  <div className="bg-transparent sm:bg-white sm:border-t border-gray-100 overflow-y-auto overflow-x-auto max-h-[calc(100vh-420px)] custom-scrollbar pb-4 px-4 sm:px-0 pt-4 sm:pt-0 relative block">
-                    <table className="min-w-full block sm:table">
-                      <thead className="hidden sm:table-header-group sticky top-0 z-30 shadow-xs border-b border-slate-200">
-                        <tr className="bg-slate-50">
-                          {showsPharmacyInData && (
-                            <th
-                              scope="col"
-                              className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                            >
-                              Código IPRESS
-                            </th>
-                          )}
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            Cód. SISMED / SIGA
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider min-w-[250px] bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            Descripción del Producto
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-right text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            Saldo
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            Lote / Venc.
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            Tipo Sum.
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-4 py-3 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap bg-slate-50 sticky top-0 z-30 border-b border-slate-200/80 shadow-2xs"
-                          >
-                            F. Finan.
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="block sm:table-row-group bg-transparent sm:bg-white">
-                        {filteredData.length > 0 ? (
-                          filteredData.map((row, i) => (
-                            <tr
-                              key={i}
-                              onClick={() => setSelectedRecord(row)}
-                              className="block sm:table-row bg-white rounded-xl sm:rounded-none shadow-sm sm:shadow-none border border-gray-200 sm:border-0 border-b-gray-100 p-4 sm:p-0 hover:bg-teal-50/50 transition-colors cursor-pointer group mb-3 sm:mb-0 relative"
-                            >
-                              {/* Mobile Card Layout */}
-                              <td className="block sm:hidden">
-                                {showsPharmacyInData && (
-                                  <div className="mb-2 border-b border-gray-100 pb-2">
-                                    <PharmacyCodeCell label={pharmacyLabelOf(row)} />
-                                  </div>
-                                )}
-                                <div className="flex justify-between items-start mb-2">
-                                  <div className="flex flex-col">
-                                    <span className="text-xs font-black text-teal-700 bg-teal-50 px-2 py-0.5 rounded w-fit mb-1 border border-teal-100">
-                                      {row.ID_Producto || "-"}
-                                    </span>
-                                    <span className="text-[10px] text-gray-400 font-bold">
-                                      {row.CODIGO_SIG || "-"}
-                                    </span>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="text-[10px] text-gray-400 font-black uppercase block mb-0.5">
-                                      Saldo
-                                    </span>
-                                    <span className="text-xl font-black text-teal-600 leading-none">
-                                      {!isNaN(parseInt(String(row.Saldo), 10))
-                                        ? parseInt(String(row.Saldo), 10)
-                                        : 0}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="text-sm font-bold text-gray-900 mb-2 leading-snug">
-                                  {row.Nombre || "-"}
-                                </div>
-                                <div className="flex justify-between items-center text-[10px]">
-                                  <div className="flex flex-col gap-0.5 w-full">
-                                    <span className="text-gray-500 font-mono">
-                                      <span className="font-bold text-gray-400">
-                                        Lote:
-                                      </span>{" "}
-                                      {row.Lote || "-"}
-                                    </span>
-                                    <div className="flex justify-between items-center">
-                                      <span className="text-gray-500 font-mono">
-                                        <span className="font-bold text-gray-400">
-                                          Vence:
-                                        </span>{" "}
-                                        {formatDate(row.Fec_Vencim) || "-"}
-                                      </span>
-                                      <div className="flex items-center gap-1.5">
-                                        <span
-                                          className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-100 font-bold uppercase truncate max-w-[80px]"
-                                          title={row.TIPSUM}
-                                        >
-                                          {row.TIPSUM || "-"}
-                                        </span>
-                                        <span
-                                          className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-100 font-bold uppercase truncate max-w-[80px]"
-                                          title={row.FFINAN}
-                                        >
-                                          {row.FFINAN || "-"}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              </td>
+                <div className="animate-in fade-in duration-300 -mx-4 md:-mx-6 -mt-4 md:-mt-6 font-sans">
+                  {filteredData.length === 0 ? (
+                    <div className="px-4 py-12 text-center text-sm text-slate-500">No se encontraron coincidencias para su búsqueda.</div>
+                  ) : (
+                    <>
+                      {/* Celular: tarjetas compactas; al tocar, el detalle. */}
+                      <ul className="divide-y divide-slate-100 bg-white sm:hidden">
+                        {filteredData.slice(0, dataMobileList.count).map((row, i) => (
+                          <LotMobileItem
+                            key={`${row.ID_Producto}-${row.Lote}-${i}`}
+                            row={row}
+                            state={getExpirationState(row, expiryWindowDays)}
+                            onOpen={() => setSelectedRecord(row)}
+                            pharmacy={showsPharmacyInData ? pharmacyLabelOf(row) : null}
+                          />
+                        ))}
+                      </ul>
+                      <div className="bg-white sm:hidden">
+                        <LoadMoreSentinel hasMore={dataMobileList.hasMore} onLoadMore={dataMobileList.loadMore} shown={dataMobileList.count} total={filteredData.length} itemLabel="lotes" />
+                      </div>
 
-                              {/* Desktop Table Cells */}
-                              {showsPharmacyInData && (
-                                <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap align-top">
-                                  <PharmacyCodeCell label={pharmacyLabelOf(row)} />
-                                </td>
-                              )}
-                              <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm text-gray-500 font-mono group-hover:text-teal-700">
-                                <div className="font-bold">
-                                  {row.ID_Producto || "-"}
-                                </div>
-                                <div className="text-[10px] text-gray-400 mt-0.5">
-                                  {row.CODIGO_SIG || "-"}
-                                </div>
-                              </td>
-                              <td className="hidden sm:table-cell px-4 py-3 text-sm text-gray-900 font-medium">
-                                {row.Nombre || "-"}
-                                <div
-                                  className="text-[10px] text-gray-400 font-normal mt-0.5 max-w-sm truncate"
-                                  title={row.Reg_Sanitario}
-                                >
-                                  RS: {row.Reg_Sanitario || "S/N"}
-                                </div>
-                              </td>
-                              <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm text-right font-bold text-gray-900">
-                                {!isNaN(parseInt(String(row.Saldo), 10))
-                                  ? parseInt(String(row.Saldo), 10)
-                                  : 0}
-                              </td>
-                              <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                                <span className="font-mono text-gray-700">
-                                  {row.Lote || "-"}
-                                </span>
-                                <div className="text-[10px] mt-0.5">
-                                  Vence: {formatDate(row.Fec_Vencim) || "-"}
-                                </div>
-                              </td>
-                              <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm">
-                                <span
-                                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 uppercase"
-                                  title={row.DESC_TIPSUM}
-                                >
-                                  {row.TIPSUM || "-"}
-                                </span>
-                              </td>
-                              <td className="hidden sm:table-cell px-4 py-3 whitespace-nowrap text-sm">
-                                <span
-                                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100 uppercase"
-                                  title={row.DESC_FFINAN}
-                                >
-                                  {row.FFINAN || "-"}
-                                </span>
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr className="block sm:table-row">
-                            <td
-                              colSpan={showsPharmacyInData ? 7 : 6}
-                              className="block sm:table-cell px-4 py-12 text-center text-sm text-gray-500"
-                            >
-                              No se encontraron coincidencias para su búsqueda.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                      {/* Escritorio: tabla paginada; al tocar una fila, el detalle. */}
+                      <div className="hidden bg-white sm:block">
+                        <div className="max-h-[calc(100vh-420px)] min-h-[320px] overflow-auto custom-scrollbar">
+                          <table className="min-w-full text-left">
+                            <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_rgb(226_232_240)]">
+                              <tr>
+                                {showsPharmacyInData && <HeaderCell>Código IPRESS</HeaderCell>}
+                                <HeaderCell>Cód. SISMED / SIGA</HeaderCell>
+                                <HeaderCell>Descripción del producto</HeaderCell>
+                                <HeaderCell align="right">Saldo</HeaderCell>
+                                <HeaderCell>Lote / Vencimiento</HeaderCell>
+                                <HeaderCell>Tipo sum.</HeaderCell>
+                                <HeaderCell>F. finan.</HeaderCell>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {dataPageRows.map((row, i) => {
+                                const state = getExpirationState(row, expiryWindowDays);
+                                const saldo = parseInt(String(row.Saldo), 10);
+                                return (
+                                  <tr
+                                    key={`${row.ID_Producto}-${row.Lote}-${i}`}
+                                    tabIndex={0}
+                                    onClick={() => setSelectedRecord(row)}
+                                    onKeyDown={(e) => { if (e.key === "Enter") setSelectedRecord(row); }}
+                                    title="Ver el detalle del lote"
+                                    className="cursor-pointer hover:bg-teal-50/40 focus:bg-teal-50/40 focus:outline-none"
+                                  >
+                                    {showsPharmacyInData && <td className="whitespace-nowrap px-4 py-3"><PharmacyCodeCell label={pharmacyLabelOf(row)} /></td>}
+                                    <td className="whitespace-nowrap px-4 py-3">
+                                      <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[12px] font-bold text-slate-700">{row.ID_Producto || "—"}</span>
+                                      {row.CODIGO_SIG ? <div className="mt-1 font-mono text-[11px] text-slate-400">{row.CODIGO_SIG}</div> : null}
+                                    </td>
+                                    <td className="min-w-[280px] px-4 py-3">
+                                      <p className="text-[13.5px] font-semibold text-slate-900">{row.Nombre || "—"}</p>
+                                      {row.Reg_Sanitario ? <p className="mt-0.5 max-w-sm truncate text-[11px] text-slate-400" title={row.Reg_Sanitario}>RS: {row.Reg_Sanitario}</p> : null}
+                                    </td>
+                                    <td className={`whitespace-nowrap px-4 py-3 text-right text-[15px] font-black ${state === "EXPIRED" ? "text-red-600" : "text-slate-900"}`}>{isNaN(saldo) ? 0 : saldo.toLocaleString("es-PE")}</td>
+                                    <td className="whitespace-nowrap px-4 py-3 text-[13px]">
+                                      <span className="font-mono text-slate-700">{row.Lote || "—"}</span>
+                                      <div className="mt-1 text-[12px] text-slate-500"><ExpiryDate value={row.Fec_Vencim} state={state} /></div>
+                                    </td>
+                                    <td className="max-w-[160px] truncate px-4 py-3 text-[12px] text-slate-600" title={row.DESC_TIPSUM || ""}>{row.TIPSUM || row.DESC_TIPSUM || <span className="text-slate-300">—</span>}</td>
+                                    <td className="max-w-[160px] truncate px-4 py-3 text-[12px] text-slate-600" title={row.DESC_FFINAN || ""}>{row.FFINAN || row.DESC_FFINAN || <span className="text-slate-300">—</span>}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                        <TablePagination page={dataPage} pageSize={DATA_PAGE_SIZE} total={filteredData.length} onPageChange={setDataPage} itemLabel="lotes" />
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -8199,215 +8077,13 @@ function processSheet(sheet) {
         </div>
       )}
 
-      {/* Modal de Detalle */}
-      {selectedRecord && (
-        <div
-          className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-in fade-in duration-200"
-          onClick={() => setSelectedRecord(null)}
-        >
-          <div
-            className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header Minimalista y Elegante */}
-            <div className="px-5 sm:px-8 pt-6 sm:pt-8 pb-5 sm:pb-6 bg-gradient-to-b from-teal-50/50 to-white flex justify-between items-start relative border-b border-gray-100">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-teal-400 to-blue-500"></div>
-              <div className="pr-10 sm:pr-12 w-full">
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                  <span className="inline-flex items-center justify-center h-7 sm:h-8 px-3 rounded-full text-[10px] sm:text-xs font-black bg-teal-100 text-teal-800 shadow-sm border border-teal-200/50 whitespace-nowrap">
-                    COD: {selectedRecord.ID_Producto || "S/ID"}
-                  </span>
-                  <span className="text-[10px] sm:text-[11px] font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
-                    SIGA: {selectedRecord.CODIGO_SIG || "-"}
-                  </span>
-                </div>
-                <h3 className="text-xl sm:text-2xl font-black text-gray-900 leading-tight tracking-tight break-words">
-                  {selectedRecord.Nombre || "Sin Descripción"}
-                </h3>
-              </div>
-              <button
-                onClick={() => setSelectedRecord(null)}
-                className="absolute top-4 sm:top-6 right-4 sm:right-6 text-gray-400 hover:text-gray-900 hover:bg-gray-100 p-2 sm:p-2.5 rounded-full transition-all"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="px-5 sm:px-8 pb-5 sm:pb-8 overflow-y-auto max-h-[70vh] custom-scrollbar">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8 mt-5 sm:mt-6">
-                {/* Estado y Ubicación - Destacado */}
-                <div className="col-span-full bg-gray-50/80 rounded-2xl p-4 sm:p-5 border border-gray-100/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
-                  <div className="w-full sm:w-auto">
-                    <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black mb-1">
-                      Establecimiento
-                    </p>
-                    <p className="text-sm border-b border-gray-100/50 pb-2 sm:border-0 sm:pb-0 font-bold text-gray-900 leading-snug">
-                      {(selectedRecord.DESC_ALM || "-").replace(
-                        /^FARM\s*-\s*/i,
-                        "",
-                      )}{" "}
-                      <span className="text-gray-400 font-medium whitespace-nowrap">
-                        ({formatAlmCode(readAlmCode(selectedRecord))})
-                      </span>
-                    </p>
-                  </div>
-                  <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start w-full sm:w-auto bg-white sm:bg-transparent p-3 sm:p-0 rounded-xl sm:rounded-none border sm:border-0 border-gray-100 mt-2 sm:mt-0">
-                    <p className="text-[10px] sm:text-[10px] text-gray-500 uppercase tracking-widest font-black mb-0 sm:mb-1">
-                      Saldo Actual
-                    </p>
-                    <p
-                      className={`text-2xl sm:text-3xl font-black leading-none ${parseFloat(String(selectedRecord.Saldo || "0").replace(/,/g, "")) <= 0 ? "text-red-500" : "text-teal-600"}`}
-                    >
-                      {!isNaN(parseInt(String(selectedRecord.Saldo), 10))
-                        ? parseInt(String(selectedRecord.Saldo), 10)
-                        : 0}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Bloque de Datos Lote/Vencimiento */}
-                <div className="space-y-5">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Clock className="w-4 h-4 text-gray-400" />
-                    <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">
-                      Control de Calidad
-                    </h4>
-                  </div>
-                  <div className="bg-white space-y-4">
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        Lote
-                      </p>
-                      <p className="text-sm font-mono font-bold text-gray-800">
-                        {selectedRecord.Lote || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        Fecha de Vencimiento
-                      </p>
-                      <p
-                        className={`text-sm font-black ${(() => {
-                          if (!selectedRecord.Fec_Vencim)
-                            return "text-gray-800";
-                          const today = new Date();
-                          today.setHours(0, 0, 0, 0);
-                          const parts =
-                            selectedRecord.Fec_Vencim.split(/[\/\-]/);
-                          if (parts.length === 3) {
-                            const m = parseInt(parts[1], 10) - 1;
-                            const y = parseInt(parts[2], 10);
-                            const d = parseInt(parts[0], 10);
-                            const fy = y < 100 ? y + 2000 : y;
-                            const exp = new Date(fy, m, d);
-                            if (exp < today) return "text-red-600";
-                            if (
-                              m === today.getMonth() &&
-                              fy === today.getFullYear()
-                            )
-                              return "text-amber-600";
-                          }
-                          return "text-gray-800";
-                        })()}`}
-                      >
-                        {formatDate(selectedRecord.Fec_Vencim) || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        Registro Sanitario
-                      </p>
-                      <p className="text-sm font-medium text-gray-800 uppercase">
-                        {selectedRecord.Reg_Sanitario || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        Última Actualización
-                      </p>
-                      <p className="text-xs font-medium text-gray-500">
-                        {formatDate(selectedRecord.Ultima_Actualizacion) || "-"}
-                      </p>
-                    </div>
-                    {selectedRecord.FECHA_DEL_EQUIPO && (
-                      <div>
-                        <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                          Fecha del Equipo
-                        </p>
-                        <p
-                          className={`text-xs font-medium ${selectedRecord.FECHA_DEL_EQUIPO !== selectedRecord.Ultima_Actualizacion ? "text-red-500" : "text-slate-400"}`}
-                        >
-                          {formatDate(selectedRecord.FECHA_DEL_EQUIPO)}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Bloque de Clasificación y Financiamiento */}
-                <div className="space-y-5">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Database className="w-4 h-4 text-gray-400" />
-                    <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">
-                      Clasificación
-                    </h4>
-                  </div>
-                  <div className="bg-white space-y-4">
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        Tipo de Suministro
-                      </p>
-                      <p className="text-sm font-medium text-gray-800">
-                        {selectedRecord.DESC_TIPSUM || "-"}{" "}
-                        <span className="text-gray-400 font-bold text-[10px] uppercase ml-1 px-1.5 py-0.5 bg-gray-100 rounded">
-                          {selectedRecord.TIPSUM || "-"}
-                        </span>
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                        F. Financiamiento
-                      </p>
-                      <p className="text-sm font-medium text-gray-800">
-                        {selectedRecord.DESC_FFINAN || "-"}{" "}
-                        <span className="text-gray-400 font-bold text-[10px] uppercase ml-1 px-1.5 py-0.5 bg-gray-100 rounded">
-                          {selectedRecord.FFINAN || "-"}
-                        </span>
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 pt-2">
-                      <div>
-                        <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                          Precio Compra
-                        </p>
-                        <p className="text-sm font-black text-gray-900">
-                          S/ {selectedRecord.Precio_Det || "-"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-gray-400 uppercase tracking-widest font-black mb-1">
-                          Precio Referencial
-                        </p>
-                        <p className="text-sm font-bold text-gray-500">
-                          S/ {selectedRecord.Precio_Cab || "-"}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="px-8 py-5 bg-gray-50/80 border-t border-gray-100 flex justify-end">
-              <button
-                onClick={() => setSelectedRecord(null)}
-                className="bg-white border border-gray-200 text-gray-700 px-6 py-2.5 rounded-xl font-bold text-sm hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
-              >
-                Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Detalle del lote: el mismo de Stock SISMED (abajo en el celular, centrado en escritorio). */}
+      <LotDetailSheet
+        row={selectedRecord}
+        state={selectedRecord ? getExpirationState(selectedRecord, expiryWindowDays) : "NORMAL"}
+        onClose={() => setSelectedRecord(null)}
+        pharmacy={selectedRecord && showsPharmacyInData ? pharmacyLabelOf(selectedRecord) : null}
+      />
 
       {/* Modal de Expiración */}
       {isExpirationModalOpen && expirationModalType && (
@@ -8436,7 +8112,7 @@ function processSheet(sheet) {
                   <h3 className="text-lg font-black text-gray-900">
                     {expirationModalType === "expired"
                       ? `Productos Vencidos (al ${String(new Date().getDate()).padStart(2, "0")}/${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()})`
-                      : "Productos por Vencer (Este Mes)"}
+                      : `Productos por Vencer (próximos ${expiryWindowDays} días)`}
                   </h3>
                   <p className="text-sm text-gray-500">
                     {expirationModalType === "expired"
@@ -8639,7 +8315,7 @@ function processSheet(sheet) {
                         {
                           value: "expiring",
                           label: "Por vencer",
-                          desc: "Este mes",
+                          desc: `En ${expiryWindowDays} días`,
                         },
                         { value: "ok", label: "Vigentes", desc: "Buen estado" },
                       ].map((opt) => (
@@ -10352,4 +10028,31 @@ function processSheet(sheet) {
       />
     </div>
   );
+};
+
+/**
+ * Lee la ventana de «por vencer» antes de montar el módulo, para que todos sus cálculos la
+ * usen desde el primer dibujo. Si la lectura falla se usa el valor por omisión (90 días).
+ */
+export const SheetSearchModule: React.FC = () => {
+  const [ready, setReady] = useState(expiryWindowLoaded);
+  useEffect(() => {
+    if (expiryWindowLoaded) return;
+    let vigente = true;
+    void noticeSettingsApi.getOrDefault().then((value) => {
+      expiryWindowDays = value.expiryDays;
+      staleDaysThreshold = value.staleDays;
+      expiryWindowLoaded = true;
+      if (vigente) setReady(true);
+    });
+    return () => { vigente = false; };
+  }, []);
+  if (!ready) {
+    return (
+      <div className="flex h-64 items-center justify-center gap-2 text-sm font-semibold text-slate-500">
+        <RefreshCw className="h-5 w-5 animate-spin text-teal-600" /> Cargando…
+      </div>
+    );
+  }
+  return <SheetSearchModuleContent />;
 };
