@@ -7,8 +7,7 @@ import { analyzeInventoryWithAura } from './services/auraService';
 import { generateFullReportPDF } from './services/pdfService';
 import { 
   Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network,
-  BarChart2, FilterX, RefreshCw, Search, Database, Activity,
-  Settings, Users, Shield, Building, FolderKanban, FileSpreadsheet, User, KeyRound, HardDriveDownload
+  ChevronRight
 } from 'lucide-react';
 
 // NEW IMPORTS
@@ -29,7 +28,10 @@ import { LoginScreen } from './components/LoginScreen';
 import { MaintenanceScreen } from './components/MaintenanceScreen';
 import { maintenanceMessage, shouldBlockForMaintenance } from './services/maintenanceMode';
 import { AdminPanel } from './components/AdminPanel';
-import { MODULE_HEADER_SLOT_ID, MODULES_WITH_HEADER_ACTIONS } from './components/ui/ModuleHeaderSlot';
+import { MODULE_HEADER_SLOT_ID } from './components/ui/ModuleHeaderSlot';
+import { HomeModule } from './components/HomeModule';
+import { UserMenu } from './components/UserMenu';
+import { findNavItem, findNavSection } from './components/navigation';
 import { UserProfile } from './components/UserProfile';
 import { showWelcomeToast } from './components/WelcomeToast';
 import { RedistributionModule } from './components/RedistributionModule';
@@ -102,7 +104,7 @@ const AuthenticatedApp: React.FC = () => {
     const [mostrarAccesoEnMantenimiento, setMostrarAccesoEnMantenimiento] = useState(false);
     // La vista inicial sale de la direccion, para que un enlace compartido abra donde debe.
     const [currentView, setCurrentView] = useState<AppModule>(
-        () => moduleForPath(window.location.pathname) || 'DASHBOARD'
+        () => moduleForPath(window.location.pathname) || 'HOME'
     );
 
     // La direccion del navegador sigue a la vista, sin agregar una entrada por render.
@@ -121,7 +123,7 @@ const AuthenticatedApp: React.FC = () => {
     // entraba directo a la pantalla del anterior.
     useEffect(() => {
         if (isAuthenticated || isLoading) return;
-        setCurrentView('DASHBOARD');
+        setCurrentView('HOME');
         if (window.location.pathname !== APP_BASE) {
             window.history.replaceState({}, '', APP_BASE);
         }
@@ -129,7 +131,7 @@ const AuthenticatedApp: React.FC = () => {
 
     // Botones de atras y adelante del navegador.
     useEffect(() => {
-        const alNavegar = () => setCurrentView(moduleForPath(window.location.pathname) || 'DASHBOARD');
+        const alNavegar = () => setCurrentView(moduleForPath(window.location.pathname) || 'HOME');
         window.addEventListener('popstate', alNavegar);
         return () => window.removeEventListener('popstate', alNavegar);
     }, []);
@@ -168,63 +170,19 @@ const AuthenticatedApp: React.FC = () => {
         }
     }, [isAuthenticated, isLoading, user]);
 
-    // Ensure currentView is allowed, if not switch to an allowed module
+    // Si la vista no está permitida (un enlace viejo, un rol que cambió), se vuelve a
+    // Inicio, que todo usuario con sesión puede ver.
     useEffect(() => {
         if (isAuthenticated && !isLoading && user && !hasPermission(currentView)) {
-            if (hasPermission('DASHBOARD')) setCurrentView('DASHBOARD');
-            else if (hasPermission('ANALYSIS_EXCLUSIONS')) setCurrentView('ANALYSIS_EXCLUSIONS');
-            else if (hasPermission('IPRESS_STOCK')) setCurrentView('IPRESS_STOCK');
-            else if (hasPermission('REDISTRIBUTION')) setCurrentView('REDISTRIBUTION');
-            else if (hasPermission('SIG_SEARCH')) setCurrentView('SIG_SEARCH');
-            else if (hasPermission('ADMIN_STOCK_ASSIGN')) setCurrentView('ADMIN_STOCK_ASSIGN');
-            else if (hasPermission('ADMIN_USERS')) setCurrentView('ADMIN_USERS');
-            else if (hasPermission('ADMIN_ROLES')) setCurrentView('ADMIN_ROLES');
-            else if (hasPermission('ADMIN_FACILITIES')) setCurrentView('ADMIN_FACILITIES');
-            else if (hasPermission('ADMIN_CATALOGS')) setCurrentView('ADMIN_CATALOGS');
-            else if (hasPermission('ADMIN_PARAMS')) setCurrentView('ADMIN_PARAMS');
-            else if (hasPermission('ADMIN_SEND_KEYS')) setCurrentView('ADMIN_SEND_KEYS');
-            else if (hasPermission('ADMIN_BACKUPS')) setCurrentView('ADMIN_BACKUPS');
-            else if (hasPermission('PROFILE')) setCurrentView('PROFILE');
+            setCurrentView('HOME');
         }
     }, [currentView, isAuthenticated, isLoading, user, hasPermission]);
 
-    const moduleHeaderInfo = useMemo(() => {
-        switch (currentView) {
-            case 'DASHBOARD':
-                return { title: 'Análisis de Requerimiento', description: 'Vista principal y resumen de indicadores de requerimiento', icon: <BarChart2 className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ANALYSIS_EXCLUSIONS':
-                return { title: 'Lista de Exclusiones', description: 'Medicamentos excluidos del análisis por establecimiento', icon: <FilterX className="h-5 w-5 sm:h-6 sm:w-6 text-amber-600" /> };
-            case 'REDISTRIBUTION':
-                return { title: 'Módulo de Redistribución', description: 'Redistribución y transferencia de medicamentos entre IPRESS', icon: <RefreshCw className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'SIG_SEARCH':
-                return { title: 'Consulta Stock', description: 'Buscador de existencias en el catálogo SIG', icon: <Search className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'IPRESS_STOCK':
-                return { title: 'Stock SISMED', description: 'Stock propio de la IPRESS, leído de la hoja de Google Sheets asignada (solo lectura)', icon: <Database className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ADMIN_USERS':
-                return { title: 'Gestión de Usuarios', description: 'Administración de cuentas de usuario y credenciales', icon: <Users className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ADMIN_ROLES':
-                return { title: 'Configuración de Roles', description: 'Gestión de roles y permisos del sistema', icon: <Shield className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ADMIN_FACILITIES':
-                return { title: 'Establecimientos', description: 'Gestión de la organización y establecimientos', icon: <Building className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ADMIN_CATALOGS':
-                return { title: 'Regímenes y Profesiones', description: 'Gestión de regímenes laborales y profesiones del personal', icon: <FolderKanban className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ADMIN_PARAMS':
-                return { title: 'Parámetros del Sistema', description: 'Configuraciones generales del sistema', icon: <Settings className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ADMIN_STOCK_ASSIGN':
-                return { title: 'Columnas de Stock por Establecimiento', description: 'Columnas visibles del stock; la hoja se reconoce sola por el código', icon: <FileSpreadsheet className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ADMIN_SEND_KEYS':
-                return { title: 'Claves de envío', description: 'Solo la PC vinculada puede enviar el stock de su establecimiento a Google Sheets', icon: <KeyRound className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'ADMIN_BACKUPS':
-                return { title: 'Backups SISMED', description: 'Descargue con un clic el backup del SISMED de sus establecimientos', icon: <HardDriveDownload className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            case 'PROFILE':
-                return { title: 'Perfil de Usuario', description: 'Configuración de perfil e información personal', icon: <User className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-            default:
-                if (currentView.startsWith('ADMIN')) {
-                    return { title: 'Panel de Administración', description: 'Módulo de administración y configuración', icon: <Shield className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-                }
-                return { title: 'Toolkit SISMED', description: 'Sistema de Gestión de Medicamentos', icon: <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-teal-600" /> };
-        }
-    }, [currentView]);
+    // Cabecera: «Sección › Herramienta», o solo el título en Inicio y Perfil.
+    const headerSection = findNavSection(currentView);
+    const headerTitle = currentView === 'PROFILE'
+        ? 'Perfil de Usuario'
+        : findNavItem(currentView)?.label || 'Toolkit SISMED';
 
     // If loading, show spinner
     if (isLoading) {
@@ -271,35 +229,28 @@ const AuthenticatedApp: React.FC = () => {
                     setCurrentView={setCurrentView}
                     isCollapsed={isSidebarCollapsed}
                     setIsCollapsed={setIsSidebarCollapsed}
-                    user={user}
-                    logout={logout}
                     hasPermission={hasPermission}
                 />
             </div>
 
             <div className="flex-1 flex flex-col h-[100dvh] overflow-hidden relative">
-                {/* Global Header */}
-                <header className="bg-white/90 border-b border-gray-200 sticky top-0 z-[1000] backdrop-blur-sm shadow-xs min-h-[52px] py-1.5 sm:py-2 px-4 sm:px-6 flex items-center justify-between transition-all duration-300 shrink-0">
-                     <div className="flex items-center gap-3 min-w-0">
-                        <div className="p-1.5 sm:p-2 rounded-xl bg-teal-50 text-teal-700 border border-teal-100/80 shrink-0 shadow-2xs">
-                            {moduleHeaderInfo.icon}
-                        </div>
-                        <div className="min-w-0">
-                            <h2 className="text-base sm:text-lg font-black text-slate-900 leading-tight truncate">
-                                {moduleHeaderInfo.title}
-                            </h2>
-                            {moduleHeaderInfo.description && (
-                                <p className="text-xs text-slate-500 font-medium truncate hidden sm:block mt-0.5">
-                                    {moduleHeaderInfo.description}
-                                </p>
-                            )}
-                        </div>
-                     </div>
-                     <div id={MODULE_HEADER_SLOT_ID} className="ml-auto flex shrink-0 items-center gap-2 pl-3 empty:hidden" />
-                     <div className={`${MODULES_WITH_HEADER_ACTIONS.has(currentView) ? 'hidden sm:flex' : 'flex'} items-center gap-2.5 text-xs sm:text-sm text-gray-500 font-medium bg-slate-100/80 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full border border-slate-200/80 shadow-2xs shrink-0 ml-3`}>
-                         <span className="w-2 h-2 rounded-full bg-teal-500 animate-[pulse_2s_ease-in-out_infinite] shadow-[0_0_8px_rgba(20,184,166,0.6)]"></span>
-                         <span className="truncate max-w-[130px] sm:max-w-[220px] font-bold text-slate-700">{user?.facilityData?.name || 'Toolkit SISMED'}</span>
-                     </div>
+                {/* Cabecera: miga de pan, acciones del módulo y el usuario */}
+                <header className="sticky top-0 z-[1000] flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm sm:px-6 md:h-16 lg:px-8">
+                    <div className="flex min-w-0 items-center gap-2">
+                        {headerSection && (
+                            <>
+                                <span className="hidden whitespace-nowrap text-[12.5px] font-semibold text-slate-400 sm:inline">{headerSection.label}</span>
+                                <ChevronRight aria-hidden="true" className="hidden h-4 w-4 shrink-0 text-slate-300 sm:block" />
+                            </>
+                        )}
+                        <h2 className="truncate text-base font-black text-slate-900 sm:text-[18px]">{headerTitle}</h2>
+                    </div>
+                    <div className="ml-auto flex shrink-0 items-center gap-3">
+                        <div id={MODULE_HEADER_SLOT_ID} className="flex shrink-0 items-center gap-2 empty:hidden" />
+                        {user && (
+                            <UserMenu user={user} onOpenProfile={() => setCurrentView('PROFILE')} onLogout={logout} />
+                        )}
+                    </div>
                 </header>
 
                 {/* CONTENT AREA SWITCHER */}
@@ -307,6 +258,7 @@ const AuthenticatedApp: React.FC = () => {
                     <div className="mx-auto max-w-[1600px] h-full">
                         <ErrorBoundary>
                             <Suspense fallback={<SuspenseFallback />}>
+                                {currentView === 'HOME' && <HomeModule onNavigate={setCurrentView} />}
                                 {currentView === 'DASHBOARD' && <AnalysisModule />}
                                 {currentView === 'ANALYSIS_EXCLUSIONS' && <AnalysisExclusionsModule />}
                                 {currentView === 'REDISTRIBUTION' && <RedistributionModule />}

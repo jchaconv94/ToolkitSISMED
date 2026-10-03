@@ -32,16 +32,23 @@ describe("rutas de la aplicación", () => {
     expect(moduleForPath(`${APP_BASE}/analisis/exclusiones#seccion`)).toBe("ANALYSIS_EXCLUSIONS");
   });
 
-  it("devuelve null en la raíz y en direcciones desconocidas", () => {
-    expect(moduleForPath(APP_BASE)).toBeNull();
-    expect(moduleForPath(`${APP_BASE}/`)).toBeNull();
+  it("abre Inicio en la raíz", () => {
+    expect(pathForModule("HOME")).toBe(`${APP_BASE}/inicio`);
+    expect(moduleForPath(APP_BASE)).toBe("HOME");
+    expect(moduleForPath(`${APP_BASE}/`)).toBe("HOME");
+    expect(moduleForPath("/")).toBe("HOME");
+    expect(moduleForPath("")).toBe("HOME");
+  });
+
+  it("devuelve null en direcciones desconocidas", () => {
     expect(moduleForPath(`${APP_BASE}/no-existe`)).toBeNull();
+    expect(moduleForPath("/no-existe")).toBeNull();
   });
 
   it("no deja ningún módulo sin ruta declarada", () => {
-    // Si alguien agrega un AppModule y olvida su ruta, cae en la de Análisis.
+    // Si alguien agrega un AppModule y olvida su ruta, cae en la de Inicio.
     const sinRuta = (AVAILABLE_MODULES.map(m => m.id) as AppModule[])
-      .filter(id => id !== "DASHBOARD" && pathForModule(id) === pathForModule("DASHBOARD"));
+      .filter(id => id !== "HOME" && pathForModule(id) === pathForModule("HOME"));
     expect(sinRuta).toEqual([]);
   });
 });

@@ -1642,7 +1642,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                 <div>
                                                     <p className="text-sm font-bold text-gray-800 border-b border-gray-100 pb-2 mb-4">Módulos Permitidos</p>
                                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                        {AVAILABLE_MODULES.map(module => (
+                                                        {AVAILABLE_MODULES.filter(module => module.id !== 'HOME').map(module => (
                                                             <label key={module.id} className={`flex items-start gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${currentRole.allowedModules.includes(module.id) ? 'bg-teal-50 border-teal-200 shadow-sm' : 'bg-white border-gray-200 hover:bg-gray-50'}`} title={module.description}>
                                                                 <input 
                                                                     type="checkbox" 
@@ -2740,7 +2740,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                         <div className="flex flex-col h-full border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6 md:col-span-8">
                             <label className="block text-xs font-bold text-gray-700 mb-2">Permisos Iniciales</label>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1">
-                                {AVAILABLE_MODULES.map(module => {
+                                {AVAILABLE_MODULES.filter(module => module.id !== 'HOME').map(module => {
                                     const isChecked = newRoleForm.allowedModules.includes(module.id as never);
                                     return (
                                         <label key={module.id} className="flex items-start gap-2 p-2.5 bg-gray-50 rounded border border-gray-100 hover:bg-gray-100 cursor-pointer transition-all" title={module.description}>

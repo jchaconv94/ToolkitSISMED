@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
 import { User } from "../types";
 import { api } from "../services/api";
+import { greetingFor } from "../services/sessionDisplay";
 
 /**
  * Saludo de bienvenida al iniciar sesión.
@@ -16,15 +17,8 @@ import { api } from "../services/api";
  * propio aviso en cuanto llega, sin retrasar su aparición.
  */
 
-const saludoPorHora = (): string => {
-  const hora = new Date().getHours();
-  if (hora < 12) return "Buenos días";
-  if (hora < 18) return "Buenas tardes";
-  return "Buenas noches";
-};
-
 /** Ámbito de la sesión: la misma cascada que usaba el modal. */
-const useJurisdiction = (user: User) => {
+export const useJurisdiction = (user: User) => {
   const [jurisdictionName, setJurisdictionName] = useState<string>("Cargando...");
   const [jurisdictionLabel, setJurisdictionLabel] = useState<string>("Establecimiento Activo");
 
@@ -211,7 +205,7 @@ const WelcomeToastContent: React.FC<{ user: User }> = ({ user }) => {
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-black tracking-tight text-white">
-            {saludoPorHora()}, {nombre}
+            {greetingFor()}, {nombre}
           </p>
           <p className="truncate text-[11px] font-semibold text-emerald-50">
             {jurisdictionLabel}: <span className="font-black">{jurisdictionName}</span> · Rol {user.role}

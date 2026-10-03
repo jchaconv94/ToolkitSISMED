@@ -7,6 +7,7 @@ import {
   Building2,
   Database,
   FileSpreadsheet,
+  Home,
   Menu,
   Settings,
   Shield,
@@ -129,6 +130,16 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentView, setCurrentVie
             </div>
 
             <div className="flex-1 overflow-y-auto px-3 py-4">
+              <button
+                type="button"
+                onClick={() => irA('HOME')}
+                className={`mb-5 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition-colors ${
+                  currentView === 'HOME' ? 'bg-white/10 text-cyan-400' : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                {icono(Home)}
+                Inicio
+              </button>
               {gruposVisibles.map(grupo => (
                 <div key={grupo.titulo} className="mb-5">
                   <p className="px-3 pb-2 text-[10px] font-black uppercase tracking-wider text-gray-500">{grupo.titulo}</p>

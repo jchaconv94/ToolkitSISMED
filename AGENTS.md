@@ -89,6 +89,7 @@ types.ts                    Fuente única de tipos, AppModule y AVAILABLE_MODULE
 contexts/AuthContext.tsx    Sesión, rol, hasPermission()
 contexts/BackupManagerContext.tsx  Descargas de backups que siguen al cambiar de módulo
 components/                 Un archivo .tsx por módulo (componentes grandes, sin subcarpetas por dominio)
+components/navigation.ts    Secciones del menú (Farmacia, Stock, Herramientas, Administración): fuente única de la barra lateral y del Inicio
 components/ui/              Kit compartido: kit.tsx, ConfirmationDialog, CustomSelect, TablePagination
 services/                   Acceso a datos, reglas de dominio y generación de documentos
 docs/                       Toda la documentación (auditorías, planes). Solo README y AGENTS viven en la raíz
@@ -104,7 +105,7 @@ Al agregar un módulo hay que tocar **seis** lugares:
 1. `types.ts` → union `AppModule` + entrada en `AVAILABLE_MODULES`
 2. `App.tsx` → import, título de cabecera, render condicional y fallback de permisos
 3. `services/appRoutes.ts` → su ruta (`administracion/claves-de-envio`, etc.)
-4. `components/Sidebar.tsx`
+4. `components/navigation.ts` → la sección a la que pertenece (de ahí salen la barra lateral y la pantalla de Inicio)
 5. `components/MobileNav.tsx` → el grupo que le corresponde en `GRUPOS` (y, si aplica, `BARRA_INFERIOR`)
 6. Permisos por rol en Supabase (`roles_config.allowed_modules`)
 
@@ -138,6 +139,7 @@ Olvidar cualquiera deja el módulo inaccesible, sin título o sin URL propia. El
 
 | `AppModule` | Etiqueta UI | Componente |
 |---|---|---|
+| `HOME` | Inicio | `components/HomeModule.tsx` (todos lo ven; `hasPermission` siempre lo permite) |
 | `DASHBOARD` | Análisis de Requerimiento | `AnalysisModule` en `App.tsx` (+ `InputSection`, `Dashboard`, `AnalysisTable`) |
 | `ANALYSIS_EXCLUSIONS` | Lista de Exclusiones | `components/AnalysisExclusionsModule.tsx` |
 | `SIG_SEARCH` | Consulta Stock | `components/SheetSearchModule.tsx` |
