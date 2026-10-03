@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  AlertTriangle, ArrowRightLeft, Bell, CheckCircle2, ChevronRight, Clock, Copy, Database, Download, History, KeyRound,
+  AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronRight, Clock, Copy, Database, History, KeyRound,
   Loader2, Monitor, MonitorSmartphone, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, SlidersHorizontal, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -26,7 +26,6 @@ import { BottomSheet } from "./ui/BottomSheet";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useDropdownPosition } from "../hooks/useDropdownPosition";
 
-type ModuleTab = "establishments";
 
 
 const PAGE_SIZE = 10;
@@ -81,7 +80,6 @@ type PendingAction =
 
 /** Claves de envío y las PC de cada establecimiento, en una sola pestaña. */
 export const AdminSendKeysModule: React.FC = () => {
-  const tab: ModuleTab = "establishments";
 
   const [keys, setKeys] = useState<SendKeyRow[]>([]);
   const [devices, setDevices] = useState<Awaited<ReturnType<typeof toolkitDevicesApi.overview>>>([]);
@@ -178,20 +176,9 @@ export const AdminSendKeysModule: React.FC = () => {
     }
   };
 
-  const bell = (
-    <AlertsBell
-      alerts={alerts}
-      busy={busy}
-      onIgnore={(row) => void ignore(row)}
-      onIgnoreAll={() => void ignoreAll()}
-      onRebind={(row) => setPending({ kind: "rebind", row })}
-    />
-  );
-
   return (
     <div className="space-y-4">
-      {tab === "establishments" && (
-        loading ? (
+      {loading ? (
           <div className="flex h-64 items-center justify-center gap-2 text-sm font-semibold text-slate-500">
             <Loader2 className="h-5 w-5 animate-spin text-teal-600" /> Cargando establecimientos…
           </div>
@@ -216,8 +203,7 @@ export const AdminSendKeysModule: React.FC = () => {
             alerts={alerts}
             onIgnoreAll={() => void ignoreAll()}
           />
-        )
-      )}
+        )}
 
       {newKey && <NewKeyModal row={newKey.row} secret={newKey.key} onCopy={() => void copyKey()} onClose={() => setNewKey(null)} />}
 
@@ -243,92 +229,6 @@ export const AdminSendKeysModule: React.FC = () => {
         onConfirm={() => void confirmPending()}
         onCancel={() => setPending(null)}
       />
-    </div>
-  );
-};
-
-const BELL_WIDTH = 420;
-
-/** Intentos bloqueados sin revisar: no ocupan la pantalla, se abren desde la campana. */
-const AlertsBell: React.FC<{
-  alerts: SendKeyRow[];
-  busy: boolean;
-  onIgnore: (row: SendKeyRow) => void;
-  onIgnoreAll: () => void;
-  onRebind: (row: SendKeyRow) => void;
-}> = ({ alerts, busy, onIgnore, onIgnoreAll, onRebind }) => {
-  const [open, setOpen] = useState(false);
-  const width = Math.min(BELL_WIDTH, typeof window === "undefined" ? BELL_WIDTH : window.innerWidth - 24);
-  const { triggerRef, menuStyles } = useDropdownPosition(open, { align: "right", customWidth: width });
-
-  return (
-    <div ref={triggerRef} className="relative">
-      <button
-        type="button"
-        aria-label={alerts.length ? `${alerts.length} intentos de envío bloqueados` : "Sin intentos de envío bloqueados"}
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={`relative flex h-10 w-10 items-center justify-center rounded-xl border bg-white transition-colors sm:h-[42px] sm:w-[42px] ${
-          open ? "border-red-300 ring-2 ring-red-500/15" : "border-slate-200 hover:bg-slate-50"
-        }`}
-      >
-        <Bell className="h-5 w-5 text-slate-600" />
-        {alerts.length > 0 && (
-          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10.5px] font-black text-white ring-2 ring-white">
-            {alerts.length > 99 ? "99+" : alerts.length}
-          </span>
-        )}
-      </button>
-      {open && createPortal(
-        <>
-          <div className="fixed inset-0 z-[9998]" onClick={() => setOpen(false)} />
-          <div
-            role="dialog"
-            aria-label="Envíos bloqueados"
-            style={{ ...menuStyles, width }}
-            className="fixed z-[9999] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_25px_-5px_rgba(0,0,0,0.12),0_8px_10px_-6px_rgba(0,0,0,0.05)] animate-in fade-in slide-in-from-top-2 duration-150"
-          >
-            <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-              <ShieldAlert className="h-4 w-4 text-red-600" />
-              <span className="text-[13px] font-black text-slate-800">Envíos bloqueados</span>
-              <span className="text-[11.5px] text-slate-400">{alerts.length ? `${alerts.length} sin revisar` : "ninguno"}</span>
-              {alerts.length > 1 && (
-                <button type="button" disabled={busy} onClick={onIgnoreAll} className="ml-auto rounded-lg px-2 py-1 text-[11.5px] font-bold text-slate-500 hover:bg-slate-100 disabled:opacity-60">
-                  Ignorar todos
-                </button>
-              )}
-            </div>
-            {alerts.length === 0 ? (
-              <p className="flex items-center gap-2 px-4 py-5 text-[12.5px] text-slate-500">
-                <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Ninguna PC intentó enviar sin permiso.
-              </p>
-            ) : (
-              <ul className="max-h-[60vh] divide-y divide-slate-100 overflow-y-auto">
-                {alerts.map((row) => (
-                  <li key={row.code} className="space-y-2 px-4 py-3">
-                    <p className="text-[12.5px] leading-snug text-slate-700">
-                      <b>{row.alert!.deviceName || "Una PC sin identificar"}</b> intentó enviar el stock de <b>{row.name}</b>{" "}
-                      <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
-                    </p>
-                    <p className="text-[11.5px] text-slate-500">
-                      {relativeTime(row.alert!.at)}{row.deviceName ? <> · vinculado a <b className="text-slate-700">{row.deviceName}</b></> : null}
-                    </p>
-                    <div className="flex gap-2">
-                      <button type="button" disabled={busy} onClick={() => onIgnore(row)} className="h-8 rounded-lg border border-slate-200 px-3 text-[11.5px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60">
-                        Ignorar
-                      </button>
-                      <button type="button" disabled={busy} onClick={() => { setOpen(false); onRebind(row); }} className="flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-[11.5px] font-bold text-white hover:bg-red-700 disabled:opacity-60">
-                        <ArrowRightLeft className="h-3.5 w-3.5" /> Cambiar a este equipo
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </>,
-        document.body,
-      )}
     </div>
   );
 };
@@ -404,13 +304,16 @@ const EstablishmentsPanel: React.FC<{
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         {/* Intentos bloqueados: solo aparece si hay alguno sin revisar. Cada uno se resuelve en su detalle. */}
         {alerts.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-red-100 bg-red-50/70 px-4 py-2.5 text-[12.5px] text-red-800">
-            <ShieldAlert className="h-4 w-4 shrink-0 text-red-600" />
-            <span className="font-semibold">{alerts.length === 1 ? "1 intento de envío bloqueado sin revisar" : `${alerts.length} intentos de envío bloqueados sin revisar`}</span>
-            <span className="ml-auto flex items-center gap-3">
-              <button type="button" onClick={() => setFilter("alerts")} className="font-bold text-red-700 hover:underline">Ver</button>
-              <button type="button" disabled={busy} onClick={onIgnoreAll} className="font-bold text-slate-500 hover:underline disabled:opacity-60">Ignorar todos</button>
-            </span>
+          <div className="flex items-start gap-3 border-b border-red-100 bg-red-50/70 px-4 py-2.5 text-[12.5px] text-red-800 md:items-center">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-600 md:mt-0" />
+            {/* En el celular las acciones van debajo del texto, a la izquierda; en escritorio, a la derecha. */}
+            <div className="flex min-w-0 flex-1 flex-col gap-1 md:flex-row md:items-center md:gap-3">
+              <span className="font-semibold">{alerts.length === 1 ? "1 intento de envío bloqueado sin revisar" : `${alerts.length} intentos de envío bloqueados sin revisar`}</span>
+              <span className="flex items-center gap-4 md:ml-auto md:gap-3">
+                <button type="button" onClick={() => setFilter("alerts")} className="font-bold text-red-700 hover:underline">Ver</button>
+                <button type="button" disabled={busy} onClick={onIgnoreAll} className="font-bold text-slate-500 hover:underline disabled:opacity-60">Ignorar todos</button>
+              </span>
+            </div>
           </div>
         )}
         <div className="flex items-center gap-2 border-b border-slate-100 p-3 md:px-4">
