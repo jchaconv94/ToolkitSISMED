@@ -538,15 +538,15 @@ export const AnalysisExclusionsModule: React.FC = () => {
             <button
               type="button"
               onClick={handleOpenNewItem}
-              className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-black text-white whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-xs font-bold text-white whitespace-nowrap shrink-0"
             >
-              <Plus className="h-4 w-4 text-teal-400" />
+              <Plus className="h-4 w-4" />
               <span>Nuevo medicamento</span>
             </button>
           </div>
 
           {/* Celular: «+» agrega; «…» abre el resto de acciones abajo. */}
-          <button type="button" onClick={handleOpenNewItem} aria-label="Nuevo medicamento" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-teal-400 md:hidden">
+          <button type="button" onClick={handleOpenNewItem} aria-label="Nuevo medicamento" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white md:hidden">
             <Plus className="h-5 w-5" />
           </button>
           <button type="button" onClick={() => setActionsOpen(true)} aria-label="Más acciones" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 md:hidden">
@@ -692,9 +692,9 @@ export const AnalysisExclusionsModule: React.FC = () => {
                         !searchTerm ? (
                           <button
                             onClick={handleOpenNewItem}
-                            className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-white shadow-sm transition-colors"
+                            className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-xs font-bold text-white shadow-sm transition-colors"
                           >
-                            <Plus className="h-4 w-4 text-teal-400" />
+                            <Plus className="h-4 w-4" />
                             Agregar Primer Medicamento
                           </button>
                         ) : undefined

@@ -237,6 +237,7 @@ justamente porque cuando estaba repetida solo se actualizó uno.
 - **Modelo único de KPIs** (2026-10-03): `KpiCard watermark` dentro de `KpiStrip`, a todo el ancho, con `cols` según cuántos haya (`md:grid-cols-3`, `md:grid-cols-2 xl:grid-cols-4`…). Si filtran la tabla, van con `onClick` y `active`.
 - **Operación ≠ supervisión:** en vista propia **no** mostrar columnas de Ubicación/Ámbito (son implícitas en la sesión). Solo el supervisor ve filtros territoriales.
 - **Modales:** header fijo + body con scroll interno + footer fijo; sin scroll horizontal; `max-w-3xl` formulario simple, `max-w-5xl` operación con lista, `max-w-6xl` comparación compleja.
+- **Botón principal: teal** (`bg-teal-600 hover:bg-teal-700 text-white`, como «Descargar» o «Generar clave»). Nada de botones negros (`bg-slate-900`), pedido del usuario el 2026-10-03.
 - **Nunca `window.confirm` / `alert`.** Usar modal propio (`components/ui/ConfirmationDialog.tsx`) para toda acción irreversible.
 - **Móvil:** tablas → tarjetas; filtros → bottom sheet; footer sticky en modales.
 - **Acentos:** cuidado con mojibake. `Catálogo`, `Código`, `Redistribución` deben renderizarse correctos en pantalla **y en PDF/Excel** (ver `services/pdfUnicodeFont.ts`).
