@@ -7,7 +7,6 @@ import {
   Eye,
   EyeOff,
   HardDriveDownload,
-  KeyRound,
   Loader2,
   Lock,
   Phone,
@@ -24,7 +23,6 @@ const CLAVE_ANTIGUA_KEY = 'aura_saved_password';
 const VENTAJAS = [
   { Icon: Database, texto: 'Stock de toda la región, siempre a la mano' },
   { Icon: HardDriveDownload, texto: 'Backups SISMED con un clic' },
-  { Icon: KeyRound, texto: 'Claves de envío por establecimiento' },
 ];
 
 /**
@@ -162,22 +160,42 @@ export const LoginScreen: React.FC = () => {
         </div>
       </aside>
 
-      {/* Franja de marca (celular) */}
+      {/* Portada del celular: fondo oscuro con las piezas del logo flotando, título grande
+          y la tarjeta del formulario montada encima de su borde inferior. */}
       <header
-        className="flex flex-col gap-3 px-6 pb-7 pt-10 text-white lg:hidden"
-        style={{ background: 'radial-gradient(circle at 10% 0%, #17565A 0%, rgba(23,86,90,0) 60%), #081A1D' }}
+        className="relative overflow-hidden px-6 pb-24 pt-12 text-white lg:hidden"
+        style={{
+          background:
+            'radial-gradient(circle at 10% 0%, #17565A 0%, rgba(23,86,90,0) 60%), radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1.5px) 0 0 / 22px 22px, #081A1D',
+        }}
       >
-        <div className="flex items-center gap-3">
-          <BrandMark size={36} tone="dark" />
-          <span className="text-[24px] font-extrabold tracking-tight">
-            Toolkit <span className="text-[#5FD0BF]">SISMED</span>
-          </span>
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-14 -top-6 grid h-[220px] w-[220px] rotate-[12deg] grid-cols-2 gap-3 opacity-90"
+        >
+          <div className="login-shape rounded-[26px] bg-[#1FA393] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" />
+          <div className="login-shape rounded-[26px] bg-[#6DD5C4] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" />
+          <div className="login-shape rounded-[26px] bg-[#F3F7F6] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" />
+          <div className="login-shape relative">
+            <div className="absolute left-[34%] top-0 h-full w-[32%] rounded-[10px] bg-[#F08A2C]" />
+            <div className="absolute left-0 top-[34%] h-[32%] w-full rounded-[10px] bg-[#F08A2C]" />
+          </div>
         </div>
-        <p className="text-[15px] leading-relaxed text-[#BFD6D2]">Gestión operativa del SISMED en una sola plataforma.</p>
+        <div className="relative flex flex-col gap-4">
+          <BrandMark size={44} tone="dark" />
+          <h1 className="text-[44px] font-extrabold leading-[1.02] tracking-[-0.03em]">
+            Toolkit
+            <br />
+            <span className="text-[#5FD0BF]">SISMED</span>
+          </h1>
+          <p className="max-w-[300px] text-[16px] font-medium leading-relaxed text-[#BFD6D2]">
+            Automatiza y simplifica la gestión operativa del SISMED.
+          </p>
+        </div>
       </header>
 
       {/* Formulario */}
-      <main className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-8 sm:px-6 lg:py-14">
+      <main className="relative -mt-16 flex flex-1 flex-col items-center justify-center gap-6 px-4 pb-8 sm:px-6 lg:mt-0 lg:py-14">
         <div className="w-full max-w-[440px] rounded-3xl bg-white px-6 py-8 shadow-[0_1px_2px_rgba(16,32,30,0.06),0_24px_60px_rgba(16,32,30,0.10)] sm:px-10 sm:py-11">
           <div className="mb-7 flex flex-col gap-2">
             <h2 className="text-[28px] font-extrabold tracking-tight sm:text-[30px]">Iniciar sesión</h2>
