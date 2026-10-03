@@ -263,7 +263,7 @@ La capa de componentes comunes **ya existe**. Antes existían cinco `HeaderCell`
 | Número `21 300` / `2 193,5` (miles con espacio, coma decimal) | `formatNumber` en `services/numberFormat.ts` |
 | Tipo de tono | `Tone` |
 
-Otras piezas compartidas en `components/ui/`: `ConfirmationDialog`, `CustomSelect`, `TablePagination`, `IncrementalList` (listas del celular que cargan al bajar), `BottomSheet` (filtros del celular: un botón junto al buscador abre el panel inferior), `FloatingActionButton` (botón principal del celular), `PharmacyCodeCell`, `ModuleHeaderSlot`.
+Otras piezas compartidas en `components/ui/`: `ConfirmationDialog`, `CustomSelect`, `TablePagination`, `IncrementalList` (listas del celular que cargan al bajar), `BottomSheet` (filtros del celular: un botón junto al buscador abre el panel inferior), `FloatingActionButton` (botón principal del celular), `BrandLogo` (marca; `BrandMark animation="hover" | "loop"` y `BrandBootScreen`, la pantalla de carga con el logo animado que sigue a la de arranque en línea de `index.html`), `PharmacyCodeCell`, `ModuleHeaderSlot`.
 
 **Los tonos se nombran por significado, nunca por color:** `success`, `warning`, `danger`, `info`, `locked`, `neutral`. Si escribes `bg-emerald-100` a mano en un módulo, casi siempre querías un `tone`.
 

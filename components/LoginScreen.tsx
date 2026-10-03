@@ -182,7 +182,7 @@ export const LoginScreen: React.FC = () => {
                     <button 
                         type="submit"
                         disabled={isSubmitting}
-                        className="w-full bg-gray-900 text-white font-bold py-3.5 rounded-xl hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-900/20 disabled:opacity-70 disabled:cursor-not-allowed group mt-2"
+                        className="w-full bg-teal-600 text-white font-bold py-3.5 rounded-xl hover:bg-teal-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-teal-900/20 disabled:opacity-70 disabled:cursor-not-allowed group mt-2"
                     >
                         {isSubmitting ? 'Verificando...' : 'Iniciar sesión'}
                         {!isSubmitting && <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />}

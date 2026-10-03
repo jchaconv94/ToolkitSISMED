@@ -74,3 +74,14 @@ export const BrandLogo: React.FC<{ size?: number; tone?: Tone; showName?: boolea
     {showName && <BrandWordmark size={size} tone={tone} />}
   </span>
 );
+
+/**
+ * Pantalla de carga a pantalla completa: el fondo azul con el logo armándose. Continúa la de
+ * arranque de index.html mientras la app termina de preparar la sesión, para que no aparezca
+ * un círculo de carga sobre blanco entre las dos.
+ */
+export const BrandBootScreen: React.FC = () => (
+  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0f2233]" role="status" aria-label="Cargando">
+    <BrandMark size={96} tone="dark" animation="loop" />
+  </div>
+);
