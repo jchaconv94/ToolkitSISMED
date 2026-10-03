@@ -33,7 +33,7 @@ import { HomeModule } from './components/HomeModule';
 import { UserMenu } from './components/UserMenu';
 import { ToolSearchDialog, ToolSearchTrigger, useToolSearchShortcut } from './components/ToolSearch';
 import { findNavItem, findNavSection, findVisibleNavSection, NAV_TINT_CLASSES, visibleNavSections } from './components/navigation';
-import { BrandLogo } from './components/ui/BrandLogo';
+import { BrandBootScreen, BrandLogo } from './components/ui/BrandLogo';
 import { UserProfile } from './components/UserProfile';
 import { showWelcomeToast } from './components/WelcomeToast';
 import { RedistributionModule } from './components/RedistributionModule';
@@ -225,11 +225,7 @@ const AuthenticatedApp: React.FC = () => {
 
     // If loading, show spinner
     if (isLoading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600"></div>
-            </div>
-        );
+        return <BrandBootScreen />;
     }
 
     // Mantenimiento: solo entran los administradores y los autorizados para pruebas.
@@ -249,11 +245,7 @@ const AuthenticatedApp: React.FC = () => {
     // If not authenticated, show Login
     if (!isAuthenticated) {
         return (
-            <Suspense fallback={
-                <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600"></div>
-                </div>
-            }>
+            <Suspense fallback={<BrandBootScreen />}>
                 <LoginScreen />
             </Suspense>
         );

@@ -44,8 +44,33 @@
   }
 }
 </script>
+    <!--
+      Pantalla de arranque: el logo armándose mientras carga la aplicación. Va aquí, en línea,
+      porque se ve antes de que lleguen los estilos y el código; index.tsx la retira al montar.
+      Mismo fondo que el manifest, para que siga sin salto a la pantalla del sistema al abrir
+      la app instalada. Las animaciones son las de index.css (.brand-mark--loop).
+    -->
+    <style>
+      #boot-splash { position: fixed; inset: 0; z-index: 2147483647; display: flex; align-items: center; justify-content: center; background: #0f2233; transition: opacity .35s ease; }
+      #boot-splash.boot-hide { opacity: 0; pointer-events: none; }
+      #boot-splash .bm-piece { transform-box: fill-box; transform-origin: center; animation: boot-pop 1.8s ease-in-out infinite both; }
+      #boot-splash .bm-2 { animation-delay: .15s; }
+      #boot-splash .bm-3 { animation-delay: .3s; }
+      #boot-splash .bm-4 { animation-name: boot-pop-spin; animation-delay: .45s; }
+      @keyframes boot-pop { 0% { transform: scale(.3); opacity: 0; } 15% { transform: scale(1.12); opacity: 1; } 25%, 70% { transform: scale(1); opacity: 1; } 88%, 100% { transform: scale(.3); opacity: 0; } }
+      @keyframes boot-pop-spin { 0% { transform: scale(.3) rotate(0); opacity: 0; } 15% { transform: scale(1.12) rotate(0); opacity: 1; } 25% { transform: scale(1) rotate(0); opacity: 1; } 45%, 70% { transform: scale(1) rotate(90deg); opacity: 1; } 88%, 100% { transform: scale(.3) rotate(90deg); opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { #boot-splash .bm-piece { animation: none; } }
+    </style>
 </head>
   <body>
+    <div id="boot-splash" aria-hidden="true">
+      <svg width="96" height="96" viewBox="0 0 64 64">
+        <rect class="bm-piece bm-1" x="3" y="3" width="26" height="26" rx="7" fill="#2bb3a0" />
+        <rect class="bm-piece bm-2" x="35" y="3" width="26" height="26" rx="7" fill="#5fd0be" />
+        <rect class="bm-piece bm-3" x="3" y="35" width="26" height="26" rx="7" fill="#ffffff" />
+        <g class="bm-piece bm-4" fill="#f28c28"><rect x="43.25" y="35" width="9.5" height="26" rx="3.5" /><rect x="35" y="43.25" width="26" height="9.5" rx="3.5" /></g>
+      </svg>
+    </div>
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
   </body>

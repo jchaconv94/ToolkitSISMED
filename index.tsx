@@ -34,3 +34,17 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+// Pantalla de arranque (index.html): se retira cuando la app ya pintó, tras al menos una
+// vuelta de la animación para que no parpadee si la carga fue instantánea.
+const splash = document.getElementById('boot-splash');
+if (splash) {
+  const MIN_VISIBLE_MS = 1100;
+  const wait = Math.max(0, MIN_VISIBLE_MS - performance.now());
+  requestAnimationFrame(() => {
+    window.setTimeout(() => {
+      splash.classList.add('boot-hide');
+      window.setTimeout(() => splash.remove(), 400);
+    }, wait);
+  });
+}

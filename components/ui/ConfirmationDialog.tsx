@@ -20,7 +20,7 @@ const toneStyles = {
     iconBackground: "bg-amber-100",
     iconColor: "text-amber-700",
     accent: "bg-amber-500",
-    confirm: "bg-slate-900 hover:bg-slate-800 focus:ring-slate-300"
+    confirm: "bg-teal-600 hover:bg-teal-700 focus:ring-teal-200"
   },
   danger: {
     iconBackground: "bg-red-100",

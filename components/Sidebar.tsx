@@ -61,10 +61,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Marca */}
       <div className={`flex h-9 shrink-0 items-center ${isCollapsed ? 'justify-center' : 'justify-between pl-5 pr-3'} mb-5`}>
         {isCollapsed ? (
-          <BrandMark size={34} tone="dark" />
+          <BrandMark size={34} tone="dark" animation="hover" />
         ) : (
           <>
-            <BrandLogo size={16} tone="dark" />
+            <BrandLogo size={16} tone="dark" animation="hover" />
             <button
               type="button"
               onClick={() => setIsCollapsed(true)}
