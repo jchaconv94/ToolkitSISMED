@@ -772,21 +772,23 @@ export const AnalysisExclusionsModule: React.FC = () => {
             <>
               <ul className="divide-y divide-slate-100">
                 {filteredExclusions.slice(0, mobileList.count).map(item => (
-                  <li key={item.id || item.sismedCode} className="px-4 py-3">
+                  <li key={item.id || item.sismedCode} className="flex items-center gap-3 px-4 py-3">
                     {/* Sin fecha de registro: en el celular se confundía con la de vencimiento. */}
-                    <p className="text-[14px] font-bold leading-snug text-slate-900">{item.description}</p>
-                    <p className="mt-0.5 text-[12px] text-slate-500">
-                      <span className="font-mono text-teal-700">{item.sismedCode}</span>
-                      {item.presentation && <> · {item.presentation}</>}
-                    </p>
-                    {item.reason && <p className="mt-1 text-[12px] italic text-slate-500">«{item.reason}»</p>}
-                    {/* Acciones grandes y separadas, fáciles de tocar. */}
-                    <div className="mt-2.5 grid grid-cols-2 gap-2">
-                      <button onClick={() => handleOpenEditItem(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 text-[13px] font-bold text-slate-700 active:bg-slate-50">
-                        <Edit3 className="h-4 w-4 text-teal-600" /> Editar
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[14px] font-bold leading-snug text-slate-900">{item.description}</p>
+                      <p className="mt-0.5 text-[12px] text-slate-500">
+                        <span className="font-mono text-teal-700">{item.sismedCode}</span>
+                        {item.presentation && <> · {item.presentation}</>}
+                      </p>
+                      {item.reason && <p className="mt-1 text-[12px] italic text-slate-500">«{item.reason}»</p>}
+                    </div>
+                    {/* Acciones con ícono y borde, a la derecha y con espacio entre ellas para tocarlas sin error. */}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button onClick={() => handleOpenEditItem(item)} aria-label="Editar" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-teal-600 active:bg-teal-50">
+                        <Edit3 className="h-[18px] w-[18px]" />
                       </button>
-                      <button onClick={() => setDeleteTarget(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-rose-200 text-[13px] font-bold text-rose-600 active:bg-rose-50">
-                        <Trash2 className="h-4 w-4" /> Eliminar
+                      <button onClick={() => setDeleteTarget(item)} aria-label="Eliminar" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 text-rose-600 active:bg-rose-50">
+                        <Trash2 className="h-[18px] w-[18px]" />
                       </button>
                     </div>
                   </li>
