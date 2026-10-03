@@ -17,7 +17,9 @@ Aplicación web interna (SPA React + Vite + TypeScript) para la **DIRESA San Mar
 - **Análisis de requerimiento** (`DASHBOARD`, `ANALYSIS`) y **Lista de Exclusiones** (`ANALYSIS_EXCLUSIONS`).
 - **Consulta Stock** (`SIG_SEARCH`, `components/SheetSearchModule.tsx`) y **Stock SISMED** (`IPRESS_STOCK`, `components/AssignedIpressStockModule.tsx`), ambos leídos de Google Sheets.
 - **Redistribución** (`REDISTRIBUTION`).
-- **Administración**: usuarios, roles, establecimientos, regímenes y profesiones, parámetros, columnas de stock, **Claves de envío** (`ADMIN_SEND_KEYS`) y **Backups SISMED** (`ADMIN_BACKUPS`).
+- **Columnas de Stock** (`ADMIN_STOCK_ASSIGN`), en la sección Stock del menú: qué columnas ve cada establecimiento en Stock SISMED.
+- **Herramientas**: **Claves de envío** (`ADMIN_SEND_KEYS`) y **Backups SISMED** (`ADMIN_BACKUPS`).
+- **Administración**: usuarios, roles, establecimientos, regímenes y profesiones y parámetros.
 - **Perfil** (`PROFILE`).
 
 Idioma del proyecto: **español**. Documentación, commits, UI, mensajes de error y nombres de módulos en español. Código (identificadores) en inglés/camelCase.
