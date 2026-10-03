@@ -16,7 +16,8 @@ import {
   X, 
   Layers, 
   Info,
-  ChevronDown
+  ChevronDown,
+  MoreHorizontal
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
@@ -25,15 +26,28 @@ import { HealthFacility, RequirementExclusionItem } from "../types";
 import { requirementExclusionService } from "../services/requirementExclusionService";
 import { filterFacilitiesByJurisdiction, getUserJurisdictionScope } from "../services/jurisdictionService";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
+import { TablePagination } from "./ui/TablePagination";
+import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
+import { BottomSheet } from "./ui/BottomSheet";
+import { FloatingActionButton } from "./ui/FloatingActionButton";
+import { noticeWhen } from "../services/notifications";
 import { 
   KpiCard, 
-  PageHeader, 
+  KpiStrip, 
+  formatDate, 
   TableHeaderCell as HeaderCell, 
   FormField as Field, 
   inputClass, 
   filterInputClass, 
   EmptyState
 } from "./ui/kit";
+
+/** Una acción en el panel inferior del celular. */
+const SheetAction: React.FC<{ icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean; danger?: boolean }> = ({ icon, label, onClick, disabled, danger }) => (
+  <button type="button" disabled={disabled} onClick={onClick} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold hover:bg-slate-50 disabled:opacity-40 ${danger ? "text-rose-700" : "text-slate-700"}`}>
+    {icon}{label}
+  </button>
+);
 
 export const AnalysisExclusionsModule: React.FC = () => {
   const { user } = useAuth();
@@ -175,19 +189,20 @@ export const AnalysisExclusionsModule: React.FC = () => {
   // KPIs
   const totalCount = exclusions.length;
   const withReasonCount = exclusions.filter(e => e.reason && e.reason.trim().length > 0).length;
-  const lastUpdated = useMemo(() => {
-    if (exclusions.length === 0) return "Sin registros";
-    const dates = exclusions
-      .map(e => e.updatedAt || e.createdAt)
-      .filter(Boolean) as string[];
-    if (dates.length === 0) return "Hoy";
+  /** El cambio más reciente de la lista (alta o edición), o vacío si no hay registros. */
+  const lastUpdatedAt = useMemo(() => {
+    const dates = exclusions.map(e => e.updatedAt || e.createdAt).filter(Boolean) as string[];
     dates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-    return new Date(dates[0]).toLocaleDateString("es-PE", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric"
-    });
+    return dates[0] || "";
   }, [exclusions]);
+
+  // Escritorio: páginas numeradas. Celular: la lista crece al bajar.
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [searchTerm, selectedFacilityCode]);
+  const pageRows = filteredExclusions.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const mobileList = useIncrementalCount(filteredExclusions.length, `${searchTerm}|${selectedFacilityCode}`, 20);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   // --- HANDLERS MANUAL ITEM ---
   const handleOpenNewItem = () => {
@@ -336,114 +351,39 @@ export const AnalysisExclusionsModule: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300">
-      {/* Header */}
-      <PageHeader
-        title="Lista de Exclusiones de Medicamentos"
-        description="Configure los medicamentos que su establecimiento omitirá automáticamente al ejecutar el Análisis de Requerimiento."
-        icon={<Ban className="h-7 w-7 text-rose-500" />}
-        tone="danger"
-        actions={
-          <div className="flex items-center gap-2.5">
-            {/* Dropdown con Opciones Excel */}
-            <div className="relative shrink-0" ref={excelDropdownRef}>
+    <div className="space-y-4 pb-24 animate-in fade-in duration-300 md:pb-12">
+      {/* Sin cabecera propia: el título ya está en la cabecera de la app. */}
+      <KpiStrip cols="md:grid-cols-3">
+        <KpiCard watermark tone={totalCount > 0 ? "warning" : "neutral"} icon={<Ban />} label="Total excluidos" value={totalCount} hint="medicamentos fuera del análisis" />
+        <KpiCard watermark tone="info" icon={<FileText />} label="Con motivo detallado" value={withReasonCount} hint={totalCount - withReasonCount ? `${totalCount - withReasonCount} sin motivo registrado` : "todos con motivo"} />
+        <KpiCard watermark tone="neutral" icon={<Layers />} label="Última actualización" value={lastUpdatedAt ? formatDate(lastUpdatedAt) : "—"} hint={lastUpdatedAt ? noticeWhen(lastUpdatedAt) : "sin registros"} />
+      </KpiStrip>
+
+      {/* Main Table Card */}
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        {/* Barra: buscador, establecimiento (solo quien supervisa varios) y acciones. */}
+        <div className="flex items-center gap-2 border-b border-slate-100 p-3 md:px-4">
+          <div className="relative min-w-0 flex-1 md:max-w-xs">
+            <Search className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              placeholder="Buscar por código, descripción o motivo..."
+              className={filterInputClass + " pl-9 pr-8"}
+            />
+            {searchTerm && (
               <button
-                type="button"
-                onClick={() => setIsExcelDropdownOpen(!isExcelDropdownOpen)}
-                className="inline-flex items-center gap-2 h-10 px-3.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 shadow-2xs hover:border-slate-300 transition-all whitespace-nowrap"
+                onClick={() => setSearchTerm("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
-                <FileSpreadsheet className="h-4 w-4 text-teal-600" />
-                <span>Opciones Excel</span>
-                <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${isExcelDropdownOpen ? "rotate-180" : ""}`} />
+                <X className="h-4 w-4" />
               </button>
-
-              {isExcelDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-60 rounded-2xl bg-white border border-slate-200 shadow-xl p-1.5 z-30 animate-in fade-in slide-in-from-top-2 duration-150">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsExcelDropdownOpen(false);
-                      setUploadedFile(null);
-                      setParsedPreview(null);
-                      setIsUploadModalOpen(true);
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-teal-700 hover:bg-teal-50 transition-colors"
-                  >
-                    <UploadCloud className="h-4 w-4 text-teal-600 shrink-0" />
-                    <div className="flex flex-col">
-                      <span>Carga Masiva Excel</span>
-                      <span className="text-[10px] text-teal-600/70 font-normal">Importar medicamentos en lote</span>
-                    </div>
-                  </button>
-
-                  <div className="my-1 border-t border-slate-100" />
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsExcelDropdownOpen(false);
-                      requirementExclusionService.downloadTemplate();
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100/80 transition-colors"
-                  >
-                    <Download className="h-4 w-4 text-slate-500 shrink-0" />
-                    <div className="flex flex-col">
-                      <span className="font-bold">Descargar Plantilla</span>
-                      <span className="text-[10px] text-slate-400 font-normal">Formato Excel de ejemplo</span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsExcelDropdownOpen(false);
-                      requirementExclusionService.exportExclusionsToExcel(exclusions, currentFacility.name, selectedFacilityCode);
-                    }}
-                    disabled={exclusions.length === 0}
-                    className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-                  >
-                    <FileSpreadsheet className="h-4 w-4 text-emerald-600 shrink-0" />
-                    <div className="flex flex-col">
-                      <span className="font-bold">Exportar Lista (.xlsx)</span>
-                      <span className="text-[10px] text-slate-400 font-normal">Guardar medicamentos excluidos</span>
-                    </div>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={handleOpenNewItem}
-              className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.98] text-xs font-black text-white shadow-xs transition-all whitespace-nowrap shrink-0"
-            >
-              <Plus className="h-4 w-4 text-teal-400" />
-              <span>Nuevo Medicamento</span>
-            </button>
+            )}
           </div>
-        }
-      />
 
-      {/* Selector de Establecimiento & Indicadores */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-        {/* Selector de Establecimiento */}
-        <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <Building2 className="h-3.5 w-3.5 text-teal-600" />
-                Establecimiento de Salud
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
-                  {userScope.label}
-                </span>
-                <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-md bg-teal-50 text-teal-700 border border-teal-200/60">
-                  SISMED: {selectedFacilityCode || "---"}
-                </span>
-              </div>
-            </div>
-
+          {canChangeFacility && (
+            <div className="hidden w-72 md:block">
             {/* Custom dropdown selector */}
             <div className="relative">
               <button
@@ -519,90 +459,204 @@ export const AnalysisExclusionsModule: React.FC = () => {
                 </>
               )}
             </div>
-          </div>
+            </div>
+          )}
 
-          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span className="flex items-center gap-1.5">
-              <Info className="h-3.5 w-3.5 text-teal-600" />
-              La lista de exclusión aplica únicamente a este código SISMED
-            </span>
-            <button
-              onClick={loadExclusions}
-              className="p-1 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 transition-colors"
-              title="Recargar datos"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin text-teal-600" : ""}`} />
-            </button>
-          </div>
-        </div>
-
-        {/* KPIs */}
-        <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <KpiCard
-            label="Total Excluidos"
-            value={totalCount}
-            icon={<Ban className="h-5 w-5" />}
-            tone={totalCount > 0 ? "warning" : "neutral"}
-            hint="Medicamentos fuera del análisis"
-          />
-          <KpiCard
-            label="Con Motivo Detallado"
-            value={withReasonCount}
-            icon={<FileText className="h-5 w-5" />}
-            tone="info"
-            hint="Registros fundamentados"
-          />
-          <KpiCard
-            label="Última Actualización"
-            value={lastUpdated}
-            icon={<Layers className="h-5 w-5" />}
-            tone="neutral"
-            hint="Fecha del último cambio"
-          />
-        </div>
-      </div>
-
-      {/* Main Table Card */}
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        {/* Barra de Búsqueda y Acciones Rápidas */}
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="relative w-full sm:w-80">
-            <Search className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Buscar por código, descripción o motivo..."
-              className={filterInputClass + " pl-9"}
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-            <span className="text-xs font-semibold text-slate-500">
-              Mostrando <strong className="text-slate-800">{filteredExclusions.length}</strong> de {totalCount} medicamentos
-            </span>
+          <div className="ml-auto hidden items-center gap-2 md:flex">
             {exclusions.length > 0 && (
               <button
                 onClick={() => setIsClearAllDialogOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors border border-rose-200"
+                className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-rose-200 px-3 text-xs font-bold text-rose-600 hover:bg-rose-50"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Vaciar Lista
+                Vaciar lista
               </button>
             )}
+            <div className="relative shrink-0" ref={excelDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setIsExcelDropdownOpen(!isExcelDropdownOpen)}
+                className="inline-flex items-center gap-2 h-10 px-3.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 whitespace-nowrap"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-teal-600" />
+                <span>Opciones Excel</span>
+                <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${isExcelDropdownOpen ? "rotate-180" : ""}`} />
+              </button>
+              {isExcelDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-60 rounded-2xl bg-white border border-slate-200 shadow-xl p-1.5 z-30 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExcelDropdownOpen(false);
+                      setUploadedFile(null);
+                      setParsedPreview(null);
+                      setIsUploadModalOpen(true);
+                    }}
+                    className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-teal-700 hover:bg-teal-50 transition-colors"
+                  >
+                    <UploadCloud className="h-4 w-4 text-teal-600 shrink-0" />
+                    <div className="flex flex-col">
+                      <span>Carga Masiva Excel</span>
+                      <span className="text-[10px] text-teal-600/70 font-normal">Importar medicamentos en lote</span>
+                    </div>
+                  </button>
+
+                  <div className="my-1 border-t border-slate-100" />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExcelDropdownOpen(false);
+                      requirementExclusionService.downloadTemplate();
+                    }}
+                    className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100/80 transition-colors"
+                  >
+                    <Download className="h-4 w-4 text-slate-500 shrink-0" />
+                    <div className="flex flex-col">
+                      <span className="font-bold">Descargar Plantilla</span>
+                      <span className="text-[10px] text-slate-400 font-normal">Formato Excel de ejemplo</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExcelDropdownOpen(false);
+                      requirementExclusionService.exportExclusionsToExcel(exclusions, currentFacility.name, selectedFacilityCode);
+                    }}
+                    disabled={exclusions.length === 0}
+                    className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <div className="flex flex-col">
+                      <span className="font-bold">Exportar Lista (.xlsx)</span>
+                      <span className="text-[10px] text-slate-400 font-normal">Guardar medicamentos excluidos</span>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleOpenNewItem}
+              className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-xs font-bold text-white whitespace-nowrap shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Nuevo medicamento</span>
+            </button>
           </div>
+
+          {/* Celular: el botón principal es flotante (abajo); «…» abre el resto de acciones. */}
+          <FloatingActionButton icon={<Plus />} label="Nuevo medicamento" onClick={handleOpenNewItem} />
+          <button type="button" onClick={() => setActionsOpen(true)} aria-label="Más acciones" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 md:hidden">
+            <MoreHorizontal className="h-5 w-5" />
+          </button>
         </div>
 
-        {/* Tabla */}
-        <div className="overflow-x-auto">
+        {/* Celular, quien supervisa varios: de qué establecimiento es la lista; tocar abre el cambio. */}
+        {canChangeFacility && (
+          <button type="button" onClick={() => setActionsOpen(true)} className="flex w-full items-center gap-2 border-b border-slate-100 px-4 py-2 text-left text-[12.5px] text-slate-600 md:hidden">
+            <Building2 className="h-4 w-4 shrink-0 text-teal-600" />
+            <span className="min-w-0 flex-1 truncate font-semibold text-slate-800">{currentFacility.name}</span>
+            <span className="font-mono text-[11px] text-slate-400">{selectedFacilityCode}</span>
+            <ChevronDown className="h-4 w-4 text-slate-400" />
+          </button>
+        )}
+
+        <BottomSheet open={actionsOpen} title="Acciones" onClose={() => setActionsOpen(false)}>
+          {canChangeFacility && (
+            <div className="mb-4">
+              <p className="mb-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400">Establecimiento</p>
+            {/* Custom dropdown selector */}
+            <div className="relative">
+              <button
+                type="button"
+                disabled={!canChangeFacility}
+                onClick={() => canChangeFacility && setIsFacilityDropdownOpen(!isFacilityDropdownOpen)}
+                className={`w-full flex items-center justify-between text-left h-11 px-3.5 rounded-xl border border-slate-200 font-bold text-slate-800 text-sm transition-colors outline-none ${
+                  canChangeFacility
+                    ? "bg-slate-50/70 hover:bg-slate-100/80 cursor-pointer focus:ring-4 focus:ring-teal-100 focus:border-teal-500"
+                    : "bg-slate-50/50 cursor-default opacity-90"
+                }`}
+              >
+                <span className="truncate">
+                  {currentFacility.name} {currentFacility.category ? `(${currentFacility.category})` : ""}
+                </span>
+                {canChangeFacility ? (
+                  <ChevronDown className={`h-4 w-4 text-slate-400 shrink-0 transition-transform ${isFacilityDropdownOpen ? "rotate-180" : ""}`} />
+                ) : (
+                  <span className="text-[10px] text-slate-400 font-normal shrink-0 px-2 py-0.5 rounded bg-slate-100">
+                    Fijo
+                  </span>
+                )}
+              </button>
+
+              {canChangeFacility && isFacilityDropdownOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-20" 
+                    onClick={() => setIsFacilityDropdownOpen(false)} 
+                  />
+                  <div className="absolute top-full left-0 right-0 mt-1 z-30 bg-white rounded-xl border border-slate-200 shadow-xl max-h-72 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                    <div className="p-2 border-b border-slate-100 bg-slate-50">
+                      <div className="relative">
+                        <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={facilitySearch}
+                          onChange={e => setFacilitySearch(e.target.value)}
+                          placeholder="Buscar establecimiento o código..."
+                          className="w-full pl-8 pr-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white outline-none focus:border-teal-500"
+                          autoFocus
+                        />
+                      </div>
+                    </div>
+                    <div className="overflow-y-auto divide-y divide-slate-100 py-1">
+                      {filteredFacilities.length === 0 ? (
+                        <div className="px-4 py-3 text-center text-xs text-slate-400">
+                          No se encontraron establecimientos
+                        </div>
+                      ) : (
+                        filteredFacilities.map(f => (
+                          <button
+                            key={f.code}
+                            type="button"
+                            onClick={() => {
+                              setSelectedFacilityCode(f.code);
+                              setIsFacilityDropdownOpen(false);
+                              setFacilitySearch("");
+                            }}
+                            className={`w-full px-3 py-2 text-left text-xs font-semibold flex items-center justify-between hover:bg-teal-50/80 transition-colors ${
+                              f.code === selectedFacilityCode ? "bg-teal-50 text-teal-900 font-bold" : "text-slate-700"
+                            }`}
+                          >
+                            <span className="truncate pr-2">{f.name}</span>
+                            <span className="font-mono text-[10px] text-slate-400 shrink-0 px-1.5 py-0.5 rounded bg-slate-100">
+                              {f.code}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            </div>
+          )}
+          <div className="space-y-1">
+            <SheetAction icon={<UploadCloud className="h-5 w-5 text-teal-600" />} label="Carga masiva Excel" onClick={() => { setActionsOpen(false); setUploadedFile(null); setParsedPreview(null); setIsUploadModalOpen(true); }} />
+            <SheetAction icon={<Download className="h-5 w-5 text-slate-500" />} label="Descargar plantilla" onClick={() => { setActionsOpen(false); requirementExclusionService.downloadTemplate(); }} />
+            <SheetAction icon={<FileSpreadsheet className="h-5 w-5 text-emerald-600" />} label="Exportar lista (.xlsx)" disabled={exclusions.length === 0} onClick={() => { setActionsOpen(false); requirementExclusionService.exportExclusionsToExcel(exclusions, currentFacility.name, selectedFacilityCode); }} />
+            <SheetAction icon={<RefreshCw className="h-5 w-5 text-teal-600" />} label="Actualizar" onClick={() => { setActionsOpen(false); void loadExclusions(); }} />
+            {exclusions.length > 0 && (
+              <SheetAction icon={<Trash2 className="h-5 w-5 text-rose-600" />} label="Vaciar lista" danger onClick={() => { setActionsOpen(false); setIsClearAllDialogOpen(true); }} />
+            )}
+          </div>
+        </BottomSheet>
+
+        {/* Tabla (escritorio) */}
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-100/75">
@@ -637,9 +691,9 @@ export const AnalysisExclusionsModule: React.FC = () => {
                         !searchTerm ? (
                           <button
                             onClick={handleOpenNewItem}
-                            className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-white shadow-sm transition-colors"
+                            className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-xs font-bold text-white shadow-sm transition-colors"
                           >
-                            <Plus className="h-4 w-4 text-teal-400" />
+                            <Plus className="h-4 w-4" />
                             Agregar Primer Medicamento
                           </button>
                         ) : undefined
@@ -648,13 +702,13 @@ export const AnalysisExclusionsModule: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredExclusions.map((item, index) => (
+                pageRows.map((item, index) => (
                   <tr
                     key={item.id || item.sismedCode}
                     className="hover:bg-slate-50/80 transition-colors group"
                   >
                     <td className="px-4 py-3.5 text-xs font-semibold text-slate-400">
-                      {index + 1}
+                      {(page - 1) * PAGE_SIZE + index + 1}
                     </td>
                     <td className="px-4 py-3.5">
                       <span className="inline-flex items-center font-mono text-xs font-bold px-2 py-1 rounded-md bg-slate-100 text-slate-800 border border-slate-200">
@@ -702,6 +756,47 @@ export const AnalysisExclusionsModule: React.FC = () => {
               )}
             </tbody>
           </table>
+          <TablePagination page={page} pageSize={PAGE_SIZE} total={filteredExclusions.length} onPageChange={setPage} itemLabel="medicamentos" />
+        </div>
+
+        {/* Celular: tarjetas; la lista crece al bajar. */}
+        <div className="md:hidden">
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-sm font-semibold text-slate-400"><RefreshCw className="h-5 w-5 animate-spin text-teal-600" /> Cargando…</div>
+          ) : filteredExclusions.length === 0 ? (
+            <EmptyState
+              title={searchTerm ? "No se encontraron coincidencias" : "Sin medicamentos excluidos"}
+              description={searchTerm ? "Intente con otro término de búsqueda." : "Agregue un medicamento con el botón «+» o desde la carga masiva."}
+            />
+          ) : (
+            <>
+              <ul className="divide-y divide-slate-100">
+                {filteredExclusions.slice(0, mobileList.count).map(item => (
+                  <li key={item.id || item.sismedCode} className="flex items-center gap-3 px-4 py-3">
+                    {/* Sin fecha de registro: en el celular se confundía con la de vencimiento. */}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[14px] font-bold leading-snug text-slate-900">{item.description}</p>
+                      <p className="mt-0.5 text-[12px] text-slate-500">
+                        <span className="font-mono text-teal-700">{item.sismedCode}</span>
+                        {item.presentation && <> · {item.presentation}</>}
+                      </p>
+                      {item.reason && <p className="mt-1 text-[12px] italic text-slate-500">«{item.reason}»</p>}
+                    </div>
+                    {/* Acciones con ícono y borde, a la derecha y con espacio entre ellas para tocarlas sin error. */}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button onClick={() => handleOpenEditItem(item)} aria-label="Editar" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-teal-600 active:bg-teal-50">
+                        <Edit3 className="h-[18px] w-[18px]" />
+                      </button>
+                      <button onClick={() => setDeleteTarget(item)} aria-label="Eliminar" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 text-rose-600 active:bg-rose-50">
+                        <Trash2 className="h-[18px] w-[18px]" />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <LoadMoreSentinel hasMore={mobileList.hasMore} onLoadMore={mobileList.loadMore} shown={mobileList.count} total={filteredExclusions.length} itemLabel="medicamentos" />
+            </>
+          )}
         </div>
       </div>
 
