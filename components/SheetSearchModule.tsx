@@ -137,6 +137,7 @@ import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notif
 import { getExpirationState } from "../services/assignedIpressStock";
 import { KpiCard, KpiStrip, StatusChip, TableHeaderCell as HeaderCell } from "./ui/kit";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
+import type { StockSearchScope } from "./StockNetworkSearchModal";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
@@ -3180,6 +3181,9 @@ const SheetSearchModuleContent: React.FC = () => {
   const [networkSeed, setNetworkSeed] = useState<{ product?: StockProduct; query?: string }>({});
   /** Si se muestran las sugerencias bajo el buscador de la lista de establecimientos. */
   const [sheetSuggestOpen, setSheetSuggestOpen] = useState(false);
+  const [ungetSuggestOpen, setUngetSuggestOpen] = useState(false);
+  /** Dónde busca el buscador de medicamentos: la UNGET abierta o toda la región. */
+  const [networkScope, setNetworkScope] = useState<StockSearchScope>("unget");
   /**
    * Estado, no referencia: `prefetchRef` no provoca un render, así que el aviso de
    * «Descargando…» se habría quedado congelado en el diálogo.
@@ -3222,10 +3226,40 @@ const SheetSearchModuleContent: React.FC = () => {
     () => (sheetSearchDeferred.trim().length >= 2 ? suggestProducts(productosDeLaUnget, sheetSearchDeferred, 5) : []),
     [productosDeLaUnget, sheetSearchDeferred],
   );
-  const abrirBusquedaEnLaUnget = (seed: { product?: StockProduct; query?: string }) => {
+  const abrirBusquedaEnLaUnget = (seed: { product?: StockProduct; query?: string }, scope: StockSearchScope = "unget") => {
     setNetworkSeed(seed);
+    setNetworkScope(scope);
     setSheetSuggestOpen(false);
     setIsNetworkSearchOpen(true);
+  };
+
+  // Toda la región: el stock ya leído de todas las UNGET a la vista.
+  const filasDeLaRegion = useMemo(
+    () => (scriptUrls.length > 1 ? sources.flatMap((hoja) => dataBySource.get(hoja.id) || []) : []),
+    [sources, dataBySource, scriptUrls.length],
+  );
+  const coberturaRegion = useMemo(
+    () => ({
+      cargadas: sources.filter((hoja) => (dataBySource.get(hoja.id)?.length || 0) > 0).length,
+      total: sources.length,
+    }),
+    [sources, dataBySource],
+  );
+  const productosDeLaRegion = useMemo(
+    () => (viewLevel === "ungets" ? buildProductIndex(filasDeLaRegion) : []),
+    [viewLevel, filasDeLaRegion],
+  );
+  const ungetSearchDeferred = useDeferredValue(ungetSearchTerm);
+  const productosRegionSugeridos = useMemo(
+    () => (ungetSearchDeferred.trim().length >= 2 ? suggestProducts(productosDeLaRegion, ungetSearchDeferred, 5) : []),
+    [productosDeLaRegion, ungetSearchDeferred],
+  );
+  /** UNGET de un código de farmacia, para los resultados de toda la región. */
+  const ungetDelCodigo = (almcod: string): string => {
+    const codigo = String(almcod || "").trim().toUpperCase();
+    const establecimiento = allFacilities.find((f: any) => f?.code && codigo.startsWith(String(f.code).toUpperCase()));
+    const unget = establecimiento && allUngets.find((u: any) => String(u.id) === String(establecimiento.ungetId));
+    return unget ? formatDisplayName(unget.name) : "";
   };
 
   // Ctrl+K abre el buscador. Se anula el atajo del navegador solo cuando hay una UNGET
@@ -4826,7 +4860,7 @@ function processSheet(sheet) {
       {/* Cabecera del módulo: volver, dónde estoy y las acciones. En el panel regional no hay
           cabecera, se empieza por los KPIs. En el celular el nivel va en la cabecera de la app
           (useModuleHeaderOverride) y las acciones en el botón de tres puntos. */}
-      <div className="px-4 pb-2 pt-3 sm:px-10 sm:pb-3 sm:pt-6 lg:px-14 xl:px-16">
+      <div className={`px-0 pt-0 sm:px-10 sm:pb-3 sm:pt-6 lg:px-14 xl:px-16 ${viewLevel === "data" ? "pb-0" : "pb-1"}`}>
         {viewLevel !== "ungets" && (
         <div className="hidden items-center gap-2 sm:flex sm:gap-3">
           {/* La flecha está a la izquierda, donde se mira, y dice a dónde lleva. */}
@@ -4902,7 +4936,7 @@ function processSheet(sheet) {
           // establecimientos, y pulsarlos aquí no cambiaba nada a la vista.
           const clickable = viewLevel === "sheets";
           return (
-            <div className={viewLevel === "ungets" ? "" : "mt-2 sm:mt-3"}>
+            <div className={viewLevel === "ungets" ? "" : "sm:mt-3"}>
               <KpiStrip cols="md:grid-cols-3">
                 <KpiCard watermark tone="success" icon={<Wifi />} label="En línea" value={summary.online} hint="actualizados en la última hora" onClick={clickable ? () => only(true, false, false) : undefined} active={clickable && !allOn && filter_emerald && !filter_amber && !filter_red} />
                 <KpiCard watermark tone="warning" icon={<FileClock />} label="Desconectados" value={summary.delayed} hint="entre 1 y 24 horas sin actualizar" onClick={clickable ? () => only(false, true, false) : undefined} active={clickable && !allOn && !filter_emerald && filter_amber && !filter_red} />
@@ -4922,7 +4956,7 @@ function processSheet(sheet) {
         const lots = activeSheetData.filter((row) => rowMatchesPharmacy(readAlmCode(row), dataFilterPharmacy)).length;
         const toggle = (value: string) => setDataFilterExpiration(dataFilterExpiration === value ? "all" : value);
         return (
-          <div className="mb-2 px-4 sm:mb-4 sm:px-10 lg:px-14 xl:px-16">
+          <div className="mb-2 px-0 sm:mb-4 sm:px-10 lg:px-14 xl:px-16">
             <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
               <KpiCard watermark tone="info" icon={<Package />} label="Lotes" value={lots.toLocaleString("es-PE")} hint="en la hoja del establecimiento" onClick={() => setDataFilterExpiration("all")} active={dataFilterExpiration === "all"} />
               <KpiCard watermark tone="warning" icon={<Clock />} label="Por vencer" value={activeSheetExpirationInfo.expiringThisMonthCount.toLocaleString("es-PE")} hint={`en los próximos ${expiryWindowDays} días`} onClick={() => toggle("expiring")} active={dataFilterExpiration === "expiring"} />
@@ -5381,17 +5415,24 @@ function processSheet(sheet) {
       {/* BUSCADOR EN TODA LA RED DE LA UNGET */}
       <StockNetworkSearchModal
         isOpen={isNetworkSearchOpen}
-        onClose={() => { setIsNetworkSearchOpen(false); setNetworkSeed({}); }}
+        onClose={() => { setIsNetworkSearchOpen(false); setNetworkSeed({}); setNetworkScope("unget"); }}
         initialProduct={networkSeed.product}
         initialQuery={networkSeed.query}
+        scope={networkScope}
+        // Dentro de una UNGET se puede ampliar a toda la región; desde el panel regional
+        // ya se busca en toda la región.
+        onScopeChange={hayPanelRegional && selectedUngetIndex !== null ? setNetworkScope : undefined}
+        ungetOfCode={ungetDelCodigo}
         ungetName={formatDisplayName(
           (selectedUngetIndex !== null && scriptUrls[selectedUngetIndex]?.name) || "la UNGET",
         )}
-        rows={filasDeLaUnget}
+        rows={networkScope === "region" ? filasDeLaRegion : filasDeLaUnget}
         facilities={allFacilities}
-        sheetsLoaded={coberturaBusqueda.cargadas}
-        sheetsTotal={coberturaBusqueda.total}
-        onCompleteSearch={async () => {
+        sheetsLoaded={networkScope === "region" ? coberturaRegion.cargadas : coberturaBusqueda.cargadas}
+        sheetsTotal={networkScope === "region" ? coberturaRegion.total : coberturaBusqueda.total}
+        // Leer lo que falta solo se ofrece en la UNGET: en toda la región serían cientos
+        // de hojas, y eso hay que decidirlo antes.
+        onCompleteSearch={networkScope === "region" ? undefined : async () => {
           setIsCompletingSearch(true);
           try {
             await prefetchPendingSheets();
@@ -5807,7 +5848,7 @@ function processSheet(sheet) {
         <div className={`sticky z-30 flex flex-col gap-4 ${
           viewLevel === "data"
             ? "top-0 bg-white sm:static p-3 sm:p-5 border-b border-slate-100"
-            : "-top-2.5 bg-[#f6f7f9] px-1 py-2 sm:static sm:px-0 sm:pt-0 sm:pb-4"
+            : "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:static sm:pt-0 sm:pb-4"
         }`}>
           {/* Search & Actions */}
           <div className="flex gap-3 items-center justify-between w-full flex-row">
@@ -5819,9 +5860,19 @@ function processSheet(sheet) {
                 <div className="relative w-full text-slate-800">
                   <input
                     type="text"
-                    placeholder="Buscar UNGET..."
+                    placeholder="Buscar UNGET o medicamento…"
+                    aria-label="Buscar UNGET o medicamento"
                     value={ungetSearchTerm}
-                    onChange={(e) => setUngetSearchTerm(e.target.value)}
+                    onChange={(e) => { setUngetSearchTerm(e.target.value); setUngetSuggestOpen(true); }}
+                    onFocus={() => setUngetSuggestOpen(true)}
+                    onBlur={() => window.setTimeout(() => setUngetSuggestOpen(false), 150)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setUngetSuggestOpen(false);
+                      if (e.key === "Enter" && filteredUngets.length === 0 && ungetSearchTerm.trim()) {
+                        setUngetSuggestOpen(false);
+                        abrirBusquedaEnLaUnget({ query: ungetSearchTerm }, "region");
+                      }
+                    }}
                     className="w-full pl-10 pr-12 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
                   />
                   {ungetSearchTerm && (
@@ -5834,6 +5885,75 @@ function processSheet(sheet) {
                       >
                         <X className="h-3.5 w-3.5 stroke-[2.5]" />
                       </button>
+                    </div>
+                  )}
+                  {/* Sugerencias del panel regional: UNGET que coinciden y medicamentos de
+                      toda la región (el mismo patrón que el buscador de establecimientos). */}
+                  {ungetSuggestOpen && ungetSearchTerm.trim().length >= 2 && (
+                    <div className="absolute left-0 right-0 top-full z-40 mt-1.5 overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-xl">
+                      <div className="max-h-[60vh] overflow-y-auto py-1.5">
+                        <p className="px-3.5 pb-1 pt-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400">UNGET</p>
+                        {filteredUngets.length === 0 ? (
+                          <p className="px-3.5 py-2 text-[13px] text-slate-400">Ninguna UNGET coincide.</p>
+                        ) : (
+                          filteredUngets.slice(0, 4).map((config) => {
+                            const idx = scriptUrls.findIndex((u) => u.url === config.url && u.name === config.name);
+                            return (
+                              <button
+                                key={config.url}
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => { setUngetSuggestOpen(false); handleSelectUnget(idx); }}
+                                className="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-slate-50"
+                              >
+                                <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
+                                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800">{formatDisplayName(config.name)}</span>
+                              </button>
+                            );
+                          })
+                        )}
+                        <p className="mt-1 border-t border-slate-100 px-3.5 pb-1 pt-2.5 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                          Medicamentos en la región
+                        </p>
+                        {productosRegionSugeridos.length === 0 ? (
+                          <p className="px-3.5 py-2 text-[13px] text-slate-400">
+                            {coberturaRegion.cargadas === 0 ? "Todavía no se ha leído el stock de ningún establecimiento." : "Ningún medicamento coincide."}
+                          </p>
+                        ) : (
+                          productosRegionSugeridos.map((producto) => (
+                            <button
+                              key={producto.key}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => { setUngetSuggestOpen(false); abrirBusquedaEnLaUnget({ product: producto }, "region"); }}
+                              className="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-slate-50"
+                            >
+                              <Pill className="h-4 w-4 shrink-0 text-teal-600" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[13px] font-semibold text-slate-800">{producto.producto || producto.codigoSismed}</span>
+                                <span className="block text-[11px] text-slate-400">
+                                  {producto.codigoSismed && <span className="font-mono">{producto.codigoSismed} · </span>}
+                                  en {producto.establecimientos} establecimiento{producto.establecimientos === 1 ? "" : "s"}
+                                </span>
+                              </span>
+                            </button>
+                          ))
+                        )}
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => { setUngetSuggestOpen(false); abrirBusquedaEnLaUnget({ query: ungetSearchTerm }, "region"); }}
+                          className="mt-1 flex w-full items-center gap-3 border-t border-slate-100 px-3.5 py-2.5 text-left text-[13px] font-bold text-teal-700 hover:bg-teal-50"
+                        >
+                          <Search className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">Buscar «{ungetSearchTerm.trim()}» en toda la región</span>
+                        </button>
+                        {coberturaRegion.cargadas < coberturaRegion.total && (
+                          <p className="px-3.5 pb-1.5 text-[11px] text-amber-700">
+                            Stock leído de {coberturaRegion.cargadas} de {coberturaRegion.total} establecimientos.
+                          </p>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -6373,7 +6493,7 @@ function processSheet(sheet) {
             </div>
           ) : (
             <div
-              className={`flex flex-col gap-6 ${viewLevel === "data" ? "p-4 sm:p-6 pb-4 sm:pb-4" : "px-1 pt-2 pb-32 sm:p-0 sm:pb-6"}`}
+              className={`flex flex-col gap-6 ${viewLevel === "data" ? "p-4 sm:p-6 pb-4 sm:pb-4" : "px-0 pt-2 pb-32 sm:p-0 sm:pb-6"}`}
             >
               {/* NIVEL 1: PANEL REGIONAL. Una tarjeta por UNGET (una fila en el celular) con
                   dónde está, cuántos establecimientos tiene y cómo están de actualizados.
