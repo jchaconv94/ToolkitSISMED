@@ -270,7 +270,7 @@ const AuthenticatedApp: React.FC = () => {
 
             <div className="flex-1 flex flex-col h-[100dvh] overflow-hidden relative">
                 {/* Cabecera: miga de pan, acciones del módulo y el usuario */}
-                <header className="sticky top-0 z-[1000] flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm sm:px-6 md:h-16 md:flex-nowrap lg:px-8">
+                <header className="sticky top-0 z-[1000] flex h-14 shrink-0 items-center gap-x-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm sm:px-6 md:h-16 lg:px-8">
                     {/* Teléfono, en Inicio: la marca; con una sección abierta, su nombre y la flecha. */}
                     {currentView === 'HOME' && (
                         <div className="flex min-w-0 items-center gap-2 md:hidden">
@@ -323,10 +323,9 @@ const AuthenticatedApp: React.FC = () => {
                     <div className="mx-4 hidden min-w-0 flex-1 justify-center md:flex">
                         <ToolSearchTrigger onOpen={abrirBuscador} className="w-full max-w-[420px]" />
                     </div>
-                    <div className="ml-auto flex h-14 shrink-0 items-center gap-3 md:ml-0 md:h-auto">
+                    <div className="ml-auto flex shrink-0 items-center gap-3 md:ml-0">
                         <div id={MODULE_HEADER_SLOT_ID} className="flex shrink-0 items-center gap-2 empty:hidden" />
-                        {!(currentView === 'HOME' && !openSection) && (
-                            <button
+                        <button
                                 type="button"
                                 onClick={abrirBuscador}
                                 aria-label="Buscar herramienta"
@@ -335,17 +334,10 @@ const AuthenticatedApp: React.FC = () => {
                             >
                                 <Search className="h-5 w-5" />
                             </button>
-                        )}
                         {user && (
                             <UserMenu user={user} onOpenProfile={() => setCurrentView('PROFILE')} onLogout={logout} />
                         )}
                     </div>
-                    {/* Teléfono, en Inicio: el buscador debajo de la marca, como en el diseño aprobado. */}
-                    {currentView === 'HOME' && !openSection && (
-                        <div className="basis-full pb-2.5 md:hidden">
-                            <ToolSearchTrigger onOpen={abrirBuscador} className="w-full" />
-                        </div>
-                    )}
                 </header>
                 <ToolSearchDialog
                     open={buscadorAbierto}
