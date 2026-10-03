@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  AlertTriangle, ArrowRightLeft, Bell, CheckCircle2, ChevronRight, Clock, Copy, Database, Download, History, KeyRound,
-  Loader2, Monitor, MonitorSmartphone, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
+  AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronRight, Clock, Copy, Database, History, KeyRound,
+  Loader2, Monitor, MonitorSmartphone, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, SlidersHorizontal, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -22,14 +22,11 @@ import {
 } from "./ui/kit";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
-import { ModuleHeaderPortal } from "./ui/ModuleHeaderSlot";
+import { BottomSheet } from "./ui/BottomSheet";
+import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useDropdownPosition } from "../hooks/useDropdownPosition";
 
-type ModuleTab = "establishments";
 
-const MODULE_TABS: Array<{ id: ModuleTab; label: string; icon: React.ElementType }> = [
-  { id: "establishments", label: "Establecimientos", icon: KeyRound },
-];
 
 const PAGE_SIZE = 10;
 
@@ -83,7 +80,6 @@ type PendingAction =
 
 /** Claves de envío y las PC de cada establecimiento, en una sola pestaña. */
 export const AdminSendKeysModule: React.FC = () => {
-  const [tab, setTab] = useState<ModuleTab>("establishments");
 
   const [keys, setKeys] = useState<SendKeyRow[]>([]);
   const [devices, setDevices] = useState<Awaited<ReturnType<typeof toolkitDevicesApi.overview>>>([]);
@@ -180,58 +176,9 @@ export const AdminSendKeysModule: React.FC = () => {
     }
   };
 
-  const tabs = MODULE_TABS;
-  const bell = (
-    <AlertsBell
-      alerts={alerts}
-      busy={busy}
-      onIgnore={(row) => void ignore(row)}
-      onIgnoreAll={() => void ignoreAll()}
-      onRebind={(row) => setPending({ kind: "rebind", row })}
-    />
-  );
-
   return (
     <div className="space-y-4">
-      {/* En el celular la fila es solo de las pestañas: la campana va a la cabecera. */}
-      <ModuleHeaderPortal><span className="sm:hidden">{bell}</span></ModuleHeaderPortal>
-
-      <div className="flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:flex-none" role="tablist">
-          {tabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={tab === id}
-              onClick={() => setTab(id)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-1.5 text-[12.5px] font-bold transition-colors sm:flex-none ${
-                tab === id ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              <Icon className="h-4 w-4 shrink-0" /> <span className="truncate">{label}</span>
-            </button>
-          ))}
-        </div>
-        {tab === "establishments" && (
-          <div className="ml-auto hidden items-center gap-2 sm:flex">
-            {latest && (
-              <span title="Última versión publicada del Toolkit" className="hidden h-[42px] items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs text-teal-800 lg:flex">
-                <Download className="h-4 w-4" /> Toolkit vigente <b>v{latest}</b>
-              </span>
-            )}
-            {latestSismed && (
-              <span title="La más alta que reporta alguna PC" className="hidden h-[42px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 lg:flex">
-                <Database className="h-4 w-4 text-slate-400" /> SISMED vigente <b>v{latestSismed}</b>
-              </span>
-            )}
-            {bell}
-          </div>
-        )}
-      </div>
-
-      {tab === "establishments" && (
-        loading ? (
+      {loading ? (
           <div className="flex h-64 items-center justify-center gap-2 text-sm font-semibold text-slate-500">
             <Loader2 className="h-5 w-5 animate-spin text-teal-600" /> Cargando establecimientos…
           </div>
@@ -253,9 +200,10 @@ export const AdminSendKeysModule: React.FC = () => {
             onGenerate={(row) => void generate(row)}
             onIgnore={(row) => void ignore(row)}
             onPending={setPending}
+            alerts={alerts}
+            onIgnoreAll={() => void ignoreAll()}
           />
-        )
-      )}
+        )}
 
       {newKey && <NewKeyModal row={newKey.row} secret={newKey.key} onCopy={() => void copyKey()} onClose={() => setNewKey(null)} />}
 
@@ -285,92 +233,6 @@ export const AdminSendKeysModule: React.FC = () => {
   );
 };
 
-const BELL_WIDTH = 420;
-
-/** Intentos bloqueados sin revisar: no ocupan la pantalla, se abren desde la campana. */
-const AlertsBell: React.FC<{
-  alerts: SendKeyRow[];
-  busy: boolean;
-  onIgnore: (row: SendKeyRow) => void;
-  onIgnoreAll: () => void;
-  onRebind: (row: SendKeyRow) => void;
-}> = ({ alerts, busy, onIgnore, onIgnoreAll, onRebind }) => {
-  const [open, setOpen] = useState(false);
-  const width = Math.min(BELL_WIDTH, typeof window === "undefined" ? BELL_WIDTH : window.innerWidth - 24);
-  const { triggerRef, menuStyles } = useDropdownPosition(open, { align: "right", customWidth: width });
-
-  return (
-    <div ref={triggerRef} className="relative">
-      <button
-        type="button"
-        aria-label={alerts.length ? `${alerts.length} intentos de envío bloqueados` : "Sin intentos de envío bloqueados"}
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={`relative flex h-10 w-10 items-center justify-center rounded-xl border bg-white transition-colors sm:h-[42px] sm:w-[42px] ${
-          open ? "border-red-300 ring-2 ring-red-500/15" : "border-slate-200 hover:bg-slate-50"
-        }`}
-      >
-        <Bell className="h-5 w-5 text-slate-600" />
-        {alerts.length > 0 && (
-          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10.5px] font-black text-white ring-2 ring-white">
-            {alerts.length > 99 ? "99+" : alerts.length}
-          </span>
-        )}
-      </button>
-      {open && createPortal(
-        <>
-          <div className="fixed inset-0 z-[9998]" onClick={() => setOpen(false)} />
-          <div
-            role="dialog"
-            aria-label="Envíos bloqueados"
-            style={{ ...menuStyles, width }}
-            className="fixed z-[9999] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_25px_-5px_rgba(0,0,0,0.12),0_8px_10px_-6px_rgba(0,0,0,0.05)] animate-in fade-in slide-in-from-top-2 duration-150"
-          >
-            <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-              <ShieldAlert className="h-4 w-4 text-red-600" />
-              <span className="text-[13px] font-black text-slate-800">Envíos bloqueados</span>
-              <span className="text-[11.5px] text-slate-400">{alerts.length ? `${alerts.length} sin revisar` : "ninguno"}</span>
-              {alerts.length > 1 && (
-                <button type="button" disabled={busy} onClick={onIgnoreAll} className="ml-auto rounded-lg px-2 py-1 text-[11.5px] font-bold text-slate-500 hover:bg-slate-100 disabled:opacity-60">
-                  Ignorar todos
-                </button>
-              )}
-            </div>
-            {alerts.length === 0 ? (
-              <p className="flex items-center gap-2 px-4 py-5 text-[12.5px] text-slate-500">
-                <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Ninguna PC intentó enviar sin permiso.
-              </p>
-            ) : (
-              <ul className="max-h-[60vh] divide-y divide-slate-100 overflow-y-auto">
-                {alerts.map((row) => (
-                  <li key={row.code} className="space-y-2 px-4 py-3">
-                    <p className="text-[12.5px] leading-snug text-slate-700">
-                      <b>{row.alert!.deviceName || "Una PC sin identificar"}</b> intentó enviar el stock de <b>{row.name}</b>{" "}
-                      <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
-                    </p>
-                    <p className="text-[11.5px] text-slate-500">
-                      {relativeTime(row.alert!.at)}{row.deviceName ? <> · vinculado a <b className="text-slate-700">{row.deviceName}</b></> : null}
-                    </p>
-                    <div className="flex gap-2">
-                      <button type="button" disabled={busy} onClick={() => onIgnore(row)} className="h-8 rounded-lg border border-slate-200 px-3 text-[11.5px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60">
-                        Ignorar
-                      </button>
-                      <button type="button" disabled={busy} onClick={() => { setOpen(false); onRebind(row); }} className="flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-[11.5px] font-bold text-white hover:bg-red-700 disabled:opacity-60">
-                        <ArrowRightLeft className="h-3.5 w-3.5" /> Cambiar a este equipo
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </>,
-        document.body,
-      )}
-    </div>
-  );
-};
-
 const FILTER_ORDER: EstablishmentFilter[] = ["all", "alerts", "protected", "waiting", "none", "toolkitOutdated", "toolkitNone"];
 
 const EstablishmentsPanel: React.FC<{
@@ -381,7 +243,9 @@ const EstablishmentsPanel: React.FC<{
   onGenerate: (row: SendKeyRow) => void;
   onIgnore: (row: SendKeyRow) => void;
   onPending: (action: PendingAction) => void;
-}> = ({ rows, latest, latestSismed, busy, onGenerate, onIgnore, onPending }) => {
+  alerts: SendKeyRow[];
+  onIgnoreAll: () => void;
+}> = ({ rows, latest, latestSismed, busy, onGenerate, onIgnore, onPending, alerts, onIgnoreAll }) => {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<EstablishmentFilter>("all");
   const [sismedFilter, setSismedFilter] = useState<SismedFilter>("all");
@@ -401,6 +265,9 @@ const EstablishmentsPanel: React.FC<{
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   useEffect(() => { setPage(1); }, [search, filter, sismedFilter]);
+  // En el celular no hay páginas: la lista crece al bajar.
+  const mobileList = useIncrementalCount(filtered.length, `${search}|${filter}|${sismedFilter}`, 20);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const showUnget = useMemo(() => new Set(rows.map((r) => r.ungetId || "")).size > 1, [rows]);
   const selected = useMemo(() => rows.find((r) => r.code === selectedCode) || null, [rows, selectedCode]);
@@ -435,12 +302,31 @@ const EstablishmentsPanel: React.FC<{
       </KpiStrip>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center sm:px-4">
-          <div className="relative w-full sm:max-w-xs">
+        {/* Intentos bloqueados: solo aparece si hay alguno sin revisar. Cada uno se resuelve en su detalle. */}
+        {alerts.length > 0 && (
+          <div className="flex items-start gap-3 border-b border-red-100 bg-red-50/70 px-4 py-2.5 text-[12.5px] text-red-800 md:items-center">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-600 md:mt-0" />
+            {/* En el celular las acciones van debajo del texto, a la izquierda; en escritorio, a la derecha. */}
+            <div className="flex min-w-0 flex-1 flex-col gap-1 md:flex-row md:items-center md:gap-3">
+              <span className="font-semibold">{alerts.length === 1 ? "1 intento de envío bloqueado sin revisar" : `${alerts.length} intentos de envío bloqueados sin revisar`}</span>
+              <span className="flex items-center gap-4 md:ml-auto md:gap-3">
+                <button type="button" onClick={() => setFilter("alerts")} className="font-bold text-red-700 hover:underline">Ver</button>
+                <button type="button" disabled={busy} onClick={onIgnoreAll} className="font-bold text-slate-500 hover:underline disabled:opacity-60">Ignorar todos</button>
+              </span>
+            </div>
+          </div>
+        )}
+        <div className="flex items-center gap-2 border-b border-slate-100 p-3 md:px-4">
+          <div className="relative min-w-0 flex-1 md:max-w-xs">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${filterInputClass} pl-9`} />
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex">
+          {/* Celular: un botón abre los filtros abajo. */}
+          <button type="button" onClick={() => setFiltersOpen(true)} aria-label="Filtros" className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 md:hidden">
+            <SlidersHorizontal className="h-4 w-4" />
+            {(filter !== "all" || sismedFilter !== "all") && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />}
+          </button>
+          <div className="ml-auto hidden gap-2 md:flex">
             <select value={filter} onChange={(e) => setFilter(e.target.value as EstablishmentFilter)} aria-label="Estado" className={`${filterInputClass} sm:w-60`}>
               {FILTER_ORDER.map((f) => (
                 <option key={f} value={f}>{f === "all" ? "Estado: todos" : ESTABLISHMENT_FILTER_LABEL[f]} ({summary.counts[f]})</option>
@@ -456,6 +342,21 @@ const EstablishmentsPanel: React.FC<{
             </select>
           </div>
         </div>
+
+        <BottomSheet open={filtersOpen} title="Filtros" onClose={() => setFiltersOpen(false)}>
+          <p className="mb-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400">Estado</p>
+          <div className="space-y-1">
+            {FILTER_ORDER.map((f) => (
+              <SheetOption key={f} active={filter === f} label={f === "all" ? "Todos" : ESTABLISHMENT_FILTER_LABEL[f]} count={summary.counts[f]} onClick={() => { setFilter(f); setFiltersOpen(false); }} />
+            ))}
+          </div>
+          <p className="mb-1.5 mt-4 text-[11px] font-black uppercase tracking-wider text-slate-400">Versión del SISMED</p>
+          <div className="space-y-1">
+            {([["all", "Todas"], ["outdated", "Desactualizado"], ...sismedVersions.map((v) => [`v:${v}`, `v${v}${v === latestSismed ? " (vigente)" : ""}`]), ["none", "Sin dato"]] as Array<[SismedFilter, string]>).map(([value, label]) => (
+              <SheetOption key={value} active={sismedFilter === value} label={label} onClick={() => { setSismedFilter(value); setFiltersOpen(false); }} />
+            ))}
+          </div>
+        </BottomSheet>
 
         {filtered.length === 0 ? (
           <EmptyState
@@ -523,41 +424,49 @@ const EstablishmentsPanel: React.FC<{
               </table>
             </div>
 
-            {/* Móvil */}
+            {/* Móvil: tarjetas con lo esencial; el resto, al tocar (detalle). */}
             <div className="space-y-2 p-3 md:hidden">
-              {pageRows.map((row) => {
+              {filtered.slice(0, mobileList.count).map((row) => {
                 const state = sendKeyState(row);
                 const device = latestDevice(row);
                 const pc = row.deviceName || device?.deviceName;
+                const tk = toolkitState(row, latest) === "outdated";
+                const sm = sismedState(row, latestSismed) === "outdated";
                 return (
-                  <div key={row.code} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                    <span className={`absolute inset-y-0 left-0 w-1 ${STATE_STYLE[state].bar}`} />
-                    <button type="button" disabled={state === "none"} onClick={() => setSelectedCode(row.code)} className="flex w-full items-start justify-between gap-2 p-3 pl-4 text-left">
+                  <div key={row.code} className="rounded-2xl border border-slate-200 bg-white p-3 text-[13px]">
+                    <button type="button" disabled={state === "none"} onClick={() => setSelectedCode(row.code)} className="flex w-full items-start justify-between gap-2 text-left">
                       <span className="min-w-0">
-                        <span className="block truncate text-[13.5px] font-black text-slate-800">{row.name}</span>
                         <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
+                        <span className="block truncate font-black text-slate-800">{row.name}</span>
+                        {pc && (
+                          <span className="block text-[11.5px] leading-snug text-slate-400">
+                            {pc}
+                            {device?.version && <> · <span className={tk ? "font-semibold text-amber-700" : ""}>Toolkit v{device.version}</span></>}
+                            {device?.sismedVersion && <> · <span className={sm ? "font-semibold text-amber-700" : ""}>SISMED v{device.sismedVersion}</span></>}
+                          </span>
+                        )}
                       </span>
                       <StateChip state={state} />
                     </button>
-                    <div className="mb-3 ml-4 mr-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
-                      <span className="flex min-w-0 items-center gap-1"><Monitor className="h-3.5 w-3.5 shrink-0" />{pc ? <b className="truncate text-slate-700">{pc}</b> : "Sin equipo aún"}</span>
-                      <ToolkitVersion device={device} state={toolkitState(row, latest)} prefix="TK " />
-                      <SismedVersion device={device} state={sismedState(row, latestSismed)} prefix="SISMED " />
-                      <span className="ml-auto flex shrink-0 items-center gap-1"><Clock className="h-3 w-3" />{relativeTime(lastSendAt(row))}</span>
-                    </div>
-                    {state === "none" && (
-                      <div className="px-3 pb-3 pl-4">
-                        <button type="button" disabled={busy} onClick={() => onGenerate(row)} className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-teal-600 text-xs font-bold text-white disabled:opacity-60">
+                    <div className="mt-2.5 flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-[11.5px] text-slate-500">Último envío: {relativeTime(lastSendAt(row))}</span>
+                      {state === "none" && (
+                        <button type="button" disabled={busy} onClick={() => onGenerate(row)} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-teal-600 px-3.5 text-xs font-bold text-white disabled:opacity-60">
                           <KeyRound className="h-3.5 w-3.5" /> Generar clave
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
+            <div className="md:hidden">
+              <LoadMoreSentinel hasMore={mobileList.hasMore} onLoadMore={mobileList.loadMore} shown={mobileList.count} total={filtered.length} itemLabel="establecimientos" />
+            </div>
 
+            <div className="hidden md:block">
             <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} itemLabel="establecimientos" />
+            </div>
           </>
         )}
       </div>
@@ -585,6 +494,14 @@ const EstablishmentsPanel: React.FC<{
     </div>
   );
 };
+
+/** Una opción de filtro en el panel inferior del celular. */
+const SheetOption: React.FC<{ active: boolean; label: string; count?: number; onClick: () => void }> = ({ active, label, count, onClick }) => (
+  <button type="button" onClick={onClick} className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-[14px] font-semibold ${active ? "bg-teal-50 text-teal-800" : "text-slate-700 hover:bg-slate-50"}`}>
+    <span>{label}</span>
+    {count !== undefined && <span className={`text-[12px] font-bold ${active ? "text-teal-700" : "text-slate-400"}`}>{count}</span>}
+  </button>
+);
 
 const POPOVER_WIDTH = 280;
 
