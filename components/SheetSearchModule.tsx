@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from "react";
 import { toast } from "sonner";
 import {
   Search,
@@ -51,6 +51,7 @@ import {
   Camera,
   CheckSquare,
   Square,
+  Pill,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
@@ -124,6 +125,8 @@ import {
   buildProductIndex,
   productKeyOf,
   readStockField,
+  suggestProducts,
+  type StockProduct,
 } from "../services/stockNetworkSearch";
 import {
   DeficiencyCaptureModal,
@@ -132,7 +135,9 @@ import {
 import { noticeSettingsApi } from "../services/noticeSettings";
 import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
 import { getExpirationState } from "../services/assignedIpressStock";
-import { KpiCard, KpiStrip, TableHeaderCell as HeaderCell } from "./ui/kit";
+import { KpiCard, KpiStrip, StatusChip, TableHeaderCell as HeaderCell } from "./ui/kit";
+import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
+import type { StockSearchScope } from "./StockNetworkSearchModal";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
@@ -2717,19 +2722,23 @@ const SheetSearchModuleContent: React.FC = () => {
   }, [scriptUrls, isConfigLoading]);
 
   // La precarga se ejecuta con la versión más reciente del estado.
-  const prefetchFnRef = useRef<() => Promise<void>>(async () => {});
+  const prefetchFnRef = useRef<(opciones?: { region?: boolean; limit?: number }) => Promise<void>>(async () => {});
   useEffect(() => {
     prefetchFnRef.current = prefetchPendingSheets;
   });
 
   // Arranca cuando el directorio ya está en pantalla y nada más está cargando.
+  // En el panel regional (más de una UNGET a la vista) se va leyendo toda la región, para
+  // que el buscador de medicamentos de la región tenga dónde buscar.
+  const precargaRegional = viewLevel === "ungets" && scriptUrls.length > 1;
   useEffect(() => {
-    if (isConfigLoading || isLoading || isSilentSyncing || selectedUngetIndex === null) return;
+    if (isConfigLoading || isLoading || isSilentSyncing) return;
+    if (selectedUngetIndex === null && !precargaRegional) return;
     const timer = setTimeout(() => {
-      void prefetchFnRef.current();
+      void prefetchFnRef.current(selectedUngetIndex === null ? { region: true } : undefined);
     }, PREFETCH_START_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [sources, isConfigLoading, isLoading, isSilentSyncing, selectedUngetIndex]);
+  }, [sources, isConfigLoading, isLoading, isSilentSyncing, selectedUngetIndex, precargaRegional]);
 
   // Se pausa con la pestaña en segundo plano y al salir del módulo.
   useEffect(() => {
@@ -3172,6 +3181,13 @@ const SheetSearchModuleContent: React.FC = () => {
    * propio diálogo para que nadie crea que vio toda la red cuando faltan hojas.
    */
   const [isNetworkSearchOpen, setIsNetworkSearchOpen] = useState(false);
+  /** Con qué se abre el buscador de la UNGET cuando se llega desde las sugerencias. */
+  const [networkSeed, setNetworkSeed] = useState<{ product?: StockProduct; query?: string }>({});
+  /** Si se muestran las sugerencias bajo el buscador de la lista de establecimientos. */
+  const [sheetSuggestOpen, setSheetSuggestOpen] = useState(false);
+  const [ungetSuggestOpen, setUngetSuggestOpen] = useState(false);
+  /** Dónde busca el buscador de medicamentos: la UNGET abierta o toda la región. */
+  const [networkScope, setNetworkScope] = useState<StockSearchScope>("unget");
   /**
    * Estado, no referencia: `prefetchRef` no provoca un render, así que el aviso de
    * «Descargando…» se habría quedado congelado en el diálogo.
@@ -3195,6 +3211,60 @@ const SheetSearchModuleContent: React.FC = () => {
     }),
     [hojasDeLaUnget, dataBySource],
   );
+
+  /**
+   * Un solo buscador para establecimientos y medicamentos (2026-10-03).
+   *
+   * Antes había dos: el campo filtraba establecimientos y una lupa aparte buscaba un
+   * medicamento en todos. Se probó un selector de modo y se descartó: el alcance de una
+   * búsqueda es lo que la gente pasa por alto (NN/g, «Scoped search»). Ahora lo escrito
+   * filtra la lista como siempre y, debajo del campo, las sugerencias van agrupadas:
+   * establecimientos y medicamentos de la UNGET, como recomiendan Baymard y NN/g.
+   */
+  const productosDeLaUnget = useMemo(
+    () => (viewLevel === "sheets" ? buildProductIndex(filasDeLaUnget) : []),
+    [viewLevel, filasDeLaUnget],
+  );
+  const sheetSearchDeferred = useDeferredValue(sheetSearchTerm);
+  const productosSugeridos = useMemo(
+    () => (sheetSearchDeferred.trim().length >= 2 ? suggestProducts(productosDeLaUnget, sheetSearchDeferred, 5) : []),
+    [productosDeLaUnget, sheetSearchDeferred],
+  );
+  const abrirBusquedaEnLaUnget = (seed: { product?: StockProduct; query?: string }, scope: StockSearchScope = "unget") => {
+    setNetworkSeed(seed);
+    setNetworkScope(scope);
+    setSheetSuggestOpen(false);
+    setIsNetworkSearchOpen(true);
+  };
+
+  // Toda la región: el stock ya leído de todas las UNGET a la vista.
+  const filasDeLaRegion = useMemo(
+    () => (scriptUrls.length > 1 ? sources.flatMap((hoja) => dataBySource.get(hoja.id) || []) : []),
+    [sources, dataBySource, scriptUrls.length],
+  );
+  const coberturaRegion = useMemo(
+    () => ({
+      cargadas: sources.filter((hoja) => (dataBySource.get(hoja.id)?.length || 0) > 0).length,
+      total: sources.length,
+    }),
+    [sources, dataBySource],
+  );
+  const productosDeLaRegion = useMemo(
+    () => (viewLevel === "ungets" ? buildProductIndex(filasDeLaRegion) : []),
+    [viewLevel, filasDeLaRegion],
+  );
+  const ungetSearchDeferred = useDeferredValue(ungetSearchTerm);
+  const productosRegionSugeridos = useMemo(
+    () => (ungetSearchDeferred.trim().length >= 2 ? suggestProducts(productosDeLaRegion, ungetSearchDeferred, 5) : []),
+    [productosDeLaRegion, ungetSearchDeferred],
+  );
+  /** UNGET de un código de farmacia, para los resultados de toda la región. */
+  const ungetDelCodigo = (almcod: string): string => {
+    const codigo = String(almcod || "").trim().toUpperCase();
+    const establecimiento = allFacilities.find((f: any) => f?.code && codigo.startsWith(String(f.code).toUpperCase()));
+    const unget = establecimiento && allUngets.find((u: any) => String(u.id) === String(establecimiento.ungetId));
+    return unget ? formatDisplayName(unget.name) : "";
+  };
 
   // Ctrl+K abre el buscador. Se anula el atajo del navegador solo cuando hay una UNGET
   // abierta, que es cuando el buscador tiene dónde buscar.
@@ -3234,6 +3304,13 @@ const SheetSearchModuleContent: React.FC = () => {
     setSelectedUngetIndex(0);
     setViewLevel("sheets");
   }, [hayPanelRegional, scriptUrls.length, viewLevel, selectedUngetIndex]);
+
+  // Al cambiar de nivel se vuelve arriba. Desde que en el celular se desplaza la página
+  // entera, entrar a una UNGET conservaba lo bajado en el panel y dejaba fuera de la vista
+  // la cabecera y los KPIs del nuevo nivel.
+  useEffect(() => {
+    document.querySelector("main")?.scrollTo({ top: 0 });
+  }, [viewLevel, selectedUngetIndex, selectedSourceId]);
 
   /**
    * Lee el stock de una IPRESS sin tocar el estado: lectura directa de Google Sheets y,
@@ -3393,22 +3470,29 @@ const SheetSearchModuleContent: React.FC = () => {
    * si deja la pestaña en segundo plano, y guarda por tandas para no escribir en IndexedDB
    * una vez por hoja.
    */
-  const prefetchPendingSheets = async () => {
+  /**
+   * Lee en segundo plano el stock de las hojas que faltan.
+   *
+   * Por omisión, solo la UNGET abierta y de a `PREFETCH_MAX_SHEETS`. Con `region` recorre
+   * todas las UNGET a la vista: en el panel regional se hace en segundo plano, de a tandas
+   * (cada tanda que entra vuelve a disparar la siguiente), y con «Leer los que faltan» del
+   * buscador de toda la región se pide todo de una vez (`limit: Infinity`).
+   */
+  const prefetchPendingSheets = async ({ region = false, limit = PREFETCH_MAX_SHEETS }: { region?: boolean; limit?: number } = {}) => {
     if (prefetchRef.current.running || !prefetchRef.current.enabled) return;
 
-    // Solo la UNGET abierta: con varias UNGET a la vista serían cientos de hojas.
-    if (selectedUngetIndex === null) return;
+    if (!region && selectedUngetIndex === null) return;
     const pending = sources
       .filter(
         (source) =>
-          source.urlIndex === selectedUngetIndex &&
+          (region || source.urlIndex === selectedUngetIndex) &&
           !dataBySource.has(source.id) &&
           canReadSheetDirect(
             source.spreadsheetId || scriptUrls[source.urlIndex]?.spreadsheetId,
             getCleanSourceId(source.id),
           ),
       )
-      .slice(0, PREFETCH_MAX_SHEETS);
+      .slice(0, limit);
     if (pending.length === 0) return;
 
     const shouldPause = () =>
@@ -4711,14 +4795,85 @@ function processSheet(sheet) {
     });
   }, [filteredAndSortedSources, reportSort]);
 
+  // En el celular el nivel actual va en la cabecera de la app, y su flecha sube un nivel.
+  useModuleHeaderOverride(
+    viewLevel === "ungets"
+      ? null
+      : viewLevel === "data"
+        ? {
+            title: describeSheetName(sources.find((s) => s.id === selectedSourceId)?.name || "Hoja"),
+            subtitle: selectedUngetIndex !== null ? formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "") : undefined,
+            onBack: volverUnNivel,
+          }
+        : {
+            title: formatDisplayName((selectedUngetIndex !== null && scriptUrls[selectedUngetIndex]?.name) || "Consulta Stock"),
+            subtitle: hayPanelRegional ? "Panel regional" : undefined,
+            onBack: destinoDeVolver ? volverUnNivel : undefined,
+          },
+  );
+
+  /**
+   * Acciones de escritorio: búsqueda en todos (en la hoja; en la lista la ofrece el selector
+   * del buscador), Configurar y Sincronizar. Van en la cabecera cuando hay cabecera (UNGET
+   * u hoja abierta) y, en el panel regional, en la fila del buscador. En el celular están en
+   * el botón de tres puntos.
+   */
+  const accionesDeEscritorio = (
+    <div className="hidden shrink-0 items-center gap-2 sm:flex">
+      {viewLevel === "data" && selectedUngetIndex !== null && (
+        <button
+          type="button"
+          onClick={() => setIsNetworkSearchOpen(true)}
+          title="Buscar un producto en todos los establecimientos (Ctrl+K)"
+          aria-label="Búsqueda avanzada"
+          aria-keyshortcuts="Control+K"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
+        >
+          <Search className="h-4 w-4" />
+        </button>
+      )}
+      {canManageConfigs && (
+        <button
+          type="button"
+          onClick={() => {
+            if (user) setTempUrls([...scriptUrls]);
+            setIsConfigOpen(!isConfigOpen);
+          }}
+          title="Conexiones de stock"
+          aria-label="Configurar"
+          className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
+        >
+          <Settings className="h-4 w-4 text-slate-500" />
+          Configurar
+        </button>
+      )}
+      <button
+        id="sync-btn"
+        type="button"
+        onClick={() => fetchData()}
+        disabled={isLoading || isSilentSyncing}
+        aria-label="Sincronizar"
+        // La hora de la última comprobación iba en una pastilla aparte que le quitaba
+        // sitio al buscador; ahora la dice el botón al pasar el cursor.
+        title={lastGlobalSync ? `Última sincronización: ${lastGlobalSync.toLocaleString("es-PE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Sincronizar"}
+        className="flex h-10 items-center justify-center gap-2 rounded-xl border border-teal-600 bg-teal-600 px-3.5 text-xs font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-50"
+      >
+        <RefreshCw className={`h-4 w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`} />
+        {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
+      </button>
+    </div>
+  );
+
   return (
     <div
       className={`flex flex-col h-full transition-all duration-300 ${isAdvancedFiltersSidebarOpen && viewLevel === "sheets" ? "md:pr-[380px] xl:pr-[420px]" : ""}`}
     >
-      {/* Cabecera del módulo en una sola fila (2026-10-03): volver, dónde estoy y las acciones.
-          El título «Reporte de Stock detallado SISMED» se quitó: lo dice la cabecera de la app. */}
-      <div className="px-4 pb-2 pt-3 sm:px-10 sm:pb-3 sm:pt-6 lg:px-14 xl:px-16">
-        <div className="flex items-center gap-2 sm:gap-3">
+      {/* Cabecera del módulo: volver, dónde estoy y las acciones. En el panel regional no hay
+          cabecera, se empieza por los KPIs. En el celular el nivel va en la cabecera de la app
+          (useModuleHeaderOverride) y las acciones en el botón de tres puntos. */}
+      <div className={`px-0 pt-0 sm:px-10 sm:pb-3 sm:pt-6 lg:px-14 xl:px-16 ${viewLevel === "data" ? "pb-0" : "pb-1"}`}>
+        {viewLevel !== "ungets" && (
+        <div className="hidden items-center gap-2 sm:flex sm:gap-3">
           {/* La flecha está a la izquierda, donde se mira, y dice a dónde lleva. */}
           {destinoDeVolver && (
             <button
@@ -4770,97 +4925,9 @@ function processSheet(sheet) {
             </p>
           </div>
 
-          {/* Celular: un solo botón de tres puntos abre todas las acciones abajo. */}
-          <button
-            type="button"
-            onClick={() => setHeaderActionsOpen(true)}
-            aria-label="Más acciones"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 sm:hidden"
-          >
-            {isLoading || isSilentSyncing ? <RefreshCw className="h-5 w-5 animate-spin text-teal-600" /> : <MoreHorizontal className="h-5 w-5" />}
-          </button>
-          <BottomSheet open={headerActionsOpen} title="Acciones" onClose={() => setHeaderActionsOpen(false)}>
-            <div className="space-y-1">
-              <button
-                type="button"
-                disabled={isLoading || isSilentSyncing}
-                onClick={() => { setHeaderActionsOpen(false); void fetchData(); }}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-              >
-                <RefreshCw className="h-5 w-5 text-teal-600" />
-                {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
-              </button>
-              {selectedUngetIndex !== null && (
-                <button
-                  type="button"
-                  onClick={() => { setHeaderActionsOpen(false); setIsNetworkSearchOpen(true); }}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  <Search className="h-5 w-5 text-teal-600" />
-                  Buscar un producto en todos los establecimientos
-                </button>
-              )}
-              {canManageConfigs && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setHeaderActionsOpen(false);
-                    if (user) setTempUrls([...scriptUrls]);
-                    setIsConfigOpen(true);
-                  }}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  <Settings className="h-5 w-5 text-slate-500" />
-                  Configurar conexiones de stock
-                </button>
-              )}
-            </div>
-          </BottomSheet>
-
-          {/* Escritorio: lupa, Configurar y Sincronizar a la vista. */}
-          <div className="hidden shrink-0 items-center gap-2 sm:flex">
-            {selectedUngetIndex !== null && (
-              <button
-                type="button"
-                onClick={() => setIsNetworkSearchOpen(true)}
-                title="Buscar un producto en todos los establecimientos (Ctrl+K)"
-                aria-label="Búsqueda avanzada"
-                aria-keyshortcuts="Control+K"
-                className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
-              >
-                <Search className="h-4 w-4" />
-              </button>
-            )}
-            {canManageConfigs && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (user) setTempUrls([...scriptUrls]);
-                  setIsConfigOpen(!isConfigOpen);
-                }}
-                title="Conexiones de stock"
-                aria-label="Configurar"
-                className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 sm:px-3.5"
-              >
-                <Settings className="h-4 w-4 text-slate-500" />
-                <span className="hidden sm:inline">Configurar</span>
-              </button>
-            )}
-            <button
-              id="sync-btn"
-              type="button"
-              onClick={() => fetchData()}
-              disabled={isLoading || isSilentSyncing}
-              aria-label="Sincronizar"
-              className="flex h-10 items-center justify-center gap-2 rounded-xl bg-teal-600 px-2.5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-50 sm:px-4"
-            >
-              <RefreshCw className={`h-4 w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">
-                {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
-              </span>
-            </button>
-          </div>
+          {accionesDeEscritorio}
         </div>
+        )}
 
         {/* Indicadores de la lista (establecimientos o UNGET): el modelo único de KPIs. Tocar
             uno deja a la vista solo ese estado de actualización; tocarlo otra vez, todos. */}
@@ -4876,12 +4943,15 @@ function processSheet(sheet) {
             setFilter_gray(all || redGray);
           };
           const allOn = filter_emerald && filter_amber && filter_red && filter_gray;
+          // En el panel regional solo informan: el filtro de estado se aplica a
+          // establecimientos, y pulsarlos aquí no cambiaba nada a la vista.
+          const clickable = viewLevel === "sheets";
           return (
-            <div className="mt-2 sm:mt-3">
+            <div className={viewLevel === "ungets" ? "" : "sm:mt-3"}>
               <KpiStrip cols="md:grid-cols-3">
-                <KpiCard watermark tone="success" icon={<Wifi />} label="En línea" value={summary.online} hint="actualizados en la última hora" onClick={() => only(true, false, false)} active={!allOn && filter_emerald && !filter_amber && !filter_red} />
-                <KpiCard watermark tone="warning" icon={<FileClock />} label="Desconectados" value={summary.delayed} hint="entre 1 y 24 horas sin actualizar" onClick={() => only(false, true, false)} active={!allOn && !filter_emerald && filter_amber && !filter_red} />
-                <KpiCard watermark tone="danger" icon={<WifiOff />} label="Fuera de línea" value={summary.offline} hint="más de un día o sin datos" onClick={() => only(false, false, true)} active={!allOn && !filter_emerald && !filter_amber && filter_red} />
+                <KpiCard watermark tone="success" icon={<Wifi />} label="En línea" value={summary.online} hint="actualizados en la última hora" onClick={clickable ? () => only(true, false, false) : undefined} active={clickable && !allOn && filter_emerald && !filter_amber && !filter_red} />
+                <KpiCard watermark tone="warning" icon={<FileClock />} label="Desconectados" value={summary.delayed} hint="entre 1 y 24 horas sin actualizar" onClick={clickable ? () => only(false, true, false) : undefined} active={clickable && !allOn && !filter_emerald && filter_amber && !filter_red} />
+                <KpiCard watermark tone="danger" icon={<WifiOff />} label="Fuera de línea" value={summary.offline} hint="más de un día o sin datos" onClick={clickable ? () => only(false, false, true) : undefined} active={clickable && !allOn && !filter_emerald && !filter_amber && filter_red} />
               </KpiStrip>
             </div>
           );
@@ -4897,7 +4967,7 @@ function processSheet(sheet) {
         const lots = activeSheetData.filter((row) => rowMatchesPharmacy(readAlmCode(row), dataFilterPharmacy)).length;
         const toggle = (value: string) => setDataFilterExpiration(dataFilterExpiration === value ? "all" : value);
         return (
-          <div className="mb-2 px-4 sm:mb-4 sm:px-10 lg:px-14 xl:px-16">
+          <div className="mb-2 px-0 sm:mb-4 sm:px-10 lg:px-14 xl:px-16">
             <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
               <KpiCard watermark tone="info" icon={<Package />} label="Lotes" value={lots.toLocaleString("es-PE")} hint="en la hoja del establecimiento" onClick={() => setDataFilterExpiration("all")} active={dataFilterExpiration === "all"} />
               <KpiCard watermark tone="warning" icon={<Clock />} label="Por vencer" value={activeSheetExpirationInfo.expiringThisMonthCount.toLocaleString("es-PE")} hint={`en los próximos ${expiryWindowDays} días`} onClick={() => toggle("expiring")} active={dataFilterExpiration === "expiring"} />
@@ -5356,18 +5426,30 @@ function processSheet(sheet) {
       {/* BUSCADOR EN TODA LA RED DE LA UNGET */}
       <StockNetworkSearchModal
         isOpen={isNetworkSearchOpen}
-        onClose={() => setIsNetworkSearchOpen(false)}
+        onClose={() => { setIsNetworkSearchOpen(false); setNetworkSeed({}); setNetworkScope("unget"); }}
+        initialProduct={networkSeed.product}
+        initialQuery={networkSeed.query}
+        scope={networkScope}
+        // Dentro de una UNGET se puede ampliar a toda la región; desde el panel regional
+        // ya se busca en toda la región.
+        onScopeChange={hayPanelRegional && selectedUngetIndex !== null ? setNetworkScope : undefined}
+        ungetOfCode={ungetDelCodigo}
         ungetName={formatDisplayName(
           (selectedUngetIndex !== null && scriptUrls[selectedUngetIndex]?.name) || "la UNGET",
         )}
-        rows={filasDeLaUnget}
+        rows={networkScope === "region" ? filasDeLaRegion : filasDeLaUnget}
         facilities={allFacilities}
-        sheetsLoaded={coberturaBusqueda.cargadas}
-        sheetsTotal={coberturaBusqueda.total}
+        sheetsLoaded={networkScope === "region" ? coberturaRegion.cargadas : coberturaBusqueda.cargadas}
+        sheetsTotal={networkScope === "region" ? coberturaRegion.total : coberturaBusqueda.total}
+        // En toda la región «Leer los que faltan» pide todas las hojas de una vez; sin
+        // pedirlo, el panel regional ya las va leyendo de a poco en segundo plano.
         onCompleteSearch={async () => {
           setIsCompletingSearch(true);
           try {
-            await prefetchPendingSheets();
+            // Si la precarga de fondo está en marcha se espera a que termine su tanda y
+            // luego se pide todo lo que falte.
+            while (prefetchRef.current.running) await new Promise((resolve) => setTimeout(resolve, 300));
+            await prefetchPendingSheets(networkScope === "region" ? { region: true, limit: Infinity } : { limit: Infinity });
           } finally {
             setIsCompletingSearch(false);
           }
@@ -5768,13 +5850,23 @@ function processSheet(sheet) {
       )}
 
       <div
-        className={`bg-white sm:rounded-[1.25rem] border-y sm:border border-slate-200 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden mx-0 sm:mx-10 lg:mx-14 xl:mx-16 ${viewLevel === "data" ? "h-auto shrink-0 mb-8" : "flex-1 min-h-[300px]"}`}
+        className={`flex flex-col mx-0 sm:mx-10 lg:mx-14 xl:mx-16 ${
+          viewLevel === "data"
+            ? "bg-white sm:rounded-[1.25rem] border-y sm:border border-slate-200 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] sm:overflow-hidden h-auto shrink-0 mb-8"
+            // Panel regional y establecimientos: sin recuadro alrededor, cada uno en su
+            // propia tarjeta (así se ve como una app).
+            : ""
+        }`}
       >
         {/* TOOLBAR */}
-        <div className="p-3 sm:p-5 border-b border-slate-100 flex flex-col gap-4">
+        <div className={`sticky z-30 flex flex-col gap-4 ${
+          viewLevel === "data"
+            ? "top-0 bg-white sm:static p-3 sm:p-5 border-b border-slate-100"
+            : "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:static sm:pt-0 sm:pb-4"
+        }`}>
           {/* Search & Actions */}
-          <div className={`flex gap-3 items-center justify-between w-full ${viewLevel === "ungets" ? "flex-col md:flex-row" : "flex-row"}`}>
-            <div className="relative flex-1 w-full md:max-w-[50%] group">
+          <div className="flex gap-3 items-center justify-between w-full flex-row">
+            <div className="relative min-w-0 flex-1 w-full md:max-w-[50%] group">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
               </div>
@@ -5782,10 +5874,20 @@ function processSheet(sheet) {
                 <div className="relative w-full text-slate-800">
                   <input
                     type="text"
-                    placeholder="Buscar UNGET..."
+                    placeholder="Buscar UNGET o medicamento…"
+                    aria-label="Buscar UNGET o medicamento"
                     value={ungetSearchTerm}
-                    onChange={(e) => setUngetSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-12 py-2.5 bg-slate-50/85 md:bg-slate-50 border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
+                    onChange={(e) => { setUngetSearchTerm(e.target.value); setUngetSuggestOpen(true); }}
+                    onFocus={() => setUngetSuggestOpen(true)}
+                    onBlur={() => window.setTimeout(() => setUngetSuggestOpen(false), 150)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setUngetSuggestOpen(false);
+                      if (e.key === "Enter" && filteredUngets.length === 0 && ungetSearchTerm.trim()) {
+                        setUngetSuggestOpen(false);
+                        abrirBusquedaEnLaUnget({ query: ungetSearchTerm }, "region");
+                      }
+                    }}
+                    className="w-full pl-10 pr-12 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
                   />
                   {ungetSearchTerm && (
                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
@@ -5799,16 +5901,96 @@ function processSheet(sheet) {
                       </button>
                     </div>
                   )}
+                  {/* Sugerencias del panel regional: UNGET que coinciden y medicamentos de
+                      toda la región (el mismo patrón que el buscador de establecimientos). */}
+                  {ungetSuggestOpen && ungetSearchTerm.trim().length >= 2 && (
+                    <div className="absolute left-0 right-0 top-full z-40 mt-1.5 overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-xl">
+                      <div className="max-h-[60vh] overflow-y-auto py-1.5">
+                        <p className="px-3.5 pb-1 pt-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400">UNGET</p>
+                        {filteredUngets.length === 0 ? (
+                          <p className="px-3.5 py-2 text-[13px] text-slate-400">Ninguna UNGET coincide.</p>
+                        ) : (
+                          filteredUngets.slice(0, 4).map((config) => {
+                            const idx = scriptUrls.findIndex((u) => u.url === config.url && u.name === config.name);
+                            return (
+                              <button
+                                key={config.url}
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => { setUngetSuggestOpen(false); handleSelectUnget(idx); }}
+                                className="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-slate-50"
+                              >
+                                <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
+                                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800">{formatDisplayName(config.name)}</span>
+                              </button>
+                            );
+                          })
+                        )}
+                        <p className="mt-1 border-t border-slate-100 px-3.5 pb-1 pt-2.5 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                          Medicamentos en la región
+                        </p>
+                        {productosRegionSugeridos.length === 0 ? (
+                          <p className="px-3.5 py-2 text-[13px] text-slate-400">
+                            {coberturaRegion.cargadas === 0 ? "Todavía no se ha leído el stock de ningún establecimiento." : "Ningún medicamento coincide."}
+                          </p>
+                        ) : (
+                          productosRegionSugeridos.map((producto) => (
+                            <button
+                              key={producto.key}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => { setUngetSuggestOpen(false); abrirBusquedaEnLaUnget({ product: producto }, "region"); }}
+                              className="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-slate-50"
+                            >
+                              <Pill className="h-4 w-4 shrink-0 text-teal-600" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[13px] font-semibold text-slate-800">{producto.producto || producto.codigoSismed}</span>
+                                <span className="block text-[11px] text-slate-400">
+                                  {producto.codigoSismed && <span className="font-mono">{producto.codigoSismed} · </span>}
+                                  en {producto.establecimientos} establecimiento{producto.establecimientos === 1 ? "" : "s"}
+                                </span>
+                              </span>
+                            </button>
+                          ))
+                        )}
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => { setUngetSuggestOpen(false); abrirBusquedaEnLaUnget({ query: ungetSearchTerm }, "region"); }}
+                          className="mt-1 flex w-full items-center gap-3 border-t border-slate-100 px-3.5 py-2.5 text-left text-[13px] font-bold text-teal-700 hover:bg-teal-50"
+                        >
+                          <Search className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">Buscar «{ungetSearchTerm.trim()}» en toda la región</span>
+                        </button>
+                        {coberturaRegion.cargadas < coberturaRegion.total && (
+                          <p className="px-3.5 pb-1.5 text-[11px] text-amber-700">
+                            Stock leído de {coberturaRegion.cargadas} de {coberturaRegion.total} establecimientos.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {viewLevel === "sheets" && (
                 <div className="relative w-full text-slate-800">
                   <input
                     type="text"
-                    placeholder="Buscar establecimiento por nombre o código..."
+                    placeholder="Buscar establecimiento o medicamento…"
+                    aria-label="Buscar establecimiento o medicamento"
                     value={sheetSearchTerm}
-                    onChange={(e) => setSheetSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-32 py-2.5 bg-slate-50/85 md:bg-slate-50 border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
+                    onChange={(e) => { setSheetSearchTerm(e.target.value); setSheetSuggestOpen(true); }}
+                    onFocus={() => setSheetSuggestOpen(true)}
+                    // Al salir del campo se espera un instante: si no, el clic en una
+                    // sugerencia llegaría con la lista ya cerrada.
+                    onBlur={() => window.setTimeout(() => setSheetSuggestOpen(false), 150)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setSheetSuggestOpen(false);
+                      if (e.key === "Enter" && filteredAndSortedSources.length === 0 && sheetSearchTerm.trim()) {
+                        abrirBusquedaEnLaUnget({ query: sheetSearchTerm });
+                      }
+                    }}
+                    className="w-full pl-10 pr-14 sm:pr-32 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
                   />
                   <div className="absolute inset-y-0 right-0 pr-1.5 flex items-center gap-1.5">
                     {sheetSearchTerm && (
@@ -5827,7 +6009,7 @@ function processSheet(sheet) {
                       className="flex items-center gap-1.5 bg-white hover:bg-slate-50 active:scale-95 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200/80 text-xs font-black transition-all shrink-0 relative shadow-sm cursor-pointer hover:border-slate-300 active:bg-slate-100"
                     >
                       <Filter className="h-3.5 w-3.5 text-teal-600" />
-                      <span>Filtros</span>
+                      <span className="hidden sm:inline">Filtros</span>
                       {(!filter_CS ||
                         !filter_PS ||
                         !filter_ALM ||
@@ -5845,6 +6027,81 @@ function processSheet(sheet) {
                       )}
                     </button>
                   </div>
+                  {/* Sugerencias agrupadas: la lista de abajo ya se filtra con lo escrito;
+                      aquí, además, los medicamentos de la UNGET que coinciden. */}
+                  {sheetSuggestOpen && sheetSearchTerm.trim().length >= 2 && (
+                    <div className="absolute left-0 right-0 top-full z-40 mt-1.5 overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-xl">
+                      <div className="max-h-[60vh] overflow-y-auto py-1.5">
+                        <p className="px-3.5 pb-1 pt-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                          Establecimientos
+                        </p>
+                        {filteredAndSortedSources.length === 0 ? (
+                          <p className="px-3.5 py-2 text-[13px] text-slate-400">Ningún establecimiento coincide.</p>
+                        ) : (
+                          filteredAndSortedSources.slice(0, 4).map((hoja) => (
+                            <button
+                              key={hoja.id}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => { setSheetSuggestOpen(false); void handleSelectSheet(hoja.id); }}
+                              className="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-slate-50"
+                            >
+                              <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
+                              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800">{describeSheetName(hoja.name)}</span>
+                              <span className="shrink-0 font-mono text-[11px] font-bold text-teal-700">{codeForSheet(hoja.id)}</span>
+                            </button>
+                          ))
+                        )}
+                        {filteredAndSortedSources.length > 4 && (
+                          <p className="px-3.5 pb-1 text-[11px] text-slate-400">
+                            y {filteredAndSortedSources.length - 4} más en la lista
+                          </p>
+                        )}
+
+                        <p className="mt-1 border-t border-slate-100 px-3.5 pb-1 pt-2.5 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                          Medicamentos en la UNGET
+                        </p>
+                        {productosSugeridos.length === 0 ? (
+                          <p className="px-3.5 py-2 text-[13px] text-slate-400">
+                            {coberturaBusqueda.cargadas === 0 ? "Todavía no se ha leído el stock de ningún establecimiento." : "Ningún medicamento coincide."}
+                          </p>
+                        ) : (
+                          productosSugeridos.map((producto) => (
+                            <button
+                              key={producto.key}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => abrirBusquedaEnLaUnget({ product: producto })}
+                              className="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-slate-50"
+                            >
+                              <Pill className="h-4 w-4 shrink-0 text-teal-600" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[13px] font-semibold text-slate-800">{producto.producto || producto.codigoSismed}</span>
+                                <span className="block text-[11px] text-slate-400">
+                                  {producto.codigoSismed && <span className="font-mono">{producto.codigoSismed} · </span>}
+                                  en {producto.establecimientos} establecimiento{producto.establecimientos === 1 ? "" : "s"}
+                                </span>
+                              </span>
+                            </button>
+                          ))
+                        )}
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => abrirBusquedaEnLaUnget({ query: sheetSearchTerm })}
+                          className="mt-1 flex w-full items-center gap-3 border-t border-slate-100 px-3.5 py-2.5 text-left text-[13px] font-bold text-teal-700 hover:bg-teal-50"
+                        >
+                          <Search className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">Buscar «{sheetSearchTerm.trim()}» en todos los establecimientos</span>
+                        </button>
+                        {coberturaBusqueda.cargadas < coberturaBusqueda.total && (
+                          <p className="px-3.5 pb-1.5 text-[11px] text-amber-700">
+                            Stock leído de {coberturaBusqueda.cargadas} de {coberturaBusqueda.total} establecimientos.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {viewLevel === "data" && (
@@ -5908,19 +6165,19 @@ function processSheet(sheet) {
               </div>
             )}
 
-            <div className={`flex items-center gap-2 overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 md:ml-auto relative z-30 ${viewLevel === "ungets" ? "w-full md:w-auto pt-1 md:pt-0 pb-1" : "w-auto"}`}>
+            <div className="flex items-center gap-2 overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 md:ml-auto relative z-30 w-auto">
               {viewLevel === "data" && (
                 <>
                   {/* Con puestos comunales y «Todos», se elige cómo armar el Excel. Con un
                       establecimiento elegido, o en una hoja de una sola farmacia, no hay nada
                       que consolidar y el botón descarga directamente. */}
                   {hojaConPuestosComunales && dataFilterPharmacy === "all" ? (
-                    <SheetExportMenu onExport={exportCurrentSheetToExcel} />
+                    <div className="hidden sm:block"><SheetExportMenu onExport={exportCurrentSheetToExcel} /></div>
                   ) : (
                     <button
                       onClick={() => exportCurrentSheetToExcel()}
                       aria-label="Exportar stock"
-                      className="flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
+                      className="hidden sm:flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
                     >
                       <Download className="h-4 w-4 text-emerald-600 shrink-0" />
                       <span className="hidden sm:inline">Exportar Stock</span>
@@ -5931,27 +6188,91 @@ function processSheet(sheet) {
 
               {viewLevel === "sheets" && (
                 <>
-                  {lastGlobalSync && (
-                    <div
-                      className="hidden items-center gap-1.5 bg-slate-50/80 border border-slate-200/80 text-slate-500 px-3 py-2 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all shrink-0 shadow-xs h-full lg:flex"
-                      title="Última comprobación global del sistema"
-                    >
-                      <RefreshCw className="h-3 w-3 text-slate-400 shrink-0" />
-                      <span>
-                        Sincronizado:{" "}
-                        <span className="font-extrabold text-slate-700">
-                          {lastGlobalSync.toLocaleString("es-PE", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            second: "2-digit",
-                          })}
-                        </span>
-                      </span>
+                  {/* Modo de vista (solo escritorio). Antes iba en una fila propia con el título
+                      «Establecimientos de salud» y los conteos por tipo, que ya dicen los KPIs. */}
+                  <div className="hidden items-center gap-2 shrink-0 md:flex">
+                    <div className="flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-xl border border-slate-200/60 shadow-[inset_0_1px_1.5px_rgba(0,0,0,0.02)] shrink-0 pr-1 lg:pr-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setSheetsViewMode("grid")}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          sheetsViewMode === "grid"
+                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
+                            : "text-slate-400 hover:text-slate-700"
+                        }`}
+                        title="Vista Cuadrícula"
+                      >
+                        <LayoutGrid className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden xs:inline">Cuadrícula</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSheetsViewMode("list")}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          sheetsViewMode === "list"
+                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
+                            : "text-slate-400 hover:text-slate-700"
+                        }`}
+                        title="Vista Lista"
+                      >
+                        <List className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden xs:inline">Lista</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSheetsViewMode("compact")}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          sheetsViewMode === "compact"
+                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
+                            : "text-slate-400 hover:text-slate-700"
+                        }`}
+                        title="Vista Compacta"
+                      >
+                        <Grid className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden xs:inline">Compacto</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSheetsViewMode("table")}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          sheetsViewMode === "table"
+                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
+                            : "text-slate-400 hover:text-slate-700"
+                        }`}
+                        title="Vista Tabla"
+                      >
+                        <Table2 className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden xs:inline">Tabla</span>
+                      </button>
                     </div>
-                  )}
+
+                    {true && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleToggleTableFullscreen(!isTableFullscreen)
+                        }
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs border ${
+                          isTableFullscreen
+                            ? "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"
+                            : "bg-teal-50 border-teal-100 text-teal-850 hover:bg-teal-100 hover:text-teal-900 hover:border-teal-200"
+                        }`}
+                        title="Pantalla Completa"
+                      >
+                        {isTableFullscreen ? (
+                          <Minimize2 className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <Maximize2 className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        <span className="hidden xs:inline">
+                          {isTableFullscreen
+                            ? "Salir F11"
+                            : "Pantalla Completa"}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+
                   {/* Button for Exiting Capture Mode (Only visible when isCaptureMode is active) */}
                   {isCaptureMode && (
                     <button
@@ -5971,7 +6292,7 @@ function processSheet(sheet) {
                     </button>
                   )}
 
-                  <div className="relative z-30">
+                  <div className="relative z-30 hidden sm:block">
                     <button
                       onClick={() =>
                         setIsExportDropdownOpen(!isExportDropdownOpen)
@@ -6072,18 +6393,96 @@ function processSheet(sheet) {
                 sources.length > 0 && (
                   <button
                     onClick={exportAllUngetsToExcel}
-                    className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap shadow-sm"
+                    aria-label="Exportar stock"
+                    className="hidden sm:flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap shadow-sm"
                   >
-                    <Download className="h-4 w-4 text-emerald-600 shrink-0" />{" "}
-                    Exportar Stock
+                    <Download className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span className="hidden sm:inline">Exportar Stock</span>
                   </button>
                 )}
+              {/* Escritorio, en el panel regional (no tiene cabecera): las acciones en esta fila. */}
+              {viewLevel === "ungets" && accionesDeEscritorio}
+
+              {/* Celular: un solo botón de tres puntos junto al buscador, con todas las
+                  acciones y las descargas de Excel. */}
+              <button
+                type="button"
+                onClick={() => setHeaderActionsOpen(true)}
+                aria-label="Más acciones"
+                className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 sm:hidden"
+              >
+                {isLoading || isSilentSyncing ? <RefreshCw className="h-5 w-5 animate-spin text-teal-600" /> : <MoreHorizontal className="h-5 w-5" />}
+              </button>
+              <BottomSheet open={headerActionsOpen} title="Acciones" onClose={() => setHeaderActionsOpen(false)}>
+                {(() => {
+                  const item = "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40";
+                  const run = (accion: () => void) => () => { setHeaderActionsOpen(false); accion(); };
+                  const descargas: { label: string; detail: string; icon: React.ReactNode; onClick: () => void }[] = [];
+                  if (viewLevel === "ungets" && globalUngetSummary && sources.length > 0) {
+                    descargas.push({ label: "Exportar stock", detail: "Saldos de todas las UNGET", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: exportAllUngetsToExcel });
+                  }
+                  if (viewLevel === "sheets") {
+                    descargas.push(
+                      { label: "Exportar stock", detail: "Saldos de todos los establecimientos", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: exportAllEstablishmentsToExcel },
+                      { label: "Reporte de actualización", detail: "Estado y fecha de cambios comprobados", icon: <FileSpreadsheet className="h-5 w-5 text-indigo-600" />, onClick: exportReportToExcel },
+                      {
+                        label: "Foto reporte de deficiencias", detail: "Seleccionar y descargar imagen para WhatsApp", icon: <Camera className="h-5 w-5 text-rose-600" />,
+                        onClick: () => { setIsCaptureMode(true); if (selectedCaptureIds.size === 0) handleAutoSelectDeficiencies(); },
+                      },
+                    );
+                  }
+                  if (viewLevel === "data") {
+                    if (hojaConPuestosComunales && dataFilterPharmacy === "all") {
+                      descargas.push(
+                        { label: "Exportar stock consolidado", detail: "Sumar el stock de todas las farmacias", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: () => exportCurrentSheetToExcel("consolidado") },
+                        { label: "Exportar stock por farmacia", detail: "Stock de cada farmacia", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: () => exportCurrentSheetToExcel("detallado") },
+                      );
+                    } else {
+                      descargas.push({ label: "Exportar stock", detail: "Excel de esta hoja", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: () => exportCurrentSheetToExcel() });
+                    }
+                  }
+                  return (
+                    <div className="space-y-1">
+                      <button type="button" disabled={isLoading || isSilentSyncing} onClick={run(() => void fetchData())} className={item}>
+                        <RefreshCw className="h-5 w-5 text-teal-600" />
+                        {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
+                      </button>
+                      {viewLevel === "data" && selectedUngetIndex !== null && (
+                        <button type="button" onClick={run(() => setIsNetworkSearchOpen(true))} className={item}>
+                          <Search className="h-5 w-5 text-teal-600" />
+                          Buscar un producto en todos los establecimientos
+                        </button>
+                      )}
+                      {canManageConfigs && (
+                        <button type="button" onClick={run(() => { if (user) setTempUrls([...scriptUrls]); setIsConfigOpen(true); })} className={item}>
+                          <Settings className="h-5 w-5 text-slate-500" />
+                          Configurar conexiones de stock
+                        </button>
+                      )}
+                      {descargas.length > 0 && (
+                        <>
+                          <p className="px-3 pb-1 pt-3 text-[11px] font-black uppercase tracking-wider text-slate-400">Descargar</p>
+                          {descargas.map((d) => (
+                            <button key={d.label} type="button" onClick={run(d.onClick)} className={item}>
+                              {d.icon}
+                              <span className="min-w-0">
+                                <span className="block">{d.label}</span>
+                                <span className="block text-xs font-medium text-slate-400">{d.detail}</span>
+                              </span>
+                            </button>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+              </BottomSheet>
             </div>
           </div>
         </div>
 
         <div
-          className={`flex-1 bg-gray-50/30 scrollbar-thin ${viewLevel === "data" ? "overflow-visible" : "overflow-auto"}`}
+          className={`flex-1 scrollbar-thin ${viewLevel === "data" ? "bg-gray-50/30 overflow-visible" : ""}`}
         >
           {isConfigLoading && scriptUrls.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-teal-600 gap-3 py-20">
@@ -6108,468 +6507,254 @@ function processSheet(sheet) {
             </div>
           ) : (
             <div
-              className={`p-4 sm:p-6 flex flex-col gap-6 ${viewLevel === "data" ? "pb-4 sm:pb-4" : "pb-32 sm:pb-6"}`}
+              className={`flex flex-col gap-6 ${viewLevel === "data" ? "p-4 sm:p-6 pb-4 sm:pb-4" : "px-0 pt-2 pb-32 sm:p-0 sm:pb-6"}`}
             >
-              {/* LEVEL 1: UNGET CARDS */}
-              {viewLevel === "ungets" && (
-                <div className="animate-in fade-in zoom-in-95 duration-300">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-                    {filteredUngets.length > 0 ? (
-                      filteredUngets.map((config, idx) => {
-                        // Encontrar el índice original en scriptUrls para las funciones de edición/borrado
-                        const originalIdx = scriptUrls.findIndex(
-                          (u) => u.url === config.url && u.name === config.name,
-                        );
-                        const isSupabaseVirtual = config.url === "SUPABASE_NATIVE" || config.url.startsWith("SUPABASE_VIRTUAL_");
-                        const ungetSourceCount = sources.filter((s) => s.urlIndex === originalIdx).length;
-                        // Apps Script puede tardar 10-40 s en responder: sin tarjetas guardadas y sin
-                        // error todavía, la UNGET está conectando, no "vacía".
-                        const isConnecting =
-                          ungetSourceCount === 0 &&
-                          !connectionErrors[config.url] &&
-                          (isLoading || isSilentSyncing || !!retryingUrls[config.url]);
+              {/* NIVEL 1: PANEL REGIONAL. Una tarjeta por UNGET (una fila en el celular) con
+                  dónde está, cuántos establecimientos tiene y cómo están de actualizados.
+                  Se quitaron el código inventado (UNG-xxxx), los conteos por tipo y el enlace
+                  del script: el enlace se ve en el engranaje. */}
+              {viewLevel === "ungets" && (() => {
+                if (filteredUngets.length === 0) {
+                  return (
+                    <div className="py-20 text-center">
+                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Settings className="h-8 w-8 text-gray-400" />
+                      </div>
+                      <h3 className="text-xl font-bold text-gray-800">No hay UNGETs que coincidan</h3>
+                      <p className="text-gray-500 mt-2">Intente con otro término de búsqueda.</p>
+                    </div>
+                  );
+                }
 
-                        // Encontrar la UNGET en allUngets para obtener su DIRESA y OGESS asignados
-                        const configNorm = normalizeName(config.name);
-                        const matchingUnget = allUngets.find((u) => 
-                          (config.ungetId && String(u.id) === String(config.ungetId)) || 
-                          u.name === config.name || 
-                          normalizeName(u.name) === configNorm
-                        );
-                        let diresaName = "";
-                        let ogessName = "";
-                        if (matchingUnget) {
-                          if (matchingUnget.diresaId) {
-                            const foundD = allDiresas.find((d) => d.id === matchingUnget.diresaId);
-                            if (foundD) diresaName = foundD.name;
-                          }
-                          if (matchingUnget.ogessId) {
-                            const foundO = allOgess.find((o) => o.id === matchingUnget.ogessId);
-                            if (foundO) ogessName = foundO.name;
-                          }
-                        }
+                const items = filteredUngets.map((config) => {
+                  // Índice original en scriptUrls, que es el que usan edición, borrado y fuentes.
+                  const originalIdx = scriptUrls.findIndex((u) => u.url === config.url && u.name === config.name);
+                  const isSupabaseVirtual = config.url === "SUPABASE_NATIVE" || config.url.startsWith("SUPABASE_VIRTUAL_");
+                  const ungetSources = sources.filter((s) => s.urlIndex === originalIdx);
+                  const status = { online: 0, delayed: 0, offline: 0 };
+                  ungetSources.forEach((s) => {
+                    const color = getUpdateStatus(s.lastUpdateTime).color;
+                    if (color === "bg-emerald-500") status.online++;
+                    else if (color === "bg-amber-500") status.delayed++;
+                    else status.offline++;
+                  });
+                  // Apps Script puede tardar 10-40 s en responder: sin tarjetas guardadas y sin
+                  // error todavía, la UNGET está conectando, no "vacía".
+                  const isConnecting =
+                    ungetSources.length === 0 &&
+                    !connectionErrors[config.url] &&
+                    (isLoading || isSilentSyncing || !!retryingUrls[config.url]);
 
-                        // La conexión es de su informático: aquí solo se puede mirar y
-                        // probar. Ofrecer «eliminar» era engañar, porque el guardado nunca
-                        // retira filas ajenas y la tarjeta reaparecía a la siguiente carga.
-                        // La excepción es la conexión sin responsable: esa sí se adopta.
-                        const sinResponsable = isConnectionOrphaned(config, cuentasActivas);
-                        const esConexionPropia = canEditConnection(config, user?.username, cuentasActivas);
+                  const configNorm = normalizeName(config.name);
+                  const matchingUnget = allUngets.find((u) =>
+                    (config.ungetId && String(u.id) === String(config.ungetId)) ||
+                    u.name === config.name ||
+                    normalizeName(u.name) === configNorm
+                  );
+                  const diresaName = matchingUnget?.diresaId ? allDiresas.find((d) => d.id === matchingUnget.diresaId)?.name || "" : "";
+                  const ogessName = matchingUnget?.ogessId ? allOgess.find((o) => o.id === matchingUnget.ogessId)?.name || "" : "";
 
-                        return (
-                          <div
-                            key={idx}
-                            onClick={() => handleSelectUnget(originalIdx)}
-                            className={`group p-4 sm:p-6 rounded-xl sm:rounded-2xl shadow-sm transition-all text-left flex flex-row sm:flex-col items-center sm:items-start gap-4 sm:gap-0 h-full cursor-pointer relative overflow-hidden border ${
-                              isSupabaseVirtual
-                                ? "bg-gradient-to-b from-white to-slate-50 border-slate-200 hover:bg-white hover:border-teal-500 hover:shadow-md"
-                                : "bg-white border-gray-200 hover:shadow-md hover:border-teal-500"
-                            }`}
+                  // La conexión es de su informático: aquí solo se puede mirar y probar. Ofrecer
+                  // «eliminar» era engañar, porque el guardado nunca retira filas ajenas y la
+                  // tarjeta reaparecía a la siguiente carga. La excepción es la conexión sin
+                  // responsable: esa sí se adopta.
+                  const sinResponsable = isConnectionOrphaned(config, cuentasActivas);
+                  const esConexionPropia = canEditConnection(config, user?.username, cuentasActivas);
+
+                  return {
+                    config, originalIdx, isSupabaseVirtual, total: ungetSources.length, status, isConnecting,
+                    name: formatDisplayName(matchingUnget ? matchingUnget.name : config.name),
+                    ogessName, diresaName,
+                    sinResponsable, esConexionPropia,
+                    canManage: canManageConfigs && !isSupabaseVirtual,
+                    error: connectionErrors[config.url],
+                  };
+                });
+
+                // La DIRESA solo se nombra si a la vista hay más de una: si no, se repite en todas.
+                const variasDiresas = new Set(items.map((i) => i.diresaName).filter(Boolean)).size > 1;
+                const territoryOf = (item: (typeof items)[number]) =>
+                  [item.ogessName, variasDiresas ? item.diresaName : ""].filter(Boolean).map((t) => formatDisplayName(t)).join(" · ");
+                type UngetItem = (typeof items)[number];
+
+                const actions = (item: UngetItem) =>
+                  item.canManage && (
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenQuickFix(item.config, e)}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-teal-300 hover:text-teal-700"
+                        title={item.esConexionPropia ? "Configurar / Probar enlace Web App" : `Probar el enlace (la mantiene ${connectionOwner(item.config)})`}
+                        aria-label="Configurar conexión"
+                      >
+                        <Settings className="h-4 w-4" />
+                      </button>
+                      {item.esConexionPropia && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDirectDelete(item.originalIdx, e); }}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-red-200 hover:text-red-600"
+                          title="Eliminar conexión"
+                          aria-label="Eliminar conexión"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  );
+
+                const badges = (item: UngetItem) => (item.sinResponsable || item.isSupabaseVirtual || item.error) ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {item.isSupabaseVirtual && <StatusChip label="Virtual" tone="info" />}
+                    {item.sinResponsable && (
+                      <span title={`${connectionOwner(item.config)} ya no está activo. Al guardar esta conexión pasará a su nombre.`}>
+                        <StatusChip label="Sin responsable" tone="warning" />
+                      </span>
+                    )}
+                    {item.error && (() => {
+                      const { label, tone } = getGasErrorLabel(item.error);
+                      return (
+                        <>
+                          <span title={item.error}><StatusChip label={label} tone={tone === "warning" ? "warning" : "danger"} /></span>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); retrySingleUrl(item.config); }}
+                            disabled={retryingUrls[item.config.url]}
+                            className="inline-flex items-center gap-1 rounded-full bg-teal-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-teal-700 disabled:opacity-50"
                           >
-                            {/* Botones de acción rápidos */}
-                            {canManageConfigs && !isSupabaseVirtual && (
-                              <div className="absolute top-4 right-4 flex items-center gap-1.5 opacity-100 sm:opacity-60 group-hover:opacity-100 transition-opacity z-10">
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleOpenQuickFix(config, e)}
-                                  className="p-1.5 sm:p-2 bg-white/90 backdrop-blur-sm shadow-sm border border-gray-200 rounded-lg text-gray-600 hover:text-teal-700 hover:border-teal-300 transition-all cursor-pointer"
-                                  title={
-                                    esConexionPropia
-                                      ? "Configurar / Probar enlace Web App"
-                                      : `Probar el enlace (la mantiene ${connectionOwner(config)})`
-                                  }
-                                >
-                                  <Settings className="h-4 w-4" />
-                                </button>
-                                {esConexionPropia && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleDirectDelete(originalIdx, e);
-                                  }}
-                                  className="p-1.5 sm:p-2 bg-white/90 backdrop-blur-sm shadow-sm border border-gray-100 rounded-lg text-gray-500 hover:text-red-600 hover:border-red-200 transition-all cursor-pointer"
-                                  title="Eliminar conexión"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                                )}
-                              </div>
-                            )}
+                            <RefreshCw className={`h-3 w-3 ${retryingUrls[item.config.url] ? "animate-spin" : ""}`} />
+                            {retryingUrls[item.config.url] ? "Cargando..." : "Reintentar"}
+                          </button>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : null;
 
-                            {isSupabaseVirtual && (
-                              <div className="absolute top-4 right-4 z-10">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-100">
-                                  UNGET
-                                </span>
-                              </div>
-                            )}
+                /** Cómo están de actualizados sus establecimientos: barra y leyenda. */
+                const statusSummary = (item: UngetItem) => {
+                  if (item.isConnecting) {
+                    return (
+                      <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                        <RefreshCw className="h-3 w-3 animate-spin text-teal-500" /> Conectando con Google Sheets...
+                      </p>
+                    );
+                  }
+                  if (item.total === 0) return null;
+                  const pct = (n: number) => `${(n / item.total) * 100}%`;
+                  return (
+                    <div className="space-y-1.5">
+                      <div className="flex h-1.5 overflow-hidden rounded-full bg-slate-100">
+                        <span className="bg-emerald-500" style={{ width: pct(item.status.online) }} />
+                        <span className="bg-amber-400" style={{ width: pct(item.status.delayed) }} />
+                        <span className="bg-red-500" style={{ width: pct(item.status.offline) }} />
+                      </div>
+                      <p className="flex flex-wrap gap-x-3 text-[12px] font-semibold text-slate-600">
+                        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />{item.status.online} en línea</span>
+                        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400" />{item.status.delayed} desconectados</span>
+                        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />{item.status.offline} fuera de línea</span>
+                      </p>
+                    </div>
+                  );
+                };
 
-                            <div className={`w-12 h-12 shrink-0 rounded-xl flex items-center justify-center sm:mb-4 group-hover:bg-teal-600 group-hover:text-white transition-colors ${
-                              "bg-teal-50 text-teal-600"
-                            }`}>
-                              {isSupabaseVirtual ? (
-                                <Building2 className="h-6 w-6" />
-                              ) : (
-                                <Building2 className="h-6 w-6" />
-                              )}
+                return (
+                  <>
+                    {/* Celular: filas, como la lista de establecimientos. */}
+                    <ul className="space-y-3 md:hidden">
+                      {items.map((item) => (
+                        <li
+                          key={item.config.url}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => handleSelectUnget(item.originalIdx)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleSelectUnget(item.originalIdx); }}
+                          className="cursor-pointer space-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm active:bg-slate-50"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[14px] font-bold leading-snug text-slate-900">{item.name}</p>
+                              <p className="mt-0.5 truncate text-[12px] text-slate-500">
+                                {[territoryOf(item), item.isConnecting ? "" : `${item.total} establecimientos`].filter(Boolean).join(" · ")}
+                              </p>
                             </div>
+                            {actions(item)}
+                          </div>
+                          {badges(item)}
+                          {statusSummary(item)}
+                        </li>
+                      ))}
+                    </ul>
 
-                            <div className="flex-1 min-w-0 pr-16 sm:pr-0">
-                              {matchingUnget && (
-                                <div className="text-[9px] font-black text-teal-600 uppercase tracking-widest leading-none mb-1 sm:mb-1.5 flex items-center gap-1.5 flex-wrap">
-                                  <span>CÓDIGO: UNG-{matchingUnget.id.substring(0, 5).toUpperCase()}</span>
-                                  {isSupabaseVirtual && (
-                                    <span className="text-[7.5px] font-extrabold bg-teal-100 text-teal-800 px-1 py-0.2 rounded uppercase">
-                                      Virtual
-                                    </span>
-                                  )}
-                                  {sinResponsable && (
-                                    <span
-                                      className="text-[7.5px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200/70 px-1 py-0.2 rounded uppercase"
-                                      title={`${connectionOwner(config)} ya no está activo. Al guardar esta conexión pasará a su nombre.`}
-                                    >
-                                      Sin responsable
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                              <h3 className="text-sm sm:text-lg font-black text-gray-900 sm:mb-2 group-hover:text-teal-700 transition-colors uppercase tracking-tight truncate sm:whitespace-normal">
-                                {formatDisplayName(matchingUnget ? matchingUnget.name : config.name)}
-                              </h3>
-                              {connectionErrors[config.url] && (
-                                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                  {(() => {
-                                    const { label, tone } = getGasErrorLabel(connectionErrors[config.url]);
-                                    return (
-                                      <div
-                                        className={`text-[9px] font-black px-2 py-0.5 rounded-md border inline-flex items-center gap-1 uppercase ${
-                                          tone === "warning"
-                                            ? "bg-amber-50 text-amber-700 border-amber-200"
-                                            : "bg-red-50 text-red-700 border-red-200"
-                                        }`}
-                                        title={connectionErrors[config.url]}
-                                      >
-                                        <AlertCircle
-                                          className={`h-3 w-3 shrink-0 ${tone === "warning" ? "text-amber-500" : "text-red-500"}`}
-                                        />
-                                        {label}
-                                      </div>
-                                    );
-                                  })()}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      retrySingleUrl(config);
-                                    }}
-                                    disabled={retryingUrls[config.url]}
-                                    className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white inline-flex items-center gap-1 uppercase transition-all shadow-xs disabled:opacity-50 cursor-pointer"
-                                    title="Reintentar la consulta de esta UNGET"
-                                  >
-                                    <RefreshCw className={`h-2.5 w-2.5 ${retryingUrls[config.url] ? "animate-spin" : ""}`} />
-                                    {retryingUrls[config.url] ? "Cargando..." : "Reintentar"}
-                                  </button>
-                                  {canManageConfigs && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => handleOpenQuickFix(config, e)}
-                                      className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white inline-flex items-center gap-1 uppercase transition-all shadow-xs cursor-pointer"
-                                      title="Corregir enlace o probar conexión"
-                                    >
-                                      <Settings className="h-2.5 w-2.5" />
-                                      Editar Enlace
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-
-                              <div className="sm:hidden text-[10px] sm:text-xs font-bold text-gray-500 mt-0.5 mb-1.5">
-                                {isConnecting ? "Conectando..." : `${ungetSourceCount} Estab.`}
-                              </div>
-
-                              {/* Resumen de establecimientos por tipo */}
-                              {allUngetSummaries[originalIdx] && (
-                                <div className="flex flex-wrap gap-1 mb-2 sm:mb-4">
-                                  {allUngetSummaries[originalIdx].cs > 0 && (
-                                    <span
-                                      className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100 uppercase"
-                                      title="Centros de Salud"
-                                    >
-                                      C.S: {allUngetSummaries[originalIdx].cs}
-                                    </span>
-                                  )}
-                                  {allUngetSummaries[originalIdx].ps > 0 && (
-                                    <span
-                                      className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-100 uppercase"
-                                      title="Puestos de Salud"
-                                    >
-                                      P.S: {allUngetSummaries[originalIdx].ps}
-                                    </span>
-                                  )}
-                                  {allUngetSummaries[originalIdx].alm > 0 && (
-                                    <span
-                                      className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-teal-50 text-teal-700 border border-teal-100 uppercase"
-                                      title="Almacenes"
-                                    >
-                                      ALM: {allUngetSummaries[originalIdx].alm}
-                                    </span>
-                                  )}
-                                  {allUngetSummaries[originalIdx].hosp > 0 && (
-                                    <span
-                                      className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-violet-50 text-violet-700 border border-violet-100 uppercase"
-                                      title="Hospitales"
-                                    >
-                                      HOSP:{" "}
-                                      {allUngetSummaries[originalIdx].hosp}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-
-                              {(matchingUnget || isSupabaseVirtual) ? (
-                                <div className="mt-auto pt-2 border-t border-gray-100 flex flex-col gap-1 w-full shrink-0">
-                                  {diresaName ? (
-                                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-500 truncate">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
-                                      <span className="truncate" title={diresaName}>
-                                        DIRESA: {diresaName}
-                                      </span>
-                                    </div>
-                                  ) : null}
-                                  {ogessName ? (
-                                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-500 truncate">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0"></span>
-                                      <span className="truncate" title={ogessName}>
-                                        OGESS: {ogessName}
-                                      </span>
-                                    </div>
-                                  ) : null}
-                                  {!isSupabaseVirtual && (
-                                    <div className="flex items-center gap-1.5 text-[9px] text-gray-400 mt-1 pt-1 border-t border-dashed border-gray-100 italic">
-                                      <LinkIcon className="h-2.5 w-2.5 shrink-0 text-slate-300" />
-                                      <span className="truncate max-w-[120px] sm:max-w-[150px]" title={describeConfigUrl(config)}>
-                                        {describeConfigUrl(config)}
-                                      </span>
-                                    </div>
-                                  )}
-                                  {!diresaName && !ogessName && isSupabaseVirtual ? (
-                                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-400 italic shrink-0">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0"></span>
-                                      <span>Sin territorio superior</span>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1.5 text-[9px] sm:text-xs text-gray-400 mt-auto">
-                                  <LinkIcon className="h-3 w-3 shrink-0" />
-                                  <span className="truncate max-w-[120px] sm:max-w-[150px]">
-                                    {describeConfigUrl(config)}
-                                  </span>
-                                </div>
-                              )}
+                    {/* Escritorio: tarjetas. */}
+                    <div className="hidden grid-cols-2 gap-4 animate-in fade-in duration-300 md:grid xl:grid-cols-3">
+                      {items.map((item) => (
+                        <div
+                          key={item.config.url}
+                          onClick={() => handleSelectUnget(item.originalIdx)}
+                          className="group flex cursor-pointer flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-teal-500 hover:shadow-md"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600 transition-colors group-hover:bg-teal-600 group-hover:text-white">
+                              <Building2 className="h-5 w-5" />
                             </div>
-
-                            <div className="hidden sm:flex items-center justify-between w-full mt-4 pt-4 border-t border-gray-50">
-                              <span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase tracking-wider inline-flex items-center gap-1.5">
-                                {isConnecting ? (
-                                  <>
-                                    <RefreshCw className="h-3 w-3 animate-spin text-teal-500" />
-                                    Conectando con Google Sheets...
-                                  </>
-                                ) : (
-                                  `${ungetSourceCount} Establecimientos`
-                                )}
-                              </span>
-                              <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-teal-500 group-hover:translate-x-1 transition-all" />
+                            <div className="min-w-0 flex-1">
+                              <h3 className="text-[15px] font-black uppercase leading-tight text-slate-900 group-hover:text-teal-700">{item.name}</h3>
+                              {territoryOf(item) && <p className="mt-0.5 truncate text-xs text-slate-500" title={territoryOf(item)}>{territoryOf(item)}</p>}
                             </div>
                           </div>
-                        );
-                      })
-                    ) : (
-                      <div className="col-span-full py-20 text-center">
-                        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                          <Settings className="h-8 w-8 text-gray-400" />
+                          {badges(item)}
+                          <div className="mt-auto">{statusSummary(item)}</div>
+                          <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-bold text-slate-500">
+                            <span className="whitespace-nowrap">{item.isConnecting ? "Conectando..." : `${item.total} establecimientos`}</span>
+                            <div className="flex items-center gap-2">
+                              {actions(item)}
+                              <ChevronRight className="h-4 w-4 text-slate-300 transition-all group-hover:translate-x-1 group-hover:text-teal-500" />
+                            </div>
+                          </div>
                         </div>
-                        <h3 className="text-xl font-bold text-gray-800">
-                          No hay UNGETs que coincidan
-                        </h3>
-                        <p className="text-gray-500 mt-2">
-                          Intente con otro término de búsqueda.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
 
               {/* LEVEL 2: SHEET CARDS */}
               {viewLevel === "sheets" && (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-                  {/* En el celular sobra: los KPIs y la lista ya dicen cuántos hay y de qué tipo. */}
-                  <div className="hidden md:flex flex-col lg:flex-row lg:items-center justify-between border-b border-gray-200/50 pb-3 mb-4 sm:mb-6 gap-4">
-                    <div className="flex flex-col gap-2.5">
-                      {/* Title and Counter Pill */}
-                      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                        <div className="flex items-center gap-2">
-                          <span className="w-1 h-5 bg-teal-500 rounded-full"></span>
-                          <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest break-words flex-1">
-                            Establecimientos de Salud
-                          </h3>
-                        </div>
-                        {filteredAndSortedSources.length > 0 && (
-                          <span className="text-[10px] whitespace-nowrap font-black bg-teal-50 text-teal-850 px-2.5 py-0.5 rounded-full border border-teal-100/70 shadow-xs uppercase tracking-wide">
-                            {filteredAndSortedSources.length}{" "}
-                            {filteredAndSortedSources.length === 1
-                              ? "establecimiento"
-                              : "establecimientos"}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Beautiful Premium Type KPIs */}
-                      {establishmentSummary && (
-                        <div className="hidden flex-wrap gap-2 pt-0.5 sm:flex">
-                          <div
-                            className="flex items-center gap-1.5 bg-sky-50/70 border border-sky-100/50 text-sky-800 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-xs"
-                            title="Centros de Salud"
-                          >
-                            <span className="w-1.5 h-1.5 bg-sky-500 rounded-full"></span>
-                            <span className="text-slate-500 font-medium">
-                              C.S.:
-                            </span>
-                            <span className="font-extrabold">
-                              {establishmentSummary.cs}
-                            </span>
-                          </div>
-                          <div
-                            className="flex items-center gap-1.5 bg-amber-50/70 border border-amber-100/50 text-amber-800 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-xs"
-                            title="Puestos de Salud"
-                          >
-                            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
-                            <span className="text-slate-500 font-medium">
-                              P.S.:
-                            </span>
-                            <span className="font-extrabold">
-                              {establishmentSummary.ps}
-                            </span>
-                          </div>
-                          <div
-                            className="flex items-center gap-1.5 bg-indigo-50/70 border border-indigo-100/50 text-indigo-800 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-xs"
-                            title="Almacenes"
-                          >
-                            <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
-                            <span className="text-slate-500 font-medium">
-                              ALM:
-                            </span>
-                            <span className="font-extrabold">
-                              {establishmentSummary.alm}
-                            </span>
-                          </div>
-                          <div
-                            className="flex items-center gap-1.5 bg-violet-50/70 border border-violet-100/50 text-violet-800 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-xs"
-                            title="Hospitales"
-                          >
-                            <span className="w-1.5 h-1.5 bg-violet-500 rounded-full"></span>
-                            <span className="text-slate-500 font-medium">
-                              HOSP:
-                            </span>
-                            <span className="font-extrabold">
-                              {establishmentSummary.hosp}
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Selector de tipo de Visualización */}
-                    <div className="hidden flex-wrap items-center gap-2 shrink-0 overflow-x-auto pb-1 -mb-1 max-w-full no-scrollbar md:flex">
-                      <div className="flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-xl border border-slate-200/60 shadow-[inset_0_1px_1.5px_rgba(0,0,0,0.02)] shrink-0 pr-1 lg:pr-0.5">
-                        <button
-                          type="button"
-                          onClick={() => setSheetsViewMode("grid")}
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            sheetsViewMode === "grid"
-                              ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                              : "text-slate-400 hover:text-slate-700"
-                          }`}
-                          title="Vista Cuadrícula"
-                        >
-                          <LayoutGrid className="h-3.5 w-3.5 shrink-0" />
-                          <span className="hidden xs:inline">Cuadrícula</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSheetsViewMode("list")}
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            sheetsViewMode === "list"
-                              ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                              : "text-slate-400 hover:text-slate-700"
-                          }`}
-                          title="Vista Lista"
-                        >
-                          <List className="h-3.5 w-3.5 shrink-0" />
-                          <span className="hidden xs:inline">Lista</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSheetsViewMode("compact")}
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            sheetsViewMode === "compact"
-                              ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                              : "text-slate-400 hover:text-slate-700"
-                          }`}
-                          title="Vista Compacta"
-                        >
-                          <Grid className="h-3.5 w-3.5 shrink-0" />
-                          <span className="hidden xs:inline">Compacto</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSheetsViewMode("table")}
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            sheetsViewMode === "table"
-                              ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                              : "text-slate-400 hover:text-slate-700"
-                          }`}
-                          title="Vista Tabla"
-                        >
-                          <Table2 className="h-3.5 w-3.5 shrink-0" />
-                          <span className="hidden xs:inline">Tabla</span>
-                        </button>
-                      </div>
-
-                      {true && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleToggleTableFullscreen(!isTableFullscreen)
-                          }
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs border ${
-                            isTableFullscreen
-                              ? "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"
-                              : "bg-teal-50 border-teal-100 text-teal-850 hover:bg-teal-100 hover:text-teal-900 hover:border-teal-200"
-                          }`}
-                          title="Pantalla Completa"
-                        >
-                          {isTableFullscreen ? (
-                            <Minimize2 className="h-3.5 w-3.5 shrink-0" />
-                          ) : (
-                            <Maximize2 className="h-3.5 w-3.5 shrink-0" />
-                          )}
-                          <span className="hidden xs:inline">
-                            {isTableFullscreen
-                              ? "Salir F11"
-                              : "Pantalla Completa"}
-                          </span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
                   {(() => {
                     const viewContent =
-                      filteredAndSortedSources.length === 0 ? (
+                      filteredAndSortedSources.length === 0 && sheetSearchTerm.trim() ? (
+                        // Lo escrito no es un establecimiento: puede ser un medicamento. Se
+                        // ofrece buscarlo en todos, en vez de dejar la pantalla vacía.
+                        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-teal-50 text-teal-600">
+                            <Pill className="h-7 w-7" />
+                          </div>
+                          <h3 className="text-base font-bold text-slate-900">
+                            Ningún establecimiento coincide con «{sheetSearchTerm.trim()}»
+                          </h3>
+                          <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">
+                            Si es un medicamento, búsquelo en el stock de todos los establecimientos de la UNGET.
+                          </p>
+                          <div className="mt-4 flex flex-wrap justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => abrirBusquedaEnLaUnget({ query: sheetSearchTerm })}
+                              className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-700"
+                            >
+                              <Search className="h-4 w-4" /> Buscar como medicamento
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSheetSearchTerm("")}
+                              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                            >
+                              Limpiar búsqueda
+                            </button>
+                          </div>
+                        </div>
+                      ) : filteredAndSortedSources.length === 0 ? (
                         <div className="py-16 text-center bg-white border border-gray-100 rounded-2xl shadow-sm p-8">
                           <div className="w-16 h-16 bg-teal-50 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-4">
                             <Filter className="h-8 w-8 text-teal-500 animate-pulse" />
@@ -7682,8 +7867,8 @@ function processSheet(sheet) {
                     if (filteredAndSortedSources.length === 0) return viewContent;
                     return (
                       <>
-                        <div className="-mx-4 -mt-4 md:hidden">
-                          <ul className="divide-y divide-slate-100 border-y border-slate-100 bg-white">
+                        <div className="md:hidden">
+                          <ul className="space-y-3">
                             {filteredAndSortedSources.slice(0, sheetsMobileList.count).map((sheet) => {
                               const sheetData = rowsForSource(sheet.id);
                               const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);

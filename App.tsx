@@ -46,6 +46,7 @@ import { NotificationsProvider } from './contexts/NotificationsContext';
 import { NotificationBell } from './components/NotificationBell';
 import { AssignedIpressStockModule } from './components/AssignedIpressStockModule';
 import { AnalysisExclusionsModule } from './components/AnalysisExclusionsModule';
+import { MODULE_HEADER_MEDIA, ModuleHeaderProvider, type ModuleHeaderOverride } from './contexts/ModuleHeaderContext';
 import { APP_BASE, moduleForPath, pathForModule, pathForView, viewForLocation } from './services/appRoutes';
 
 const SuspenseFallback = () => (
@@ -157,10 +158,18 @@ const AuthenticatedApp: React.FC = () => {
     // Flecha «volver» de la cabecera: regresa a la pantalla anterior de la app. Si se
     // entró directo a un módulo (enlace o recarga), no hay pantalla anterior propia y
     // volver al navegador sacaría al usuario de la app: entonces va al Inicio.
+    // Título del nivel en que está el módulo (ver contexts/ModuleHeaderContext.tsx).
+    const [moduleHeader, setModuleHeader] = useState<ModuleHeaderOverride | null>(null);
+
     const volver = useCallback(() => {
+        // En el celular, dentro de un nivel del módulo, la flecha sube un nivel.
+        if (moduleHeader?.onBack && window.matchMedia(MODULE_HEADER_MEDIA).matches) {
+            moduleHeader.onBack();
+            return;
+        }
         if (typeof window.history.state?.paso === 'number' && window.history.state.paso > 0) window.history.back();
         else setCurrentView('HOME');
-    }, [setCurrentView]);
+    }, [setCurrentView, moduleHeader]);
 
     // Buscador de herramientas: campo de la cabecera, lupa en el teléfono y Ctrl+K.
     const [buscadorAbierto, setBuscadorAbierto] = useState(false);
@@ -253,6 +262,7 @@ const AuthenticatedApp: React.FC = () => {
 
     // --- RENDER MAIN LAYOUT ---
     return (
+        <ModuleHeaderProvider value={setModuleHeader}>
         <div className="flex h-[100dvh] bg-gray-50/50 overflow-hidden">
             <div className="hidden md:flex">
                 <Sidebar 
@@ -305,7 +315,7 @@ const AuthenticatedApp: React.FC = () => {
                                 <ArrowLeft className="h-5 w-5" />
                             </button>
                         )}
-                        <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl md:h-9 md:w-9 ${headerTint.chip}`}>
+                        <span className={`${moduleHeader ? 'hidden sm:grid' : 'grid'} h-8 w-8 shrink-0 place-items-center rounded-xl md:h-9 md:w-9 ${headerTint.chip}`}>
                             <HeaderIcon aria-hidden="true" className="h-[18px] w-[18px]" />
                         </span>
                         {headerSection && (
@@ -314,7 +324,17 @@ const AuthenticatedApp: React.FC = () => {
                                 <ChevronRight aria-hidden="true" className="hidden h-4 w-4 shrink-0 text-slate-300 sm:block" />
                             </>
                         )}
-                        <h2 className="truncate text-base font-black text-slate-900 sm:text-[18px]">{headerTitle}</h2>
+                        {moduleHeader ? (
+                            <>
+                                <div className="min-w-0 leading-tight sm:hidden">
+                                    {moduleHeader.subtitle && <p className="truncate text-[10px] font-bold uppercase tracking-wider text-slate-400">{moduleHeader.subtitle}</p>}
+                                    <h2 className="truncate text-[15px] font-black text-slate-900">{moduleHeader.title}</h2>
+                                </div>
+                                <h2 className="hidden truncate text-base font-black text-slate-900 sm:block sm:text-[18px]">{headerTitle}</h2>
+                            </>
+                        ) : (
+                            <h2 className="truncate text-base font-black text-slate-900 sm:text-[18px]">{headerTitle}</h2>
+                        )}
                     </div>
                     <div className="mx-4 hidden min-w-0 flex-1 justify-center md:flex">
                         <ToolSearchTrigger onOpen={abrirBuscador} className="w-full max-w-[420px]" />
@@ -383,6 +403,7 @@ const AuthenticatedApp: React.FC = () => {
 
             </div>
         </div>
+        </ModuleHeaderProvider>
     );
 };
 

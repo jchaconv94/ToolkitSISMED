@@ -236,7 +236,7 @@ export const KpiCard: React.FC<{
  */
 export const KpiStrip: React.FC<{ children: React.ReactNode; cols: string }> = ({ children, cols }) => (
   <div
-    className={`-mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-1 md:mx-0 md:grid md:overflow-visible md:px-0 md:pb-0 ${cols} [&>*]:min-w-[40%] [&>*]:shrink-0 [&>*]:snap-start md:[&>*]:min-w-0`}
+    className={`hide-scrollbar -mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden px-3 pb-1 md:mx-0 md:grid md:overflow-visible md:px-0 md:pb-0 ${cols} [&>*]:min-w-[40%] [&>*]:shrink-0 [&>*]:snap-start md:[&>*]:min-w-0`}
   >
     {children}
   </div>
