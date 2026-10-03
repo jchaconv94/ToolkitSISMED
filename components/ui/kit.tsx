@@ -105,7 +105,7 @@ export const KpiCard: React.FC<{
     return (
       <Container
         {...(isInteractive ? { type: "button", onClick } : {})}
-        className={`relative overflow-hidden rounded-2xl border bg-gradient-to-br ${toneWatermark[tone].gradient} to-white p-4 text-left shadow-sm transition-all duration-200 ${
+        className={`relative flex flex-col justify-start overflow-hidden rounded-2xl border bg-gradient-to-br ${toneWatermark[tone].gradient} to-white p-4 text-left shadow-sm transition-all duration-200 ${
           active ? "border-teal-500 ring-2 ring-teal-500/20" : "border-slate-200/90"
         } ${isInteractive ? "cursor-pointer hover:-translate-y-0.5 hover:shadow-md" : ""}`}
       >

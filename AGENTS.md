@@ -259,9 +259,10 @@ La capa de componentes comunes **ya existe**. Antes existían cinco `HeaderCell`
 | Clase de `<input>` de formulario | `inputClass` (h-11) |
 | Clase de campo en barra de filtros | `filterInputClass` (h-10) |
 | Fecha `15/07/2026` | `formatDate` |
+| Número `21 300` / `2 193,5` (miles con espacio, coma decimal) | `formatNumber` en `services/numberFormat.ts` |
 | Tipo de tono | `Tone` |
 
-Otras piezas compartidas en `components/ui/`: `ConfirmationDialog`, `CustomSelect`, `TablePagination`, `PharmacyCodeCell`, `ModuleHeaderSlot`.
+Otras piezas compartidas en `components/ui/`: `ConfirmationDialog`, `CustomSelect`, `TablePagination`, `IncrementalList` (listas del celular que cargan al bajar), `BottomSheet` (filtros del celular: un botón junto al buscador abre el panel inferior), `PharmacyCodeCell`, `ModuleHeaderSlot`.
 
 **Los tonos se nombran por significado, nunca por color:** `success`, `warning`, `danger`, `info`, `locked`, `neutral`. Si escribes `bg-emerald-100` a mano en un módulo, casi siempre querías un `tone`.
 

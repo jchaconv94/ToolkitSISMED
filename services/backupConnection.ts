@@ -8,6 +8,7 @@
 
 import { getSessionToken } from "./api";
 import { callSendKeysRpc } from "./sendKeys";
+import { formatNumber } from "./numberFormat";
 
 /** Se puede cambiar con VITE_BACKUP_CONNECTION_URL para probar contra un servicio local. */
 export const CONNECTION_URL: string =
@@ -86,7 +87,7 @@ export const sha256Hex = async (data: ArrayBuffer): Promise<string> => {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 };
 
-export const formatMegabytes = (bytes: number) => `${(bytes / 1048576).toLocaleString("es-PE", { maximumFractionDigits: 1 })} MB`;
+export const formatMegabytes = (bytes: number) => `${formatNumber(bytes / 1048576, 1)} MB`;
 
 const RULES_SQL = "SUPABASE_BACKUPS_REGLAS.sql";
 

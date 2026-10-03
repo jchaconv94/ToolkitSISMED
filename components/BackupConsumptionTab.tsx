@@ -4,11 +4,14 @@ import { useBackupManager } from "../contexts/BackupManagerContext";
 import { UsageItem, backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import { limaDay } from "../services/backupModule";
 import { StatusChip, TableHeaderCell, Tone } from "./ui/kit";
+import { TablePagination } from "./ui/TablePagination";
+import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
+import { formatNumber } from "../services/numberFormat";
 
 /** Porcentaje con coma decimal y dos decimales: 0,25 %. es-PE usaría punto, por eso se arma a mano. */
 const percent = (ratio: number) => `${(ratio * 100).toFixed(2).replace(".", ",")} %`;
 
-const number = (n: number) => n.toLocaleString("es-PE", { maximumFractionDigits: n < 100 ? 1 : 0 });
+const number = (n: number) => formatNumber(n, n < 100 ? 1 : 0);
 
 /** Mes siguiente, para «se reinicia el 1 de noviembre». */
 const nextMonthName = (now = new Date()) =>
@@ -23,14 +26,14 @@ const ICON: Record<string, string> = { danger: "bg-red-50 text-red-700", warning
 const LimitCard: React.FC<{ icon: React.ReactNode; label: string; ratio: number | null; used: string; what: string; reset: string; charges: boolean }> = ({ icon, label, ratio, used, what, reset, charges }) => {
   const tone = toneOf(ratio);
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+    <div className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm md:p-5">
       <span className={`absolute inset-y-0 left-0 w-1 ${BAR[tone]}`} />
       <div className="flex items-start gap-3">
         <span className={`rounded-xl p-2.5 ${ICON[tone]}`}>{icon}</span>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">{label}</p>
           <div className="mt-1 flex flex-wrap items-baseline gap-2">
-            <span className={`text-[30px] font-black leading-none ${VALUE[tone]}`}>{ratio == null ? "—" : percent(ratio)}</span>
+            <span className={`text-[26px] font-black leading-none md:text-[30px] ${VALUE[tone]}`}>{ratio == null ? "—" : percent(ratio)}</span>
             {tone === "warning" && <StatusChip label="Cerca del tope" tone="warning" />}
             {tone === "danger" && <StatusChip label="Pausado" tone="danger" />}
           </div>
@@ -42,7 +45,11 @@ const LimitCard: React.FC<{ icon: React.ReactNode; label: string; ratio: number 
         <span className="absolute inset-y-0 left-[80%] w-0.5 bg-white" />
       </div>
       <div className="mt-1 flex justify-between gap-2 text-[10.5px] font-semibold text-slate-400"><span className="truncate">{used}</span><span className="shrink-0">aviso 70 % · pausa 80 %</span></div>
-      <dl className="mt-4 grid grid-cols-1 gap-2 border-t border-slate-100 pt-3 text-[12px] sm:grid-cols-3">
+      {/* Celular: una sola línea; escritorio: el detalle en tres columnas. */}
+      <p className="mt-3 border-t border-slate-100 pt-2.5 text-[12px] text-slate-500 md:hidden">
+        Se reinicia {reset.charAt(0).toLowerCase() + reset.slice(1)} · <span className={`font-semibold ${charges ? "text-amber-700" : "text-slate-700"}`}>{charges ? "Podría cobrar" : "No cobra"}</span>
+      </p>
+      <dl className="mt-4 hidden grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-[12px] md:grid">
         <div><dt className="text-slate-400">Qué cuenta</dt><dd className="font-semibold text-slate-700">{what}</dd></div>
         <div><dt className="text-slate-400">Se reinicia</dt><dd className="font-semibold text-slate-700">{reset}</dd></div>
         <div><dt className="text-slate-400">Si se pasa</dt><dd className={`font-semibold ${charges ? "text-amber-700" : "text-slate-700"}`}>{charges ? "Podría cobrar" : "No cobra: se detiene"}</dd></div>
@@ -110,12 +117,20 @@ const DailyChart: React.FC<{ daily: Array<{ date: string; requests: number }>; l
 
 type MonthRow = Awaited<ReturnType<typeof backupModuleApi.monthByUnget>>[number];
 
+const MONTH_PAGE = 10;
+
+const lastLabel = (lastAt: string | null) =>
+  lastAt ? (limaDay(lastAt) === limaDay(Date.now()) ? "Hoy" : new Date(lastAt).toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit" })) : "Nunca";
+
 /** Pestaña «Consumo» (solo el administrador): el plan gratuito de Cloudflare al detalle. */
 export const BackupConsumptionTab: React.FC = () => {
   const manager = useBackupManager();
   const usage = manager.usage;
   const [month, setMonth] = useState<MonthRow[] | null>(null);
   const [monthError, setMonthError] = useState("");
+  const [monthPage, setMonthPage] = useState(1);
+  const monthRows = month || [];
+  const monthMobile = useIncrementalCount(monthRows.length, monthRows.length, 10);
 
   useEffect(() => {
     backupModuleApi.monthByUnget()
@@ -155,23 +170,26 @@ export const BackupConsumptionTab: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className={`flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center ${banner.tone}`}>
+      <div className={`flex items-start gap-3 rounded-2xl border p-4 md:items-center ${banner.tone}`}>
         <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${banner.iconTone}`}>{banner.icon}</span>
         <div className="min-w-0 flex-1">
           <p className={`text-[14px] font-black ${banner.titleTone}`}>{banner.title}</p>
           <p className={`text-[12.5px] ${banner.textTone}`}>{bannerText}</p>
+          <p className="mt-1.5 text-[11.5px] font-semibold text-emerald-700 md:hidden">✓ Borrado a 1 día · ✓ Pausa al 80 % · ✓ Alerta $1</p>
         </div>
-        <div className="flex flex-wrap gap-1.5 text-[11.5px] font-bold">
+        <div className="hidden flex-wrap gap-1.5 text-[11.5px] font-bold md:flex">
           {["Borrado a 1 día en R2", "Pausa al 80 %", "Alerta de presupuesto $1"].map((c) => (
             <span key={c} className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-emerald-700 ring-1 ring-emerald-200"><CheckCircle2 className="h-3.5 w-3.5" />{c}</span>
           ))}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1">
-        <span className="text-[12px] font-black uppercase tracking-wider text-slate-500">Límites del plan gratuito de Cloudflare</span>
-        <span className="text-[11.5px] text-slate-400">· medido {new Date(usage.at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
-        <button type="button" onClick={manager.refreshUsage} className="ml-auto text-[12px] font-bold text-teal-700 hover:underline">Volver a medir</button>
+      <div className="px-1 md:flex md:items-center md:gap-2">
+        <p className="text-[12px] font-black uppercase tracking-wider text-slate-500">Límites del plan gratuito de Cloudflare</p>
+        <div className="mt-0.5 flex flex-1 items-center gap-2 md:mt-0">
+          <span className="text-[11.5px] text-slate-400"><span className="hidden md:inline">· </span>medido {new Date(usage.at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
+          <button type="button" onClick={manager.refreshUsage} className="ml-auto text-[12px] font-bold text-teal-700 hover:underline">Volver a medir</button>
+        </div>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <LimitCard icon={<PlugZap className="h-5 w-5" />} label="Conexiones hoy" ratio={get("doRequests")?.ratio ?? null} used={used(get("doRequests"))} what="Mensajes de las PC y de la web" reset={resetDay} charges={false} />
@@ -183,7 +201,7 @@ export const BackupConsumptionTab: React.FC = () => {
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-[13px] font-black text-slate-800">Mensajes de conexión por día</p>
-          <p className="mb-3 text-[11.5px] text-slate-400">Últimos 7 días · el límite es 100 000 al día · se cuentan en hora UTC</p>
+          <p className="mb-3 text-[11.5px] text-slate-400">Últimos 7 días · el límite es {number(100000)} al día · se cuentan en hora UTC</p>
           {usage.daily?.length ? <DailyChart daily={usage.daily} limit={get("doRequests")?.limit || 100000} /> : <p className="py-6 text-[12.5px] text-slate-400">Sin datos de Cloudflare todavía.</p>}
         </div>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -194,7 +212,8 @@ export const BackupConsumptionTab: React.FC = () => {
           {monthError ? <p className="px-5 pb-5 text-[12.5px] text-amber-700">{monthError}</p> : !month ? (
             <p className="flex items-center gap-2 px-5 pb-5 text-[12.5px] text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Cargando…</p>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-[12.5px]">
                 <thead className="bg-slate-50">
                   <tr>
@@ -206,18 +225,37 @@ export const BackupConsumptionTab: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {month.map((r) => (
+                  {month.slice((monthPage - 1) * MONTH_PAGE, monthPage * MONTH_PAGE).map((r) => (
                     <tr key={r.ungetId} className="h-11">
                       <td className="px-4 font-semibold text-slate-700">{r.unget}</td>
                       <td className="px-4 text-right font-mono font-bold text-slate-800">{r.downloaded}</td>
                       <td className={`px-4 text-right font-mono ${r.failed ? "font-bold text-red-600" : "text-slate-400"}`}>{r.failed}</td>
                       <td className="px-4 text-right font-mono text-slate-600">{r.bytes ? formatMegabytes(r.bytes) : "—"}</td>
-                      <td className="px-4 text-slate-500">{r.lastAt ? (limaDay(r.lastAt) === limaDay(Date.now()) ? "Hoy" : new Date(r.lastAt).toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit" })) : "Nunca"}</td>
+                      <td className="px-4 text-slate-500">{lastLabel(r.lastAt)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <TablePagination page={monthPage} pageSize={MONTH_PAGE} total={month.length} onPageChange={setMonthPage} itemLabel="UNGET" />
             </div>
+            {/* Celular: una tarjeta por UNGET. */}
+            <ul className="divide-y divide-slate-100 border-t border-slate-100 md:hidden">
+              {month.slice(0, monthMobile.count).map((r) => (
+                <li key={r.ungetId} className="px-5 py-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="truncate text-[14px] font-bold text-slate-800">{r.unget}</span>
+                    <span className="shrink-0 text-[11.5px] text-slate-400">Último: {lastLabel(r.lastAt)}</span>
+                  </div>
+                  <p className="mt-0.5 text-[12px] text-slate-500">
+                    <b className="text-slate-800">{r.downloaded}</b> descargados · <b className={r.failed ? "text-red-600" : "text-slate-400"}>{r.failed}</b> fallidos{r.bytes ? ` · ${formatMegabytes(r.bytes)}` : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <div className="md:hidden">
+              <LoadMoreSentinel hasMore={monthMobile.hasMore} onLoadMore={monthMobile.loadMore} shown={monthMobile.count} total={month.length} itemLabel="UNGET" />
+            </div>
+            </>
           )}
         </div>
       </div>
