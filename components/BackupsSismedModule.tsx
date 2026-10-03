@@ -17,7 +17,7 @@ import {
   filterInputClass,
 } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
-import { ModuleHeaderPortal } from "./ui/ModuleHeaderSlot";
+import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { BackupConsumptionTab } from "./BackupConsumptionTab";
 
 const PAGE_SIZE = 10;
@@ -88,14 +88,28 @@ const Detail: React.FC<{ row: BackupRowView }> = ({ row }) => {
   return <span className="text-[12px] text-slate-400">{row.online ? "Listo para pedir" : "La PC debe estar encendida"}</span>;
 };
 
-const Signal: React.FC<{ row: BackupRowView; align?: "left" | "right" }> = ({ row, align = "left" }) => (
-  <div className={align === "right" ? "text-right" : ""}>
-    {row.online
-      ? <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-500" />En línea</span>
-      : <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-slate-400"><WifiOff className="h-3.5 w-3.5" />Desconectada</span>}
-    <div className="text-[11px] text-slate-400">{row.online && row.lastSeen ? relativeTime(new Date(row.lastSeen).toISOString()) : "—"}</div>
-  </div>
+/** La PC del establecimiento: si está en línea, cuál es y qué Toolkit tiene. */
+const Equipo: React.FC<{ row: BackupRowView }> = ({ row }) => (
+  row.online ? (
+    <div className="min-w-0">
+      <div className="flex items-center gap-1.5 font-semibold text-slate-700"><span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" title="En línea" /><span className="truncate">{row.equipo || "PC en línea"}</span></div>
+      <div className="mt-0.5 text-[11px] text-slate-400">En línea · Toolkit v{row.version || "?"}{row.lastSeen ? ` · ${relativeTime(new Date(row.lastSeen).toISOString()).toLowerCase()}` : ""}</div>
+    </div>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-slate-400"><WifiOff className="h-3.5 w-3.5" />Desconectada</span>
+  )
 );
+
+/** Estado del pedido: el chip cuando hay algo que decir y, debajo, el detalle. */
+const Estado: React.FC<{ row: BackupRowView }> = ({ row }) => {
+  const chip = chipFor(row);
+  return (
+    <div className="min-w-0 space-y-1">
+      {chip && <StatusChip label={chip.label} tone={chip.tone} />}
+      <Detail row={row} />
+    </div>
+  );
+};
 
 type Tab = "backups" | "consumo";
 
@@ -146,6 +160,9 @@ export const BackupsSismedModule: React.FC = () => {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // En el celular no hay páginas: la lista crece al bajar.
+  const mobileList = useIncrementalCount(filtered.length, `${search}|${filter}`, 20);
+  const mobileRows = filtered.slice(0, mobileList.count);
   useEffect(() => { setPage(1); }, [search, filter]);
 
   const activityItems = useMemo(
@@ -173,24 +190,6 @@ export const BackupsSismedModule: React.FC = () => {
 
   return (
     <div className="space-y-4 pb-24">
-      <ModuleHeaderPortal>
-        <div className="flex items-center gap-2">
-          <span title={manager.status === "open" ? "Conectado" : manager.status === "connecting" ? "Conectando…" : "Sin conexión"} className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1.5 text-xs font-bold sm:px-3 ${
-            manager.status === "open" ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : manager.status === "connecting" ? "border-blue-200 bg-blue-50 text-blue-700"
-                : "border-red-200 bg-red-50 text-red-700"
-          }`}>
-            {manager.status === "connecting" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span className={`h-2 w-2 rounded-full ${manager.status === "open" ? "bg-emerald-500" : "bg-red-500"}`} />}
-            {manager.status === "open"
-              ? <><span className="hidden sm:inline">Conectado · {onlineCount === 1 ? "1 PC en línea" : `${onlineCount} PC en línea`}</span><span className="sm:hidden">{onlineCount} PC</span></>
-              : manager.status === "connecting" ? <span className="hidden sm:inline">Conectando…</span> : <span className="hidden sm:inline">Sin conexión</span>}
-          </span>
-          <button type="button" aria-label="Actualizar" onClick={refresh} className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:bg-slate-50">
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </div>
-      </ModuleHeaderPortal>
-
       {isAdmin && (
         <div className="flex">
           <div className="flex min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:flex-none" role="tablist">
@@ -215,7 +214,7 @@ export const BackupsSismedModule: React.FC = () => {
       {tab === "consumo" && isAdmin ? <BackupConsumptionTab /> : (
         <>
           <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-            <KpiCard watermark tone="info" icon={<Wifi />} label="PC en línea ahora" value={`${summary.online} / ${summary.total}`} hint={summary.total - summary.online ? `${summary.total - summary.online} desconectadas` : "todas conectadas"} onClick={() => setFilter(filter === "online" ? "all" : "online")} active={filter === "online"} />
+            <KpiCard watermark tone={manager.status === "closed" ? "danger" : "info"} icon={<Wifi />} label="PC en línea ahora" value={manager.status === "open" ? `${summary.online} / ${summary.total}` : "—"} hint={manager.status === "connecting" ? "conectando con el servicio…" : manager.status !== "open" ? "sin conexión con el servicio" : summary.total - summary.online ? `${summary.total - summary.online} desconectadas` : "todas conectadas"} onClick={() => setFilter(filter === "online" ? "all" : "online")} active={filter === "online"} />
             <KpiCard watermark tone="success" icon={<CheckCircle2 />} label="Descargados hoy" value={summary.downloadedToday} hint={`de ${summary.total} establecimientos`} onClick={() => setFilter(filter === "today" ? "all" : "today")} active={filter === "today"} />
             <KpiCard watermark tone="neutral" icon={<History />} label="Sin backup en 7 días" value={summary.stale} hint={summary.stale ? "pídalos esta semana" : "todos al día"} />
             <KpiCard watermark tone={plan.tone} icon={<Gauge />} label="Plan gratuito" value={plan.value} progress={plan.ratio} progressMarks={[0.7, 0.8]} hint={plan.hint} />
@@ -228,11 +227,14 @@ export const BackupsSismedModule: React.FC = () => {
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${filterInputClass} pl-9`} />
               </div>
               <div className="flex gap-2 sm:ml-auto">
+                <button type="button" onClick={refresh} aria-label="Actualizar" className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                  <RefreshCw className={`h-4 w-4 text-teal-600 ${manager.status === "connecting" ? "animate-spin" : ""}`} /><span className="hidden md:inline">Actualizar</span>
+                </button>
                 <select value={filter} onChange={(e) => setFilter(e.target.value as ShowFilter)} aria-label="Mostrar" className={`${filterInputClass} flex-1 sm:w-56 sm:flex-none`}>
                   {FILTERS.map((f) => <option key={f} value={f}>{f === "all" ? "Mostrar: todos" : SHOW_FILTER_LABEL[f]} ({counts[f]})</option>)}
                 </select>
-                <button type="button" onClick={() => setActivityOpen(true)} className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">
-                  <Activity className="h-4 w-4" />Actividad
+                <button type="button" onClick={() => setActivityOpen(true)} aria-label="Actividad" className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                  <Activity className="h-4 w-4" /><span className="hidden md:inline">Actividad</span>
                   {activityItems.length > 0 && <span className="rounded-full bg-teal-600 px-1.5 text-[10.5px] text-white">{activityItems.length}</span>}
                 </button>
               </div>
@@ -261,28 +263,21 @@ export const BackupsSismedModule: React.FC = () => {
                       <tr>
                         <TableHeaderCell>Establecimiento</TableHeaderCell>
                         <TableHeaderCell>Equipo</TableHeaderCell>
-                        <TableHeaderCell>Señal</TableHeaderCell>
                         <TableHeaderCell>Estado</TableHeaderCell>
-                        <TableHeaderCell>Backup</TableHeaderCell>
                         <TableHeaderCell>Último descargado</TableHeaderCell>
                         <TableHeaderCell align="right"><span className="sr-only">Acciones</span></TableHeaderCell>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {pageRows.map((row) => {
-                        const chip = chipFor(row);
                         return (
                           <tr key={row.code} className={`h-[60px] ${row.online ? "" : "bg-slate-50/50"}`}>
                             <td className="px-4 py-2">
                               <div className="font-bold text-slate-800">{row.name}</div>
                               <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
                             </td>
-                            <td className="px-4 py-2">
-                              {row.equipo ? <><div className="font-semibold text-slate-700">{row.equipo}</div><div className="font-mono text-[11px] text-slate-400">Toolkit v{row.version || "?"}</div></> : <span className="text-slate-400">—</span>}
-                            </td>
-                            <td className="px-4 py-2"><Signal row={row} /></td>
-                            <td className="px-4 py-2">{chip ? <StatusChip label={chip.label} tone={chip.tone} /> : <span className="text-slate-300">—</span>}</td>
-                            <td className="px-4 py-2"><Detail row={row} /></td>
+                            <td className="px-4 py-2"><Equipo row={row} /></td>
+                            <td className="px-4 py-2"><Estado row={row} /></td>
                             <td className="px-4 py-2 text-[12px] text-slate-500">
                               {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}
                             </td>
@@ -294,29 +289,35 @@ export const BackupsSismedModule: React.FC = () => {
                   </table>
                 </div>
 
-                <div className="space-y-2 p-3 md:hidden">
-                  {pageRows.map((row) => {
-                    const chip = chipFor(row);
-                    return (
-                      <div key={row.code} className={`space-y-2.5 rounded-2xl border border-slate-200 p-3 text-[13px] ${row.online ? "bg-white" : "bg-slate-50/60"}`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="truncate font-black text-slate-800">{row.name}</div>
-                            <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
-                          </div>
-                          {chip ? <StatusChip label={chip.label} tone={chip.tone} /> : <Signal row={row} align="right" />}
+                {/* Celular: una fila compacta por establecimiento y la lista crece al bajar. */}
+                <ul className="divide-y divide-slate-100 md:hidden">
+                  {mobileRows.map((row) => (
+                    <li key={row.code} className={`flex items-start gap-3 px-4 py-3 text-[13px] ${row.online ? "" : "bg-slate-50/60"}`}>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-baseline gap-2">
+                          <span className="truncate font-bold text-slate-900">{row.name}</span>
+                          <span className="shrink-0 font-mono text-[11px] text-teal-700">{row.code}</span>
                         </div>
-                        <Detail row={row} />
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="min-w-0 truncate text-[11.5px] text-slate-500">Último: {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}</span>
-                          {action(row)}
+                        <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
+                          {row.online
+                            ? <><span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" /><span className="truncate">{row.equipo || "PC en línea"}</span></>
+                            : <><WifiOff className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="text-slate-400">Desconectada</span></>}
                         </div>
+                        <div className="truncate text-[12px] text-slate-500">Último: {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}</div>
+                        {/* El detalle solo cuando hay un pedido en curso; el cupo lo dice el chip. */}
+                        {row.job ? <Estado row={row} /> : chipFor(row) && <StatusChip label={chipFor(row)!.label} tone={chipFor(row)!.tone} />}
                       </div>
-                    );
-                  })}
+                      {action(row)}
+                    </li>
+                  ))}
+                </ul>
+                <div className="md:hidden">
+                  <LoadMoreSentinel hasMore={mobileList.hasMore} onLoadMore={mobileList.loadMore} shown={mobileList.count} total={filtered.length} itemLabel="establecimientos" />
                 </div>
 
-                <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} itemLabel="establecimientos" />
+                <div className="hidden md:block">
+                  <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} itemLabel="establecimientos" />
+                </div>
               </>
             )}
           </div>
