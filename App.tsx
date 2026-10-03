@@ -13,7 +13,7 @@ import {
 // NEW IMPORTS
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Sidebar } from './components/Sidebar';
-import { MobileNav } from './components/MobileNav'; // Nuevo import
+import { MobileSectionScreen, MobileTabBar, activeMobileTab } from './components/MobileNavigation';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Toaster } from 'sonner';
 
@@ -31,7 +31,8 @@ import { AdminPanel } from './components/AdminPanel';
 import { MODULE_HEADER_SLOT_ID } from './components/ui/ModuleHeaderSlot';
 import { HomeModule } from './components/HomeModule';
 import { UserMenu } from './components/UserMenu';
-import { findNavItem, findNavSection, NAV_TINT_CLASSES } from './components/navigation';
+import { findNavItem, findNavSection, findVisibleNavSection, NAV_TINT_CLASSES, visibleNavSections } from './components/navigation';
+import { BrandLogo } from './components/ui/BrandLogo';
 import { UserProfile } from './components/UserProfile';
 import { showWelcomeToast } from './components/WelcomeToast';
 import { RedistributionModule } from './components/RedistributionModule';
@@ -42,7 +43,7 @@ import { BackupsSismedModule } from './components/BackupsSismedModule';
 import { BackupManagerProvider } from './contexts/BackupManagerContext';
 import { AssignedIpressStockModule } from './components/AssignedIpressStockModule';
 import { AnalysisExclusionsModule } from './components/AnalysisExclusionsModule';
-import { APP_BASE, moduleForPath, pathForModule } from './services/appRoutes';
+import { APP_BASE, moduleForPath, pathForModule, pathForView, viewForLocation } from './services/appRoutes';
 
 const SuspenseFallback = () => (
     <div className="flex-1 flex h-full w-full items-center justify-center p-8 bg-gray-50/50">
@@ -103,21 +104,30 @@ const AuthenticatedApp: React.FC = () => {
     // Durante el mantenimiento, la pantalla deja pasar al acceso para administradores.
     const [mostrarAccesoEnMantenimiento, setMostrarAccesoEnMantenimiento] = useState(false);
     // La vista inicial sale de la direccion, para que un enlace compartido abra donde debe.
-    const [currentView, setCurrentView] = useState<AppModule>(
-        () => moduleForPath(window.location.pathname) || 'HOME'
+    //
+    // `section` es la pantalla de una sección del teléfono (Inicio con `?seccion=stock`).
+    // Solo cuenta en Inicio: abrir cualquier módulo la cierra.
+    const [nav, setNav] = useState<{ module: AppModule; section: string | null }>(
+        () => viewForLocation(window.location.pathname, window.location.search)
     );
+    const currentView = nav.module;
+    const openSectionId = nav.module === 'HOME' ? nav.section : null;
+    const setCurrentView = useCallback((module: AppModule) => setNav({ module, section: null }), []);
+    const openSectionScreen = useCallback((section: string) => setNav({ module: 'HOME', section }), []);
 
     // La direccion del navegador sigue a la vista, sin agregar una entrada por render.
     // Solo con sesion iniciada: sin ella la direccion debe ser la raiz.
     useEffect(() => {
         if (!isAuthenticated) return;
-        const destino = pathForModule(currentView);
-        if (window.location.pathname === destino) return;
+        const destino = pathForView(currentView, openSectionId);
+        // Se compara con la consulta incluida: la pantalla de una sección comparte ruta con Inicio.
+        const actual = window.location.pathname + (currentView === 'HOME' ? window.location.search : '');
+        if (actual === destino) return;
         // `paso` cuenta las pantallas recorridas dentro de la aplicación: con él la flecha
         // «volver» sabe si hay a dónde regresar sin salirse de la app.
         const paso = typeof window.history.state?.paso === 'number' ? window.history.state.paso + 1 : 1;
         window.history.pushState({ view: currentView, paso }, '', destino);
-    }, [currentView, isAuthenticated]);
+    }, [currentView, openSectionId, isAuthenticated]);
 
     // Al cerrar sesion, la direccion vuelve a la raiz y la vista al inicio.
     //
@@ -134,7 +144,7 @@ const AuthenticatedApp: React.FC = () => {
 
     // Botones de atras y adelante del navegador.
     useEffect(() => {
-        const alNavegar = () => setCurrentView(moduleForPath(window.location.pathname) || 'HOME');
+        const alNavegar = () => setNav(viewForLocation(window.location.pathname, window.location.search));
         window.addEventListener('popstate', alNavegar);
         return () => window.removeEventListener('popstate', alNavegar);
     }, []);
@@ -145,7 +155,7 @@ const AuthenticatedApp: React.FC = () => {
     const volver = useCallback(() => {
         if (typeof window.history.state?.paso === 'number' && window.history.state.paso > 0) window.history.back();
         else setCurrentView('HOME');
-    }, []);
+    }, [setCurrentView]);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     
     const wasSidebarCollapsedRef = React.useRef(false);
@@ -187,7 +197,11 @@ const AuthenticatedApp: React.FC = () => {
         if (isAuthenticated && !isLoading && user && !hasPermission(currentView)) {
             setCurrentView('HOME');
         }
-    }, [currentView, isAuthenticated, isLoading, user, hasPermission]);
+    }, [currentView, isAuthenticated, isLoading, user, hasPermission, setCurrentView]);
+
+    // Teléfono: secciones de la barra inferior y la que está abierta, si el usuario la ve.
+    const mobileSections = visibleNavSections(hasPermission);
+    const openSection = findVisibleNavSection(openSectionId, hasPermission);
 
     // Cabecera: «Sección › Herramienta», o solo el título en Inicio y Perfil.
     const headerSection = findNavSection(currentView);
@@ -249,7 +263,33 @@ const AuthenticatedApp: React.FC = () => {
             <div className="flex-1 flex flex-col h-[100dvh] overflow-hidden relative">
                 {/* Cabecera: miga de pan, acciones del módulo y el usuario */}
                 <header className="sticky top-0 z-[1000] flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm sm:px-6 md:h-16 lg:px-8">
-                    <div className="flex min-w-0 items-center gap-2">
+                    {/* Teléfono, en Inicio: la marca; con una sección abierta, su nombre y la flecha. */}
+                    {currentView === 'HOME' && (
+                        <div className="flex min-w-0 items-center gap-2 md:hidden">
+                            {openSection ? (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={volver}
+                                        aria-label="Volver"
+                                        title="Volver"
+                                        className="-ml-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+                                    >
+                                        <ArrowLeft className="h-5 w-5" />
+                                    </button>
+                                    <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl ${NAV_TINT_CLASSES[openSection.tint].chip}`}>
+                                        <openSection.icon aria-hidden="true" className="h-[18px] w-[18px]" />
+                                    </span>
+                                    <h2 className="truncate text-base font-black text-slate-900">{openSection.label}</h2>
+                                </>
+                            ) : (
+                                <h2 className="flex items-center">
+                                    <BrandLogo size={16} tone="light" />
+                                </h2>
+                            )}
+                        </div>
+                    )}
+                    <div className={`min-w-0 items-center gap-2 ${currentView === 'HOME' ? 'hidden md:flex' : 'flex'}`}>
                         {currentView !== 'HOME' && (
                             <button
                                 type="button"
@@ -281,11 +321,20 @@ const AuthenticatedApp: React.FC = () => {
                 </header>
 
                 {/* CONTENT AREA SWITCHER */}
-                <main className="flex-1 overflow-y-auto w-full px-3 sm:px-5 2xl:px-6 pt-2.5 sm:pt-3 pb-16 md:pb-6 lg:pb-6">
+                <main className="flex-1 overflow-y-auto w-full px-3 sm:px-5 2xl:px-6 pt-2.5 sm:pt-3 pb-6">
                     <div className="mx-auto max-w-[1600px] h-full">
                         <ErrorBoundary>
                             <Suspense fallback={<SuspenseFallback />}>
-                                {currentView === 'HOME' && <HomeModule onNavigate={setCurrentView} />}
+                                {currentView === 'HOME' && openSection && (
+                                    <div className="md:hidden">
+                                        <MobileSectionScreen section={openSection} onNavigate={setCurrentView} />
+                                    </div>
+                                )}
+                                {currentView === 'HOME' && (
+                                    <div className={openSection ? 'hidden md:block' : undefined}>
+                                        <HomeModule onNavigate={setCurrentView} />
+                                    </div>
+                                )}
                                 {currentView === 'DASHBOARD' && <AnalysisModule />}
                                 {currentView === 'ANALYSIS_EXCLUSIONS' && <AnalysisExclusionsModule />}
                                 {currentView === 'REDISTRIBUTION' && <RedistributionModule />}
@@ -301,10 +350,12 @@ const AuthenticatedApp: React.FC = () => {
                     </div>
                 </main>
 
-                <MobileNav 
-                    currentView={currentView} 
-                    setCurrentView={setCurrentView} 
-                    hasPermission={hasPermission} 
+                {/* Teléfono: barra inferior de pestañas (Inicio y una por sección). */}
+                <MobileTabBar
+                    sections={mobileSections}
+                    activeTab={activeMobileTab(currentView, openSection?.id || null)}
+                    onHome={() => setCurrentView('HOME')}
+                    onSection={openSectionScreen}
                 />
 
             </div>

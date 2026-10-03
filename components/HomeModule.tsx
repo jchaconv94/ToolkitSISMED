@@ -9,6 +9,9 @@ import { EmptyState } from "./ui/kit";
 /**
  * Inicio: saludo y todas las herramientas que el usuario puede abrir, por sección.
  * Las secciones y su orden salen de `navigation.ts`, igual que el lateral.
+ *
+ * En escritorio son tarjetas; en el teléfono (por debajo de `md`), una cuadrícula de
+ * íconos de cuatro columnas, como la pantalla de inicio de un teléfono.
  */
 
 /** El saludo cambia solo si la pantalla queda abierta de la mañana a la tarde. */
@@ -36,7 +39,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
         <h1 className="text-[24px] font-black leading-tight tracking-tight text-slate-900 sm:text-[28px]">
           {greetingFor(now)}, <span className="text-teal-700">{userFirstName(user)}</span>
         </h1>
-        <p className="mt-1 text-[13.5px] text-slate-500">¿Qué necesita hacer hoy?</p>
+        <p className="mt-1 hidden text-[13.5px] text-slate-500 md:block">¿Qué necesita hacer hoy?</p>
       </div>
 
       {sections.length === 0 ? (
@@ -48,7 +51,39 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
           />
         </div>
       ) : (
-        <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-2">
+        <>
+        <div className="space-y-6 md:hidden">
+          {sections.map(section => {
+            const tint = NAV_TINT_CLASSES[section.tint];
+            return (
+              <section key={section.id} aria-labelledby={`inicio-movil-${section.id}`}>
+                <h2 id={`inicio-movil-${section.id}`} className="mb-3 text-[12px] font-black uppercase tracking-wider text-slate-500">
+                  {section.label}
+                </h2>
+                <div className="grid grid-cols-4 gap-x-2 gap-y-4">
+                  {section.items.map(item => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.module}
+                        type="button"
+                        onClick={() => onNavigate(item.module)}
+                        aria-label={item.label}
+                        className="group flex min-w-0 flex-col items-center gap-1.5 rounded-2xl focus-visible:outline-none"
+                      >
+                        <span className={`grid h-14 w-14 place-items-center rounded-[18px] text-white shadow-sm transition-transform group-active:scale-95 group-focus-visible:ring-2 group-focus-visible:ring-teal-500 group-focus-visible:ring-offset-2 ${tint.solid}`}>
+                          <Icon aria-hidden="true" className="h-6 w-6" />
+                        </span>
+                        <span className="w-full truncate text-center text-[11px] font-semibold text-slate-700">{item.shortLabel}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+        <div className="hidden grid-cols-1 items-stretch gap-5 md:grid xl:grid-cols-2">
           {sections.map((section, index) => {
             const tint = NAV_TINT_CLASSES[section.tint];
             const SectionIcon = section.icon;
@@ -92,6 +127,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
             );
           })}
         </div>
+        </>
       )}
     </div>
   );

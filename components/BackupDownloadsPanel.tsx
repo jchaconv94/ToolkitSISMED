@@ -47,7 +47,7 @@ export const BackupDownloadsPanel: React.FC = () => {
   };
 
   return createPortal(
-    <div className="fixed inset-x-3 bottom-[76px] z-[9000] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_25px_-5px_rgba(0,0,0,0.15)] md:inset-x-auto md:bottom-4 md:right-4 md:w-[340px]">
+    <div className="fixed inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom))] z-[9000] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_25px_-5px_rgba(0,0,0,0.15)] md:inset-x-auto md:bottom-4 md:right-4 md:w-[340px]">
       <div className="flex items-center gap-2 bg-slate-900 px-4 py-2.5 text-white">
         <FolderDown className="h-4 w-4" />
         <span className="text-[13px] font-bold">Descargas</span>

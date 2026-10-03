@@ -89,7 +89,7 @@ types.ts                    Fuente única de tipos, AppModule y AVAILABLE_MODULE
 contexts/AuthContext.tsx    Sesión, rol, hasPermission()
 contexts/BackupManagerContext.tsx  Descargas de backups que siguen al cambiar de módulo
 components/                 Un archivo .tsx por módulo (componentes grandes, sin subcarpetas por dominio)
-components/navigation.ts    Secciones del menú (Farmacia, Stock, Herramientas, Administración): fuente única de la barra lateral y del Inicio
+components/navigation.ts    Secciones del menú (Farmacia, Stock, Herramientas, Administración): fuente única de la barra lateral, del Inicio y de la navegación del teléfono
 components/ui/              Kit compartido: kit.tsx, ConfirmationDialog, CustomSelect, TablePagination
 services/                   Acceso a datos, reglas de dominio y generación de documentos
 docs/                       Toda la documentación (auditorías, planes). Solo README y AGENTS viven en la raíz
@@ -98,16 +98,17 @@ backend/                    Google Apps Script legado
 cloudflare/conexion         Servicio de conexión de Backups SISMED (se publica desde GitHub)
 ```
 
-**No hay react-router.** La navegación es `currentView: AppModule` en `App.tsx`, con Sidebar/MobileNav como disparadores. La URL se sincroniza a mano con `history.pushState` usando `services/appRoutes.ts`.
+**No hay react-router.** La navegación es `currentView: AppModule` en `App.tsx`, con `Sidebar` (escritorio) y la barra inferior de pestañas de `components/MobileNavigation.tsx` (teléfono) como disparadores. La URL se sincroniza a mano con `history.pushState` usando `services/appRoutes.ts`.
 
-Al agregar un módulo hay que tocar **seis** lugares:
+**Navegación del teléfono (desde el 2026-10-03).** Por debajo de `md` no hay lateral: una barra inferior con «Inicio» y una pestaña por sección visible, y al tocar una sección se abre su pantalla con la lista de herramientas. Todo se deriva de `components/navigation.ts`; ya no existe `MobileNav.tsx` con su lista propia. La pantalla de sección es Inicio con `?seccion=<id>` (`pathForSection` / `viewForLocation` en `appRoutes.ts`), así forma parte del historial y la flecha «volver» y el botón atrás regresan de una herramienta a su sección. Perfil y Cerrar sesión se abren desde el avatar (`UserMenu`).
+
+Al agregar un módulo hay que tocar **cinco** lugares:
 
 1. `types.ts` → union `AppModule` + entrada en `AVAILABLE_MODULES`
 2. `App.tsx` → import, título de cabecera, render condicional y fallback de permisos
 3. `services/appRoutes.ts` → su ruta (`administracion/claves-de-envio`, etc.)
-4. `components/navigation.ts` → la sección a la que pertenece (de ahí salen la barra lateral y la pantalla de Inicio)
-5. `components/MobileNav.tsx` → el grupo que le corresponde en `GRUPOS` (y, si aplica, `BARRA_INFERIOR`)
-6. Permisos por rol en Supabase (`roles_config.allowed_modules`)
+4. `components/navigation.ts` → la sección a la que pertenece (de ahí salen la barra lateral, la pantalla de Inicio y la barra inferior y las pantallas de sección del teléfono)
+5. Permisos por rol en Supabase (`roles_config.allowed_modules`)
 
 Olvidar cualquiera deja el módulo inaccesible, sin título o sin URL propia. El paso 3 está protegido: `services/appRoutes.test.ts` falla si un módulo de `AVAILABLE_MODULES` no tiene ruta declarada. Si un módulo nuevo debe verlo el ADMIN aunque su rol en Supabase aún no lo tenga, añádelo también a la excepción de `hasPermission` en `contexts/AuthContext.tsx`.
 

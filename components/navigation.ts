@@ -24,9 +24,9 @@ import { AppModule } from "../types";
 /**
  * Mapa de navegación de la aplicación: secciones, herramientas y su orden.
  *
- * Es la única fuente para el lateral de escritorio, la pantalla de Inicio y la miga de
- * pan de la cabecera. Antes cada menú tenía su propia lista y se desordenaban entre sí.
- * Un módulo nuevo se agrega aquí (además de los seis lugares de AGENTS.md §4).
+ * Es la única fuente para el lateral de escritorio, la pantalla de Inicio, la miga de
+ * pan de la cabecera y la barra inferior del teléfono (pestañas y pantallas de sección). Antes cada menú tenía su propia lista y se desordenaban entre sí.
+ * Un módulo nuevo se agrega aquí (además de los otros lugares de AGENTS.md §4).
  */
 
 export type NavTint = "teal" | "cyan" | "violet" | "slate";
@@ -45,6 +45,8 @@ export interface NavItem {
 export interface NavSection {
   id: string;
   label: string;
+  /** Nombre corto, el de la pestaña de la barra inferior del teléfono. */
+  shortLabel: string;
   icon: LucideIcon;
   tint: NavTint;
   items: NavItem[];
@@ -62,6 +64,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: "farmacia",
     label: "Farmacia",
+    shortLabel: "Farmacia",
     icon: Pill,
     tint: "teal",
     items: [
@@ -73,6 +76,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: "stock",
     label: "Stock",
+    shortLabel: "Stock",
     icon: Boxes,
     tint: "cyan",
     items: [
@@ -83,6 +87,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: "herramientas",
     label: "Herramientas",
+    shortLabel: "Herramientas",
     icon: Wrench,
     tint: "violet",
     items: [
@@ -93,6 +98,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     id: "administracion",
     label: "Administración",
+    shortLabel: "Admin",
     icon: Settings,
     tint: "slate",
     items: [
@@ -119,6 +125,13 @@ export const visibleNavSections = (hasPermission: (module: AppModule) => boolean
   NAV_SECTIONS
     .map(section => ({ ...section, items: section.items.filter(item => hasPermission(item.module)) }))
     .filter(section => section.items.length > 0);
+
+/** Sección visible con ese identificador, o `null` si no existe o el usuario no ve ninguna de sus herramientas. */
+export const findVisibleNavSection = (
+  sectionId: string | null,
+  hasPermission: (module: AppModule) => boolean,
+): NavSection | null =>
+  sectionId ? visibleNavSections(hasPermission).find(section => section.id === sectionId) || null : null;
 
 /** Sección a la que pertenece un módulo, o `null` (Inicio y Perfil no tienen sección). */
 export const findNavSection = (module: AppModule): NavSection | null =>
