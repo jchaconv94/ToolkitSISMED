@@ -138,7 +138,7 @@ import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
 import { BottomSheet } from "./ui/BottomSheet";
 import { DeficiencyCaptureBar } from "./DeficiencyCaptureBar";
-import { EstablishmentCard } from "./EstablishmentCard";
+import { EstablishmentCard, EstablishmentMobileRow } from "./EstablishmentCard";
 
 /** Lista vacía compartida: evita crear un array nuevo por tarjeta sin datos. */
 const EMPTY_SOURCE_ROWS: SIGData[] = [];
@@ -4717,7 +4717,7 @@ function processSheet(sheet) {
     >
       {/* Cabecera del módulo en una sola fila (2026-10-03): volver, dónde estoy y las acciones.
           El título «Reporte de Stock detallado SISMED» se quitó: lo dice la cabecera de la app. */}
-      <div className="px-4 pb-3 pt-4 sm:px-10 sm:pt-6 lg:px-14 xl:px-16">
+      <div className="px-4 pb-2 pt-3 sm:px-10 sm:pb-3 sm:pt-6 lg:px-14 xl:px-16">
         <div className="flex items-center gap-2 sm:gap-3">
           {/* La flecha está a la izquierda, donde se mira, y dice a dónde lleva. */}
           {destinoDeVolver && (
@@ -4877,7 +4877,7 @@ function processSheet(sheet) {
           };
           const allOn = filter_emerald && filter_amber && filter_red && filter_gray;
           return (
-            <div className="mt-3">
+            <div className="mt-2 sm:mt-3">
               <KpiStrip cols="md:grid-cols-3">
                 <KpiCard watermark tone="success" icon={<Wifi />} label="En línea" value={summary.online} hint="actualizados en la última hora" onClick={() => only(true, false, false)} active={!allOn && filter_emerald && !filter_amber && !filter_red} />
                 <KpiCard watermark tone="warning" icon={<FileClock />} label="Desconectados" value={summary.delayed} hint="entre 1 y 24 horas sin actualizar" onClick={() => only(false, true, false)} active={!allOn && !filter_emerald && filter_amber && !filter_red} />
@@ -4897,7 +4897,7 @@ function processSheet(sheet) {
         const lots = activeSheetData.filter((row) => rowMatchesPharmacy(readAlmCode(row), dataFilterPharmacy)).length;
         const toggle = (value: string) => setDataFilterExpiration(dataFilterExpiration === value ? "all" : value);
         return (
-          <div className="mb-4 px-4 sm:px-10 lg:px-14 xl:px-16">
+          <div className="mb-2 px-4 sm:mb-4 sm:px-10 lg:px-14 xl:px-16">
             <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
               <KpiCard watermark tone="info" icon={<Package />} label="Lotes" value={lots.toLocaleString("es-PE")} hint="en la hoja del establecimiento" onClick={() => setDataFilterExpiration("all")} active={dataFilterExpiration === "all"} />
               <KpiCard watermark tone="warning" icon={<Clock />} label="Por vencer" value={activeSheetExpirationInfo.expiringThisMonthCount.toLocaleString("es-PE")} hint={`en los próximos ${expiryWindowDays} días`} onClick={() => toggle("expiring")} active={dataFilterExpiration === "expiring"} />
@@ -5771,7 +5771,7 @@ function processSheet(sheet) {
         className={`bg-white sm:rounded-[1.25rem] border-y sm:border border-slate-200 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden mx-0 sm:mx-10 lg:mx-14 xl:mx-16 ${viewLevel === "data" ? "h-auto shrink-0 mb-8" : "flex-1 min-h-[300px]"}`}
       >
         {/* TOOLBAR */}
-        <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col gap-4">
+        <div className="p-3 sm:p-5 border-b border-slate-100 flex flex-col gap-4">
           {/* Search & Actions */}
           <div className={`flex gap-3 items-center justify-between w-full ${viewLevel === "ungets" ? "flex-col md:flex-row" : "flex-row"}`}>
             <div className="relative flex-1 w-full md:max-w-[50%] group">
@@ -7688,43 +7688,32 @@ function processSheet(sheet) {
                               const sheetData = rowsForSource(sheet.id);
                               const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);
                               const code = codeForSheet(sheet.id);
-                              const status = getUpdateStatus(sheet.lastUpdateTime);
-                              const items = sheetData.length > 0 ? sheetData.length : sheet.rowCount || 0;
-                              const selected = selectedCaptureIds.has(sheet.id);
+                              const cleanSheetId = sheet.id.includes("_") ? sheet.id.split("_").slice(1).join("_") : sheet.id;
+                              const syncRecord = supabaseSyncs[sheet.id] || (sheet.facilityCode ? supabaseSyncs[sheet.facilityCode] : undefined) || supabaseSyncs[cleanSheetId] || (code ? supabaseSyncs[code] : undefined);
                               return (
-                                <li
+                                <EstablishmentMobileRow
                                   key={sheet.id}
-                                  role="button"
-                                  tabIndex={0}
-                                  onClick={() => (isCaptureMode ? toggleCardSelection(sheet.id) : handleSelectSheet(sheet.id))}
-                                  onKeyDown={(e) => { if (e.key === "Enter") (isCaptureMode ? toggleCardSelection(sheet.id) : handleSelectSheet(sheet.id)); }}
-                                  className={`flex cursor-pointer items-center gap-3 px-4 py-3 active:bg-slate-50 ${selected ? "bg-teal-50/60" : ""}`}
-                                >
-                                  <div className="min-w-0 flex-1">
-                                    {code && <span className="font-mono text-[11px] text-teal-700">{code}</span>}
-                                    <p className="truncate text-[14px] font-bold text-slate-900">{describeSheetName(sheet.name)}</p>
-                                    <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-slate-500">
-                                      <span className={`h-2 w-2 shrink-0 rounded-full ${status.color}`} />
-                                      <span>{status.label}</span>
-                                      <span className="text-slate-300">·</span>
-                                      <span>{items.toLocaleString("es-PE")} ítems</span>
-                                    </p>
-                                    {(expiredCount > 0 || expiringThisMonthCount > 0) && (
-                                      <p className="mt-0.5 text-[12px] font-semibold">
-                                        {expiredCount > 0 && <span className="text-red-600">{expiredCount} vencidos</span>}
-                                        {expiredCount > 0 && expiringThisMonthCount > 0 && <span className="text-slate-300"> · </span>}
-                                        {expiringThisMonthCount > 0 && <span className="text-amber-700">{expiringThisMonthCount} por vencer</span>}
-                                      </p>
-                                    )}
-                                  </div>
-                                  {isCaptureMode ? (
-                                    <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${selected ? "border-teal-600 bg-teal-600 text-white" : "border-slate-300 bg-white"}`}>
-                                      {selected && <Check className="h-4 w-4" />}
-                                    </span>
-                                  ) : (
-                                    <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
-                                  )}
-                                </li>
+                                  data={{
+                                    id: sheet.id,
+                                    name: describeSheetName(sheet.name),
+                                    code: code || "",
+                                    lastUpdate: sheet.lastUpdate,
+                                    lastUpdateTime: sheet.lastUpdateTime,
+                                    equipmentDate: sheet.equipmentDate,
+                                    equipmentDateTime: sheet.equipmentDateTime,
+                                    expiredCount,
+                                    expiringThisMonthCount,
+                                    totalItems: sheetData.length > 0 ? sheetData.length : sheet.rowCount || 0,
+                                    syncRecordDate: getLastMovementDate(syncRecord),
+                                    hasSyncRecord: !!syncRecord,
+                                    isCheckingSync: isCheckingLatestSyncs,
+                                  }}
+                                  isCaptureMode={isCaptureMode}
+                                  isSelected={selectedCaptureIds.has(sheet.id)}
+                                  onToggleSelect={() => toggleCardSelection(sheet.id)}
+                                  onClick={() => handleSelectSheet(sheet.id)}
+                                  onShowHistory={() => handleShowSyncHistory(sheet)}
+                                />
                               );
                             })}
                           </ul>

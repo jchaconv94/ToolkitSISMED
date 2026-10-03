@@ -112,7 +112,7 @@ export const LotDetailSheet: React.FC<{
     : [];
 
   return (
-    <BottomSheet open={Boolean(row)} title="Detalle del lote" onClose={onClose} centeredOnDesktop>
+    <BottomSheet open={Boolean(row)} title="Detalle del lote" onClose={onClose} centeredOnDesktop hideTitle>
       {row && (
         <div className="space-y-4 pb-1">
           <div className="flex items-start justify-between gap-4">

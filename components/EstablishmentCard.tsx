@@ -453,3 +453,76 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
     </button>
   );
 };
+
+/**
+ * Versión del celular de la tarjeta de establecimiento: los mismos datos que la de escritorio
+ * —estado de conexión, hora de actualización y del equipo (en rojo si no coinciden), últimos
+ * movimientos, ítems, vencidos y por vencer— en una fila compacta para ver muchos a la vez.
+ * Al tocarla se abre el stock; el chip de movimientos abre el historial.
+ */
+export const EstablishmentMobileRow: React.FC<EstablishmentCardProps> = ({
+  data,
+  isCaptureMode = false,
+  isSelected = false,
+  onToggleSelect,
+  onClick,
+  onShowHistory,
+}) => {
+  const {
+    name, code, lastUpdate, lastUpdateTime, equipmentDate, equipmentDateTime,
+    expiredCount, expiringThisMonthCount, totalItems, syncRecordDate, hasSyncRecord, isCheckingSync,
+  } = data;
+  const isMismatch = !checkDatesMatch(lastUpdateTime, equipmentDateTime);
+  const open = () => (isCaptureMode ? onToggleSelect?.() : onClick?.());
+  const chip = "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold";
+
+  return (
+    <li
+      role="button"
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={(e) => { if (e.key === "Enter") open(); }}
+      className={`relative cursor-pointer px-4 py-3 active:bg-slate-50 ${isCaptureMode && isSelected ? "bg-rose-50/50" : ""}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          {code && <span className="font-mono text-[11px] font-bold text-teal-700">{code}</span>}
+          <p className="text-[14px] font-bold leading-snug text-slate-900">{name}</p>
+        </div>
+        {isCaptureMode ? (
+          <span className={`mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${isSelected ? "border-rose-600 bg-rose-600 text-white" : "border-slate-300 bg-white"}`}>
+            {isSelected && <Check className="h-4 w-4" />}
+          </span>
+        ) : (
+          <span className="mt-0.5 shrink-0">{renderCardSyncStatusPill(lastUpdateTime)}</span>
+        )}
+      </div>
+
+      {(lastUpdate || lastUpdateTime) && (
+        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11.5px] text-slate-500">
+          <span className="inline-flex items-center gap-1"><RefreshCw className="h-3 w-3 text-slate-400" />Act. <b className="font-semibold text-slate-700">{formatCardFullDate(lastUpdate || lastUpdateTime)}</b></span>
+          {(equipmentDate || equipmentDateTime) && (
+            <span className={`inline-flex items-center gap-1 ${isMismatch ? "font-semibold text-rose-600" : ""}`} title={isMismatch ? "La fecha del equipo no coincide con la actualización" : undefined}>
+              <Monitor className="h-3 w-3" />Equipo <b className={isMismatch ? "font-bold" : "font-semibold text-slate-700"}>{formatCardFullDate(equipmentDate || equipmentDateTime)}</b>
+            </span>
+          )}
+        </p>
+      )}
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className={`${chip} border-slate-200 bg-slate-50 text-slate-600`}><Package className="h-3 w-3" />{totalItems.toLocaleString("es-PE")} ítems</span>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onShowHistory?.(e); }}
+          className={`${chip} ${syncRecordDate ? "border-teal-200 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-500"}`}
+          title="Historial de cambios del stock"
+        >
+          <FileClock className="h-3 w-3" />
+          {isCheckingSync ? "Comprobando…" : syncRecordDate ? `Movimiento ${getCardUpdateStatus(new Date(syncRecordDate).getTime()).label.toLowerCase()}` : hasSyncRecord ? "Sin movimientos" : "Historial sin verificar"}
+        </button>
+        {expiredCount > 0 && <span className={`${chip} border-rose-200 bg-rose-50 text-rose-700`}><AlertTriangle className="h-3 w-3" />{expiredCount} vencido{expiredCount !== 1 ? "s" : ""}</span>}
+        {expiringThisMonthCount > 0 && <span className={`${chip} border-amber-200 bg-amber-50 text-amber-700`}><Clock className="h-3 w-3" />{expiringThisMonthCount} por vencer</span>}
+      </div>
+    </li>
+  );
+};
