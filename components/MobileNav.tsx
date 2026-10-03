@@ -19,6 +19,7 @@ import {
   HardDriveDownload
 } from 'lucide-react';
 import { AppModule } from '../types';
+import { BrandLogo } from './ui/BrandLogo';
 
 interface MobileNavProps {
   currentView: AppModule;
@@ -113,8 +114,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentView, setCurrentVie
 
           <nav className="absolute inset-y-0 left-0 flex w-[90%] max-w-sm flex-col bg-[#0f172a] shadow-2xl animate-in slide-in-from-left duration-200">
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-              <div>
-                <p className="text-base font-black text-white">ToolKit SISMED</p>
+              <div className="space-y-1">
+                <BrandLogo size={16} tone="dark" />
                 <p className="text-[11px] font-semibold text-gray-400">Menú de navegación</p>
               </div>
               <button

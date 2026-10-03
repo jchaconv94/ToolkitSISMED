@@ -30,7 +30,7 @@ export const MaintenanceScreen: React.FC<MaintenanceScreenProps> = ({
       </div>
 
       <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-        ToolKit SISMED Web
+        Toolkit SISMED
       </p>
       <h1 className="text-xl sm:text-2xl font-black text-slate-900 mt-2 tracking-tight">
         Sistema en mantenimiento
