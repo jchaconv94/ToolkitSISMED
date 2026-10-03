@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Building2, ChevronDown, LogOut, MapPin, UserCircle } from "lucide-react";
+import { Building2, ChevronDown, Download, LogOut, MapPin, Share, SquarePlus, UserCircle, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { useInstallApp } from "../services/installApp";
+import { BrandMark } from "./ui/BrandLogo";
 import { User } from "../types";
 import { api } from "../services/api";
 import { userFullName, userInitial } from "../services/sessionDisplay";
@@ -49,6 +52,8 @@ interface UserMenuProps {
 
 export const UserMenu: React.FC<UserMenuProps> = ({ user, onOpenProfile, onLogout }) => {
   const [open, setOpen] = useState(false);
+  const installApp = useInstallApp();
+  const [iosHelp, setIosHelp] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -191,6 +196,17 @@ export const UserMenu: React.FC<UserMenuProps> = ({ user, onOpenProfile, onLogou
               <UserCircle className="h-[18px] w-[18px] text-slate-500" />
               Perfil de usuario
             </button>
+            {installApp.available && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => choose(() => { if (installApp.needsInstructions) setIosHelp(true); else void installApp.install(); })}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-teal-700 hover:bg-teal-50 focus:outline-none focus-visible:bg-teal-50"
+              >
+                <Download className="h-[18px] w-[18px]" />
+                Instalar app
+              </button>
+            )}
             <button
               type="button"
               role="menuitem"
@@ -202,6 +218,28 @@ export const UserMenu: React.FC<UserMenuProps> = ({ user, onOpenProfile, onLogou
             </button>
           </div>
         </div>
+      )}
+      {iosHelp && createPortal(
+        <div className="fixed inset-0 z-[9600] flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-6" onClick={() => setIosHelp(false)}>
+          <div role="dialog" aria-modal="true" aria-label="Instalar en iPhone o iPad" onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-t-3xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl">
+            <div className="mb-4 flex items-center gap-3">
+              <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#0f2233]"><BrandMark size={30} tone="dark" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[16px] font-black text-slate-900">Instalar Toolkit SISMED</p>
+                <p className="text-[12.5px] text-slate-500">Quedará en su pantalla de inicio, como una app.</p>
+              </div>
+              <button type="button" aria-label="Cerrar" onClick={() => setIosHelp(false)} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <ol className="space-y-3 text-[13.5px] text-slate-700">
+              <li className="flex items-center gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-slate-100 text-sky-600"><Share className="h-[18px] w-[18px]" /></span><span>Toque <b>Compartir</b> en la barra de Safari.</span></li>
+              <li className="flex items-center gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700"><SquarePlus className="h-[18px] w-[18px]" /></span><span>Elija <b>Agregar a inicio</b>.</span></li>
+              <li className="flex items-center gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-slate-100 font-black text-teal-700">3</span><span>Confirme con <b>Agregar</b>.</span></li>
+            </ol>
+            <button type="button" onClick={() => setIosHelp(false)} className="mt-5 h-11 w-full rounded-xl bg-slate-900 text-[14px] font-bold text-white">Entendido</button>
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

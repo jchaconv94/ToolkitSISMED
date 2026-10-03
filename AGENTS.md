@@ -97,6 +97,7 @@ components/ToolSearch.tsx   Buscador de herramientas (campo de la cabecera, lupa
 components/ui/              Kit compartido: kit.tsx, ConfirmationDialog, CustomSelect, TablePagination
 services/                   Acceso a datos, reglas de dominio y generación de documentos
 docs/                       Toda la documentación (auditorías, planes). Solo README y AGENTS viven en la raíz
+public/                     Ícono (favicon.svg), íconos PNG de la app, manifest.webmanifest y sw.js (service worker sin caché, solo para poder instalar la app; services/installApp.ts maneja «Instalar app» del menú del usuario)
 supabase/                   Todos los .sql que el usuario ejecuta a mano en el panel de Supabase
 backend/                    Google Apps Script legado
 cloudflare/conexion         Servicio de conexión de Backups SISMED (se publica desde GitHub)

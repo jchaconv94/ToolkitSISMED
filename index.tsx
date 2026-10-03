@@ -16,6 +16,13 @@ window.addEventListener('vite:preloadError', (event) => {
   }
 });
 
+// Service worker mínimo (public/sw.js): permite instalar la app; no guarda caché.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL }).catch(() => {});
+  });
+}
+
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");

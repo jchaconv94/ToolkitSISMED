@@ -1,0 +1,18 @@
+{
+  "name": "Toolkit SISMED",
+  "short_name": "Toolkit",
+  "description": "Herramientas del SISMED para la DIRESA San Martín: análisis de requerimiento, stock, backups y más.",
+  "lang": "es-PE",
+  "id": "/ToolkitSISMED/",
+  "start_url": "/ToolkitSISMED/inicio",
+  "scope": "/ToolkitSISMED/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f2233",
+  "theme_color": "#0f2233",
+  "icons": [
+    { "src": "/ToolkitSISMED/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/ToolkitSISMED/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/ToolkitSISMED/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
