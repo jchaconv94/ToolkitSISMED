@@ -163,7 +163,7 @@ export const LoginScreen: React.FC = () => {
       {/* Portada del celular: fondo oscuro con las piezas del logo flotando, título grande
           y la tarjeta del formulario montada encima de su borde inferior. */}
       <header
-        className="relative overflow-hidden px-6 pb-24 pt-12 text-white lg:hidden"
+        className="relative overflow-hidden px-6 pb-[190px] pt-12 text-white lg:hidden"
         style={{
           background:
             'radial-gradient(circle at 10% 0%, #17565A 0%, rgba(23,86,90,0) 60%), radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1.5px) 0 0 / 22px 22px, #081A1D',
@@ -171,7 +171,7 @@ export const LoginScreen: React.FC = () => {
       >
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -right-14 -top-6 grid h-[220px] w-[220px] rotate-[12deg] grid-cols-2 gap-3 opacity-90"
+          className="pointer-events-none absolute bottom-[52px] -right-5 grid h-[140px] w-[140px] rotate-[12deg] grid-cols-2 gap-2.5 opacity-90"
         >
           <div className="login-shape rounded-[26px] bg-[#1FA393] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" />
           <div className="login-shape rounded-[26px] bg-[#6DD5C4] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" />
@@ -182,11 +182,11 @@ export const LoginScreen: React.FC = () => {
           </div>
         </div>
         <div className="relative flex flex-col gap-4">
-          <BrandMark size={44} tone="dark" />
-          <h1 className="text-[44px] font-extrabold leading-[1.02] tracking-[-0.03em]">
-            Toolkit
-            <br />
-            <span className="text-[#5FD0BF]">SISMED</span>
+          <h1 className="flex items-center gap-3 text-[34px] font-extrabold leading-none tracking-[-0.03em]">
+            <BrandMark size={40} tone="dark" />
+            <span>
+              Toolkit <span className="text-[#5FD0BF]">SISMED</span>
+            </span>
           </h1>
           <p className="max-w-[300px] text-[16px] font-medium leading-relaxed text-[#BFD6D2]">
             Automatiza y simplifica la gestión operativa del SISMED.
