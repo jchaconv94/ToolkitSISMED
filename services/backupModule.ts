@@ -199,3 +199,23 @@ export const activityFromRequest = (row: BackupActivityRow, me?: string | null):
       return { ...base, kind: "download", tone: "info", text: `${row.code} · en curso · ${pedido}` };
   }
 };
+
+// --- Abrir una pestaña desde fuera --------------------------------------------------------
+
+/**
+ * La campana de avisos abre el módulo directamente en «Consumo». Queda anotado para cuando
+ * el módulo se monte y, si ya estaba abierto, se le avisa con un evento.
+ */
+let requestedTab: "consumo" | null = null;
+export const BACKUPS_TAB_EVENT = "backups-sismed:tab";
+
+export const requestBackupsTab = (tab: "consumo") => {
+  requestedTab = tab;
+  try { window.dispatchEvent(new CustomEvent(BACKUPS_TAB_EVENT, { detail: tab })); } catch { /* sin ventana */ }
+};
+
+export const takeRequestedBackupsTab = (): "consumo" | null => {
+  const tab = requestedTab;
+  requestedTab = null;
+  return tab;
+};

@@ -42,6 +42,8 @@ import { AdminStockAssignmentModule } from './components/AdminStockAssignmentMod
 import { AdminSendKeysModule } from './components/AdminSendKeysModule';
 import { BackupsSismedModule } from './components/BackupsSismedModule';
 import { BackupManagerProvider } from './contexts/BackupManagerContext';
+import { NotificationsProvider } from './contexts/NotificationsContext';
+import { NotificationBell } from './components/NotificationBell';
 import { AssignedIpressStockModule } from './components/AssignedIpressStockModule';
 import { AnalysisExclusionsModule } from './components/AnalysisExclusionsModule';
 import { APP_BASE, moduleForPath, pathForModule, pathForView, viewForLocation } from './services/appRoutes';
@@ -92,7 +94,9 @@ const App: React.FC = () => {
             <AuthProvider>
                 <Toaster position="top-center" closeButton theme="light" style={{ zIndex: 2147483647 }} toastOptions={{ style: { zIndex: 2147483647, color: '#1e293b' }, className: 'text-slate-800' }} />
                 <BackupManagerProvider>
-                    <AuthenticatedApp />
+                    <NotificationsProvider>
+                        <AuthenticatedApp />
+                    </NotificationsProvider>
                 </BackupManagerProvider>
             </AuthProvider>
         </ErrorBoundary>
@@ -323,7 +327,7 @@ const AuthenticatedApp: React.FC = () => {
                     <div className="mx-4 hidden min-w-0 flex-1 justify-center md:flex">
                         <ToolSearchTrigger onOpen={abrirBuscador} className="w-full max-w-[420px]" />
                     </div>
-                    <div className="ml-auto flex shrink-0 items-center gap-3 md:ml-0">
+                    <div className="ml-auto flex shrink-0 items-center gap-1.5 md:ml-0 md:gap-3">
                         <div id={MODULE_HEADER_SLOT_ID} className="flex shrink-0 items-center gap-2 empty:hidden" />
                         <button
                                 type="button"
@@ -334,6 +338,7 @@ const AuthenticatedApp: React.FC = () => {
                             >
                                 <Search className="h-5 w-5" />
                             </button>
+                        {user && <NotificationBell onNavigate={setCurrentView} />}
                         {user && (
                             <UserMenu user={user} onOpenProfile={() => setCurrentView('PROFILE')} onLogout={logout} />
                         )}
