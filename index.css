@@ -106,3 +106,24 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .brand-mark .bm-piece { animation: none !important; }
 }
+
+/* Login: las cuatro piezas del logo entran flotando, una tras otra, y luego se mecen
+   apenas. Sin movimiento si el sistema pide reducir animaciones. */
+.login-shape {
+  opacity: 0;
+  animation: login-shape-in 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) forwards, login-shape-float 7s ease-in-out 1s infinite;
+}
+.login-shape:nth-child(2) { animation-delay: 0.12s, 1.4s; }
+.login-shape:nth-child(3) { animation-delay: 0.24s, 1.8s; }
+.login-shape:nth-child(4) { animation-delay: 0.36s, 2.2s; }
+@keyframes login-shape-in {
+  from { opacity: 0; transform: translateY(40px) scale(0.9); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes login-shape-float {
+  0%, 100% { opacity: 1; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-10px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-shape { animation: none !important; opacity: 1; }
+}

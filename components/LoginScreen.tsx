@@ -1,209 +1,302 @@
-
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Lock, User, ArrowRight, Phone, ShieldCheck, Eye, EyeOff } from 'lucide-react';
-import { BrandLogo, BrandMark, BrandWordmark } from './ui/BrandLogo';
+import {
+  AlertCircle,
+  ArrowRight,
+  Database,
+  Eye,
+  EyeOff,
+  HardDriveDownload,
+  KeyRound,
+  Loader2,
+  Lock,
+  Phone,
+  ShieldCheck,
+  User,
+} from 'lucide-react';
+import { BrandMark } from './ui/BrandLogo';
 
+/** Solo se recuerda el usuario. La contraseña nunca se guarda en el navegador. */
+const USUARIO_RECORDADO_KEY = 'aura_saved_username';
+/** Clave antigua que guardaba la contraseña en texto plano: se borra al abrir el login. */
+const CLAVE_ANTIGUA_KEY = 'aura_saved_password';
+
+const VENTAJAS = [
+  { Icon: Database, texto: 'Stock de toda la región, siempre a la mano' },
+  { Icon: HardDriveDownload, texto: 'Backups SISMED con un clic' },
+  { Icon: KeyRound, texto: 'Claves de envío por establecimiento' },
+];
+
+/**
+ * Inicio de sesión (rediseño del 2026-10-03, sobre la propuesta «B» del usuario).
+ *
+ * Escritorio: panel oscuro con la marca y las piezas del logo, que entran flotando; a la
+ * derecha, la tarjeta del formulario. Celular: una franja oscura con la marca arriba y el
+ * formulario debajo, sin piezas que estorben.
+ */
 export const LoginScreen: React.FC = () => {
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  const [rememberUser, setRememberUser] = useState(false);
   const [error, setError] = useState('');
+  const [tried, setTried] = useState(false);
+  const [capsLock, setCapsLock] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const usuarioRef = useRef<HTMLInputElement>(null);
+  const claveRef = useRef<HTMLInputElement>(null);
 
-  React.useEffect(() => {
-      const savedUsername = localStorage.getItem('aura_saved_username');
-      const savedPassword = localStorage.getItem('aura_saved_password');
-      if (savedUsername && savedPassword) {
-          setUsername(savedUsername);
-          setPassword(savedPassword);
-          setRememberMe(true);
+  useEffect(() => {
+    try {
+      // Antes «Recordar mis credenciales» guardaba también la contraseña, sin cifrar.
+      localStorage.removeItem(CLAVE_ANTIGUA_KEY);
+      const guardado = localStorage.getItem(USUARIO_RECORDADO_KEY);
+      if (guardado) {
+        setUsername(guardado);
+        setRememberUser(true);
+        // Con el usuario ya puesto, lo siguiente que se escribe es la contraseña.
+        claveRef.current?.focus();
+        return;
       }
+    } catch {
+      // Sin almacenamiento local solo se pierde recordar el usuario.
+    }
+    usuarioRef.current?.focus();
   }, []);
 
+  const usuarioVacio = tried && !username.trim();
+  const claveVacia = tried && !password;
+
   const handleSubmit = async (e: React.FormEvent) => {
-      e.preventDefault();
-      setError('');
-      setIsSubmitting(true);
-      
-      const result = await login(username, password);
-      
-      if (!result.success) {
-          setError(result.message || 'Error al iniciar sesión');
-      } else {
-          if (rememberMe) {
-              localStorage.setItem('aura_saved_username', username);
-              localStorage.setItem('aura_saved_password', password);
-          } else {
-              localStorage.removeItem('aura_saved_username');
-              localStorage.removeItem('aura_saved_password');
-          }
-      }
+    e.preventDefault();
+    if (isSubmitting) return;
+    setTried(true);
+    setError('');
+    if (!username.trim() || !password) return;
+
+    setIsSubmitting(true);
+    const result = await login(username, password);
+    if (!result.success) {
+      setError(result.message || 'No se pudo iniciar sesión.');
       setIsSubmitting(false);
+      return;
+    }
+    try {
+      if (rememberUser) localStorage.setItem(USUARIO_RECORDADO_KEY, username.trim());
+      else localStorage.removeItem(USUARIO_RECORDADO_KEY);
+    } catch {
+      // Sin almacenamiento local, simplemente no se recuerda.
+    }
+    setIsSubmitting(false);
   };
 
-  const handleInputChange = (setter: React.Dispatch<React.SetStateAction<string>>, value: string) => {
-      setter(value);
-      if (error) setError(''); // Clear error on typing
+  const alEscribir = (setter: React.Dispatch<React.SetStateAction<string>>, value: string) => {
+    setter(value);
+    if (error) setError('');
   };
+
+  const detectarMayusculas = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    setCapsLock(e.getModifierState?.('CapsLock') ?? false);
+  };
+
+  const campo = (conError: boolean) =>
+    `flex h-[52px] items-center gap-3 rounded-[14px] border-[1.5px] px-4 transition-all focus-within:border-teal-600 focus-within:bg-white focus-within:ring-4 focus-within:ring-teal-600/15 ${
+      conError ? 'border-red-600 bg-white' : 'border-[#C4D0CD] bg-[#F3F6F5]'
+    }`;
 
   return (
-    <div className="flex min-h-screen bg-white">
-        {/* Left Side: Branding/Imagery (Hidden on Mobile) */}
-        <div className="hidden lg:flex lg:w-[45%] relative bg-gray-900 items-center justify-center overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-teal-900 via-gray-900 to-gray-950"></div>
-            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-[0.04]"></div>
-            
-            {/* Subtle glow effect */}
-            <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-teal-500/10 rounded-full blur-[128px]"></div>
-            
-            <div className="relative z-10 flex flex-col items-center text-center p-12 max-w-lg">
-                <div className="bg-white/5 p-5 rounded-3xl mb-8 backdrop-blur-sm border border-white/10 shadow-2xl">
-                    <BrandMark size={72} tone="dark" />
-                </div>
-                
-                <h1 className="mb-6">
-                    <BrandWordmark size={46} tone="dark" />
-                </h1>
-                
-                <p className="text-lg text-teal-100 font-medium leading-relaxed opacity-90 mb-10">
-                    Toolkit SISMED automatiza y simplifica la gestión operativa del SISMED en una sola plataforma.
-                </p>
-                
-                <div className="w-16 h-1 bg-teal-500/50 rounded-full mb-10"></div>
-                
-                <div className="flex items-center gap-2 text-sm text-gray-400 font-medium">
-                    <ShieldCheck className="h-4 w-4 text-teal-500/70" />
-                    <span>Gestión Eficiente de información Farmacéutica</span>
-                </div>
-                <div className="mt-2 text-xs text-gray-500 font-mono">
-                    Toolkit SISMED © {new Date().getFullYear()}
-                </div>
-            </div>
+    <div className="flex min-h-[100dvh] flex-col bg-[#EEF3F2] text-[#10201E] lg:flex-row">
+      {/* Panel de marca (escritorio) */}
+      <aside
+        className="relative hidden min-h-[640px] flex-[1.15] flex-col justify-between overflow-hidden px-16 py-14 text-white lg:flex"
+        style={{
+          background:
+            'radial-gradient(circle at 12% 8%, #17565A 0%, rgba(23,86,90,0) 55%), radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1.5px) 0 0 / 26px 26px, #081A1D',
+        }}
+      >
+        {/* Las piezas del logo, abajo a la derecha: sin tapar el texto. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-[80px] -right-[70px] grid h-[400px] w-[400px] -rotate-[14deg] grid-cols-2 gap-6"
+        >
+          <div className="login-shape rounded-[56px] bg-[#1FA393] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" />
+          <div className="login-shape rounded-[56px] bg-[#6DD5C4] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" />
+          <div className="login-shape rounded-[56px] bg-[#F3F7F6] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" />
+          <div className="login-shape relative">
+            <div className="absolute left-[34%] top-0 h-full w-[32%] rounded-[22px] bg-[#F08A2C] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" />
+            <div className="absolute left-0 top-[34%] h-[32%] w-full rounded-[22px] bg-[#F08A2C]" />
+          </div>
         </div>
 
-        {/* Right Side: Form Container */}
-        <div className="w-full lg:w-[55%] flex items-center justify-center p-8 sm:p-12 lg:p-24 bg-gray-50 relative">
-            
-            {/* Background minimal pattern for the right side */}
-            <div className="absolute top-0 right-0 p-8 opacity-20 pointer-events-none">
-                <svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
-                    <defs>
-                        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-gray-300"/>
-                        </pattern>
-                    </defs>
-                    <rect width="100%" height="100%" fill="url(#grid)" />
-                </svg>
-            </div>
-
-            <div className="w-full max-w-[400px] relative z-10">
-                
-                {/* Mobile Header */}
-                <div className="lg:hidden mb-10 flex flex-col items-center justify-center">
-                    <h1 className="mb-2">
-                        <BrandLogo size={26} tone="light" />
-                    </h1>
-                    <p className="text-sm font-medium text-gray-500">Gestión Farmacéutica</p>
-                </div>
-
-                <div className="mb-10 text-center lg:text-left">
-                    <h2 className="text-3xl font-bold text-gray-900 mb-2 tracking-tight">Bienvenido</h2>
-                    <p className="text-gray-500 font-medium text-sm">Ingrese sus credenciales de acceso institucional.</p>
-                </div>
-
-                {error && (
-                    <div className="mb-6 p-4 bg-red-50/50 border border-red-200/60 text-red-700 text-sm rounded-xl flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
-                        <Lock className="h-5 w-5 shrink-0 mt-0.5 text-red-500" />
-                        <span>{error}</span>
-                    </div>
-                )}
-
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider ml-1">Usuario</label>
-                        <div className="relative group">
-                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-teal-600 transition-colors">
-                                <User className="h-5 w-5" />
-                            </div>
-                            <input 
-                                type="text"
-                                className={`w-full pl-12 pr-4 py-3.5 bg-white border ${error ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-teal-500 focus:ring-teal-500/20'} rounded-xl focus:ring-4 outline-none transition-all text-gray-900 font-medium shadow-sm`}
-                                placeholder="Ej. jperez"
-                                value={username}
-                                onChange={(e) => handleInputChange(setUsername, e.target.value)}
-                            />
-                        </div>
-                    </div>
-                    
-                    <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider ml-1">Contraseña</label>
-                        <div className="relative group">
-                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-teal-600 transition-colors">
-                                <Lock className="h-5 w-5" />
-                            </div>
-                            <input 
-                                type={showPassword ? 'text' : 'password'}
-                                className={`w-full pl-12 pr-12 py-3.5 bg-white border ${error ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-teal-500 focus:ring-teal-500/20'} rounded-xl focus:ring-4 outline-none transition-all text-gray-900 font-medium shadow-sm`}
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => handleInputChange(setPassword, e.target.value)}
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-teal-600 transition-colors focus:outline-none"
-                            >
-                                {showPassword ? (
-                                    <EyeOff className="h-5 w-5" />
-                                ) : (
-                                    <Eye className="h-5 w-5" />
-                                )}
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center mt-2 ml-1">
-                        <input
-                            id="remember-me"
-                            name="remember-me"
-                            type="checkbox"
-                            checked={rememberMe}
-                            onChange={(e) => setRememberMe(e.target.checked)}
-                            className="h-4 w-4 text-teal-600 focus:ring-teal-500/50 border border-gray-300 rounded transition-colors cursor-pointer"
-                        />
-                        <label htmlFor="remember-me" className="ml-2 block text-xs font-semibold text-gray-700 cursor-pointer select-none">
-                            Recordar mis credenciales
-                        </label>
-                    </div>
-
-                    <button 
-                        type="submit"
-                        disabled={isSubmitting}
-                        className="w-full bg-teal-600 text-white font-bold py-3.5 rounded-xl hover:bg-teal-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-teal-900/20 disabled:opacity-70 disabled:cursor-not-allowed group mt-2"
-                    >
-                        {isSubmitting ? 'Verificando...' : 'Iniciar sesión'}
-                        {!isSubmitting && <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />}
-                    </button>
-                </form>
-
-                <div className="mt-8 text-center flex flex-col items-center gap-4 border-t border-gray-200 pt-6">
-                    <button className="text-sm font-bold text-teal-600 hover:text-teal-800 transition-colors">
-                        ¿Olvidó su contraseña?
-                    </button>
-                    
-                    <div className="text-xs text-gray-400 mt-2">
-                        <p className="mb-2">Contacta al administrador del sistema:</p>
-                        <div className="inline-flex items-center gap-2 bg-gray-50 hover:bg-gray-100 transition-colors py-2 px-4 rounded-full border border-gray-200">
-                            <Phone className="h-4 w-4 text-gray-500" />
-                            <span className="font-bold text-gray-700 tracking-wide">956606972 - Ing. Jordan Chacon Villacis</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <div className="relative flex items-center gap-3">
+          <BrandMark size={34} tone="dark" />
+          <span className="text-[17px] font-bold tracking-tight">Toolkit SISMED</span>
         </div>
+
+        <div className="relative flex max-w-[460px] flex-col gap-6">
+          <h1 className="text-[60px] font-extrabold leading-[1.02] tracking-[-0.035em]">
+            Toolkit
+            <br />
+            <span className="text-[#5FD0BF]">SISMED</span>
+          </h1>
+          <p className="text-[19px] font-medium leading-relaxed text-[#BFD6D2]">
+            Automatiza y simplifica la gestión operativa del SISMED en una sola plataforma.
+          </p>
+          <ul className="mt-2 flex flex-col gap-3">
+            {VENTAJAS.map(({ Icon, texto }) => (
+              <li key={texto} className="flex items-center gap-3 text-[15px] font-medium text-[#D6E8E5]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#5FD0BF]/30 bg-[#5FD0BF]/10 text-[#8BE3D5]">
+                  <Icon className="h-[18px] w-[18px]" />
+                </span>
+                {texto}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="relative flex items-center gap-2 text-sm font-medium text-[#A9C6C1]">
+          <ShieldCheck className="h-[18px] w-[18px] text-[#5FD0BF]" />
+          Gestión eficiente de información farmacéutica
+        </div>
+      </aside>
+
+      {/* Franja de marca (celular) */}
+      <header
+        className="flex flex-col gap-3 px-6 pb-7 pt-10 text-white lg:hidden"
+        style={{ background: 'radial-gradient(circle at 10% 0%, #17565A 0%, rgba(23,86,90,0) 60%), #081A1D' }}
+      >
+        <div className="flex items-center gap-3">
+          <BrandMark size={36} tone="dark" />
+          <span className="text-[24px] font-extrabold tracking-tight">
+            Toolkit <span className="text-[#5FD0BF]">SISMED</span>
+          </span>
+        </div>
+        <p className="text-[15px] leading-relaxed text-[#BFD6D2]">Gestión operativa del SISMED en una sola plataforma.</p>
+      </header>
+
+      {/* Formulario */}
+      <main className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-8 sm:px-6 lg:py-14">
+        <div className="w-full max-w-[440px] rounded-3xl bg-white px-6 py-8 shadow-[0_1px_2px_rgba(16,32,30,0.06),0_24px_60px_rgba(16,32,30,0.10)] sm:px-10 sm:py-11">
+          <div className="mb-7 flex flex-col gap-2">
+            <h2 className="text-[28px] font-extrabold tracking-tight sm:text-[30px]">Iniciar sesión</h2>
+            <p className="text-[15px] font-medium text-[#4E5F5C]">Ingrese con su cuenta institucional.</p>
+          </div>
+
+          {error && (
+            <div role="alert" className="mb-5 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm font-semibold text-red-700 animate-in fade-in slide-in-from-top-1">
+              <AlertCircle className="mt-0.5 h-[18px] w-[18px] shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-[18px]">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="login-usuario" className="text-sm font-bold">Usuario</label>
+              <div className={campo(usuarioVacio)}>
+                <User className="h-5 w-5 shrink-0 text-[#4E5F5C]" />
+                <input
+                  ref={usuarioRef}
+                  id="login-usuario"
+                  type="text"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="Ej. jperez"
+                  value={username}
+                  onChange={(e) => alEscribir(setUsername, e.target.value)}
+                  aria-invalid={usuarioVacio}
+                  className="h-full min-w-0 flex-1 border-0 bg-transparent text-base font-medium outline-none placeholder:text-[#7A8A87]"
+                />
+              </div>
+              {usuarioVacio && <span className="text-[13px] font-semibold text-red-700">Ingrese su usuario.</span>}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label htmlFor="login-clave" className="text-sm font-bold">Contraseña</label>
+              <div className={`${campo(claveVacia)} pr-1.5`}>
+                <Lock className="h-5 w-5 shrink-0 text-[#4E5F5C]" />
+                <input
+                  ref={claveRef}
+                  id="login-clave"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  placeholder="Su contraseña"
+                  value={password}
+                  onChange={(e) => alEscribir(setPassword, e.target.value)}
+                  onKeyUp={detectarMayusculas}
+                  onKeyDown={detectarMayusculas}
+                  onBlur={() => setCapsLock(false)}
+                  aria-invalid={claveVacia}
+                  className="h-full min-w-0 flex-1 border-0 bg-transparent text-base font-medium outline-none placeholder:text-[#7A8A87]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[10px] text-[#4E5F5C] hover:bg-slate-100"
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
+              {claveVacia && <span className="text-[13px] font-semibold text-red-700">Ingrese su contraseña.</span>}
+              {capsLock && !claveVacia && (
+                <span className="text-[13px] font-semibold text-amber-700">Las mayúsculas están activadas.</span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2.5 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={rememberUser}
+                  onChange={(e) => setRememberUser(e.target.checked)}
+                  className="h-[18px] w-[18px] accent-teal-700"
+                />
+                Recordar mi usuario
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowHelp((v) => !v)}
+                aria-expanded={showHelp}
+                className="min-h-[44px] text-sm font-bold text-teal-700 hover:underline"
+              >
+                ¿Olvidó su contraseña?
+              </button>
+            </div>
+
+            {showHelp && (
+              <div className="rounded-xl bg-[#F3F6F5] px-4 py-3.5 text-sm font-medium leading-relaxed text-[#24332F] animate-in fade-in">
+                Para restablecerla, comuníquese con el administrador del sistema:
+                <span className="mt-1.5 flex items-center gap-2 font-bold text-[#10201E]">
+                  <Phone className="h-4 w-4 text-teal-700" />
+                  956606972 · Ing. Jordan Chacon Villacis
+                </span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="mt-1.5 flex h-[54px] items-center justify-center gap-2.5 rounded-[14px] bg-gradient-to-b from-[#0E8C80] to-[#0B7A70] text-base font-bold text-white shadow-[0_8px_20px_rgba(11,122,112,0.30)] transition-all hover:-translate-y-px hover:shadow-[0_12px_28px_rgba(11,122,112,0.38)] disabled:translate-y-0 disabled:opacity-80"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-[18px] w-[18px] animate-spin" />
+                  Verificando…
+                </>
+              ) : (
+                <>
+                  Iniciar sesión
+                  <ArrowRight className="h-[18px] w-[18px]" />
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+        <p className="text-[13px] font-medium text-[#4E5F5C]">© 2026 Toolkit SISMED</p>
+      </main>
     </div>
   );
 };
