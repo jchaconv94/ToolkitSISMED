@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2 } from "lucide-react";
+import { BrandMark } from "./ui/BrandLogo";
 import { User } from "../types";
 import { api } from "../services/api";
-import { greetingFor } from "../services/sessionDisplay";
+import { greetingFor, userFirstName } from "../services/sessionDisplay";
 
 /**
  * Saludo de bienvenida al iniciar sesión.
@@ -192,26 +192,30 @@ export const useJurisdiction = (user: User) => {
 
 const WelcomeToastContent: React.FC<{ user: User }> = ({ user }) => {
   const { jurisdictionName, jurisdictionLabel } = useJurisdiction(user);
-  const nombre = user.personnelData?.firstName || user.username;
+  const nombre = userFirstName(user);
 
   return (
     /* Pegado al borde derecho, como si asomara desde fuera de la pantalla. Sonner deja un
        margen de 24 px (16 en móvil, por debajo de 600 px), así que se desplaza justo eso
        para quedar a ras; y solo se redondea el lado izquierdo, que es el que se ve. */
-    <div className="w-full translate-x-4 min-[600px]:translate-x-6 overflow-hidden rounded-l-2xl rounded-r-none border-y border-l border-emerald-400/40 bg-gradient-to-r from-emerald-600 to-emerald-500 shadow-lg shadow-emerald-900/20">
-      <div className="flex items-center gap-3 px-4 py-3.5 pr-7">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20 text-white">
-          <CheckCircle2 className="h-5 w-5" />
+    <div className="relative w-full translate-x-4 min-[600px]:translate-x-6 overflow-hidden rounded-l-2xl rounded-r-none border-y border-l border-slate-200 bg-white shadow-xl shadow-slate-900/10">
+      <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b from-[#5fd0be] to-[#2bb3a0]" />
+      <div className="flex items-center gap-3 py-3.5 pl-5 pr-7">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#0f2233]">
+          <BrandMark size={26} tone="dark" />
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-black tracking-tight text-white">
-            {greetingFor()}, {nombre}
+          <p className="truncate text-[15px] font-black tracking-tight text-slate-900">
+            {greetingFor()}, <span className="text-teal-600">{nombre}</span>
           </p>
-          <p className="truncate text-[11px] font-semibold text-emerald-50">
-            {jurisdictionLabel}: <span className="font-black">{jurisdictionName}</span> · Rol {user.role}
+          <p className="truncate text-[11.5px] font-semibold text-slate-500">
+            {jurisdictionLabel}: <span className="font-bold text-slate-700">{jurisdictionName}</span> · Rol {user.role}
           </p>
         </div>
       </div>
+      {/* Cuánto le queda al aviso antes de irse solo. */}
+      <span aria-hidden="true" className="absolute bottom-0 left-1.5 right-0 h-[3px] origin-left bg-teal-500/70 animate-[welcome-progress_5s_linear_forwards]" />
+      <style>{`@keyframes welcome-progress { from { transform: scaleX(1); } to { transform: scaleX(0); } }`}</style>
     </div>
   );
 };

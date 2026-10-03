@@ -7,7 +7,7 @@ import { analyzeInventoryWithAura } from './services/auraService';
 import { generateFullReportPDF } from './services/pdfService';
 import { 
   Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network,
-  ChevronRight
+  ChevronRight, ArrowLeft, Home, UserCircle2
 } from 'lucide-react';
 
 // NEW IMPORTS
@@ -31,7 +31,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { MODULE_HEADER_SLOT_ID } from './components/ui/ModuleHeaderSlot';
 import { HomeModule } from './components/HomeModule';
 import { UserMenu } from './components/UserMenu';
-import { findNavItem, findNavSection } from './components/navigation';
+import { findNavItem, findNavSection, NAV_TINT_CLASSES } from './components/navigation';
 import { UserProfile } from './components/UserProfile';
 import { showWelcomeToast } from './components/WelcomeToast';
 import { RedistributionModule } from './components/RedistributionModule';
@@ -113,7 +113,10 @@ const AuthenticatedApp: React.FC = () => {
         if (!isAuthenticated) return;
         const destino = pathForModule(currentView);
         if (window.location.pathname === destino) return;
-        window.history.pushState({ view: currentView }, '', destino);
+        // `paso` cuenta las pantallas recorridas dentro de la aplicación: con él la flecha
+        // «volver» sabe si hay a dónde regresar sin salirse de la app.
+        const paso = typeof window.history.state?.paso === 'number' ? window.history.state.paso + 1 : 1;
+        window.history.pushState({ view: currentView, paso }, '', destino);
     }, [currentView, isAuthenticated]);
 
     // Al cerrar sesion, la direccion vuelve a la raiz y la vista al inicio.
@@ -134,6 +137,14 @@ const AuthenticatedApp: React.FC = () => {
         const alNavegar = () => setCurrentView(moduleForPath(window.location.pathname) || 'HOME');
         window.addEventListener('popstate', alNavegar);
         return () => window.removeEventListener('popstate', alNavegar);
+    }, []);
+
+    // Flecha «volver» de la cabecera: regresa a la pantalla anterior de la app. Si se
+    // entró directo a un módulo (enlace o recarga), no hay pantalla anterior propia y
+    // volver al navegador sacaría al usuario de la app: entonces va al Inicio.
+    const volver = useCallback(() => {
+        if (typeof window.history.state?.paso === 'number' && window.history.state.paso > 0) window.history.back();
+        else setCurrentView('HOME');
     }, []);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     
@@ -183,6 +194,8 @@ const AuthenticatedApp: React.FC = () => {
     const headerTitle = currentView === 'PROFILE'
         ? 'Perfil de Usuario'
         : findNavItem(currentView)?.label || 'Toolkit SISMED';
+    const HeaderIcon = currentView === 'PROFILE' ? UserCircle2 : findNavItem(currentView)?.icon || Home;
+    const headerTint = NAV_TINT_CLASSES[headerSection?.tint || 'teal'];
 
     // If loading, show spinner
     if (isLoading) {
@@ -237,6 +250,20 @@ const AuthenticatedApp: React.FC = () => {
                 {/* Cabecera: miga de pan, acciones del módulo y el usuario */}
                 <header className="sticky top-0 z-[1000] flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm sm:px-6 md:h-16 lg:px-8">
                     <div className="flex min-w-0 items-center gap-2">
+                        {currentView !== 'HOME' && (
+                            <button
+                                type="button"
+                                onClick={volver}
+                                aria-label="Volver"
+                                title="Volver"
+                                className="-ml-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+                            >
+                                <ArrowLeft className="h-5 w-5" />
+                            </button>
+                        )}
+                        <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl md:h-9 md:w-9 ${headerTint.chip}`}>
+                            <HeaderIcon aria-hidden="true" className="h-[18px] w-[18px]" />
+                        </span>
                         {headerSection && (
                             <>
                                 <span className="hidden whitespace-nowrap text-[12.5px] font-semibold text-slate-400 sm:inline">{headerSection.label}</span>
