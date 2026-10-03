@@ -37,6 +37,12 @@ interface StockNetworkSearchModalProps {
   /** Descarga las hojas que faltan. Sin ella no se ofrece completar. */
   onCompleteSearch?: () => void;
   isCompleting?: boolean;
+  /**
+   * Con qué se abre: un producto ya elegido en las sugerencias del buscador de la lista, o
+   * lo escrito allí para buscarlo tal cual. Sin ellos se abre vacío.
+   */
+  initialProduct?: StockProduct | null;
+  initialQuery?: string;
 }
 
 /**
@@ -71,6 +77,8 @@ export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = (
   sheetsTotal,
   onCompleteSearch,
   isCompleting = false,
+  initialProduct = null,
+  initialQuery = "",
 }) => {
   const [term, setTerm] = useState("");
   /** El producto que se está consultando. Sin él no hay resultados que mostrar. */
@@ -96,6 +104,20 @@ export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = (
       document.removeEventListener("keydown", alPulsar);
     };
   }, [isOpen, onClose]);
+
+  // Al abrirse desde el buscador de la lista llega ya con lo buscado.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (initialProduct) {
+      setElegido(initialProduct);
+      setTerm(initialProduct.producto || initialProduct.codigoSismed);
+    } else if (initialQuery.trim()) {
+      setTerm(initialQuery);
+      setConsultaLibre(initialQuery);
+    }
+    // Solo al abrir: después manda lo que se escriba en el propio diálogo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   // Al cerrarse se olvida lo buscado: la próxima vez se empieza limpio.
   useEffect(() => {

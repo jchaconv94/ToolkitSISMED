@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from "react";
 import { toast } from "sonner";
 import {
   Search,
@@ -125,6 +125,8 @@ import {
   buildProductIndex,
   productKeyOf,
   readStockField,
+  suggestProducts,
+  type StockProduct,
 } from "../services/stockNetworkSearch";
 import {
   DeficiencyCaptureModal,
@@ -3174,12 +3176,10 @@ const SheetSearchModuleContent: React.FC = () => {
    * propio diálogo para que nadie crea que vio toda la red cuando faltan hojas.
    */
   const [isNetworkSearchOpen, setIsNetworkSearchOpen] = useState(false);
-  /**
-   * Qué busca el buscador de la lista de establecimientos: un establecimiento (filtra la
-   * lista) o un medicamento en todos ellos (abre el buscador de la UNGET). Antes eran dos
-   * buscadores: el campo y una lupa aparte.
-   */
-  const [sheetsSearchMode, setSheetsSearchMode] = useState<"ipress" | "producto">("ipress");
+  /** Con qué se abre el buscador de la UNGET cuando se llega desde las sugerencias. */
+  const [networkSeed, setNetworkSeed] = useState<{ product?: StockProduct; query?: string }>({});
+  /** Si se muestran las sugerencias bajo el buscador de la lista de establecimientos. */
+  const [sheetSuggestOpen, setSheetSuggestOpen] = useState(false);
   /**
    * Estado, no referencia: `prefetchRef` no provoca un render, así que el aviso de
    * «Descargando…» se habría quedado congelado en el diálogo.
@@ -3203,6 +3203,30 @@ const SheetSearchModuleContent: React.FC = () => {
     }),
     [hojasDeLaUnget, dataBySource],
   );
+
+  /**
+   * Un solo buscador para establecimientos y medicamentos (2026-10-03).
+   *
+   * Antes había dos: el campo filtraba establecimientos y una lupa aparte buscaba un
+   * medicamento en todos. Se probó un selector de modo y se descartó: el alcance de una
+   * búsqueda es lo que la gente pasa por alto (NN/g, «Scoped search»). Ahora lo escrito
+   * filtra la lista como siempre y, debajo del campo, las sugerencias van agrupadas:
+   * establecimientos y medicamentos de la UNGET, como recomiendan Baymard y NN/g.
+   */
+  const productosDeLaUnget = useMemo(
+    () => (viewLevel === "sheets" ? buildProductIndex(filasDeLaUnget) : []),
+    [viewLevel, filasDeLaUnget],
+  );
+  const sheetSearchDeferred = useDeferredValue(sheetSearchTerm);
+  const productosSugeridos = useMemo(
+    () => (sheetSearchDeferred.trim().length >= 2 ? suggestProducts(productosDeLaUnget, sheetSearchDeferred, 5) : []),
+    [productosDeLaUnget, sheetSearchDeferred],
+  );
+  const abrirBusquedaEnLaUnget = (seed: { product?: StockProduct; query?: string }) => {
+    setNetworkSeed(seed);
+    setSheetSuggestOpen(false);
+    setIsNetworkSearchOpen(true);
+  };
 
   // Ctrl+K abre el buscador. Se anula el atajo del navegador solo cuando hay una UNGET
   // abierta, que es cuando el buscador tiene dónde buscar.
@@ -5357,7 +5381,9 @@ function processSheet(sheet) {
       {/* BUSCADOR EN TODA LA RED DE LA UNGET */}
       <StockNetworkSearchModal
         isOpen={isNetworkSearchOpen}
-        onClose={() => setIsNetworkSearchOpen(false)}
+        onClose={() => { setIsNetworkSearchOpen(false); setNetworkSeed({}); }}
+        initialProduct={networkSeed.product}
+        initialQuery={networkSeed.query}
         ungetName={formatDisplayName(
           (selectedUngetIndex !== null && scriptUrls[selectedUngetIndex]?.name) || "la UNGET",
         )}
@@ -5778,36 +5804,13 @@ function processSheet(sheet) {
         }`}
       >
         {/* TOOLBAR */}
-        <div className={`sticky z-20 flex flex-col gap-4 ${
+        <div className={`sticky z-30 flex flex-col gap-4 ${
           viewLevel === "data"
             ? "top-0 bg-white sm:static p-3 sm:p-5 border-b border-slate-100"
             : "-top-2.5 bg-[#f6f7f9] px-1 py-2 sm:static sm:px-0 sm:pt-0 sm:pb-4"
         }`}>
           {/* Search & Actions */}
           <div className="flex gap-3 items-center justify-between w-full flex-row">
-            {viewLevel === "sheets" && (
-              <div className="flex h-[42px] shrink-0 items-center rounded-xl border border-slate-200 bg-white p-1" role="tablist" aria-label="Qué buscar">
-                {([
-                  { mode: "ipress" as const, label: "Establecimiento", Icon: Building2 },
-                  { mode: "producto" as const, label: "Medicamento", Icon: Pill },
-                ]).map(({ mode, label, Icon }) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    role="tab"
-                    aria-selected={sheetsSearchMode === mode}
-                    title={mode === "ipress" ? "Buscar un establecimiento" : "Buscar un medicamento en todos los establecimientos (Ctrl+K)"}
-                    onClick={() => setSheetsSearchMode(mode)}
-                    className={`flex h-full items-center gap-1.5 rounded-lg px-2.5 text-xs font-bold transition-colors ${
-                      sheetsSearchMode === mode ? "bg-teal-600 text-white" : "text-slate-500 hover:bg-slate-50"
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    <span className="hidden lg:inline">{label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
             <div className="relative min-w-0 flex-1 w-full md:max-w-[50%] group">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
@@ -5835,25 +5838,24 @@ function processSheet(sheet) {
                   )}
                 </div>
               )}
-              {viewLevel === "sheets" && sheetsSearchMode === "producto" && (
-                // Con «Medicamento» el campo abre el buscador de toda la UNGET, que sugiere
-                // productos mientras se escribe y consolida el saldo por establecimiento.
-                <button
-                  type="button"
-                  onClick={() => setIsNetworkSearchOpen(true)}
-                  className="block h-[42px] w-full truncate rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-left text-sm font-medium text-slate-400 shadow-2xs transition-all hover:border-teal-300"
-                >
-                  <span className="sm:hidden">Buscar medicamento…</span>
-                  <span className="hidden sm:inline">Buscar un medicamento en todos los establecimientos…</span>
-                </button>
-              )}
-              {viewLevel === "sheets" && sheetsSearchMode === "ipress" && (
+              {viewLevel === "sheets" && (
                 <div className="relative w-full text-slate-800">
                   <input
                     type="text"
-                    placeholder="Buscar establecimiento por nombre o código..."
+                    placeholder="Buscar establecimiento o medicamento…"
+                    aria-label="Buscar establecimiento o medicamento"
                     value={sheetSearchTerm}
-                    onChange={(e) => setSheetSearchTerm(e.target.value)}
+                    onChange={(e) => { setSheetSearchTerm(e.target.value); setSheetSuggestOpen(true); }}
+                    onFocus={() => setSheetSuggestOpen(true)}
+                    // Al salir del campo se espera un instante: si no, el clic en una
+                    // sugerencia llegaría con la lista ya cerrada.
+                    onBlur={() => window.setTimeout(() => setSheetSuggestOpen(false), 150)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setSheetSuggestOpen(false);
+                      if (e.key === "Enter" && filteredAndSortedSources.length === 0 && sheetSearchTerm.trim()) {
+                        abrirBusquedaEnLaUnget({ query: sheetSearchTerm });
+                      }
+                    }}
                     className="w-full pl-10 pr-14 sm:pr-32 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
                   />
                   <div className="absolute inset-y-0 right-0 pr-1.5 flex items-center gap-1.5">
@@ -5891,6 +5893,81 @@ function processSheet(sheet) {
                       )}
                     </button>
                   </div>
+                  {/* Sugerencias agrupadas: la lista de abajo ya se filtra con lo escrito;
+                      aquí, además, los medicamentos de la UNGET que coinciden. */}
+                  {sheetSuggestOpen && sheetSearchTerm.trim().length >= 2 && (
+                    <div className="absolute left-0 right-0 top-full z-40 mt-1.5 overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-xl">
+                      <div className="max-h-[60vh] overflow-y-auto py-1.5">
+                        <p className="px-3.5 pb-1 pt-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                          Establecimientos
+                        </p>
+                        {filteredAndSortedSources.length === 0 ? (
+                          <p className="px-3.5 py-2 text-[13px] text-slate-400">Ningún establecimiento coincide.</p>
+                        ) : (
+                          filteredAndSortedSources.slice(0, 4).map((hoja) => (
+                            <button
+                              key={hoja.id}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => { setSheetSuggestOpen(false); void handleSelectSheet(hoja.id); }}
+                              className="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-slate-50"
+                            >
+                              <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
+                              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800">{describeSheetName(hoja.name)}</span>
+                              <span className="shrink-0 font-mono text-[11px] font-bold text-teal-700">{codeForSheet(hoja.id)}</span>
+                            </button>
+                          ))
+                        )}
+                        {filteredAndSortedSources.length > 4 && (
+                          <p className="px-3.5 pb-1 text-[11px] text-slate-400">
+                            y {filteredAndSortedSources.length - 4} más en la lista
+                          </p>
+                        )}
+
+                        <p className="mt-1 border-t border-slate-100 px-3.5 pb-1 pt-2.5 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                          Medicamentos en la UNGET
+                        </p>
+                        {productosSugeridos.length === 0 ? (
+                          <p className="px-3.5 py-2 text-[13px] text-slate-400">
+                            {coberturaBusqueda.cargadas === 0 ? "Todavía no se ha leído el stock de ningún establecimiento." : "Ningún medicamento coincide."}
+                          </p>
+                        ) : (
+                          productosSugeridos.map((producto) => (
+                            <button
+                              key={producto.key}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => abrirBusquedaEnLaUnget({ product: producto })}
+                              className="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-slate-50"
+                            >
+                              <Pill className="h-4 w-4 shrink-0 text-teal-600" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[13px] font-semibold text-slate-800">{producto.producto || producto.codigoSismed}</span>
+                                <span className="block text-[11px] text-slate-400">
+                                  {producto.codigoSismed && <span className="font-mono">{producto.codigoSismed} · </span>}
+                                  en {producto.establecimientos} establecimiento{producto.establecimientos === 1 ? "" : "s"}
+                                </span>
+                              </span>
+                            </button>
+                          ))
+                        )}
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => abrirBusquedaEnLaUnget({ query: sheetSearchTerm })}
+                          className="mt-1 flex w-full items-center gap-3 border-t border-slate-100 px-3.5 py-2.5 text-left text-[13px] font-bold text-teal-700 hover:bg-teal-50"
+                        >
+                          <Search className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">Buscar «{sheetSearchTerm.trim()}» en todos los establecimientos</span>
+                        </button>
+                        {coberturaBusqueda.cargadas < coberturaBusqueda.total && (
+                          <p className="px-3.5 pb-1.5 text-[11px] text-amber-700">
+                            Stock leído de {coberturaBusqueda.cargadas} de {coberturaBusqueda.total} establecimientos.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {viewLevel === "data" && (
@@ -5977,6 +6054,91 @@ function processSheet(sheet) {
 
               {viewLevel === "sheets" && (
                 <>
+                  {/* Modo de vista (solo escritorio). Antes iba en una fila propia con el título
+                      «Establecimientos de salud» y los conteos por tipo, que ya dicen los KPIs. */}
+                  <div className="hidden items-center gap-2 shrink-0 md:flex">
+                    <div className="flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-xl border border-slate-200/60 shadow-[inset_0_1px_1.5px_rgba(0,0,0,0.02)] shrink-0 pr-1 lg:pr-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setSheetsViewMode("grid")}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          sheetsViewMode === "grid"
+                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
+                            : "text-slate-400 hover:text-slate-700"
+                        }`}
+                        title="Vista Cuadrícula"
+                      >
+                        <LayoutGrid className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden xs:inline">Cuadrícula</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSheetsViewMode("list")}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          sheetsViewMode === "list"
+                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
+                            : "text-slate-400 hover:text-slate-700"
+                        }`}
+                        title="Vista Lista"
+                      >
+                        <List className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden xs:inline">Lista</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSheetsViewMode("compact")}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          sheetsViewMode === "compact"
+                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
+                            : "text-slate-400 hover:text-slate-700"
+                        }`}
+                        title="Vista Compacta"
+                      >
+                        <Grid className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden xs:inline">Compacto</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSheetsViewMode("table")}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          sheetsViewMode === "table"
+                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
+                            : "text-slate-400 hover:text-slate-700"
+                        }`}
+                        title="Vista Tabla"
+                      >
+                        <Table2 className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden xs:inline">Tabla</span>
+                      </button>
+                    </div>
+
+                    {true && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleToggleTableFullscreen(!isTableFullscreen)
+                        }
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs border ${
+                          isTableFullscreen
+                            ? "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"
+                            : "bg-teal-50 border-teal-100 text-teal-850 hover:bg-teal-100 hover:text-teal-900 hover:border-teal-200"
+                        }`}
+                        title="Pantalla Completa"
+                      >
+                        {isTableFullscreen ? (
+                          <Minimize2 className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <Maximize2 className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        <span className="hidden xs:inline">
+                          {isTableFullscreen
+                            ? "Salir F11"
+                            : "Pantalla Completa"}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+
                   {/* Button for Exiting Capture Mode (Only visible when isCaptureMode is active) */}
                   {isCaptureMode && (
                     <button
@@ -6426,169 +6588,39 @@ function processSheet(sheet) {
               {/* LEVEL 2: SHEET CARDS */}
               {viewLevel === "sheets" && (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-                  {/* En el celular sobra: los KPIs y la lista ya dicen cuántos hay y de qué tipo. */}
-                  <div className="hidden md:flex flex-col lg:flex-row lg:items-center justify-between border-b border-gray-200/50 pb-3 mb-4 sm:mb-6 gap-4">
-                    <div className="flex flex-col gap-2.5">
-                      {/* Title and Counter Pill */}
-                      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                        <div className="flex items-center gap-2">
-                          <span className="w-1 h-5 bg-teal-500 rounded-full"></span>
-                          <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest break-words flex-1">
-                            Establecimientos de Salud
-                          </h3>
-                        </div>
-                        {filteredAndSortedSources.length > 0 && (
-                          <span className="text-[10px] whitespace-nowrap font-black bg-teal-50 text-teal-850 px-2.5 py-0.5 rounded-full border border-teal-100/70 shadow-xs uppercase tracking-wide">
-                            {filteredAndSortedSources.length}{" "}
-                            {filteredAndSortedSources.length === 1
-                              ? "establecimiento"
-                              : "establecimientos"}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Beautiful Premium Type KPIs */}
-                      {establishmentSummary && (
-                        <div className="hidden flex-wrap gap-2 pt-0.5 sm:flex">
-                          <div
-                            className="flex items-center gap-1.5 bg-sky-50/70 border border-sky-100/50 text-sky-800 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-xs"
-                            title="Centros de Salud"
-                          >
-                            <span className="w-1.5 h-1.5 bg-sky-500 rounded-full"></span>
-                            <span className="text-slate-500 font-medium">
-                              C.S.:
-                            </span>
-                            <span className="font-extrabold">
-                              {establishmentSummary.cs}
-                            </span>
-                          </div>
-                          <div
-                            className="flex items-center gap-1.5 bg-amber-50/70 border border-amber-100/50 text-amber-800 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-xs"
-                            title="Puestos de Salud"
-                          >
-                            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
-                            <span className="text-slate-500 font-medium">
-                              P.S.:
-                            </span>
-                            <span className="font-extrabold">
-                              {establishmentSummary.ps}
-                            </span>
-                          </div>
-                          <div
-                            className="flex items-center gap-1.5 bg-indigo-50/70 border border-indigo-100/50 text-indigo-800 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-xs"
-                            title="Almacenes"
-                          >
-                            <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
-                            <span className="text-slate-500 font-medium">
-                              ALM:
-                            </span>
-                            <span className="font-extrabold">
-                              {establishmentSummary.alm}
-                            </span>
-                          </div>
-                          <div
-                            className="flex items-center gap-1.5 bg-violet-50/70 border border-violet-100/50 text-violet-800 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-xs"
-                            title="Hospitales"
-                          >
-                            <span className="w-1.5 h-1.5 bg-violet-500 rounded-full"></span>
-                            <span className="text-slate-500 font-medium">
-                              HOSP:
-                            </span>
-                            <span className="font-extrabold">
-                              {establishmentSummary.hosp}
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Selector de tipo de Visualización */}
-                    <div className="hidden flex-wrap items-center gap-2 shrink-0 overflow-x-auto pb-1 -mb-1 max-w-full no-scrollbar md:flex">
-                      <div className="flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-xl border border-slate-200/60 shadow-[inset_0_1px_1.5px_rgba(0,0,0,0.02)] shrink-0 pr-1 lg:pr-0.5">
-                        <button
-                          type="button"
-                          onClick={() => setSheetsViewMode("grid")}
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            sheetsViewMode === "grid"
-                              ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                              : "text-slate-400 hover:text-slate-700"
-                          }`}
-                          title="Vista Cuadrícula"
-                        >
-                          <LayoutGrid className="h-3.5 w-3.5 shrink-0" />
-                          <span className="hidden xs:inline">Cuadrícula</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSheetsViewMode("list")}
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            sheetsViewMode === "list"
-                              ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                              : "text-slate-400 hover:text-slate-700"
-                          }`}
-                          title="Vista Lista"
-                        >
-                          <List className="h-3.5 w-3.5 shrink-0" />
-                          <span className="hidden xs:inline">Lista</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSheetsViewMode("compact")}
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            sheetsViewMode === "compact"
-                              ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                              : "text-slate-400 hover:text-slate-700"
-                          }`}
-                          title="Vista Compacta"
-                        >
-                          <Grid className="h-3.5 w-3.5 shrink-0" />
-                          <span className="hidden xs:inline">Compacto</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSheetsViewMode("table")}
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            sheetsViewMode === "table"
-                              ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                              : "text-slate-400 hover:text-slate-700"
-                          }`}
-                          title="Vista Tabla"
-                        >
-                          <Table2 className="h-3.5 w-3.5 shrink-0" />
-                          <span className="hidden xs:inline">Tabla</span>
-                        </button>
-                      </div>
-
-                      {true && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleToggleTableFullscreen(!isTableFullscreen)
-                          }
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs border ${
-                            isTableFullscreen
-                              ? "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"
-                              : "bg-teal-50 border-teal-100 text-teal-850 hover:bg-teal-100 hover:text-teal-900 hover:border-teal-200"
-                          }`}
-                          title="Pantalla Completa"
-                        >
-                          {isTableFullscreen ? (
-                            <Minimize2 className="h-3.5 w-3.5 shrink-0" />
-                          ) : (
-                            <Maximize2 className="h-3.5 w-3.5 shrink-0" />
-                          )}
-                          <span className="hidden xs:inline">
-                            {isTableFullscreen
-                              ? "Salir F11"
-                              : "Pantalla Completa"}
-                          </span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
                   {(() => {
                     const viewContent =
-                      filteredAndSortedSources.length === 0 ? (
+                      filteredAndSortedSources.length === 0 && sheetSearchTerm.trim() ? (
+                        // Lo escrito no es un establecimiento: puede ser un medicamento. Se
+                        // ofrece buscarlo en todos, en vez de dejar la pantalla vacía.
+                        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-teal-50 text-teal-600">
+                            <Pill className="h-7 w-7" />
+                          </div>
+                          <h3 className="text-base font-bold text-slate-900">
+                            Ningún establecimiento coincide con «{sheetSearchTerm.trim()}»
+                          </h3>
+                          <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">
+                            Si es un medicamento, búsquelo en el stock de todos los establecimientos de la UNGET.
+                          </p>
+                          <div className="mt-4 flex flex-wrap justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => abrirBusquedaEnLaUnget({ query: sheetSearchTerm })}
+                              className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-700"
+                            >
+                              <Search className="h-4 w-4" /> Buscar como medicamento
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSheetSearchTerm("")}
+                              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                            >
+                              Limpiar búsqueda
+                            </button>
+                          </div>
+                        </div>
+                      ) : filteredAndSortedSources.length === 0 ? (
                         <div className="py-16 text-center bg-white border border-gray-100 rounded-2xl shadow-sm p-8">
                           <div className="w-16 h-16 bg-teal-50 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-4">
                             <Filter className="h-8 w-8 text-teal-500 animate-pulse" />
