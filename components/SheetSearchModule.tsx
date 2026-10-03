@@ -51,6 +51,7 @@ import {
   Camera,
   CheckSquare,
   Square,
+  Pill,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
@@ -133,6 +134,7 @@ import { noticeSettingsApi } from "../services/noticeSettings";
 import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
 import { getExpirationState } from "../services/assignedIpressStock";
 import { KpiCard, KpiStrip, StatusChip, TableHeaderCell as HeaderCell } from "./ui/kit";
+import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
@@ -3173,6 +3175,12 @@ const SheetSearchModuleContent: React.FC = () => {
    */
   const [isNetworkSearchOpen, setIsNetworkSearchOpen] = useState(false);
   /**
+   * Qué busca el buscador de la lista de establecimientos: un establecimiento (filtra la
+   * lista) o un medicamento en todos ellos (abre el buscador de la UNGET). Antes eran dos
+   * buscadores: el campo y una lupa aparte.
+   */
+  const [sheetsSearchMode, setSheetsSearchMode] = useState<"ipress" | "producto">("ipress");
+  /**
    * Estado, no referencia: `prefetchRef` no provoca un render, así que el aviso de
    * «Descargando…» se habría quedado congelado en el diálogo.
    */
@@ -4718,16 +4726,85 @@ function processSheet(sheet) {
     });
   }, [filteredAndSortedSources, reportSort]);
 
+  // En el celular el nivel actual va en la cabecera de la app, y su flecha sube un nivel.
+  useModuleHeaderOverride(
+    viewLevel === "ungets"
+      ? null
+      : viewLevel === "data"
+        ? {
+            title: describeSheetName(sources.find((s) => s.id === selectedSourceId)?.name || "Hoja"),
+            subtitle: selectedUngetIndex !== null ? formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "") : undefined,
+            onBack: volverUnNivel,
+          }
+        : {
+            title: formatDisplayName((selectedUngetIndex !== null && scriptUrls[selectedUngetIndex]?.name) || "Consulta Stock"),
+            subtitle: hayPanelRegional ? "Panel regional" : undefined,
+            onBack: destinoDeVolver ? volverUnNivel : undefined,
+          },
+  );
+
+  /**
+   * Acciones de escritorio: búsqueda en todos (en la hoja; en la lista la ofrece el selector
+   * del buscador), Configurar y Sincronizar. Van en la cabecera cuando hay cabecera (UNGET
+   * u hoja abierta) y, en el panel regional, en la fila del buscador. En el celular están en
+   * el botón de tres puntos.
+   */
+  const accionesDeEscritorio = (
+    <div className="hidden shrink-0 items-center gap-2 sm:flex">
+      {viewLevel === "data" && selectedUngetIndex !== null && (
+        <button
+          type="button"
+          onClick={() => setIsNetworkSearchOpen(true)}
+          title="Buscar un producto en todos los establecimientos (Ctrl+K)"
+          aria-label="Búsqueda avanzada"
+          aria-keyshortcuts="Control+K"
+          className="flex h-[42px] w-[42px] items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
+        >
+          <Search className="h-4 w-4" />
+        </button>
+      )}
+      {canManageConfigs && (
+        <button
+          type="button"
+          onClick={() => {
+            if (user) setTempUrls([...scriptUrls]);
+            setIsConfigOpen(!isConfigOpen);
+          }}
+          title="Conexiones de stock"
+          aria-label="Configurar"
+          className="flex h-[42px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
+        >
+          <Settings className="h-4 w-4 text-slate-500" />
+          Configurar
+        </button>
+      )}
+      <button
+        id="sync-btn"
+        type="button"
+        onClick={() => fetchData()}
+        disabled={isLoading || isSilentSyncing}
+        aria-label="Sincronizar"
+        // La hora de la última comprobación iba en una pastilla aparte que le quitaba
+        // sitio al buscador; ahora la dice el botón al pasar el cursor.
+        title={lastGlobalSync ? `Última sincronización: ${lastGlobalSync.toLocaleString("es-PE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Sincronizar"}
+        className="flex h-[42px] items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 text-xs font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-50"
+      >
+        <RefreshCw className={`h-4 w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`} />
+        {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
+      </button>
+    </div>
+  );
+
   return (
     <div
       className={`flex flex-col h-full transition-all duration-300 ${isAdvancedFiltersSidebarOpen && viewLevel === "sheets" ? "md:pr-[380px] xl:pr-[420px]" : ""}`}
     >
-      {/* Cabecera del módulo: volver y dónde estoy. En el panel regional no hay cabecera, se
-          empieza por los KPIs. Las acciones (Configurar, Sincronizar…) van en la fila del
-          buscador; en el celular, dentro del botón de tres puntos. */}
+      {/* Cabecera del módulo: volver, dónde estoy y las acciones. En el panel regional no hay
+          cabecera, se empieza por los KPIs. En el celular el nivel va en la cabecera de la app
+          (useModuleHeaderOverride) y las acciones en el botón de tres puntos. */}
       <div className="px-4 pb-2 pt-3 sm:px-10 sm:pb-3 sm:pt-6 lg:px-14 xl:px-16">
         {viewLevel !== "ungets" && (
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="hidden items-center gap-2 sm:flex sm:gap-3">
           {/* La flecha está a la izquierda, donde se mira, y dice a dónde lleva. */}
           {destinoDeVolver && (
             <button
@@ -4779,6 +4856,7 @@ function processSheet(sheet) {
             </p>
           </div>
 
+          {accionesDeEscritorio}
         </div>
         )}
 
@@ -5694,25 +5772,43 @@ function processSheet(sheet) {
         className={`flex flex-col mx-0 sm:mx-10 lg:mx-14 xl:mx-16 ${
           viewLevel === "data"
             ? "bg-white sm:rounded-[1.25rem] border-y sm:border border-slate-200 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] sm:overflow-hidden h-auto shrink-0 mb-8"
-            : viewLevel === "sheets"
-              // Establecimientos: en el celular cada uno es su propia tarjeta, sin recuadro
-              // alrededor (así se ve como una app); en escritorio sigue el recuadro.
-              ? "md:bg-white md:rounded-[1.25rem] md:border md:border-slate-200 md:shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] md:overflow-hidden sm:flex-1 sm:min-h-[300px]"
-              // Panel regional: las UNGET sueltas, cada una en su tarjeta.
-              : ""
+            // Panel regional y establecimientos: sin recuadro alrededor, cada uno en su
+            // propia tarjeta (así se ve como una app).
+            : ""
         }`}
       >
         {/* TOOLBAR */}
         <div className={`sticky z-20 flex flex-col gap-4 ${
           viewLevel === "data"
             ? "top-0 bg-white sm:static p-3 sm:p-5 border-b border-slate-100"
-            : viewLevel === "sheets"
-              ? "-top-2.5 bg-[#f6f7f9] px-1 py-2 md:static md:bg-white md:p-5 md:border-b md:border-slate-100"
-              : "-top-2.5 bg-[#f6f7f9] px-1 py-2 sm:static sm:px-0 sm:pt-0 sm:pb-4"
+            : "-top-2.5 bg-[#f6f7f9] px-1 py-2 sm:static sm:px-0 sm:pt-0 sm:pb-4"
         }`}>
           {/* Search & Actions */}
           <div className="flex gap-3 items-center justify-between w-full flex-row">
-            <div className="relative flex-1 w-full md:max-w-[50%] group">
+            {viewLevel === "sheets" && (
+              <div className="flex h-[42px] shrink-0 items-center rounded-xl border border-slate-200 bg-white p-1" role="tablist" aria-label="Qué buscar">
+                {([
+                  { mode: "ipress" as const, label: "Establecimiento", Icon: Building2 },
+                  { mode: "producto" as const, label: "Medicamento", Icon: Pill },
+                ]).map(({ mode, label, Icon }) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="tab"
+                    aria-selected={sheetsSearchMode === mode}
+                    title={mode === "ipress" ? "Buscar un establecimiento" : "Buscar un medicamento en todos los establecimientos (Ctrl+K)"}
+                    onClick={() => setSheetsSearchMode(mode)}
+                    className={`flex h-full items-center gap-1.5 rounded-lg px-2.5 text-xs font-bold transition-colors ${
+                      sheetsSearchMode === mode ? "bg-teal-600 text-white" : "text-slate-500 hover:bg-slate-50"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span className="hidden lg:inline">{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="relative min-w-0 flex-1 w-full md:max-w-[50%] group">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
               </div>
@@ -5723,7 +5819,7 @@ function processSheet(sheet) {
                     placeholder="Buscar UNGET..."
                     value={ungetSearchTerm}
                     onChange={(e) => setUngetSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-12 py-2.5 bg-slate-50/85 md:bg-slate-50 border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
+                    className="w-full pl-10 pr-12 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
                   />
                   {ungetSearchTerm && (
                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
@@ -5739,14 +5835,26 @@ function processSheet(sheet) {
                   )}
                 </div>
               )}
-              {viewLevel === "sheets" && (
+              {viewLevel === "sheets" && sheetsSearchMode === "producto" && (
+                // Con «Medicamento» el campo abre el buscador de toda la UNGET, que sugiere
+                // productos mientras se escribe y consolida el saldo por establecimiento.
+                <button
+                  type="button"
+                  onClick={() => setIsNetworkSearchOpen(true)}
+                  className="block h-[42px] w-full truncate rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-left text-sm font-medium text-slate-400 shadow-2xs transition-all hover:border-teal-300"
+                >
+                  <span className="sm:hidden">Buscar medicamento…</span>
+                  <span className="hidden sm:inline">Buscar un medicamento en todos los establecimientos…</span>
+                </button>
+              )}
+              {viewLevel === "sheets" && sheetsSearchMode === "ipress" && (
                 <div className="relative w-full text-slate-800">
                   <input
                     type="text"
                     placeholder="Buscar establecimiento por nombre o código..."
                     value={sheetSearchTerm}
                     onChange={(e) => setSheetSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-32 py-2.5 bg-slate-50/85 md:bg-slate-50 border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
+                    className="w-full pl-10 pr-14 sm:pr-32 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
                   />
                   <div className="absolute inset-y-0 right-0 pr-1.5 flex items-center gap-1.5">
                     {sheetSearchTerm && (
@@ -5765,7 +5873,7 @@ function processSheet(sheet) {
                       className="flex items-center gap-1.5 bg-white hover:bg-slate-50 active:scale-95 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200/80 text-xs font-black transition-all shrink-0 relative shadow-sm cursor-pointer hover:border-slate-300 active:bg-slate-100"
                     >
                       <Filter className="h-3.5 w-3.5 text-teal-600" />
-                      <span>Filtros</span>
+                      <span className="hidden sm:inline">Filtros</span>
                       {(!filter_CS ||
                         !filter_PS ||
                         !filter_ALM ||
@@ -5996,51 +6104,8 @@ function processSheet(sheet) {
                     <span className="hidden sm:inline">Exportar Stock</span>
                   </button>
                 )}
-              {/* Escritorio: búsqueda en todos, Configurar y Sincronizar, en la misma fila que
-                  el buscador (antes ocupaban una fila propia arriba). */}
-              <div className="hidden items-center gap-2 sm:flex">
-                {selectedUngetIndex !== null && (
-                  <button
-                    type="button"
-                    onClick={() => setIsNetworkSearchOpen(true)}
-                    title="Buscar un producto en todos los establecimientos (Ctrl+K)"
-                    aria-label="Búsqueda avanzada"
-                    aria-keyshortcuts="Control+K"
-                    className="flex h-[42px] w-[42px] items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
-                  >
-                    <Search className="h-4 w-4" />
-                  </button>
-                )}
-                {canManageConfigs && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (user) setTempUrls([...scriptUrls]);
-                      setIsConfigOpen(!isConfigOpen);
-                    }}
-                    title="Conexiones de stock"
-                    aria-label="Configurar"
-                    className="flex h-[42px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
-                  >
-                    <Settings className="h-4 w-4 text-slate-500" />
-                    Configurar
-                  </button>
-                )}
-                <button
-                  id="sync-btn"
-                  type="button"
-                  onClick={() => fetchData()}
-                  disabled={isLoading || isSilentSyncing}
-                  aria-label="Sincronizar"
-                  // La hora de la última comprobación iba en una pastilla aparte que le quitaba
-                  // sitio al buscador; ahora la dice el botón al pasar el cursor.
-                  title={lastGlobalSync ? `Última sincronización: ${lastGlobalSync.toLocaleString("es-PE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Sincronizar"}
-                  className="flex h-[42px] items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 text-xs font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-50"
-                >
-                  <RefreshCw className={`h-4 w-4 ${isLoading || isSilentSyncing ? "animate-spin" : ""}`} />
-                  {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
-                </button>
-              </div>
+              {/* Escritorio, en el panel regional (no tiene cabecera): las acciones en esta fila. */}
+              {viewLevel === "ungets" && accionesDeEscritorio}
 
               {/* Celular: un solo botón de tres puntos junto al buscador, con todas las
                   acciones y las descargas de Excel. */}
@@ -6086,7 +6151,7 @@ function processSheet(sheet) {
                         <RefreshCw className="h-5 w-5 text-teal-600" />
                         {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
                       </button>
-                      {selectedUngetIndex !== null && (
+                      {viewLevel === "data" && selectedUngetIndex !== null && (
                         <button type="button" onClick={run(() => setIsNetworkSearchOpen(true))} className={item}>
                           <Search className="h-5 w-5 text-teal-600" />
                           Buscar un producto en todos los establecimientos
@@ -6121,7 +6186,7 @@ function processSheet(sheet) {
         </div>
 
         <div
-          className={`flex-1 scrollbar-thin ${viewLevel === "data" ? "bg-gray-50/30 overflow-visible" : viewLevel === "sheets" ? "md:bg-gray-50/30 md:overflow-auto" : ""}`}
+          className={`flex-1 scrollbar-thin ${viewLevel === "data" ? "bg-gray-50/30 overflow-visible" : ""}`}
         >
           {isConfigLoading && scriptUrls.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-teal-600 gap-3 py-20">
@@ -6146,7 +6211,7 @@ function processSheet(sheet) {
             </div>
           ) : (
             <div
-              className={`flex flex-col gap-6 ${viewLevel === "data" ? "p-4 sm:p-6 pb-4 sm:pb-4" : viewLevel === "sheets" ? "px-1 pt-2 pb-32 md:p-6" : "px-1 pt-2 pb-32 sm:p-0 sm:pb-6"}`}
+              className={`flex flex-col gap-6 ${viewLevel === "data" ? "p-4 sm:p-6 pb-4 sm:pb-4" : "px-1 pt-2 pb-32 sm:p-0 sm:pb-6"}`}
             >
               {/* NIVEL 1: PANEL REGIONAL. Una tarjeta por UNGET (una fila en el celular) con
                   dónde está, cuántos establecimientos tiene y cómo están de actualizados.
