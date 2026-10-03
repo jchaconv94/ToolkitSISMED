@@ -267,6 +267,14 @@ describe("visto y distintivo", () => {
     expect(isUnseen(lista[0], vista)).toBe(false);
   });
 
+  it("abrir un aviso marca solo ese y baja el contador en uno", () => {
+    const lista = [aviso("claves-bloqueadas", "a"), aviso("sismed-antiguo", "b"), aviso("toolkit-desactualizado", "c")];
+    const vista = markSeen(EMPTY_MEMORY, [lista[1]]);
+    expect(unseenCount(lista, vista)).toBe(2);
+    expect(isUnseen(lista[1], vista)).toBe(false);
+    expect(isUnseen(lista[0], vista)).toBe(true);
+  });
+
   it("vuelve a contar si su contenido cambió desde que se vio", () => {
     const vista = markSeen(EMPTY_MEMORY, [aviso("stock-sin-actualizar", "3:a,b")]);
     expect(isUnseen(aviso("stock-sin-actualizar", "3:a,b"), vista)).toBe(false);
