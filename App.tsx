@@ -7,7 +7,7 @@ import { analyzeInventoryWithAura } from './services/auraService';
 import { generateFullReportPDF } from './services/pdfService';
 import { 
   Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network,
-  ChevronRight, ArrowLeft, Home, UserCircle2, Search
+  ArrowLeft, Home, UserCircle2, Search
 } from 'lucide-react';
 
 // NEW IMPORTS
@@ -46,7 +46,7 @@ import { NotificationsProvider } from './contexts/NotificationsContext';
 import { NotificationBell } from './components/NotificationBell';
 import { AssignedIpressStockModule } from './components/AssignedIpressStockModule';
 import { AnalysisExclusionsModule } from './components/AnalysisExclusionsModule';
-import { MODULE_HEADER_MEDIA, ModuleHeaderProvider, type ModuleHeaderOverride } from './contexts/ModuleHeaderContext';
+import { ModuleHeaderProvider, type ModuleHeaderOverride } from './contexts/ModuleHeaderContext';
 import { APP_BASE, moduleForPath, pathForModule, pathForView, viewForLocation } from './services/appRoutes';
 
 const SuspenseFallback = () => (
@@ -162,8 +162,9 @@ const AuthenticatedApp: React.FC = () => {
     const [moduleHeader, setModuleHeader] = useState<ModuleHeaderOverride | null>(null);
 
     const volver = useCallback(() => {
-        // En el celular, dentro de un nivel del módulo, la flecha sube un nivel.
-        if (moduleHeader?.onBack && window.matchMedia(MODULE_HEADER_MEDIA).matches) {
+        // Dentro de un nivel del módulo (UNGET u hoja de Consulta Stock), la flecha de la
+        // cabecera sube un nivel; el módulo ya no tiene flecha propia.
+        if (moduleHeader?.onBack) {
             moduleHeader.onBack();
             return;
         }
@@ -318,12 +319,6 @@ const AuthenticatedApp: React.FC = () => {
                         <span className={`${moduleHeader ? 'hidden sm:grid' : 'grid'} h-8 w-8 shrink-0 place-items-center rounded-xl md:h-9 md:w-9 ${headerTint.chip}`}>
                             <HeaderIcon aria-hidden="true" className="h-[18px] w-[18px]" />
                         </span>
-                        {headerSection && (
-                            <>
-                                <span className="hidden whitespace-nowrap text-[12.5px] font-semibold text-slate-400 sm:inline">{headerSection.label}</span>
-                                <ChevronRight aria-hidden="true" className="hidden h-4 w-4 shrink-0 text-slate-300 sm:block" />
-                            </>
-                        )}
                         {moduleHeader ? (
                             <>
                                 <div className="min-w-0 leading-tight sm:hidden">

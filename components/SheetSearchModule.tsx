@@ -4813,25 +4813,13 @@ function processSheet(sheet) {
   );
 
   /**
-   * Acciones de escritorio: búsqueda en todos (en la hoja; en la lista la ofrece el selector
-   * del buscador), Configurar y Sincronizar. Van en la cabecera cuando hay cabecera (UNGET
+   * Acciones de escritorio: Configurar y Sincronizar (la búsqueda de un medicamento en
+   * todos los establecimientos la ofrece el buscador de la lista). Van en la cabecera cuando hay cabecera (UNGET
    * u hoja abierta) y, en el panel regional, en la fila del buscador. En el celular están en
    * el botón de tres puntos.
    */
   const accionesDeEscritorio = (
     <div className="hidden shrink-0 items-center gap-2 sm:flex">
-      {viewLevel === "data" && selectedUngetIndex !== null && (
-        <button
-          type="button"
-          onClick={() => setIsNetworkSearchOpen(true)}
-          title="Buscar un producto en todos los establecimientos (Ctrl+K)"
-          aria-label="Búsqueda avanzada"
-          aria-keyshortcuts="Control+K"
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
-        >
-          <Search className="h-4 w-4" />
-        </button>
-      )}
       {canManageConfigs && (
         <button
           type="button"
@@ -4874,19 +4862,7 @@ function processSheet(sheet) {
       <div className={`px-0 pt-0 sm:px-10 sm:pb-3 sm:pt-6 lg:px-14 xl:px-16 ${viewLevel === "data" ? "pb-0" : "pb-1"}`}>
         {viewLevel !== "ungets" && (
         <div className="hidden items-center gap-2 sm:flex sm:gap-3">
-          {/* La flecha está a la izquierda, donde se mira, y dice a dónde lleva. */}
-          {destinoDeVolver && (
-            <button
-              type="button"
-              onClick={volverUnNivel}
-              title={`Volver a ${destinoDeVolver}`}
-              aria-label={`Volver a ${destinoDeVolver}`}
-              className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:border-teal-300 hover:text-teal-700"
-            >
-              <ArrowLeft className="h-[18px] w-[18px] transition-transform group-hover:-translate-x-0.5" />
-            </button>
-          )}
-
+          {/* Sin flecha propia: la de la cabecera de la app ya sube un nivel. */}
           {/* Dónde estoy: arriba, pequeño y pulsable, el nivel anterior; abajo, el actual. */}
           <div className="min-w-0 flex-1">
             {viewLevel === "data" && selectedUngetIndex !== null && (
@@ -6447,12 +6423,6 @@ function processSheet(sheet) {
                         <RefreshCw className="h-5 w-5 text-teal-600" />
                         {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
                       </button>
-                      {viewLevel === "data" && selectedUngetIndex !== null && (
-                        <button type="button" onClick={run(() => setIsNetworkSearchOpen(true))} className={item}>
-                          <Search className="h-5 w-5 text-teal-600" />
-                          Buscar un producto en todos los establecimientos
-                        </button>
-                      )}
                       {canManageConfigs && (
                         <button type="button" onClick={run(() => { if (user) setTempUrls([...scriptUrls]); setIsConfigOpen(true); })} className={item}>
                           <Settings className="h-5 w-5 text-slate-500" />
