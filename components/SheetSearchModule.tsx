@@ -2722,19 +2722,23 @@ const SheetSearchModuleContent: React.FC = () => {
   }, [scriptUrls, isConfigLoading]);
 
   // La precarga se ejecuta con la versión más reciente del estado.
-  const prefetchFnRef = useRef<() => Promise<void>>(async () => {});
+  const prefetchFnRef = useRef<(opciones?: { region?: boolean; limit?: number }) => Promise<void>>(async () => {});
   useEffect(() => {
     prefetchFnRef.current = prefetchPendingSheets;
   });
 
   // Arranca cuando el directorio ya está en pantalla y nada más está cargando.
+  // En el panel regional (más de una UNGET a la vista) se va leyendo toda la región, para
+  // que el buscador de medicamentos de la región tenga dónde buscar.
+  const precargaRegional = viewLevel === "ungets" && scriptUrls.length > 1;
   useEffect(() => {
-    if (isConfigLoading || isLoading || isSilentSyncing || selectedUngetIndex === null) return;
+    if (isConfigLoading || isLoading || isSilentSyncing) return;
+    if (selectedUngetIndex === null && !precargaRegional) return;
     const timer = setTimeout(() => {
-      void prefetchFnRef.current();
+      void prefetchFnRef.current(selectedUngetIndex === null ? { region: true } : undefined);
     }, PREFETCH_START_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [sources, isConfigLoading, isLoading, isSilentSyncing, selectedUngetIndex]);
+  }, [sources, isConfigLoading, isLoading, isSilentSyncing, selectedUngetIndex, precargaRegional]);
 
   // Se pausa con la pestaña en segundo plano y al salir del módulo.
   useEffect(() => {
@@ -3466,22 +3470,29 @@ const SheetSearchModuleContent: React.FC = () => {
    * si deja la pestaña en segundo plano, y guarda por tandas para no escribir en IndexedDB
    * una vez por hoja.
    */
-  const prefetchPendingSheets = async () => {
+  /**
+   * Lee en segundo plano el stock de las hojas que faltan.
+   *
+   * Por omisión, solo la UNGET abierta y de a `PREFETCH_MAX_SHEETS`. Con `region` recorre
+   * todas las UNGET a la vista: en el panel regional se hace en segundo plano, de a tandas
+   * (cada tanda que entra vuelve a disparar la siguiente), y con «Leer los que faltan» del
+   * buscador de toda la región se pide todo de una vez (`limit: Infinity`).
+   */
+  const prefetchPendingSheets = async ({ region = false, limit = PREFETCH_MAX_SHEETS }: { region?: boolean; limit?: number } = {}) => {
     if (prefetchRef.current.running || !prefetchRef.current.enabled) return;
 
-    // Solo la UNGET abierta: con varias UNGET a la vista serían cientos de hojas.
-    if (selectedUngetIndex === null) return;
+    if (!region && selectedUngetIndex === null) return;
     const pending = sources
       .filter(
         (source) =>
-          source.urlIndex === selectedUngetIndex &&
+          (region || source.urlIndex === selectedUngetIndex) &&
           !dataBySource.has(source.id) &&
           canReadSheetDirect(
             source.spreadsheetId || scriptUrls[source.urlIndex]?.spreadsheetId,
             getCleanSourceId(source.id),
           ),
       )
-      .slice(0, PREFETCH_MAX_SHEETS);
+      .slice(0, limit);
     if (pending.length === 0) return;
 
     const shouldPause = () =>
@@ -5430,12 +5441,15 @@ function processSheet(sheet) {
         facilities={allFacilities}
         sheetsLoaded={networkScope === "region" ? coberturaRegion.cargadas : coberturaBusqueda.cargadas}
         sheetsTotal={networkScope === "region" ? coberturaRegion.total : coberturaBusqueda.total}
-        // Leer lo que falta solo se ofrece en la UNGET: en toda la región serían cientos
-        // de hojas, y eso hay que decidirlo antes.
-        onCompleteSearch={networkScope === "region" ? undefined : async () => {
+        // En toda la región «Leer los que faltan» pide todas las hojas de una vez; sin
+        // pedirlo, el panel regional ya las va leyendo de a poco en segundo plano.
+        onCompleteSearch={async () => {
           setIsCompletingSearch(true);
           try {
-            await prefetchPendingSheets();
+            // Si la precarga de fondo está en marcha se espera a que termine su tanda y
+            // luego se pide todo lo que falte.
+            while (prefetchRef.current.running) await new Promise((resolve) => setTimeout(resolve, 300));
+            await prefetchPendingSheets(networkScope === "region" ? { region: true, limit: Infinity } : { limit: Infinity });
           } finally {
             setIsCompletingSearch(false);
           }
