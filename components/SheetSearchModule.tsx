@@ -41,6 +41,7 @@ import {
   Monitor,
   Package,
   CalendarClock,
+  MoreHorizontal,
   Wifi,
   WifiOff,
   FileClock,
@@ -135,6 +136,7 @@ import { KpiCard, KpiStrip, TableHeaderCell as HeaderCell } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
+import { BottomSheet } from "./ui/BottomSheet";
 import { DeficiencyCaptureBar } from "./DeficiencyCaptureBar";
 import { EstablishmentCard } from "./EstablishmentCard";
 
@@ -1483,6 +1485,8 @@ const SheetSearchModuleContent: React.FC = () => {
   const [isShareHelpOpen, setIsShareHelpOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<SIGData | null>(null);
+  /** Celular: las acciones de la cabecera van juntas en un botón de tres puntos. */
+  const [headerActionsOpen, setHeaderActionsOpen] = useState(false);
 
   // Modal para vencimientos en tabla
   const [isExpirationModalOpen, setIsExpirationModalOpen] = useState(false);
@@ -4528,6 +4532,9 @@ function processSheet(sheet) {
     setSelectedCaptureIds(new Set());
   };
 
+  // Celular: la lista de establecimientos crece al bajar.
+  const sheetsMobileList = useIncrementalCount(filteredAndSortedSources.length, filteredAndSortedSources, 30);
+
   const handleAutoSelectDeficiencies = () => {
     const deficientIds = new Set<string>();
     filteredAndSortedSources.forEach((sheet) => {
@@ -4763,8 +4770,55 @@ function processSheet(sheet) {
             </p>
           </div>
 
-          {/* Acciones: íconos en el celular; en escritorio, Configurar y Sincronizar con texto. */}
-          <div className="flex shrink-0 items-center gap-2">
+          {/* Celular: un solo botón de tres puntos abre todas las acciones abajo. */}
+          <button
+            type="button"
+            onClick={() => setHeaderActionsOpen(true)}
+            aria-label="Más acciones"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 sm:hidden"
+          >
+            {isLoading || isSilentSyncing ? <RefreshCw className="h-5 w-5 animate-spin text-teal-600" /> : <MoreHorizontal className="h-5 w-5" />}
+          </button>
+          <BottomSheet open={headerActionsOpen} title="Acciones" onClose={() => setHeaderActionsOpen(false)}>
+            <div className="space-y-1">
+              <button
+                type="button"
+                disabled={isLoading || isSilentSyncing}
+                onClick={() => { setHeaderActionsOpen(false); void fetchData(); }}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              >
+                <RefreshCw className="h-5 w-5 text-teal-600" />
+                {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
+              </button>
+              {selectedUngetIndex !== null && (
+                <button
+                  type="button"
+                  onClick={() => { setHeaderActionsOpen(false); setIsNetworkSearchOpen(true); }}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <Search className="h-5 w-5 text-teal-600" />
+                  Buscar un producto en todos los establecimientos
+                </button>
+              )}
+              {canManageConfigs && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHeaderActionsOpen(false);
+                    if (user) setTempUrls([...scriptUrls]);
+                    setIsConfigOpen(true);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <Settings className="h-5 w-5 text-slate-500" />
+                  Configurar conexiones de stock
+                </button>
+              )}
+            </div>
+          </BottomSheet>
+
+          {/* Escritorio: lupa, Configurar y Sincronizar a la vista. */}
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
             {selectedUngetIndex !== null && (
               <button
                 type="button"
@@ -4808,70 +4862,30 @@ function processSheet(sheet) {
           </div>
         </div>
 
-        {/* Indicadores de la lista de establecimientos o UNGET (la parte B los rehace). */}
-        <div className="mt-3">
-          {/* Connection KPIs (Cards) */}
-          {(() => {
-            // En una hoja, los indicadores van en su propia fila a todo el ancho (abajo).
-            if (viewLevel === "data") return null;
-
-            const currentSummary =
-              viewLevel === "sheets"
-                ? establishmentSummary
-                : viewLevel === "ungets"
-                  ? globalUngetSummary
-                  : null;
-            if (!currentSummary) return null;
-            return (
-              <div className="flex flex-row items-center gap-2 sm:gap-4 overflow-x-auto hide-scrollbar w-full justify-start pb-1">
-                {/* En Línea */}
-                <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                  <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
-                    <Wifi className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-600" />
-                  </div>
-                  <div className="flex flex-col justify-center gap-0.5 pr-2">
-                    <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                      {currentSummary.online}
-                    </span>
-                    <span className="text-[9px] sm:text-[10px] font-bold text-teal-600 leading-none uppercase">
-                      En Línea
-                    </span>
-                  </div>
-                </div>
-
-                {/* Desconectados */}
-                <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                  <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-amber-50 flex items-center justify-center shrink-0 border border-amber-100/50">
-                    <FileClock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-600" />
-                  </div>
-                  <div className="flex flex-col justify-center gap-0.5 pr-2">
-                    <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                      {currentSummary.delayed}
-                    </span>
-                    <span className="text-[9px] sm:text-[10px] font-bold text-amber-600 leading-none uppercase">
-                      Desconectados
-                    </span>
-                  </div>
-                </div>
-
-                {/* Fuera de Línea */}
-                <div className="flex items-center gap-2 sm:gap-2.5 bg-white border border-slate-100/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] rounded-xl sm:rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2 shrink-0">
-                  <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-red-50 flex items-center justify-center shrink-0 border border-red-100/50">
-                    <WifiOff className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500" />
-                  </div>
-                  <div className="flex flex-col justify-center gap-0.5 pr-2">
-                    <span className="text-sm sm:text-lg font-black text-slate-800 leading-none">
-                      {currentSummary.offline}
-                    </span>
-                    <span className="text-[9px] sm:text-[10px] font-bold text-red-500 leading-none uppercase">
-                      Fuera Línea
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-        </div>
+        {/* Indicadores de la lista (establecimientos o UNGET): el modelo único de KPIs. Tocar
+            uno deja a la vista solo ese estado de actualización; tocarlo otra vez, todos. */}
+        {viewLevel !== "data" && (() => {
+          const summary = viewLevel === "sheets" ? establishmentSummary : viewLevel === "ungets" ? globalUngetSummary : null;
+          if (!summary) return null;
+          const only = (emerald: boolean, amber: boolean, redGray: boolean) => {
+            const isActive = filter_emerald === emerald && filter_amber === amber && filter_red === redGray && filter_gray === redGray;
+            const all = isActive;
+            setFilter_emerald(all || emerald);
+            setFilter_amber(all || amber);
+            setFilter_red(all || redGray);
+            setFilter_gray(all || redGray);
+          };
+          const allOn = filter_emerald && filter_amber && filter_red && filter_gray;
+          return (
+            <div className="mt-3">
+              <KpiStrip cols="md:grid-cols-3">
+                <KpiCard watermark tone="success" icon={<Wifi />} label="En línea" value={summary.online} hint="actualizados en la última hora" onClick={() => only(true, false, false)} active={!allOn && filter_emerald && !filter_amber && !filter_red} />
+                <KpiCard watermark tone="warning" icon={<FileClock />} label="Desconectados" value={summary.delayed} hint="entre 1 y 24 horas sin actualizar" onClick={() => only(false, true, false)} active={!allOn && !filter_emerald && filter_amber && !filter_red} />
+                <KpiCard watermark tone="danger" icon={<WifiOff />} label="Fuera de línea" value={summary.offline} hint="más de un día o sin datos" onClick={() => only(false, false, true)} active={!allOn && !filter_emerald && !filter_amber && filter_red} />
+              </KpiStrip>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Indicadores de la hoja abierta: el modelo único de KPIs, como en Stock SISMED. Siguen
@@ -5759,7 +5773,7 @@ function processSheet(sheet) {
         {/* TOOLBAR */}
         <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col gap-4">
           {/* Search & Actions */}
-          <div className={`flex gap-3 items-center justify-between w-full ${viewLevel === "data" ? "flex-row" : "flex-col md:flex-row"}`}>
+          <div className={`flex gap-3 items-center justify-between w-full ${viewLevel === "ungets" ? "flex-col md:flex-row" : "flex-row"}`}>
             <div className="relative flex-1 w-full md:max-w-[50%] group">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
@@ -5894,7 +5908,7 @@ function processSheet(sheet) {
               </div>
             )}
 
-            <div className={`flex items-center gap-2 overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 md:ml-auto relative z-30 ${viewLevel === "data" ? "w-auto" : "w-full md:w-auto pt-1 md:pt-0 pb-1"}`}>
+            <div className={`flex items-center gap-2 overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 md:ml-auto relative z-30 ${viewLevel === "ungets" ? "w-full md:w-auto pt-1 md:pt-0 pb-1" : "w-auto"}`}>
               {viewLevel === "data" && (
                 <>
                   {/* Con puestos comunales y «Todos», se elige cómo armar el Excel. Con un
@@ -5919,7 +5933,7 @@ function processSheet(sheet) {
                 <>
                   {lastGlobalSync && (
                     <div
-                      className="flex items-center gap-1.5 bg-slate-50/80 border border-slate-200/80 text-slate-500 px-3 py-2 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all shrink-0 shadow-xs h-full"
+                      className="hidden items-center gap-1.5 bg-slate-50/80 border border-slate-200/80 text-slate-500 px-3 py-2 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all shrink-0 shadow-xs h-full lg:flex"
                       title="Última comprobación global del sistema"
                     >
                       <RefreshCw className="h-3 w-3 text-slate-400 shrink-0" />
@@ -5962,12 +5976,13 @@ function processSheet(sheet) {
                       onClick={() =>
                         setIsExportDropdownOpen(!isExportDropdownOpen)
                       }
-                      className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 shadow-sm whitespace-nowrap group cursor-pointer"
+                      aria-label="Exportar reportes"
+                      className="flex h-[42px] items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 shadow-sm whitespace-nowrap group cursor-pointer"
                     >
                       <Download className="h-4 w-4 text-emerald-600 shrink-0 transition-transform group-hover:translate-y-0.5" />
-                      <span>Exportar Reportes</span>
+                      <span className="hidden sm:inline">Exportar Reportes</span>
                       <ChevronDown
-                        className={`h-4 w-4 text-slate-400 shrink-0 transition-transform duration-200 ${isExportDropdownOpen ? "rotate-180" : ""}`}
+                        className={`hidden h-4 w-4 text-slate-400 shrink-0 transition-transform duration-200 sm:block ${isExportDropdownOpen ? "rotate-180" : ""}`}
                       />
                     </button>
 
@@ -6392,7 +6407,8 @@ function processSheet(sheet) {
               {/* LEVEL 2: SHEET CARDS */}
               {viewLevel === "sheets" && (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-gray-200/50 pb-3 mb-4 sm:mb-6 gap-4">
+                  {/* En el celular sobra: los KPIs y la lista ya dicen cuántos hay y de qué tipo. */}
+                  <div className="hidden md:flex flex-col lg:flex-row lg:items-center justify-between border-b border-gray-200/50 pb-3 mb-4 sm:mb-6 gap-4">
                     <div className="flex flex-col gap-2.5">
                       {/* Title and Counter Pill */}
                       <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -6414,7 +6430,7 @@ function processSheet(sheet) {
 
                       {/* Beautiful Premium Type KPIs */}
                       {establishmentSummary && (
-                        <div className="flex flex-wrap gap-2 pt-0.5">
+                        <div className="hidden flex-wrap gap-2 pt-0.5 sm:flex">
                           <div
                             className="flex items-center gap-1.5 bg-sky-50/70 border border-sky-100/50 text-sky-800 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-xs"
                             title="Centros de Salud"
@@ -6468,7 +6484,7 @@ function processSheet(sheet) {
                     </div>
 
                     {/* Selector de tipo de Visualización */}
-                    <div className="flex flex-wrap items-center gap-2 shrink-0 overflow-x-auto pb-1 -mb-1 max-w-full no-scrollbar">
+                    <div className="hidden flex-wrap items-center gap-2 shrink-0 overflow-x-auto pb-1 -mb-1 max-w-full no-scrollbar md:flex">
                       <div className="flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-xl border border-slate-200/60 shadow-[inset_0_1px_1.5px_rgba(0,0,0,0.02)] shrink-0 pr-1 lg:pr-0.5">
                         <button
                           type="button"
@@ -6532,7 +6548,7 @@ function processSheet(sheet) {
                           }
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs border ${
                             isTableFullscreen
-                              ? "bg-slate-800 border-slate-700 text-white hover:bg-slate-700"
+                              ? "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"
                               : "bg-teal-50 border-teal-100 text-teal-850 hover:bg-teal-100 hover:text-teal-900 hover:border-teal-200"
                           }`}
                           title="Pantalla Completa"
@@ -7661,7 +7677,62 @@ function processSheet(sheet) {
                       );
                     }
 
-                    return viewContent;
+                    // Celular: filas compactas (código, nombre, actualización e ítems); al tocar,
+                    // su stock. En escritorio siguen la cuadrícula y los demás modos de vista.
+                    if (filteredAndSortedSources.length === 0) return viewContent;
+                    return (
+                      <>
+                        <div className="-mx-4 -mt-4 md:hidden">
+                          <ul className="divide-y divide-slate-100 border-y border-slate-100 bg-white">
+                            {filteredAndSortedSources.slice(0, sheetsMobileList.count).map((sheet) => {
+                              const sheetData = rowsForSource(sheet.id);
+                              const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);
+                              const code = codeForSheet(sheet.id);
+                              const status = getUpdateStatus(sheet.lastUpdateTime);
+                              const items = sheetData.length > 0 ? sheetData.length : sheet.rowCount || 0;
+                              const selected = selectedCaptureIds.has(sheet.id);
+                              return (
+                                <li
+                                  key={sheet.id}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => (isCaptureMode ? toggleCardSelection(sheet.id) : handleSelectSheet(sheet.id))}
+                                  onKeyDown={(e) => { if (e.key === "Enter") (isCaptureMode ? toggleCardSelection(sheet.id) : handleSelectSheet(sheet.id)); }}
+                                  className={`flex cursor-pointer items-center gap-3 px-4 py-3 active:bg-slate-50 ${selected ? "bg-teal-50/60" : ""}`}
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    {code && <span className="font-mono text-[11px] text-teal-700">{code}</span>}
+                                    <p className="truncate text-[14px] font-bold text-slate-900">{describeSheetName(sheet.name)}</p>
+                                    <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-slate-500">
+                                      <span className={`h-2 w-2 shrink-0 rounded-full ${status.color}`} />
+                                      <span>{status.label}</span>
+                                      <span className="text-slate-300">·</span>
+                                      <span>{items.toLocaleString("es-PE")} ítems</span>
+                                    </p>
+                                    {(expiredCount > 0 || expiringThisMonthCount > 0) && (
+                                      <p className="mt-0.5 text-[12px] font-semibold">
+                                        {expiredCount > 0 && <span className="text-red-600">{expiredCount} vencidos</span>}
+                                        {expiredCount > 0 && expiringThisMonthCount > 0 && <span className="text-slate-300"> · </span>}
+                                        {expiringThisMonthCount > 0 && <span className="text-amber-700">{expiringThisMonthCount} por vencer</span>}
+                                      </p>
+                                    )}
+                                  </div>
+                                  {isCaptureMode ? (
+                                    <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${selected ? "border-teal-600 bg-teal-600 text-white" : "border-slate-300 bg-white"}`}>
+                                      {selected && <Check className="h-4 w-4" />}
+                                    </span>
+                                  ) : (
+                                    <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          <LoadMoreSentinel hasMore={sheetsMobileList.hasMore} onLoadMore={sheetsMobileList.loadMore} shown={sheetsMobileList.count} total={filteredAndSortedSources.length} itemLabel="establecimientos" />
+                        </div>
+                        <div className="hidden md:block">{viewContent}</div>
+                      </>
+                    );
                   })()}
                 </div>
               )}
