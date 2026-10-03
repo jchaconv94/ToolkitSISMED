@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AVAILABLE_MODULES, AppModule } from "../types";
-import { NAV_SECTIONS, findNavItem, findNavSection, visibleNavSections } from "./navigation";
+import { NAV_SECTIONS, findNavItem, findNavSection, findVisibleNavSection, visibleNavSections } from "./navigation";
 
 describe("mapa de navegación", () => {
   const enMenu = NAV_SECTIONS.flatMap(section => section.items.map(item => item.module));
@@ -32,5 +32,18 @@ describe("mapa de navegación", () => {
     expect(findNavSection("HOME")).toBeNull();
     expect(findNavSection("PROFILE")).toBeNull();
     expect(findNavItem("HOME")?.label).toBe("Inicio");
+  });
+
+  it("da a cada sección un nombre corto para la pestaña del teléfono", () => {
+    expect(NAV_SECTIONS.map(s => s.shortLabel)).toEqual(["Farmacia", "Stock", "Herramientas", "Admin"]);
+  });
+
+  it("solo abre la pantalla de una sección que el usuario ve", () => {
+    const permitidos = new Set<AppModule>(["IPRESS_STOCK"]);
+    const puede = (m: AppModule) => permitidos.has(m);
+    expect(findVisibleNavSection("stock", puede)?.items.map(i => i.module)).toEqual(["IPRESS_STOCK"]);
+    expect(findVisibleNavSection("administracion", puede)).toBeNull();
+    expect(findVisibleNavSection("no-existe", puede)).toBeNull();
+    expect(findVisibleNavSection(null, puede)).toBeNull();
   });
 });

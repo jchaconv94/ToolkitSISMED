@@ -59,6 +59,42 @@ export const moduleForPath = (pathname: string): AppModule | null => {
   return MODULOS_POR_RUTA.get(ruta) || null;
 };
 
+/**
+ * Pantalla de una sección en el teléfono (la lista de herramientas de «Stock», etc.).
+ *
+ * No es un módulo: es Inicio con la sección abierta, `/inicio?seccion=stock`. Va en la
+ * dirección para que forme parte del historial y la flecha «volver» (y el botón atrás de
+ * Android) regrese de una herramienta a la sección desde la que se abrió.
+ */
+const PARAMETRO_SECCION = "seccion";
+
+/** Dirección de la pantalla de una sección. */
+export const pathForSection = (sectionId: string): string =>
+  `${pathForModule("HOME")}?${PARAMETRO_SECCION}=${encodeURIComponent(sectionId)}`;
+
+/** Dirección de una vista: la del módulo o, en Inicio con una sección abierta, la de la sección. */
+export const pathForView = (module: AppModule, sectionId: string | null): string =>
+  module === "HOME" && sectionId ? pathForSection(sectionId) : pathForModule(module);
+
+/** Sección abierta según la consulta de la dirección (`?seccion=stock`), o `null`. */
+export const sectionForSearch = (search: string): string | null => {
+  try {
+    const valor = new URLSearchParams(search).get(PARAMETRO_SECCION);
+    return valor && valor.trim() ? valor.trim() : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Vista que corresponde a una dirección completa: el módulo y, solo en Inicio, la sección
+ * abierta. Una dirección desconocida es Inicio sin sección.
+ */
+export const viewForLocation = (pathname: string, search: string): { module: AppModule; section: string | null } => {
+  const module = moduleForPath(pathname) || "HOME";
+  return { module, section: module === "HOME" ? sectionForSearch(search) : null };
+};
+
 /** Dónde se deja escrito a qué vino el usuario al cambiar de módulo. */
 const CLAVE_INTENCION = "toolkit_intencion_navegacion";
 

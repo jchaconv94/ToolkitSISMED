@@ -168,7 +168,7 @@ export const BackupsSismedModule: React.FC = () => {
     <div className="space-y-4 pb-24">
       <ModuleHeaderPortal>
         <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1.5 text-xs font-bold sm:px-3 ${
+          <span title={manager.status === "open" ? "Conectado" : manager.status === "connecting" ? "Conectando…" : "Sin conexión"} className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1.5 text-xs font-bold sm:px-3 ${
             manager.status === "open" ? "border-emerald-200 bg-emerald-50 text-emerald-700"
               : manager.status === "connecting" ? "border-blue-200 bg-blue-50 text-blue-700"
                 : "border-red-200 bg-red-50 text-red-700"
@@ -176,7 +176,7 @@ export const BackupsSismedModule: React.FC = () => {
             {manager.status === "connecting" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span className={`h-2 w-2 rounded-full ${manager.status === "open" ? "bg-emerald-500" : "bg-red-500"}`} />}
             {manager.status === "open"
               ? <><span className="hidden sm:inline">Conectado · {onlineCount === 1 ? "1 PC en línea" : `${onlineCount} PC en línea`}</span><span className="sm:hidden">{onlineCount} PC</span></>
-              : manager.status === "connecting" ? <span>Conectando…</span> : <span>Sin conexión</span>}
+              : manager.status === "connecting" ? <span className="hidden sm:inline">Conectando…</span> : <span className="hidden sm:inline">Sin conexión</span>}
           </span>
           <button type="button" aria-label="Actualizar" onClick={refresh} className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:bg-slate-50">
             <RefreshCw className="h-4 w-4" />
