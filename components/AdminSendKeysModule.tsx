@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle, ArrowRightLeft, Bell, CheckCircle2, ChevronRight, Clock, Copy, Database, Download, History, KeyRound,
-  Loader2, Monitor, MonitorSmartphone, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
+  Loader2, Monitor, MonitorSmartphone, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, SlidersHorizontal, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -22,7 +22,8 @@ import {
 } from "./ui/kit";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
-import { ModuleHeaderPortal } from "./ui/ModuleHeaderSlot";
+import { BottomSheet } from "./ui/BottomSheet";
+import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useDropdownPosition } from "../hooks/useDropdownPosition";
 
 type ModuleTab = "establishments";
@@ -193,10 +194,8 @@ export const AdminSendKeysModule: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* En el celular la fila es solo de las pestañas: la campana va a la cabecera. */}
-      <ModuleHeaderPortal><span className="sm:hidden">{bell}</span></ModuleHeaderPortal>
-
-      <div className="flex items-center gap-2">
+      {/* Una sola pestaña: en el celular sobra; la campana va junto al buscador. */}
+      <div className="hidden items-center gap-2 md:flex">
         <div className="flex min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-1 sm:inline-flex sm:flex-none" role="tablist">
           {tabs.map(({ id, label, icon: Icon }) => (
             <button
@@ -253,6 +252,7 @@ export const AdminSendKeysModule: React.FC = () => {
             onGenerate={(row) => void generate(row)}
             onIgnore={(row) => void ignore(row)}
             onPending={setPending}
+            mobileBell={bell}
           />
         )
       )}
@@ -381,7 +381,8 @@ const EstablishmentsPanel: React.FC<{
   onGenerate: (row: SendKeyRow) => void;
   onIgnore: (row: SendKeyRow) => void;
   onPending: (action: PendingAction) => void;
-}> = ({ rows, latest, latestSismed, busy, onGenerate, onIgnore, onPending }) => {
+  mobileBell: React.ReactNode;
+}> = ({ rows, latest, latestSismed, busy, onGenerate, onIgnore, onPending, mobileBell }) => {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<EstablishmentFilter>("all");
   const [sismedFilter, setSismedFilter] = useState<SismedFilter>("all");
@@ -401,6 +402,9 @@ const EstablishmentsPanel: React.FC<{
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   useEffect(() => { setPage(1); }, [search, filter, sismedFilter]);
+  // En el celular no hay páginas: la lista crece al bajar.
+  const mobileList = useIncrementalCount(filtered.length, `${search}|${filter}|${sismedFilter}`, 20);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const showUnget = useMemo(() => new Set(rows.map((r) => r.ungetId || "")).size > 1, [rows]);
   const selected = useMemo(() => rows.find((r) => r.code === selectedCode) || null, [rows, selectedCode]);
@@ -426,7 +430,7 @@ const EstablishmentsPanel: React.FC<{
   const toggle = (next: EstablishmentFilter) => setFilter(filter === next ? "all" : next);
 
   return (
-    <div className="space-y-4 pb-6">
+    <div className="space-y-4 pb-6 max-md:!mt-0">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
         <KpiCard watermark tone="success" icon={<ShieldCheck />} label="Protegidos" value={`${summary.protectedCount} / ${summary.total}`} hint="con clave de envío" onClick={() => toggle("protected")} active={filter === "protected"} />
         <KpiCard watermark tone="neutral" icon={<ShieldOff />} label="Sin clave" value={summary.none} hint={summary.waiting ? `${summary.waiting} esperando primer envío` : "envían desde cualquier PC"} onClick={() => toggle("none")} active={filter === "none"} />
@@ -435,12 +439,18 @@ const EstablishmentsPanel: React.FC<{
       </KpiStrip>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center sm:px-4">
-          <div className="relative w-full sm:max-w-xs">
+        <div className="flex items-center gap-2 border-b border-slate-100 p-3 md:px-4">
+          <div className="relative min-w-0 flex-1 md:max-w-xs">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${filterInputClass} pl-9`} />
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex">
+          {/* Celular: un botón abre los filtros abajo; la campana de intentos va al lado. */}
+          <button type="button" onClick={() => setFiltersOpen(true)} aria-label="Filtros" className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 md:hidden">
+            <SlidersHorizontal className="h-4 w-4" />
+            {(filter !== "all" || sismedFilter !== "all") && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />}
+          </button>
+          <span className="md:hidden">{mobileBell}</span>
+          <div className="ml-auto hidden gap-2 md:flex">
             <select value={filter} onChange={(e) => setFilter(e.target.value as EstablishmentFilter)} aria-label="Estado" className={`${filterInputClass} sm:w-60`}>
               {FILTER_ORDER.map((f) => (
                 <option key={f} value={f}>{f === "all" ? "Estado: todos" : ESTABLISHMENT_FILTER_LABEL[f]} ({summary.counts[f]})</option>
@@ -456,6 +466,21 @@ const EstablishmentsPanel: React.FC<{
             </select>
           </div>
         </div>
+
+        <BottomSheet open={filtersOpen} title="Filtros" onClose={() => setFiltersOpen(false)}>
+          <p className="mb-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400">Estado</p>
+          <div className="space-y-1">
+            {FILTER_ORDER.map((f) => (
+              <SheetOption key={f} active={filter === f} label={f === "all" ? "Todos" : ESTABLISHMENT_FILTER_LABEL[f]} count={summary.counts[f]} onClick={() => { setFilter(f); setFiltersOpen(false); }} />
+            ))}
+          </div>
+          <p className="mb-1.5 mt-4 text-[11px] font-black uppercase tracking-wider text-slate-400">Versión del SISMED</p>
+          <div className="space-y-1">
+            {([["all", "Todas"], ["outdated", "Desactualizado"], ...sismedVersions.map((v) => [`v:${v}`, `v${v}${v === latestSismed ? " (vigente)" : ""}`]), ["none", "Sin dato"]] as Array<[SismedFilter, string]>).map(([value, label]) => (
+              <SheetOption key={value} active={sismedFilter === value} label={label} onClick={() => { setSismedFilter(value); setFiltersOpen(false); }} />
+            ))}
+          </div>
+        </BottomSheet>
 
         {filtered.length === 0 ? (
           <EmptyState
@@ -523,41 +548,49 @@ const EstablishmentsPanel: React.FC<{
               </table>
             </div>
 
-            {/* Móvil */}
+            {/* Móvil: tarjetas con lo esencial; el resto, al tocar (detalle). */}
             <div className="space-y-2 p-3 md:hidden">
-              {pageRows.map((row) => {
+              {filtered.slice(0, mobileList.count).map((row) => {
                 const state = sendKeyState(row);
                 const device = latestDevice(row);
                 const pc = row.deviceName || device?.deviceName;
+                const tk = toolkitState(row, latest) === "outdated";
+                const sm = sismedState(row, latestSismed) === "outdated";
                 return (
-                  <div key={row.code} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                    <span className={`absolute inset-y-0 left-0 w-1 ${STATE_STYLE[state].bar}`} />
-                    <button type="button" disabled={state === "none"} onClick={() => setSelectedCode(row.code)} className="flex w-full items-start justify-between gap-2 p-3 pl-4 text-left">
+                  <div key={row.code} className="rounded-2xl border border-slate-200 bg-white p-3 text-[13px]">
+                    <button type="button" disabled={state === "none"} onClick={() => setSelectedCode(row.code)} className="flex w-full items-start justify-between gap-2 text-left">
                       <span className="min-w-0">
-                        <span className="block truncate text-[13.5px] font-black text-slate-800">{row.name}</span>
                         <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
+                        <span className="block truncate font-black text-slate-800">{row.name}</span>
+                        {pc && (
+                          <span className="block text-[11.5px] leading-snug text-slate-400">
+                            {pc}
+                            {device?.version && <> · <span className={tk ? "font-semibold text-amber-700" : ""}>Toolkit v{device.version}</span></>}
+                            {device?.sismedVersion && <> · <span className={sm ? "font-semibold text-amber-700" : ""}>SISMED v{device.sismedVersion}</span></>}
+                          </span>
+                        )}
                       </span>
                       <StateChip state={state} />
                     </button>
-                    <div className="mb-3 ml-4 mr-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
-                      <span className="flex min-w-0 items-center gap-1"><Monitor className="h-3.5 w-3.5 shrink-0" />{pc ? <b className="truncate text-slate-700">{pc}</b> : "Sin equipo aún"}</span>
-                      <ToolkitVersion device={device} state={toolkitState(row, latest)} prefix="TK " />
-                      <SismedVersion device={device} state={sismedState(row, latestSismed)} prefix="SISMED " />
-                      <span className="ml-auto flex shrink-0 items-center gap-1"><Clock className="h-3 w-3" />{relativeTime(lastSendAt(row))}</span>
-                    </div>
-                    {state === "none" && (
-                      <div className="px-3 pb-3 pl-4">
-                        <button type="button" disabled={busy} onClick={() => onGenerate(row)} className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-teal-600 text-xs font-bold text-white disabled:opacity-60">
+                    <div className="mt-2.5 flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-[11.5px] text-slate-500">Último envío: {relativeTime(lastSendAt(row))}</span>
+                      {state === "none" && (
+                        <button type="button" disabled={busy} onClick={() => onGenerate(row)} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-teal-600 px-3.5 text-xs font-bold text-white disabled:opacity-60">
                           <KeyRound className="h-3.5 w-3.5" /> Generar clave
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
+            <div className="md:hidden">
+              <LoadMoreSentinel hasMore={mobileList.hasMore} onLoadMore={mobileList.loadMore} shown={mobileList.count} total={filtered.length} itemLabel="establecimientos" />
+            </div>
 
+            <div className="hidden md:block">
             <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} itemLabel="establecimientos" />
+            </div>
           </>
         )}
       </div>
@@ -585,6 +618,14 @@ const EstablishmentsPanel: React.FC<{
     </div>
   );
 };
+
+/** Una opción de filtro en el panel inferior del celular. */
+const SheetOption: React.FC<{ active: boolean; label: string; count?: number; onClick: () => void }> = ({ active, label, count, onClick }) => (
+  <button type="button" onClick={onClick} className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-[14px] font-semibold ${active ? "bg-teal-50 text-teal-800" : "text-slate-700 hover:bg-slate-50"}`}>
+    <span>{label}</span>
+    {count !== undefined && <span className={`text-[12px] font-bold ${active ? "text-teal-700" : "text-slate-400"}`}>{count}</span>}
+  </button>
+);
 
 const POPOVER_WIDTH = 280;
 
