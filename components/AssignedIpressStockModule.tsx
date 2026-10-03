@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  Building2,
+  CalendarClock,
   Clock,
   Download,
-  FileSpreadsheet,
   Package,
   RefreshCw,
   Search,
@@ -27,10 +26,11 @@ import {
   type FacilitySheetLink,
 } from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
-import { EmptyState, KpiCard, KpiStrip, StatusChip, TableHeaderCell as HeaderCell, filterInputClass, toneIconClass } from "./ui/kit";
+import { EmptyState, KpiCard, KpiStrip, TableHeaderCell as HeaderCell, filterInputClass } from "./ui/kit";
+import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { TablePagination } from "./ui/TablePagination";
 import { noticeSettingsApi } from "../services/noticeSettings";
-import { DEFAULT_NOTICE_THRESHOLDS } from "../services/notifications";
+import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, type NoticeThresholds, noticeWhen } from "../services/notifications";
 import {
   DEFAULT_STOCK_COLUMN_KEYS,
   STOCK_COLUMNS,
@@ -65,13 +65,15 @@ export const AssignedIpressStockModule: React.FC = () => {
   const [search, setSearch] = useState("");
   const [expirationFilter, setExpirationFilter] = useState<ExpirationFilter>("ALL");
   const [page, setPage] = useState(1);
-  /** Ventana de «por vencer»: el mismo parámetro que usa la campana. */
-  const [expiryDays, setExpiryDays] = useState(DEFAULT_NOTICE_THRESHOLDS.expiryDays);
+  const [lastUpdateAt, setLastUpdateAt] = useState(0);
+  /** Ventana de «por vencer» y días sin actualizar: los mismos parámetros que usa la campana. */
+  const [thresholds, setThresholds] = useState<NoticeThresholds>(DEFAULT_NOTICE_THRESHOLDS);
+  const expiryDays = thresholds.expiryDays;
   const pageSize = 50;
 
   useEffect(() => {
     let vigente = true;
-    void noticeSettingsApi.getOrDefault().then(value => { if (vigente) setExpiryDays(value.expiryDays); });
+    void noticeSettingsApi.getOrDefault().then(value => { if (vigente) setThresholds(value); });
     return () => { vigente = false; };
   }, []);
 
@@ -104,6 +106,7 @@ export const AssignedIpressStockModule: React.FC = () => {
       setRows(result.rows);
       setLoadedSheet(result.sheetName);
       setLastUpdate(result.lastUpdate);
+      setLastUpdateAt(result.lastUpdateAt);
       if (result.message) {
         setErrorMessage(result.message);
         return;
@@ -114,6 +117,7 @@ export const AssignedIpressStockModule: React.FC = () => {
       setRows([]);
       setLoadedSheet("");
       setLastUpdate("");
+      setLastUpdateAt(0);
       setErrorMessage(message);
       toast.error(message);
     } finally {
@@ -148,6 +152,9 @@ export const AssignedIpressStockModule: React.FC = () => {
   }, [rows, search, visibleColumns, expirationFilter, expiryDays]);
 
   const visibleRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
+  // En el celular no hay páginas: la lista crece al bajar.
+  const mobileList = useIncrementalCount(filteredRows.length, `${search}|${expirationFilter}|${loadedSheet}`);
+  const mobileRows = filteredRows.slice(0, mobileList.count);
   const metrics = useMemo(() => ({
     lots: rows.length,
     expiring: rows.filter(row => getExpirationState(row, expiryDays) === "EXPIRING").length,
@@ -187,7 +194,8 @@ export const AssignedIpressStockModule: React.FC = () => {
     XLSX.writeFile(workbook, `STOCK_SISMED_${facilityCode || "IPRESS"}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  const sheetLabel = link?.sheet?.name || assignment?.sheetName || "";
+  const [updateDate, updateTime] = lastUpdate.split(" ");
+  const isStale = lastUpdateAt > 0 && Date.now() - lastUpdateAt >= thresholds.staleDays * DAY_MS;
   const toggleFilter = (value: ExpirationFilter) => setExpirationFilter(current => (current === value ? "ALL" : value));
   const textOrDash = (key: string, ...values: unknown[]) => {
     if (!canShow(key)) return "";
@@ -196,27 +204,6 @@ export const AssignedIpressStockModule: React.FC = () => {
 
   return (
     <div className="space-y-4 animate-in fade-in duration-300">
-      {/* El título ya está en la cabecera de la app: aquí solo va de quién es la hoja y cuándo se actualizó. */}
-      <section className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-        <span className={`hidden h-10 w-10 shrink-0 place-items-center rounded-xl sm:grid ${toneIconClass.info}`}><Building2 className="h-5 w-5" /></span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[14px] font-black text-slate-900">
-            {facilityName}
-            {facilityCode && <span className="ml-2 font-mono text-xs font-bold text-slate-400">{facilityCode}</span>}
-          </p>
-          <p className="mt-0.5 truncate text-[12px] text-slate-500">
-            {loading ? "Leyendo la hoja…" : lastUpdate ? <>Actualizada el <strong className="font-bold text-slate-700">{lastUpdate}</strong></> : loadedSheet ? "Sin fecha de actualización" : "Sin hoja"}
-          </p>
-          {link?.status === "dentro-de-su-ipress" && (
-            <p className="mt-0.5 text-[11px] text-slate-400">Puesto comunal: su stock viene dentro de la hoja de su IPRESS, separado por su ALMCOD.</p>
-          )}
-        </div>
-        <span className="hidden shrink-0 sm:inline"><StatusChip label="Solo lectura" tone="success" /></span>
-        <button type="button" onClick={() => void loadStock(true)} disabled={loading || !facilityCode} aria-label="Actualizar" className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 px-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:px-4">
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> <span className="hidden sm:inline">Actualizar</span>
-        </button>
-      </section>
-
       {loading ? (
         <div className="flex justify-center rounded-2xl border border-slate-200 bg-white py-20 shadow-sm"><div className="h-9 w-9 animate-spin rounded-full border-2 border-teal-500 border-t-transparent" /></div>
       ) : errorMessage ? (
@@ -235,10 +222,12 @@ export const AssignedIpressStockModule: React.FC = () => {
       ) : (
         <>
           {/* Los indicadores son también el filtro: tocar uno muestra solo esos lotes. */}
-          <KpiStrip cols="md:grid-cols-3">
+          <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
             <KpiCard watermark tone="info" icon={<Package />} label="Lotes" value={metrics.lots.toLocaleString("es-PE")} hint="en la hoja del establecimiento" onClick={() => setExpirationFilter("ALL")} active={expirationFilter === "ALL"} />
             <KpiCard watermark tone="warning" icon={<Clock />} label="Por vencer" value={metrics.expiring.toLocaleString("es-PE")} hint={`en los próximos ${expiryDays} días`} onClick={() => toggleFilter("EXPIRING")} active={expirationFilter === "EXPIRING"} />
             <KpiCard watermark tone="danger" icon={<AlertTriangle />} label="Vencidos" value={metrics.expired.toLocaleString("es-PE")} hint="todavía con saldo" onClick={() => toggleFilter("EXPIRED")} active={expirationFilter === "EXPIRED"} />
+            {/* Ámbar con el mismo umbral de días sin actualizar que usa la campana. */}
+            <KpiCard watermark tone={isStale ? "warning" : "neutral"} icon={<CalendarClock />} label="Última actualización" value={updateDate || "—"} hint={lastUpdateAt ? `${updateTime ? `a las ${updateTime.slice(0, 5)} · ` : ""}${noticeWhen(lastUpdateAt)}` : "sin fecha en la hoja"} />
           </KpiStrip>
 
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -252,6 +241,9 @@ export const AssignedIpressStockModule: React.FC = () => {
                 )}
               </label>
               <span className="ml-auto" />
+              <button type="button" onClick={() => void loadStock(true)} disabled={loading || !facilityCode} aria-label="Actualizar" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
+                <RefreshCw className={`h-4 w-4 text-teal-600 ${loading ? "animate-spin" : ""}`} /><span className="hidden sm:inline">Actualizar</span>
+              </button>
               <button type="button" onClick={exportStock} aria-label="Exportar a Excel" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50">
                 <Download className="h-4 w-4 text-emerald-600" /><span className="hidden sm:inline">Exportar</span>
               </button>
@@ -270,12 +262,12 @@ export const AssignedIpressStockModule: React.FC = () => {
               <>
                 {/* Celular: una tarjeta compacta por lote. */}
                 <ul className="divide-y divide-slate-100 sm:hidden">
-                  {visibleRows.map((row, index) => {
+                  {mobileRows.map((row, index) => {
                     const state = getExpirationState(row, expiryDays);
                     const tipo = textOrDash("DESC_TIPSUM", row.TIPSUM, row.DESC_TIPSUM);
                     const fuente = textOrDash("DESC_FFINAN", row.FFINAN, row.DESC_FFINAN);
                     return (
-                      <li key={`${String(row.Id_Producto)}-${String(row.Lote)}-${(page - 1) * pageSize + index}`} className="flex gap-3 px-4 py-3">
+                      <li key={`${String(row.Id_Producto)}-${String(row.Lote)}-${index}`} className="flex gap-3 px-4 py-3">
                         <div className="min-w-0 flex-1">
                           {showsPharmacy && <PharmacyCodeCell label={pharmacyLabelOf(row)} className="mb-1" />}
                           <p className="text-[14px] font-bold leading-snug text-slate-900">{canShow("Nombre") ? String(row.Nombre || "—") : "—"}</p>
@@ -301,9 +293,12 @@ export const AssignedIpressStockModule: React.FC = () => {
                     );
                   })}
                 </ul>
+                <div className="sm:hidden">
+                  <LoadMoreSentinel hasMore={mobileList.hasMore} onLoadMore={mobileList.loadMore} shown={mobileList.count} total={filteredRows.length} itemLabel="lotes" />
+                </div>
 
                 {/* Escritorio: tabla. */}
-                <div className="hidden max-h-[calc(100vh-440px)] min-h-[320px] overflow-auto custom-scrollbar sm:block">
+                <div className="hidden max-h-[calc(100vh-370px)] min-h-[320px] overflow-auto custom-scrollbar sm:block">
                   <table className="min-w-full text-left">
                     <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_rgb(226_232_240)]">
                       <tr>
@@ -355,7 +350,9 @@ export const AssignedIpressStockModule: React.FC = () => {
               </>
             )}
 
-            <TablePagination page={page} pageSize={pageSize} total={filteredRows.length} onPageChange={setPage} itemLabel="lotes" />
+            <div className="hidden sm:block">
+              <TablePagination page={page} pageSize={pageSize} total={filteredRows.length} onPageChange={setPage} itemLabel="lotes" />
+            </div>
           </section>
         </>
       )}
