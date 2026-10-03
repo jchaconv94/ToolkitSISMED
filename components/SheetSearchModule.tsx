@@ -4813,25 +4813,13 @@ function processSheet(sheet) {
   );
 
   /**
-   * Acciones de escritorio: búsqueda en todos (en la hoja; en la lista la ofrece el selector
-   * del buscador), Configurar y Sincronizar. Van en la cabecera cuando hay cabecera (UNGET
+   * Acciones de escritorio: Configurar y Sincronizar (la búsqueda de un medicamento en
+   * todos los establecimientos la ofrece el buscador de la lista). Van en la cabecera cuando hay cabecera (UNGET
    * u hoja abierta) y, en el panel regional, en la fila del buscador. En el celular están en
    * el botón de tres puntos.
    */
   const accionesDeEscritorio = (
     <div className="hidden shrink-0 items-center gap-2 sm:flex">
-      {viewLevel === "data" && selectedUngetIndex !== null && (
-        <button
-          type="button"
-          onClick={() => setIsNetworkSearchOpen(true)}
-          title="Buscar un producto en todos los establecimientos (Ctrl+K)"
-          aria-label="Búsqueda avanzada"
-          aria-keyshortcuts="Control+K"
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-200 bg-white text-teal-600 transition-colors hover:bg-teal-50"
-        >
-          <Search className="h-4 w-4" />
-        </button>
-      )}
       {canManageConfigs && (
         <button
           type="button"
@@ -6435,12 +6423,6 @@ function processSheet(sheet) {
                         <RefreshCw className="h-5 w-5 text-teal-600" />
                         {isLoading ? "Sincronizando..." : isSilentSyncing ? "Verificando..." : "Sincronizar"}
                       </button>
-                      {viewLevel === "data" && selectedUngetIndex !== null && (
-                        <button type="button" onClick={run(() => setIsNetworkSearchOpen(true))} className={item}>
-                          <Search className="h-5 w-5 text-teal-600" />
-                          Buscar un producto en todos los establecimientos
-                        </button>
-                      )}
                       {canManageConfigs && (
                         <button type="button" onClick={run(() => { if (user) setTempUrls([...scriptUrls]); setIsConfigOpen(true); })} className={item}>
                           <Settings className="h-5 w-5 text-slate-500" />
