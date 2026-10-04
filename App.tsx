@@ -1191,6 +1191,13 @@ const AnalysisModule: React.FC = () => {
                                 </div>
                             )}
 
+                            {/* CATEGORÍA: la franja del archivo ya no repite los datos del establecimiento. */}
+                            {result.category && (
+                                <div className="flex items-center gap-1.5 text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold">
+                                    <span>CAT: {result.category}</span>
+                                </div>
+                            )}
+
                             {/* MICRORED */}
                             {activeMicrored && (
                                 <div className="flex items-center gap-1.5 text-teal-800 bg-teal-50/50 border border-teal-100 rounded-lg px-2.5 py-1 text-xs font-semibold">
