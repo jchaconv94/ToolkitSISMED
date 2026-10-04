@@ -31,8 +31,6 @@ import {
   User,
   ChevronDown,
   LayoutGrid,
-  List,
-  Grid,
   Table2,
   ArrowUp,
   ArrowDown,
@@ -143,7 +141,8 @@ import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
 import { BottomSheet } from "./ui/BottomSheet";
 import { DeficiencyCaptureBar } from "./DeficiencyCaptureBar";
-import { EstablishmentCard, EstablishmentMobileRow } from "./EstablishmentCard";
+import { EstablishmentCard, EstablishmentMobileRow, type EstablishmentCardData } from "./EstablishmentCard";
+import { EstablishmentSyncPanel, EstablishmentTable, type SyncFilter } from "./EstablishmentTable";
 
 /** Lista vacía compartida: evita crear un array nuevo por tarjeta sin datos. */
 const EMPTY_SOURCE_ROWS: SIGData[] = [];
@@ -757,44 +756,13 @@ const renderRangeFilter = (
   );
 };
 
-const renderSyncStatusPill = (timestamp?: number) => {
-  const statusObj = getUpdateStatus(timestamp);
-  const isEmerald =
-    statusObj.color.includes("emerald") ||
-    statusObj.color.includes("bg-emerald-500");
-  const isAmber =
-    statusObj.color.includes("amber") ||
-    statusObj.color.includes("bg-amber-500");
-  const isRed =
-    statusObj.color.includes("red") || statusObj.color.includes("bg-red-500");
-
-  let containerClass = "bg-slate-50 text-slate-500 border-slate-200";
-  let dotClass = "bg-slate-400";
-
-  if (isEmerald) {
-    containerClass =
-      "bg-[#f0fdf4] text-[#166534] border-[#bbf7d0] hover:bg-[#e8fbf0]";
-    dotClass = "bg-[#22c55e]";
-  } else if (isAmber) {
-    containerClass =
-      "bg-[#fffbeb] text-[#92400e] border-[#fef08a] hover:bg-[#fff9db]";
-    dotClass = "bg-[#f59e0b]";
-  } else if (isRed) {
-    containerClass =
-      "bg-[#fef2f2] text-[#991b1b] border-[#fecaca] hover:bg-[#fee2e2]";
-    dotClass = "bg-[#ef4444]";
-  }
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[8.5px] font-black tracking-wide border shadow-3xs transition-colors select-none whitespace-nowrap overflow-hidden ${containerClass}`}
-    >
-      <span
-        className={`h-1 w-1 sm:h-1.5 sm:w-1.5 rounded-full shrink-0 ${dotClass}`}
-      />
-      <span className="truncate">{statusObj.label}</span>
-    </span>
-  );
+/** Cómo se dice, al pie de la tabla, el orden elegido en Filtros. */
+const SHEET_SORT_LABELS: Record<string, string> = {
+  name_asc: "nombre (A-Z)",
+  name_desc: "nombre (Z-A)",
+  date_newest: "sincronización más reciente",
+  date_oldest: "sincronización más antigua",
+  expired_highest: "mayor número de vencidos",
 };
 
 const getSheetType = (name: string): "CS" | "PS" | "ALM" | "HOSP" | "OTRO" => {
@@ -1213,8 +1181,8 @@ const SheetSearchModuleContent: React.FC = () => {
   );
   const [selectedSourceId, setSelectedSourceId] = useState<string>("");
   const [sheetsViewMode, setSheetsViewMode] = useState<
-    "grid" | "list" | "compact" | "table"
-  >("grid");
+    "grid" | "table"
+  >("table");
   const [isTableFullscreen, setIsTableFullscreen] = useState(false);
   const [stockModalSourceId, setStockModalSourceId] = useState<string | null>(
     null,
@@ -4619,6 +4587,42 @@ function processSheet(sheet) {
   // Celular: la lista de establecimientos crece al bajar.
   const sheetsMobileList = useIncrementalCount(filteredAndSortedSources.length, filteredAndSortedSources, 30);
 
+  // Escritorio: filas de la tabla de establecimientos (la ordena y pagina EstablishmentTable).
+  const establishmentTableRows = useMemo<EstablishmentCardData[]>(
+    () =>
+      viewLevel !== "sheets"
+        ? []
+        : filteredAndSortedSources.map((sheet) => {
+            const sheetData = rowsForSource(sheet.id);
+            const { expiredCount, expiringThisMonthCount } = getExpirationStats(sheetData);
+            const code = codeForSheet(sheet.id);
+            const cleanSheetId = sheet.id.includes("_") ? sheet.id.split("_").slice(1).join("_") : sheet.id;
+            const syncRecord = supabaseSyncs[sheet.id] || (sheet.facilityCode ? supabaseSyncs[sheet.facilityCode] : undefined) || supabaseSyncs[cleanSheetId] || (code ? supabaseSyncs[code] : undefined);
+            return {
+              id: sheet.id,
+              name: describeSheetName(sheet.name),
+              code: code || "",
+              lastUpdate: sheet.lastUpdate,
+              lastUpdateTime: sheet.lastUpdateTime,
+              equipmentDate: sheet.equipmentDate,
+              equipmentDateTime: sheet.equipmentDateTime,
+              expiredCount,
+              expiringThisMonthCount,
+              totalItems: sheetData.length > 0 ? sheetData.length : sheet.rowCount || 0,
+              syncRecordDate: getLastMovementDate(syncRecord),
+              hasSyncRecord: !!syncRecord,
+              isCheckingSync: isCheckingLatestSyncs,
+            };
+          }),
+    [viewLevel, filteredAndSortedSources, rowsForSource, codeForSheet, supabaseSyncs, isCheckingLatestSyncs],
+  );
+
+  // Cuántos establecimientos tiene la UNGET abierta, sin contar búsqueda ni filtros.
+  const ungetSheetTotal = useMemo(
+    () => (selectedUngetIndex === null ? 0 : sources.filter((s) => s.urlIndex === selectedUngetIndex).length),
+    [sources, selectedUngetIndex],
+  );
+
   const handleAutoSelectDeficiencies = () => {
     const deficientIds = new Set<string>();
     filteredAndSortedSources.forEach((sheet) => {
@@ -4883,7 +4887,7 @@ function processSheet(sheet) {
                 Panel regional
               </button>
             )}
-            <p className="truncate text-[15px] font-black text-slate-900 sm:text-base">
+            <p className={`truncate font-black text-slate-900 ${viewLevel === "sheets" ? "text-2xl tracking-tight" : "text-[15px] sm:text-base"}`}>
               {viewLevel === "data"
                 ? (() => {
                     const name = sources.find((s) => s.id === selectedSourceId)?.name || "Hoja";
@@ -4899,6 +4903,11 @@ function processSheet(sheet) {
                   ? formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "Documento")
                   : "Panel regional"}
             </p>
+            {viewLevel === "sheets" && (
+              <p className="mt-0.5 text-sm font-medium text-slate-500">
+                {ungetSheetTotal} establecimiento{ungetSheetTotal === 1 ? "" : "s"} monitoreado{ungetSheetTotal === 1 ? "" : "s"}
+              </p>
+            )}
           </div>
 
           {accionesDeEscritorio}
@@ -4922,13 +4931,45 @@ function processSheet(sheet) {
           // En el panel regional solo informan: el filtro de estado se aplica a
           // establecimientos, y pulsarlos aquí no cambiaba nada a la vista.
           const clickable = viewLevel === "sheets";
-          return (
-            <div className={viewLevel === "ungets" ? "" : "sm:mt-3"}>
+          const strip = (
               <KpiStrip cols="md:grid-cols-3">
                 <KpiCard watermark tone="success" icon={<Wifi />} label="En línea" value={summary.online} hint="actualizados en la última hora" onClick={clickable ? () => only(true, false, false) : undefined} active={clickable && !allOn && filter_emerald && !filter_amber && !filter_red} />
                 <KpiCard watermark tone="warning" icon={<FileClock />} label="Desconectados" value={summary.delayed} hint="entre 1 y 24 horas sin actualizar" onClick={clickable ? () => only(false, true, false) : undefined} active={clickable && !allOn && !filter_emerald && filter_amber && !filter_red} />
                 <KpiCard watermark tone="danger" icon={<WifiOff />} label="Fuera de línea" value={summary.offline} hint="más de un día o sin datos" onClick={clickable ? () => only(false, false, true) : undefined} active={clickable && !allOn && !filter_emerald && !filter_amber && filter_red} />
               </KpiStrip>
+          );
+          if (viewLevel === "ungets") return strip;
+          // Dentro de una UNGET, en escritorio: el panel «Estado de sincronización» (solo de
+          // Consulta Stock), con la barra de avance y las mismas cuatro cajas que filtran.
+          // En el celular siguen los tres indicadores de siempre.
+          const syncFilter: SyncFilter = allOn
+            ? "all"
+            : filter_emerald && !filter_amber && !filter_red
+              ? "al-dia"
+              : !filter_emerald && filter_amber && !filter_red
+                ? "retraso"
+                : !filter_emerald && !filter_amber && filter_red
+                  ? "sin-actualizar"
+                  : "all";
+          const selectSync = (value: SyncFilter) => {
+            setFilter_emerald(value === "all" || value === "al-dia");
+            setFilter_amber(value === "all" || value === "retraso");
+            setFilter_red(value === "all" || value === "sin-actualizar");
+            setFilter_gray(value === "all" || value === "sin-actualizar");
+          };
+          return (
+            <div className="sm:mt-4">
+              <div className="md:hidden">{strip}</div>
+              <div className="hidden md:block">
+                <EstablishmentSyncPanel
+                  total={summary.total}
+                  online={summary.online}
+                  delayed={summary.delayed}
+                  offline={summary.offline}
+                  active={syncFilter}
+                  onSelect={selectSync}
+                />
+              </div>
             </div>
           );
         })()}
@@ -6167,59 +6208,24 @@ function processSheet(sheet) {
                   {/* Modo de vista (solo escritorio). Antes iba en una fila propia con el título
                       «Establecimientos de salud» y los conteos por tipo, que ya dicen los KPIs. */}
                   <div className="hidden items-center gap-2 shrink-0 md:flex">
-                    <div className="flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-xl border border-slate-200/60 shadow-[inset_0_1px_1.5px_rgba(0,0,0,0.02)] shrink-0 pr-1 lg:pr-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setSheetsViewMode("grid")}
-                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                          sheetsViewMode === "grid"
-                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                            : "text-slate-400 hover:text-slate-700"
-                        }`}
-                        title="Vista Cuadrícula"
-                      >
-                        <LayoutGrid className="h-3.5 w-3.5 shrink-0" />
-                        <span className="hidden xs:inline">Cuadrícula</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSheetsViewMode("list")}
-                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                          sheetsViewMode === "list"
-                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                            : "text-slate-400 hover:text-slate-700"
-                        }`}
-                        title="Vista Lista"
-                      >
-                        <List className="h-3.5 w-3.5 shrink-0" />
-                        <span className="hidden xs:inline">Lista</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSheetsViewMode("compact")}
-                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                          sheetsViewMode === "compact"
-                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                            : "text-slate-400 hover:text-slate-700"
-                        }`}
-                        title="Vista Compacta"
-                      >
-                        <Grid className="h-3.5 w-3.5 shrink-0" />
-                        <span className="hidden xs:inline">Compacto</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSheetsViewMode("table")}
-                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                          sheetsViewMode === "table"
-                            ? "bg-white text-teal-950 shadow-xs border border-slate-200/30"
-                            : "text-slate-400 hover:text-slate-700"
-                        }`}
-                        title="Vista Tabla"
-                      >
-                        <Table2 className="h-3.5 w-3.5 shrink-0" />
-                        <span className="hidden xs:inline">Tabla</span>
-                      </button>
+                    <div className="flex h-10 items-center gap-0.5 rounded-xl border border-slate-200 bg-white p-1 shadow-sm" role="group" aria-label="Vista">
+                      {([
+                        { mode: "table", label: "Tabla", icon: <Table2 className="h-3.5 w-3.5 shrink-0" /> },
+                        { mode: "grid", label: "Tarjetas", icon: <LayoutGrid className="h-3.5 w-3.5 shrink-0" /> },
+                      ] as const).map((option) => (
+                        <button
+                          key={option.mode}
+                          type="button"
+                          onClick={() => setSheetsViewMode(option.mode)}
+                          aria-pressed={sheetsViewMode === option.mode}
+                          className={`flex h-full items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors ${
+                            sheetsViewMode === option.mode ? "bg-teal-600 text-white" : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                          }`}
+                        >
+                          {option.icon}
+                          {option.label}
+                        </button>
+                      ))}
                     </div>
 
                     {true && (
@@ -6228,10 +6234,10 @@ function processSheet(sheet) {
                         onClick={() =>
                           handleToggleTableFullscreen(!isTableFullscreen)
                         }
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs border ${
+                        className={`flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold shadow-sm transition-colors ${
                           isTableFullscreen
-                            ? "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"
-                            : "bg-teal-50 border-teal-100 text-teal-850 hover:bg-teal-100 hover:text-teal-900 hover:border-teal-200"
+                            ? "border-teal-600 bg-teal-600 text-white hover:bg-teal-700"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                         }`}
                         title="Pantalla Completa"
                       >
@@ -6242,8 +6248,8 @@ function processSheet(sheet) {
                         )}
                         <span className="hidden xs:inline">
                           {isTableFullscreen
-                            ? "Salir F11"
-                            : "Pantalla Completa"}
+                            ? "Salir de pantalla completa"
+                            : "Pantalla completa"}
                         </span>
                       </button>
                     )}
@@ -6763,7 +6769,7 @@ function processSheet(sheet) {
                         </div>
                       ) : (
                         <>
-                          {/* 1) GRID LAYOUT */}
+                          {/* 1) TARJETAS */}
                           {sheetsViewMode === "grid" && (
                             <div className={`grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] md:grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4 sm:gap-6 animate-in fade-in duration-200 ${isCaptureMode ? "pb-28" : ""}`}>
                               {filteredAndSortedSources.map((sheet) => {
@@ -6807,853 +6813,22 @@ function processSheet(sheet) {
                             </div>
                           )}
 
-                          {/* 2) LIST LAYOUT */}
-                          {sheetsViewMode === "list" && (
-                            <div className="flex flex-col gap-3.5 animate-in fade-in duration-200">
-                              {filteredAndSortedSources.map((sheet) => {
-                                const sheetData = rowsForSource(sheet.id);
-                                const { expiredCount, expiringThisMonthCount } =
-                                  getExpirationStats(sheetData);
-                                const description = describeSheetName(sheet.name);
-                                const code = codeForSheet(sheet.id);
-                                const statusObj = getUpdateStatus(
-                                  sheet.lastUpdateTime,
-                                );
-                                const isSelected = selectedCaptureIds.has(sheet.id);
-
-                                return (
-                                  <button
-                                    key={sheet.id}
-                                    onClick={() => {
-                                      if (isCaptureMode) {
-                                        toggleCardSelection(sheet.id);
-                                      } else {
-                                        handleSelectSheet(sheet.id);
-                                      }
-                                    }}
-                                    className={`group relative bg-white border p-4 sm:p-5 rounded-xl sm:rounded-2xl transition-all text-left w-full cursor-pointer overflow-hidden ${
-                                      isCaptureMode && isSelected
-                                        ? "border-rose-500 ring-4 ring-rose-400/30 bg-rose-50/20 shadow-md"
-                                        : isCaptureMode
-                                        ? "border-slate-200 hover:border-rose-300 hover:ring-2 hover:ring-rose-200/50 shadow-sm"
-                                        : "border-gray-200 shadow-[0_1px_4px_rgba(0,0,0,0.012)] hover:shadow-md hover:border-teal-500"
-                                    }`}
-                                  >
-                                    {isCaptureMode && (
-                                      <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5 transition-all">
-                                        {isSelected ? (
-                                          <div className="flex items-center gap-1 bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow-sm">
-                                            <Check className="h-3.5 w-3.5 stroke-[3]" />
-                                            <span>Seleccionado</span>
-                                          </div>
-                                        ) : (
-                                          <div className="flex items-center gap-1 bg-white/90 backdrop-blur-xs text-slate-500 border border-slate-300 hover:border-slate-400 text-[10px] font-bold px-2 py-0.5 rounded-lg shadow-xs">
-                                            <Square className="h-3.5 w-3.5" />
-                                            <span>Seleccionar</span>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                    <div className="flex flex-wrap items-center justify-between gap-y-3 gap-x-4 w-full">
-                                      {/* Column 1: Hospital Info & Status (Flexible width) */}
-                                      <div className="flex items-center gap-3 md:gap-4 flex-[1_1_240px] min-w-[200px]">
-                                        <div className="w-9 h-9 md:w-11 md:h-11 shrink-0 bg-blue-50 text-blue-600 rounded-xl md:rounded-2xl flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors relative shadow-2xs">
-                                          <Hospital className="h-5 w-5 md:h-6 md:w-6" />
-                                          <div
-                                            className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5"
-                                            title={statusObj.label}
-                                          >
-                                            <span
-                                              className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${statusObj.color}`}
-                                            />
-                                            <span
-                                              className={`relative inline-flex rounded-full h-3.5 w-3.5 border-2 border-white ${statusObj.color}`}
-                                            />
-                                          </div>
-                                        </div>
-
-                                        <div className="min-w-0 flex-1">
-                                          <div className="flex items-center gap-1.5 mb-0.5 md:mb-1 flex-wrap">
-                                            {code && (
-                                              <span className="text-[9px] md:text-[10px] font-black tracking-wider text-teal-600 bg-teal-50/80 px-1.5 py-0.5 rounded-md border border-teal-100 shrink-0">
-                                                {code}
-                                              </span>
-                                            )}
-                                            {/* Mobile sync state badge */}
-                                            <span className="lg:hidden inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8.5px] font-extrabold bg-slate-50 border border-slate-200 shrink-0 whitespace-nowrap">
-                                              <span className="relative flex h-1.5 w-1.5 mr-0.5 shrink-0">
-                                                <span
-                                                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${statusObj.color}`}
-                                                />
-                                                <span
-                                                  className={`relative inline-flex rounded-full h-1.5 w-1.5 ${statusObj.color}`}
-                                                />
-                                              </span>
-                                              <span className="text-slate-650 truncate max-w-[100px]">
-                                                {statusObj.label}
-                                              </span>
-                                            </span>
-                                          </div>
-                                          <h3
-                                            className="text-[13px] sm:text-sm md:text-base font-black text-slate-800 leading-tight group-hover:text-slate-950 truncate"
-                                            title={description}
-                                          >
-                                            {description}
-                                          </h3>
-                                          {/* Mobile items info */}
-                                          <div className="lg:hidden flex items-center gap-1 mt-0.5 md:mt-1 text-[9px] md:text-[10px] text-slate-500 font-extrabold bg-slate-50 border border-slate-150 px-1.5 py-0.5 rounded-md w-fit">
-                                            <Package className="h-3 w-3 md:h-3.5 md:w-3.5 text-slate-400 shrink-0" />
-                                            <span>
-                                              {sheetData.length} ítems
-                                            </span>
-                                          </div>
-                                        </div>
-                                      </div>
-
-                                      {/* Column 2: Inventory Stats (LG+) */}
-                                      <div className="hidden lg:flex flex-col gap-0.5 flex-[1_1_100px] max-w-[140px] min-w-[90px] shrink-0">
-                                        <span className="text-[8px] text-slate-400 font-extrabold uppercase tracking-wider">
-                                          Inventario
-                                        </span>
-                                        <div className="inline-flex items-center gap-1 text-[11px] font-black text-slate-705 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg w-fit">
-                                          <Package className="h-3 w-3 text-slate-400 shrink-0" />
-                                          <span>{sheetData.length} ítems</span>
-                                        </div>
-                                      </div>
-
-                                      {/* Column 3: Sincronización Logs & Devices (LG+) */}
-                                      <div className="hidden lg:flex flex-col gap-0.5 flex-[1_1_140px] max-w-[200px] min-w-[130px] shrink-0">
-                                        <span className="text-[8px] text-slate-400 font-extrabold uppercase tracking-wider">
-                                          Última Conexión
-                                        </span>
-                                        <div className="flex flex-col gap-0.5 text-[9px] 2xl:text-[10px] font-extrabold text-slate-600">
-                                          {(sheet.lastUpdate || sheet.lastUpdateTime) && (
-                                            <div className="flex items-center gap-1">
-                                              <RefreshCw className="h-3 w-3 text-slate-450 shrink-0" />
-                                              <span className="truncate">
-                                                Act:{" "}
-                                                <span className="text-slate-850 font-black">
-                                                  {formatFullDate(
-                                                    sheet.lastUpdate || sheet.lastUpdateTime,
-                                                  )}
-                                                </span>
-                                              </span>
-                                            </div>
-                                          )}
-                                          {(sheet.equipmentDate || sheet.equipmentDateTime) && (
-                                            <div className="flex items-center gap-1">
-                                              <Monitor className="h-3 w-3 text-slate-450 shrink-0" />
-                                              <span className="truncate flex-1 min-w-0">
-                                                Equipo:{" "}
-                                                <span
-                                                  className={`font-black ${!datesMatch(sheet.lastUpdateTime, sheet.equipmentDateTime) ? "text-rose-500 font-extrabold" : "text-slate-600"}`}
-                                                >
-                                                  {formatFullDate(
-                                                    sheet.equipmentDate || sheet.equipmentDateTime,
-                                                  )}
-                                                </span>
-                                              </span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {/* Column 4: Warning Badges & Actions */}
-                                      <div className="flex flex-wrap items-center justify-between sm:justify-end gap-1.5 sm:gap-2.5 flex-[1_1_300px] min-w-[200px] ml-auto">
-                                        {/* Sync status pill on desktop layout */}
-                                        <div className="hidden lg:flex shrink-0 scale-[0.85] xl:scale-95 origin-right">
-                                          {renderSyncStatusPill(
-                                            sheet.lastUpdateTime,
-                                          )}
-                                        </div>
-
-                                        {/* Expirations badges */}
-                                        <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-1.5 shrink-0 ml-auto">
-                                          {expiredCount > 0 && (
-                                            <div
-                                              className="flex items-center gap-1 bg-red-50 text-red-700 px-2 py-0.5 sm:px-2.5 sm:py-1 md:py-1.5 rounded-md sm:rounded-lg text-[9px] sm:text-[10px] font-black border border-red-100/80 shadow-3xs whitespace-nowrap"
-                                              title="Vencidos en stock"
-                                            >
-                                              <AlertTriangle className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-red-550 shrink-0" />
-                                              <span>
-                                                {expiredCount} vencido
-                                                {expiredCount !== 1 ? "s" : ""}
-                                              </span>
-                                            </div>
-                                          )}
-                                          {expiringThisMonthCount > 0 && (
-                                            <div
-                                              className="flex items-center gap-1 bg-amber-50 text-amber-700 px-2 py-0.5 sm:px-2.5 sm:py-1 md:py-1.5 rounded-md sm:rounded-lg text-[9px] sm:text-[10px] font-black border border-amber-100/80 shadow-3xs whitespace-nowrap"
-                                              title="Vencimiento cercano"
-                                            >
-                                              <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-550 shrink-0" />
-                                              <span>
-                                                {expiringThisMonthCount} por
-                                                vencer
-                                              </span>
-                                            </div>
-                                          )}
-                                        </div>
-
-                                        {/* Consult button / indicator */}
-                                        <div className="flex items-center gap-1 pl-2 border-l border-slate-150 h-5 sm:h-7 shrink-0 ml-2">
-                                          <span className="text-[9px] sm:text-[10.5px] font-black text-teal-600 uppercase tracking-wider group-hover:text-teal-755 whitespace-nowrap">
-                                            Ver Stock
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {/* 3) COMPACT LAYOUT */}
-                          {sheetsViewMode === "compact" && (
-                            <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] md:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 animate-in fade-in duration-200">
-                              {filteredAndSortedSources.map((sheet) => {
-                                const sheetData = rowsForSource(sheet.id);
-                                const { expiredCount, expiringThisMonthCount } =
-                                  getExpirationStats(sheetData);
-                                const description = describeSheetName(sheet.name);
-                                const code = codeForSheet(sheet.id);
-                                const isSelected = selectedCaptureIds.has(sheet.id);
-
-                                return (
-                                  <button
-                                    key={sheet.id}
-                                    onClick={() => {
-                                      if (isCaptureMode) {
-                                        toggleCardSelection(sheet.id);
-                                      } else {
-                                        handleSelectSheet(sheet.id);
-                                      }
-                                    }}
-                                    className={`group relative bg-white border p-4 rounded-xl sm:rounded-2xl transition-all text-left flex flex-col justify-between h-full min-h-[175px] cursor-pointer overflow-hidden ${
-                                      isCaptureMode && isSelected
-                                        ? "border-rose-500 ring-4 ring-rose-400/30 bg-rose-50/20 shadow-md"
-                                        : isCaptureMode
-                                        ? "border-slate-200 hover:border-rose-300 hover:ring-2 hover:ring-rose-200/50 shadow-sm"
-                                        : "border-gray-200 shadow-[0_1px_4px_rgba(0,0,0,0.012)] hover:shadow-md hover:border-teal-500"
-                                    }`}
-                                  >
-                                    {isCaptureMode && (
-                                      <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5 transition-all">
-                                        {isSelected ? (
-                                          <div className="flex items-center gap-1 bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-lg shadow-sm">
-                                            <Check className="h-3 w-3 stroke-[3]" />
-                                          </div>
-                                        ) : (
-                                          <div className="flex items-center gap-1 bg-white/90 text-slate-500 border border-slate-300 text-[9px] font-bold px-1.5 py-0.5 rounded-lg shadow-xs">
-                                            <Square className="h-3 w-3" />
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                    <div className="w-full">
-                                      {/* Compact Top Row: SISMED code with Establishment style icon, and stats/status dot on the right */}
-                                      <div className="flex items-center justify-between mb-3.5">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-6.5 h-6.5 shrink-0 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                            <Hospital className="h-3.5 w-3.5" />
-                                          </div>
-                                          {code && (
-                                            <span className="text-[10.5px] font-black text-cyan-600 tracking-wide">
-                                              {code}
-                                            </span>
-                                          )}
-                                        </div>
-
-                                        <div className="flex items-center gap-1.5">
-                                          {expiredCount > 0 && (
-                                            <div
-                                              className="bg-red-50 text-red-600 text-[10px] font-black px-1.5 py-0.5 rounded-md border border-red-200/50 shadow-3xs"
-                                              title="Vencido"
-                                            >
-                                              {expiredCount}v
-                                            </div>
-                                          )}
-                                          {expiringThisMonthCount > 0 && (
-                                            <div
-                                              className="bg-amber-50 text-amber-600 text-[10px] font-black px-1.5 py-0.5 rounded-md border border-amber-200/50 shadow-3xs"
-                                              title="Por vencer"
-                                            >
-                                              {expiringThisMonthCount}pv
-                                            </div>
-                                          )}
-                                          <div
-                                            className="flex items-center"
-                                            title={
-                                              getUpdateStatus(
-                                                sheet.lastUpdateTime,
-                                              ).label
-                                            }
-                                          >
-                                            <span className="relative flex h-3 w-3">
-                                              <span
-                                                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${getUpdateStatus(sheet.lastUpdateTime).color}`}
-                                              />
-                                              <span
-                                                className={`relative inline-flex rounded-full h-3 w-3 border border-white shadow-3xs ${getUpdateStatus(sheet.lastUpdateTime).color}`}
-                                              />
-                                            </span>
-                                          </div>
-                                        </div>
-                                      </div>
-
-                                      {/* Description: Tighter text */}
-                                      <h3
-                                        className="text-[13px] font-black text-slate-800 leading-snug tracking-tight mb-2 group-hover:text-teal-900 transition-colors line-clamp-1"
-                                        title={description}
-                                      >
-                                        {description}
-                                      </h3>
-
-                                      {sheet.lastUpdateTime && (
-                                        <div
-                                          className="text-[10px] font-bold text-slate-400 mt-1 flex items-center gap-1.5"
-                                          title="Última actualización"
-                                        >
-                                          <RefreshCw className="h-3 w-3 text-slate-400/85 shrink-0" />
-                                          <span>
-                                            Act:{" "}
-                                            <span className="font-extrabold text-slate-500">
-                                              {formatFullDate(
-                                                sheet.lastUpdateTime,
-                                              )}
-                                            </span>
-                                          </span>
-                                        </div>
-                                      )}
-                                      {sheet.equipmentDateTime && (
-                                        <div
-                                          className={`text-[10px] font-bold mt-0.5 flex items-center gap-1.5 ${!datesMatch(sheet.lastUpdateTime, sheet.equipmentDateTime) ? "text-red-500" : "text-slate-400"}`}
-                                          title="Fecha y hora del equipo"
-                                        >
-                                          <Monitor className="h-3 w-3 text-slate-400/85 shrink-0" />
-                                          <span>
-                                            Equipo:{" "}
-                                            <span
-                                              className={`font-extrabold ${!datesMatch(sheet.lastUpdateTime, sheet.equipmentDateTime) ? "text-red-500 font-black" : "text-slate-500"}`}
-                                            >
-                                              {formatFullDate(
-                                                sheet.equipmentDateTime,
-                                              )}
-                                            </span>
-                                          </span>
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* Expirations and Ver Stock mini row */}
-                                    <div className="flex flex-wrap items-center justify-between mt-4 pt-3 border-t border-slate-100 w-full gap-2">
-                                      {renderSyncStatusPill(
-                                        sheet.lastUpdateTime,
-                                      )}
-
-                                      <div className="flex items-center text-[9px] font-black text-teal-600 uppercase tracking-wider group-hover:text-teal-700 transition-colors shrink-0 ml-auto">
-                                        <span>
-                                          VER STOCK ({sheetData.length})
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {/* 4) TABLE LAYOUT */}
+                          {/* 2) TABLA: la vista por omisión. Toda la fila abre el stock. */}
                           {sheetsViewMode === "table" && (
-                            <div
-                              className={`bg-white rounded-2xl border border-slate-200/50 relative overflow-hidden ${isTableFullscreen ? "shadow-lg border-slate-200/60 m-1 sm:m-2" : "shadow-sm animate-in fade-in duration-200"}`}
-                            >
-                              <div className="overflow-auto scrollbar-thin">
-                                <table className="min-w-full divide-y divide-slate-100 text-left font-sans">
-                                  <thead className="sticky top-0 z-10 bg-slate-50 text-slate-500 text-[10px] font-black uppercase tracking-wider shadow-[0_1px_0_0_rgba(226,232,240,0.8)]">
-                                    <tr>
-                                      <th
-                                        scope="col"
-                                        className="px-5 py-3 font-black sticky top-0 bg-slate-50 z-10"
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setFilterSortOrder(
-                                              filterSortOrder === "code_asc"
-                                                ? "code_desc"
-                                                : "code_asc",
-                                            )
-                                          }
-                                          className="group inline-flex items-center gap-1.5 hover:text-slate-800 transition-colors text-left uppercase tracking-wider font-black"
-                                        >
-                                          <span>Cód. SISMED</span>
-                                          <span className="shrink-0">
-                                            {filterSortOrder === "code_asc" && (
-                                              <ArrowUp className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder ===
-                                              "code_desc" && (
-                                              <ArrowDown className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder !== "code_asc" &&
-                                              filterSortOrder !==
-                                                "code_desc" && (
-                                                <ArrowUpDown className="h-3.5 w-3.5 text-slate-300 opacity-40 group-hover:opacity-100 transition-opacity" />
-                                              )}
-                                          </span>
-                                        </button>
-                                      </th>
-                                      <th
-                                        scope="col"
-                                        className="px-5 py-3 font-black sticky top-0 bg-slate-50 z-10"
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setFilterSortOrder(
-                                              filterSortOrder === "name_asc"
-                                                ? "name_desc"
-                                                : "name_asc",
-                                            )
-                                          }
-                                          className="group inline-flex items-center gap-1.5 hover:text-slate-800 transition-colors text-left uppercase tracking-wider font-black"
-                                        >
-                                          <span>Establecimiento de Salud</span>
-                                          <span className="shrink-0">
-                                            {filterSortOrder === "name_asc" && (
-                                              <ArrowUp className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder ===
-                                              "name_desc" && (
-                                              <ArrowDown className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder !== "name_asc" &&
-                                              filterSortOrder !==
-                                                "name_desc" && (
-                                                <ArrowUpDown className="h-3.5 w-3.5 text-slate-300 opacity-40 group-hover:opacity-100 transition-opacity" />
-                                              )}
-                                          </span>
-                                        </button>
-                                      </th>
-                                      <th
-                                        scope="col"
-                                        className="px-5 py-3 font-black text-center sticky top-0 bg-slate-50 z-10"
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setFilterSortOrder(
-                                              filterSortOrder === "type_asc"
-                                                ? "type_desc"
-                                                : "type_asc",
-                                            )
-                                          }
-                                          className="group inline-flex items-center gap-1.5 hover:text-slate-800 transition-colors uppercase tracking-wider font-black mx-auto justify-center"
-                                        >
-                                          <span>Tipo</span>
-                                          <span className="shrink-0">
-                                            {filterSortOrder === "type_asc" && (
-                                              <ArrowUp className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder ===
-                                              "type_desc" && (
-                                              <ArrowDown className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder !== "type_asc" &&
-                                              filterSortOrder !==
-                                                "type_desc" && (
-                                                <ArrowUpDown className="h-3.5 w-3.5 text-slate-300 opacity-40 group-hover:opacity-100 transition-opacity" />
-                                              )}
-                                          </span>
-                                        </button>
-                                      </th>
-                                      <th
-                                        scope="col"
-                                        className="px-5 py-3 font-black sticky top-0 bg-slate-50 z-10"
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setFilterSortOrder(
-                                              filterSortOrder === "date_newest"
-                                                ? "date_oldest"
-                                                : "date_newest",
-                                            )
-                                          }
-                                          className="group inline-flex items-center gap-1.5 hover:text-slate-800 transition-colors text-left uppercase tracking-wider font-black"
-                                        >
-                                          <span>Última Sincronización</span>
-                                          <span className="shrink-0">
-                                            {filterSortOrder ===
-                                              "date_newest" && (
-                                              <ArrowDown className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder ===
-                                              "date_oldest" && (
-                                              <ArrowUp className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder !==
-                                              "date_newest" &&
-                                              filterSortOrder !==
-                                                "date_oldest" && (
-                                                <ArrowUpDown className="h-3.5 w-3.5 text-slate-300 opacity-40 group-hover:opacity-100 transition-opacity" />
-                                              )}
-                                          </span>
-                                        </button>
-                                      </th>
-                                      <th
-                                        scope="col"
-                                        className="px-5 py-3 font-black sticky top-0 bg-slate-50 z-10"
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setFilterSortOrder(
-                                              filterSortOrder === "equip_newest"
-                                                ? "equip_oldest"
-                                                : "equip_newest",
-                                            )
-                                          }
-                                          className="group inline-flex items-center gap-1.5 hover:text-slate-800 transition-colors text-left uppercase tracking-wider font-black"
-                                        >
-                                          <span>Act. de Equipo</span>
-                                          <span className="shrink-0">
-                                            {filterSortOrder ===
-                                              "equip_newest" && (
-                                              <ArrowDown className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder ===
-                                              "equip_oldest" && (
-                                              <ArrowUp className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder !==
-                                              "equip_newest" &&
-                                              filterSortOrder !==
-                                                "equip_oldest" && (
-                                                <ArrowUpDown className="h-3.5 w-3.5 text-slate-300 opacity-40 group-hover:opacity-100 transition-opacity" />
-                                              )}
-                                          </span>
-                                        </button>
-                                      </th>
-                                      <th
-                                        scope="col"
-                                        className="px-5 py-3 font-black text-center sticky top-0 bg-slate-50 z-10"
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setFilterSortOrder(
-                                              filterSortOrder ===
-                                                "status_green_first"
-                                                ? "status_red_first"
-                                                : "status_green_first",
-                                            )
-                                          }
-                                          className="group inline-flex items-center gap-1.5 hover:text-slate-800 transition-colors uppercase tracking-wider font-black mx-auto justify-center"
-                                        >
-                                          <span>Estado</span>
-                                          <span className="shrink-0">
-                                            {filterSortOrder ===
-                                              "status_green_first" && (
-                                              <ArrowUp className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder ===
-                                              "status_red_first" && (
-                                              <ArrowDown className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder !==
-                                              "status_green_first" &&
-                                              filterSortOrder !==
-                                                "status_red_first" && (
-                                                <ArrowUpDown className="h-3.5 w-3.5 text-slate-300 opacity-40 group-hover:opacity-100 transition-opacity" />
-                                              )}
-                                          </span>
-                                        </button>
-                                      </th>
-                                      <th
-                                        scope="col"
-                                        className="px-5 py-3 font-black text-center sticky top-0 bg-slate-50 z-10 text-slate-500 uppercase tracking-wider"
-                                      >
-                                        <span>Últimos Movimientos</span>
-                                      </th>
-                                      <th
-                                        scope="col"
-                                        className="px-5 py-3 font-black text-center sticky top-0 bg-slate-50 z-10"
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setFilterSortOrder(
-                                              filterSortOrder ===
-                                                "expired_highest"
-                                                ? "expired_lowest"
-                                                : "expired_highest",
-                                            )
-                                          }
-                                          className="group inline-flex items-center gap-1.5 hover:text-slate-800 transition-colors uppercase tracking-wider font-black mx-auto justify-center"
-                                        >
-                                          <span>Expiraciones</span>
-                                          <span className="shrink-0">
-                                            {filterSortOrder ===
-                                              "expired_highest" && (
-                                              <ArrowDown className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder ===
-                                              "expired_lowest" && (
-                                              <ArrowUp className="h-3.5 w-3.5 text-teal-600" />
-                                            )}
-                                            {filterSortOrder !==
-                                              "expired_highest" &&
-                                              filterSortOrder !==
-                                                "expired_lowest" && (
-                                                <ArrowUpDown className="h-3.5 w-3.5 text-slate-300 opacity-40 group-hover:opacity-100 transition-opacity" />
-                                              )}
-                                          </span>
-                                        </button>
-                                      </th>
-                                      <th
-                                        scope="col"
-                                        className="px-5 py-3 font-black text-right pr-6 sticky top-0 bg-slate-50 z-10 uppercase tracking-wider"
-                                      >
-                                        Acción
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-100 bg-white">
-                                    {filteredAndSortedSources.map((sheet) => {
-                                      const sheetData = rowsForSource(sheet.id);
-                                      const {
-                                        expiredCount,
-                                        expiringThisMonthCount,
-                                      } = getExpirationStats(sheetData);
-                                      const description = describeSheetName(sheet.name);
-                                      const code = codeForSheet(sheet.id);
-                                      const type = getSheetType(sheet.name);
-
-                                      let typeBadge = (
-                                        <span className="inline-flex items-center justify-center bg-slate-50 text-slate-500 px-2 py-0.5 rounded text-[8.5px] font-bold border border-slate-100/80 min-w-[50px]">
-                                          OTRO
-                                        </span>
-                                      );
-                                      if (type === "CS") {
-                                        typeBadge = (
-                                          <span className="inline-flex items-center justify-center bg-sky-50 text-sky-700 px-2 py-0.5 rounded text-[8.5px] font-bold border border-sky-100/70 min-w-[50px]">
-                                            C.S.
-                                          </span>
-                                        );
-                                      } else if (type === "PS") {
-                                        typeBadge = (
-                                          <span className="inline-flex items-center justify-center bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-[8.5px] font-bold border border-amber-100/70 min-w-[50px]">
-                                            P.S.
-                                          </span>
-                                        );
-                                      } else if (type === "ALM") {
-                                        typeBadge = (
-                                          <span className="inline-flex items-center justify-center bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded text-[8.5px] font-bold border border-indigo-100/70 min-w-[50px]">
-                                            ALM
-                                          </span>
-                                        );
-                                      } else if (type === "HOSP") {
-                                        typeBadge = (
-                                          <span className="inline-flex items-center justify-center bg-violet-50 text-violet-700 px-2 py-0.5 rounded text-[8.5px] font-bold border border-violet-100/75 min-w-[50px]">
-                                            HOSP
-                                          </span>
-                                        );
-                                      }
-
-                                      const statusObj = getUpdateStatus(
-                                        sheet.lastUpdateTime,
-                                      );
-                                      const isSelected = selectedCaptureIds.has(sheet.id);
-
-                                      return (
-                                        <tr
-                                          key={sheet.id}
-                                          onClick={() => {
-                                            if (isCaptureMode) {
-                                              toggleCardSelection(sheet.id);
-                                            } else {
-                                              handleSelectSheet(sheet.id);
-                                            }
-                                          }}
-                                          className={`transition-all cursor-pointer group ${
-                                            isCaptureMode && isSelected
-                                              ? "bg-rose-50/70 hover:bg-rose-50"
-                                              : "hover:bg-teal-50/20"
-                                          }`}
-                                        >
-                                          <td className="px-5 py-3 whitespace-nowrap">
-                                            {isCaptureMode ? (
-                                              <div className="flex items-center gap-2">
-                                                {isSelected ? (
-                                                  <div className="flex items-center gap-1 bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md shadow-sm">
-                                                    <Check className="h-3 w-3 stroke-[3]" />
-                                                    <span>Sel.</span>
-                                                  </div>
-                                                ) : (
-                                                  <div className="flex items-center gap-1 bg-white text-slate-500 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                                                    <Square className="h-3 w-3" />
-                                                  </div>
-                                                )}
-                                                {code && (
-                                                  <span className="text-[10px] font-extrabold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-100">
-                                                    {code}
-                                                  </span>
-                                                )}
-                                              </div>
-                                            ) : code ? (
-                                              <span className="text-[10px] font-extrabold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-100">
-                                                {code}
-                                              </span>
-                                            ) : (
-                                              <span className="text-[10px] text-slate-400 font-bold">
-                                                -
-                                              </span>
-                                            )}
-                                          </td>
-                                          <td className="px-5 py-3">
-                                            <h3
-                                              className="text-xs font-black text-slate-800 leading-snug truncate max-w-[240px] group-hover:text-teal-905 transition-colors"
-                                              title={description}
-                                            >
-                                              {description}
-                                            </h3>
-                                          </td>
-                                          <td className="px-5 py-3 text-center whitespace-nowrap">
-                                            {typeBadge}
-                                          </td>
-                                          <td className="px-5 py-3 whitespace-nowrap">
-                                            {sheet.lastUpdateTime ? (
-                                              <div
-                                                className={`flex items-center gap-1.5 text-[10.5px] font-bold ${statusObj.color.includes("bg-emerald-500") ? "text-slate-600" : "text-slate-400"}`}
-                                              >
-                                                <Wifi
-                                                  className={`h-3.5 w-3.5 shrink-0 ${statusObj.color.replace("bg-", "text-")}`}
-                                                />
-                                                <span>
-                                                  {formatFullDate(
-                                                    sheet.lastUpdateTime,
-                                                  )}
-                                                </span>
-                                              </div>
-                                            ) : (
-                                              <div className="flex items-center gap-1.5 text-[10.5px] text-slate-400 font-bold">
-                                                <Wifi className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                                                <span>Sin datos</span>
-                                              </div>
-                                            )}
-                                          </td>
-                                          <td className="px-5 py-3 whitespace-nowrap">
-                                            {sheet.equipmentDateTime ? (
-                                              <div
-                                                className={`flex items-center gap-1.5 text-[10.5px] font-bold ${statusObj.color.includes("bg-emerald-500") ? "text-slate-600" : "text-slate-400"}`}
-                                              >
-                                                <Monitor
-                                                  className={`h-3.5 w-3.5 shrink-0 ${statusObj.color.includes("bg-emerald-500") ? "text-indigo-500" : "text-slate-400"}`}
-                                                />
-                                                <span>
-                                                  {formatFullDate(
-                                                    sheet.equipmentDateTime,
-                                                  )}
-                                                </span>
-                                              </div>
-                                            ) : (
-                                              <div className="flex items-center gap-1.5 text-[10.5px] text-slate-400 font-bold">
-                                                <Monitor className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                                                <span>Sin datos</span>
-                                              </div>
-                                            )}
-                                          </td>
-                                          <td className="px-5 py-3 text-center whitespace-nowrap">
-                                            <span
-                                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-bold border ${statusObj.color.includes("bg-emerald-500") ? "bg-emerald-50 text-emerald-800 border-emerald-100" : statusObj.color.includes("bg-amber-500") ? "bg-amber-50 text-amber-800 border-amber-100" : "bg-rose-50 text-rose-800 border-rose-100"}`}
-                                            >
-                                              <span className="relative flex h-1.5 w-1.5">
-                                                <span
-                                                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${statusObj.color}`}
-                                                />
-                                                <span
-                                                  className={`relative inline-flex rounded-full h-1.5 w-1.5 ${statusObj.color}`}
-                                                />
-                                              </span>
-                                              {statusObj.label}
-                                            </span>
-                                          </td>
-                                          <td className="px-5 py-3 whitespace-nowrap text-center">
-                                            {(() => {
-                                              const syncRecord =
-                                                supabaseSyncs[sheet.id];
-                                              if (!syncRecord) {
-                                                return (
-                                                  <span className="text-[10px] font-bold text-slate-400">
-                                                    -
-                                                  </span>
-                                                );
-                                              }
-                                              return (
-                                                <div
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleShowSyncHistory(sheet);
-                                                  }}
-                                                  className="inline-flex items-center justify-center cursor-pointer hover:opacity-80 transition-opacity"
-                                                  title={`Último cambio: ${new Date(syncRecord.sync_date).toLocaleString("es-PE")}`}
-                                                >
-                                                  {renderSyncStatusPill(
-                                                    new Date(
-                                                      syncRecord.sync_date,
-                                                    ).getTime(),
-                                                  )}
-                                                </div>
-                                              );
-                                            })()}
-                                          </td>
-                                          <td className="px-5 py-3 text-center whitespace-nowrap">
-                                            <div className="flex items-center justify-center gap-1.5">
-                                              {expiredCount === 0 &&
-                                              expiringThisMonthCount === 0 ? (
-                                                <span className="inline-flex items-center gap-0.5 bg-green-50 text-green-700 px-1.5 py-0.5 rounded text-[9px] font-bold border border-green-100">
-                                                  <Check className="h-2.5 w-2.5 text-green-500" />{" "}
-                                                  Al día
-                                                </span>
-                                              ) : (
-                                                <>
-                                                  {expiredCount > 0 && (
-                                                    <span
-                                                      className="inline-flex items-center gap-0.5 bg-red-50 text-red-700 px-1.5 py-0.5 rounded text-[9px] font-black border border-red-100"
-                                                      title="Vencido"
-                                                    >
-                                                      <AlertTriangle className="h-2.5 w-2.5 text-red-500" />
-                                                      {expiredCount}v
-                                                    </span>
-                                                  )}
-                                                  {expiringThisMonthCount >
-                                                    0 && (
-                                                    <span
-                                                      className="inline-flex items-center gap-0.5 bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded text-[9px] font-black border border-amber-100"
-                                                      title="Por vencer"
-                                                    >
-                                                      <Clock className="h-2.5 w-2.5 text-amber-500" />
-                                                      {expiringThisMonthCount}pv
-                                                    </span>
-                                                  )}
-                                                </>
-                                              )}
-                                            </div>
-                                          </td>
-                                          <td className="px-5 py-3 text-right pr-6 whitespace-nowrap">
-                                            <div className="inline-flex items-center gap-1 text-[10px] font-black text-teal-600 uppercase tracking-wider group-hover:text-teal-700 transition-all">
-                                              <span>Ver stock</span>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
+                            <div className={`animate-in fade-in duration-200 ${isCaptureMode ? "pb-28" : ""}`}>
+                              <EstablishmentTable
+                                rows={establishmentTableRows}
+                                followGivenOrder={filterSortOrder !== "name_asc"}
+                                givenOrderLabel={SHEET_SORT_LABELS[filterSortOrder]}
+                                onOpen={(id) => handleSelectSheet(id)}
+                                onShowHistory={(id) => {
+                                  const sheet = sources.find((s) => s.id === id);
+                                  if (sheet) handleShowSyncHistory(sheet);
+                                }}
+                                isCaptureMode={isCaptureMode}
+                                selectedIds={selectedCaptureIds}
+                                onToggleSelect={toggleCardSelection}
+                              />
                             </div>
                           )}
                         </>
@@ -7758,56 +6933,26 @@ function processSheet(sheet) {
                                 )}
                               </button>
 
-                              {/* View Switcher inside Fullscreen Header */}
+                              {/* Vista dentro de la pantalla completa: Tabla o Tarjetas. */}
                               <div className="flex items-center gap-0.5 bg-slate-800 border border-slate-700/60 p-0.5 rounded-xl">
-                                <button
-                                  type="button"
-                                  onClick={() => setSheetsViewMode("grid")}
-                                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                                    sheetsViewMode === "grid"
-                                      ? "bg-slate-700 text-teal-400 font-bold"
-                                      : "text-slate-400 hover:text-slate-300"
-                                  }`}
-                                  title="Vista Cuadrícula"
-                                >
-                                  <LayoutGrid className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setSheetsViewMode("list")}
-                                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                                    sheetsViewMode === "list"
-                                      ? "bg-slate-700 text-teal-400 font-bold"
-                                      : "text-slate-400 hover:text-slate-300"
-                                  }`}
-                                  title="Vista Lista"
-                                >
-                                  <List className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setSheetsViewMode("compact")}
-                                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                                    sheetsViewMode === "compact"
-                                      ? "bg-slate-700 text-teal-400 font-bold"
-                                      : "text-slate-400 hover:text-slate-300"
-                                  }`}
-                                  title="Vista Compacta"
-                                >
-                                  <Grid className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setSheetsViewMode("table")}
-                                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                                    sheetsViewMode === "table"
-                                      ? "bg-slate-700 text-teal-400 font-bold"
-                                      : "text-slate-400 hover:text-slate-300"
-                                  }`}
-                                  title="Vista Tabla"
-                                >
-                                  <Table2 className="h-3.5 w-3.5" />
-                                </button>
+                                {([
+                                  { mode: "table", label: "Tabla", icon: <Table2 className="h-3.5 w-3.5" /> },
+                                  { mode: "grid", label: "Tarjetas", icon: <LayoutGrid className="h-3.5 w-3.5" /> },
+                                ] as const).map((option) => (
+                                  <button
+                                    key={option.mode}
+                                    type="button"
+                                    onClick={() => setSheetsViewMode(option.mode)}
+                                    className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                                      sheetsViewMode === option.mode
+                                        ? "bg-slate-700 text-teal-400 font-bold"
+                                        : "text-slate-400 hover:text-slate-300"
+                                    }`}
+                                    title={option.label}
+                                  >
+                                    {option.icon}
+                                  </button>
+                                ))}
                               </div>
 
                               {/* Exit fullscreen - ICON ONLY */}
