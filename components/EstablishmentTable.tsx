@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Building2, Check, ChevronRight, FileClock, History, Monitor, Square, Wifi, WifiOff } from "lucide-react";
 import { KpiCard, KpiStrip, StatusChip, type Tone } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
@@ -140,7 +140,30 @@ const byUrgency = (a: EstablishmentCardData, b: EstablishmentCardData) =>
   b.expiringThisMonthCount - a.expiringThisMonthCount ||
   a.name.localeCompare(b.name);
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
+
+const COLUMNS: Array<{ k: SortKey; label: string; align: "left" | "right" | "center" }> = [
+  { k: "name", label: "Establecimiento", align: "left" },
+  { k: "status", label: "Estado", align: "left" },
+  { k: "update", label: "Última actualización", align: "left" },
+  { k: "movement", label: "Últ. movimiento", align: "left" },
+  { k: "expiring", label: "Por vencer", align: "center" },
+  { k: "expired", label: "Vencidos", align: "center" },
+  { k: "items", label: "Ítems", align: "right" },
+];
+
+/** El contenedor que hace scroll (el <main> de la app o el de la pantalla completa). */
+const scrollParentOf = (el: HTMLElement): HTMLElement | null => {
+  let node = el.parentElement;
+  while (node) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === "auto" || overflowY === "scroll")) return node;
+    node = node.parentElement;
+  }
+  return null;
+};
+
+type Floating = { top: number; left: number; width: number; height: number; cols: Array<{ left: number; width: number }> };
 
 export const EstablishmentTable: React.FC<{
   rows: EstablishmentCardData[];
@@ -189,32 +212,68 @@ export const EstablishmentTable: React.FC<{
     });
   };
 
-  const th = (k: SortKey, children: React.ReactNode, align: "left" | "right" | "center" = "left", className = "") => {
+  const alignClass = (align: "left" | "right" | "center") =>
+    align === "right" ? "text-right justify-end" : align === "center" ? "text-center justify-center" : "text-left justify-start";
+
+  const sortButton = (k: SortKey, label: string) => {
     const activeDir = sort?.key === k ? sort.dir : null;
     return (
-      <th
-        key={k}
-        scope="col"
-        aria-sort={activeDir === "asc" ? "ascending" : activeDir === "desc" ? "descending" : "none"}
-        className={`sticky -top-3 z-10 bg-slate-50 px-2.5 py-3 text-[10px] leading-tight font-black uppercase tracking-wide text-slate-500 shadow-[inset_0_-1px_0_rgb(226_232_240)] ${align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"} ${className}`}
+      <button
+        type="button"
+        onClick={() => toggleSort(k)}
+        className={`group inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-slate-800 ${activeDir ? "text-teal-700" : ""}`}
       >
-        <button
-          type="button"
-          onClick={() => toggleSort(k)}
-          className={`group inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-slate-800 ${activeDir ? "text-teal-700" : ""}`}
-        >
-          {children}
-          {activeDir === "asc" ? (
-            <ArrowUp className="h-3 w-3" />
-          ) : activeDir === "desc" ? (
-            <ArrowDown className="h-3 w-3" />
-          ) : (
-            <ArrowUpDown className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-60" />
-          )}
-        </button>
-      </th>
+        {label}
+        {activeDir === "asc" ? (
+          <ArrowUp className="h-3 w-3" />
+        ) : activeDir === "desc" ? (
+          <ArrowDown className="h-3 w-3" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-60" />
+        )}
+      </button>
     );
   };
+
+  const headCell = "bg-slate-50 shadow-[inset_0_-1px_0_rgb(226_232_240)]";
+  const headText = "text-[10px] leading-tight font-black uppercase tracking-wide text-slate-500";
+
+  // Encabezado que se queda arriba al bajar. No se usa `sticky` en la tabla: así, pegado,
+  // va a todo el ancho del área que hace scroll, sin bordes ni hueco encima (también en
+  // pantalla completa). Copia las posiciones de las columnas reales.
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [floating, setFloating] = useState<Floating | null>(null);
+  useEffect(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    const update = () => {
+      const scroller = scrollParentOf(table);
+      const thead = table.tHead;
+      if (!thead) return;
+      const area = scroller ? scroller.getBoundingClientRect() : { top: 0, left: 0 };
+      const width = scroller ? scroller.clientWidth : document.documentElement.clientWidth;
+      const head = thead.getBoundingClientRect();
+      const body = table.getBoundingClientRect();
+      if (head.top >= area.top || body.bottom < area.top + head.height * 2) {
+        setFloating((prev) => (prev ? null : prev));
+        return;
+      }
+      const cols = Array.from(thead.rows[0].cells).map((cell) => {
+        const r = cell.getBoundingClientRect();
+        return { left: r.left - area.left, width: r.width };
+      });
+      const next: Floating = { top: area.top, left: area.left, width, height: head.height, cols };
+      setFloating((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+    };
+    update();
+    // En captura: el scroll de cualquier contenedor (el del área, el horizontal de la tabla).
+    document.addEventListener("scroll", update, { capture: true, passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      document.removeEventListener("scroll", update, { capture: true });
+      window.removeEventListener("resize", update);
+    };
+  }, [pageRows.length, isCaptureMode, sort, page]);
 
   const count = (value: number, tone: "amber" | "red") =>
     value > 0 ? (
@@ -227,19 +286,47 @@ export const EstablishmentTable: React.FC<{
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      {floating && (
+        <div
+          aria-hidden="true"
+          className="fixed z-30 overflow-hidden border-b border-slate-200 bg-slate-50 shadow-[0_6px_12px_-8px_rgba(15,23,42,0.25)]"
+          style={{ top: floating.top, left: floating.left, width: floating.width, height: floating.height }}
+        >
+          {/* Las mismas columnas, en la misma posición (sin la de captura ni la flecha). */}
+          {COLUMNS.map((col, i) => {
+            const pos = floating.cols[i + (isCaptureMode ? 1 : 0)];
+            if (!pos) return null;
+            return (
+              <div
+                key={col.k}
+                className={`absolute inset-y-0 flex items-center px-2.5 ${headText} ${alignClass(col.align)}`}
+                style={{ left: pos.left, width: pos.width }}
+              >
+                {sortButton(col.k, col.label)}
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div className="overflow-x-auto rounded-t-2xl xl:overflow-visible">
-        <table className="w-full text-left">
+        <table ref={tableRef} className="w-full text-left">
           <thead>
             <tr>
-              {isCaptureMode && <th className="sticky -top-3 z-10 w-10 rounded-tl-2xl bg-slate-50 px-4 py-3 shadow-[inset_0_-1px_0_rgb(226_232_240)]" />}
-              {th("name", "Establecimiento", "left", isCaptureMode ? "" : "rounded-tl-2xl")}
-              {th("status", "Estado")}
-              {th("update", "Última actualización")}
-              {th("movement", "Últ. movimiento")}
-              {th("expiring", "Por vencer", "center")}
-              {th("expired", "Vencidos", "center")}
-              {th("items", "Ítems", "right")}
-              <th className="sticky -top-3 z-10 w-10 rounded-tr-2xl bg-slate-50 shadow-[inset_0_-1px_0_rgb(226_232_240)]" aria-label="Abrir" />
+              {isCaptureMode && <th className={`w-10 rounded-tl-2xl px-4 py-3 ${headCell}`} />}
+              {COLUMNS.map((col, i) => {
+                const activeDir = sort?.key === col.k ? sort.dir : null;
+                return (
+                  <th
+                    key={col.k}
+                    scope="col"
+                    aria-sort={activeDir === "asc" ? "ascending" : activeDir === "desc" ? "descending" : "none"}
+                    className={`px-2.5 py-3 ${headCell} ${headText} ${alignClass(col.align)} ${i === 0 && !isCaptureMode ? "rounded-tl-2xl" : ""}`}
+                  >
+                    {sortButton(col.k, col.label)}
+                  </th>
+                );
+              })}
+              <th className={`w-10 rounded-tr-2xl ${headCell}`} aria-label="Abrir" />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">

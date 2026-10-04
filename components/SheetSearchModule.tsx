@@ -5975,7 +5975,11 @@ function processSheet(sheet) {
         <div className={`sticky z-30 flex flex-col gap-4 ${
           viewLevel === "data"
             ? "top-0 bg-white sm:static p-3 sm:p-5 border-b border-slate-100"
-            : "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:static sm:pt-0 sm:pb-4"
+            : viewLevel === "sheets" && sheetsViewMode === "grid"
+              // En Tarjetas, la barra se queda arriba al bajar, con el fondo de la página
+              // a todo el ancho (la sombra recortada lo extiende a los lados).
+              ? "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:-top-3 sm:-mt-3 sm:pt-3 sm:pb-4 sm:shadow-[0_0_0_100vmax_#f6f7f9] sm:[clip-path:inset(0_-100vmax)]"
+              : "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:static sm:pt-0 sm:pb-4"
         }`}>
           {/* Search & Actions */}
           <div className="flex gap-3 items-center justify-between w-full flex-row">
