@@ -1,6 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { toast } from 'sonner';
+import { findMesKey, TEMPLATE_MONTH_HEADERS } from '../services/requirementMonths';
 import { Trash2, Activity, Upload, FileSpreadsheet, Calendar, Check, AlertCircle, AlertTriangle, X, Syringe, Settings2, Play, RefreshCw, Sparkles, Download, ChevronDown, ChevronUp, CheckCircle, Ban, ListFilter, Building2 } from 'lucide-react';
 import { read, utils, writeFile } from 'xlsx';
 import { MedicationInput, HealthFacility, Microred, RequirementExclusionItem } from '../types';
@@ -430,8 +431,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
       "RED", "MICRORED", "COD EESS", "ESTABLECIMIENTO", "CAT",
       "MED COD", "DESCRIPCION DEL PRODUCTO", "MEDFF", "PRECIO",
       "MEDTIP", "MEDPET", "MEDEST",
-      "MES_1", "MES_2", "MES_3", "MES_4", "MES_5", "MES_6",
-      "MES_7", "MES_8", "MES_9", "MES_10", "MES_11", "MES_12", "STOCK_FIN"
+      // MES01 … MES12, como el archivo del SISMED. Antes eran MES_1 … MES_12 y el propio
+      // sistema no las reconocía al cargar la plantilla (los consumos quedaban en 0).
+      ...TEMPLATE_MONTH_HEADERS, "STOCK_FIN"
     ];
 
     const ws = utils.json_to_sheet([], { header });
@@ -584,8 +586,8 @@ export const InputSection: React.FC<InputSectionProps> = ({
                     
                     const findKey = (keys: string[]) => Object.keys(row).find(k => keys.some(key => k.toLowerCase().includes(key.toLowerCase())));
                     let countFound = 0;
-                    monthNames.forEach(names => {
-                        if (findKey(names)) countFound++;
+                    monthNames.forEach((names, i) => {
+                        if (findMesKey(Object.keys(row), i + 1) || findKey(names)) countFound++;
                     });
                     if (countFound > 0) {
                         detectedCount = countFound;
@@ -677,8 +679,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
                     ['julio', 'jul', 'mes07', 'mes7'], ['agosto', 'ago', 'mes08', 'mes8'], ['setiembre', 'septiembre', 'set', 'sep', 'mes09', 'mes9'],
                     ['octubre', 'oct', 'mes10'], ['noviembre', 'nov', 'mes11'], ['diciembre', 'dic', 'mes12']
                 ];
-                monthNames.forEach(names => {
-                    const key = findKey(names);
+                monthNames.forEach((names, i) => {
+                    // Primero «MES» + número (MES01, MES_1…); si no, por el nombre del mes.
+                    const key = findMesKey(rowKeys, i + 1) || findKey(names);
                     if (key) {
                         const val = Number(row[key]);
                         months.push(isNaN(val) ? 0 : val);
