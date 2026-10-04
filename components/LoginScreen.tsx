@@ -14,6 +14,8 @@ import {
   User,
 } from 'lucide-react';
 import { BrandMark } from './ui/BrandLogo';
+import { PinLogin } from './PinLogin';
+import { isDesktopPointer, readStoredDevice, type StoredDevice } from '../services/deviceAccess';
 
 /** Solo se recuerda el usuario. La contraseña nunca se guarda en el navegador. */
 const USUARIO_RECORDADO_KEY = 'aura_saved_username';
@@ -58,6 +60,18 @@ export const LoginScreen: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const usuarioRef = useRef<HTMLInputElement>(null);
   const claveRef = useRef<HTMLInputElement>(null);
+  // Con un PIN activado en esta PC se empieza por el PIN.
+  const [pinDevice, setPinDevice] = useState<StoredDevice | null>(() => {
+    const guardado = readStoredDevice();
+    return guardado?.kind === 'pin' && isDesktopPointer() ? guardado : null;
+  });
+
+  const usarContrasena = (mensaje?: string) => {
+    if (pinDevice) setUsername(pinDevice.username);
+    setPinDevice(null);
+    if (mensaje) setError(mensaje);
+    window.setTimeout(() => (pinDevice ? claveRef : usuarioRef).current?.focus(), 0);
+  };
 
   useEffect(() => {
     try {
@@ -214,6 +228,10 @@ export const LoginScreen: React.FC = () => {
       {/* Formulario */}
       <main className="relative -mt-16 flex flex-1 flex-col items-center justify-center gap-6 px-4 pb-8 sm:px-6 lg:mt-0 lg:py-14">
         <div className="w-full max-w-[440px] rounded-3xl bg-white px-6 py-8 shadow-[0_1px_2px_rgba(16,32,30,0.06),0_24px_60px_rgba(16,32,30,0.10)] sm:px-10 sm:py-11">
+          {pinDevice ? (
+            <PinLogin device={pinDevice} onUsePassword={usarContrasena} />
+          ) : (
+          <>
           <div className="mb-7 flex flex-col gap-2">
             <h2 className="text-[28px] font-extrabold tracking-tight sm:text-[30px]">Iniciar sesión</h2>
             <p className="text-[15px] font-medium text-[#4E5F5C]">Ingrese con su cuenta institucional.</p>
@@ -346,6 +364,8 @@ export const LoginScreen: React.FC = () => {
               )}
             </button>
           </form>
+          </>
+          )}
         </div>
         <p className="text-[13px] font-medium text-[#4E5F5C]">© 2026 Toolkit SISMED</p>
       </main>

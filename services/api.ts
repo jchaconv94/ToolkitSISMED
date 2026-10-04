@@ -52,6 +52,7 @@ let usersCache: any[] | null = null;
  * contraseña ocurre en el servidor mediante `app_verify_password`.
  * Ver `supabase/SUPABASE_SEGURIDAD_APLICAR_ESTO.sql`.
  */
+import { deviceLoginMessage, type DeviceInfo, type DeviceKind, type DeviceLoginResult } from "./deviceAccess";
 const USER_SELECT = "username, role, personnel_id, is_active, created_at, personnel:personnel_id(*, facilities:facility_code(*), labor_regimes:labor_regime_id(*), professions:profession_id(*)), roles_config:role(*)";
 
 /**
@@ -113,6 +114,66 @@ const loginOnServer = async (username: string, password: string): Promise<boolea
 };
 
 export const api = {
+    /**
+     * Entrar con el PIN o la huella de este equipo (`app_device_login`). Si el servidor
+     * acepta, guarda el token y arma el usuario igual que el ingreso con contraseña.
+     */
+    loginWithDevice: async (
+        deviceId: string,
+        secret: string,
+        pin: string | null,
+    ): Promise<{ success: boolean; user?: User; message?: string; result?: DeviceLoginResult }> => {
+        if (!supabase) return { success: false, message: "Sin conexión con el servidor." };
+        const { data, error } = await supabase.rpc("app_device_login", {
+            p_device_id: deviceId,
+            p_secret: secret,
+            p_pin: pin,
+        });
+        if (error) {
+            return { success: false, message: isMissingFunction(error) ? "El acceso rápido aún no está disponible. Entre con su contraseña." : "No se pudo verificar el acceso. Intente de nuevo." };
+        }
+        const result = data as DeviceLoginResult;
+        if (!result?.ok) return { success: false, result, message: deviceLoginMessage(result) };
+        setSessionToken(result.token);
+        const session = await api.refreshSession(result.username);
+        if (!session.success || !session.user) {
+            setSessionToken(null);
+            return { success: false, message: "No se pudo cargar su cuenta. Entre con su contraseña." };
+        }
+        return { success: true, user: session.user, result };
+    },
+
+    /** Activa el PIN o la huella en este equipo. Devuelve el id que guarda el navegador. */
+    registerDevice: async (kind: DeviceKind, deviceName: string, secret: string, pin: string | null): Promise<string> => {
+        if (!supabase) throw new Error("Sin conexión con el servidor.");
+        const { data, error } = await supabase.rpc("app_device_register", {
+            p_token: requireSessionToken(),
+            p_kind: kind,
+            p_device_name: deviceName,
+            p_secret: secret,
+            p_pin: pin,
+        });
+        if (error) throw new Error(error.message || "No se pudo activar el acceso rápido.");
+        return String(data);
+    },
+
+    /** Mis equipos con acceso rápido. `null` si el SQL todavía no se ejecutó. */
+    listDevices: async (): Promise<DeviceInfo[] | null> => {
+        if (!supabase) return null;
+        const { data, error } = await supabase.rpc("app_device_list", { p_token: requireSessionToken() });
+        if (error) {
+            if (isMissingFunction(error)) return null;
+            throw new Error(error.message || "No se pudieron leer sus equipos.");
+        }
+        return (data as DeviceInfo[]) || [];
+    },
+
+    removeDevice: async (deviceId: string): Promise<void> => {
+        if (!supabase) return;
+        const { error } = await supabase.rpc("app_device_remove", { p_token: requireSessionToken(), p_device_id: deviceId });
+        if (error) throw new Error(error.message || "No se pudo quitar el equipo.");
+    },
+
     /** Cierra la sesión en el servidor y borra el token local. */
     endSession: async (): Promise<void> => {
         const token = getSessionToken();

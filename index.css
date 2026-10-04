@@ -149,3 +149,10 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .login-piece { animation: none !important; }
 }
+
+/* PIN equivocado: las casillas se sacuden. */
+@keyframes pin-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}

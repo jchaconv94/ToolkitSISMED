@@ -2,9 +2,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { User, AuthState, AppModule, SystemConfig } from '../types';
 import { api } from '../services/api';
+import type { DeviceLoginResult } from '../services/deviceAccess';
 
 interface AuthContextType extends AuthState {
   login: (u: string, p: string) => Promise<{ success: boolean; message?: string }>;
+  /** Entrar con el PIN o la huella de este equipo (ver services/deviceAccess.ts). */
+  loginWithDevice: (deviceId: string, secret: string, pin: string | null) => Promise<{ success: boolean; message?: string; result?: DeviceLoginResult }>;
   logout: () => void;
   hasPermission: (module: AppModule) => boolean;
   updateUserContext: (data: Partial<User>) => void;
@@ -116,6 +119,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return result;
   };
 
+  const loginWithDevice = async (deviceId: string, secret: string, pin: string | null) => {
+    const result = await api.loginWithDevice(deviceId, secret, pin);
+    if (result.success && result.user) {
+        sessionStorage.setItem('aura_auth_user', JSON.stringify(result.user));
+        sessionStorage.removeItem('aura_welcome_shown_session');
+        setState(prev => ({ ...prev, user: result.user as User, isAuthenticated: true, isLoading: false }));
+    }
+    return result;
+  };
+
   const logout = () => {
     // Invalida el token en el servidor antes de olvidarlo aquí.
     void api.endSession();
@@ -202,7 +215,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const contextValue = useMemo(() => ({
-      ...state, login, logout, hasPermission, updateUserContext, updateSystemConfigContext, refreshUserData
+      ...state, login, loginWithDevice, logout, hasPermission, updateUserContext, updateSystemConfigContext, refreshUserData
   }), [state, hasPermission]);
 
   return (
