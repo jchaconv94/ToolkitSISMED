@@ -1186,7 +1186,7 @@ const AnalysisModule: React.FC = () => {
                 const corteBonito = corte ? corte.charAt(0) + corte.slice(1).toLowerCase() : '';
                 return (
                 <div className="flex flex-col gap-5 border-b border-gray-200 pb-5 lg:flex-row lg:items-stretch lg:justify-between 2xl:pb-6">
-                    <div className="min-w-0 self-center">
+                    <div className="flex min-w-0 flex-1 flex-col justify-center rounded-2xl border border-slate-200 bg-white p-4 shadow-sm 2xl:p-5">
                         <h2 className="text-2xl 2xl:text-3xl font-bold text-gray-900 tracking-tight">Resultados del Análisis</h2>
                         {activeEstName && (
                             <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[15px] font-bold text-slate-800">
