@@ -1117,13 +1117,8 @@ export const InputSection: React.FC<InputSectionProps> = ({
       {/* Item Preview */}
       {items.length > 0 && !hasAnalyzedData && (
         <div className="space-y-4 mt-4 pt-4 border-t border-dashed border-gray-200 animate-in fade-in duration-500">
-          {/* Solo el título: el establecimiento, la microred, el corte y «Limpiar todo» ya
-              están en la franja de arriba. */}
-          <div className="max-w-5xl mx-auto px-1 text-left">
-            <h3 className="text-sm font-black text-gray-700 uppercase tracking-wide">
-              Items Cargados ({items.length})
-            </h3>
-          </div>
+          {/* Sin título: la franja de arriba ya dice de qué establecimiento es, el corte,
+              cuántos registros hay y tiene «Limpiar todo». */}
           
           {/* Scrollable Table Container for Mobile */}
           <div className="bg-gray-50 rounded-lg border border-gray-200 max-h-60 overflow-y-auto max-w-5xl mx-auto shadow-sm overflow-x-auto">
