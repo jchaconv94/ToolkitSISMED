@@ -138,6 +138,8 @@ Olvidar cualquiera deja el módulo inaccesible, sin título o sin URL propia. El
 > - `pgcrypto` no verifica hashes `$2b$` (los que genera bcryptjs). Las funciones reetiquetan el prefijo a `$2a$` al comparar; no toques eso sin leer `docs/SEGURIDAD_AUDITORIA.md`.
 >
 > Auditoría, hallazgos y lo que sigue pendiente: `docs/SEGURIDAD_AUDITORIA.md`.
+>
+> **Acceso rápido con PIN (PC) o huella (celular), desde el 2026-10-04.** Todo en Supabase, sin servidor propio: `supabase/SUPABASE_INGRESO_PIN_HUELLA.sql` (tabla `app_devices`, funciones `app_device_*`). El equipo guarda una llave al azar (`services/deviceAccess.ts`) y Supabase su SHA-256 y el PIN con bcrypt; nunca se guarda la contraseña. 5 PIN equivocados bloquean el equipo; cambiar la contraseña desactiva todos los equipos. El PIN se crea en Perfil (`components/QuickAccessCard.tsx`) y se usa en el login (`components/PinLogin.tsx`). La huella del celular (paso siguiente) la comprueba el propio teléfono y libera la llave: Supabase no verifica firmas WebAuthn.
 
 ---
 

@@ -25,6 +25,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { CustomSelect } from './ui/CustomSelect';
 import { api } from '../services/api';
+import { QuickAccessCard } from './QuickAccessCard';
 
 export const UserProfile: React.FC = () => {
   const { user, updateUserContext, refreshUserData } = useAuth();
@@ -389,6 +390,8 @@ export const UserProfile: React.FC = () => {
                         </div>
                     </div>
                 </div>
+
+                <QuickAccessCard />
             </div>
 
             {/* Middle & Right Column: Labor Information */}
