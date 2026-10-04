@@ -105,6 +105,8 @@ cloudflare/conexion         Servicio de conexión de Backups SISMED (se publica 
 
 **No hay react-router.** La navegación es `currentView: AppModule` en `App.tsx`, con `Sidebar` (escritorio) y la barra inferior de pestañas de `components/MobileNavigation.tsx` (teléfono) como disparadores. La URL se sincroniza a mano con `history.pushState` usando `services/appRoutes.ts`.
 
+**Lateral de escritorio (desde el 2026-10-04).** Siempre arranca contraído (solo íconos); se expande y contrae con el botón de la cabecera, junto al título. No hay ítem «Inicio»: la marca lleva a Inicio. Contraído, al pasar el mouse o llegar con el teclado, el ícono crece y se estira en una pastilla teal con el nombre, sin brillo (pedido del usuario) (portal, para que el `<nav>` no la recorte).
+
 **Navegación del teléfono (desde el 2026-10-03).** Por debajo de `md` no hay lateral: una barra inferior con «Inicio» y una pestaña por sección visible, y al tocar una sección se abre su pantalla con la lista de herramientas. Todo se deriva de `components/navigation.ts`; ya no existe `MobileNav.tsx` con su lista propia. La pantalla de sección es Inicio con `?seccion=<id>` (`pathForSection` / `viewForLocation` en `appRoutes.ts`), así forma parte del historial y la flecha «volver» y el botón atrás regresan de una herramienta a su sección. Perfil y Cerrar sesión se abren desde el avatar (`UserMenu`).
 
 Al agregar un módulo hay que tocar **cinco** lugares:
