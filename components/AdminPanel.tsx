@@ -322,7 +322,9 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       });
   }, [users, isSuperAdmin, userDiresaId, userOgessId, userUngetId, userMicroredId, userFacilityCode, getExpandedHierarchy]);
 
-  const filteredUsers = useMemo(() => {
+  // Búsqueda y filtros, menos el estado: los indicadores cuentan sobre esta lista, así
+  // reflejan los filtros aplicados y siguen sirviendo para elegir Activos / Inactivos.
+  const usersMatchingFilters = useMemo(() => {
       let list = scopedUsers;
 
       // 2. Filter by search query (name, username, dni, email, phone)
@@ -348,14 +350,6 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       // 4. Filter by Role
       if (filterRole !== 'ALL') {
           list = list.filter(u => (u.role || '').toUpperCase() === filterRole.toUpperCase());
-      }
-
-      // 5. Filter by Status
-      if (filterStatus !== 'ALL') {
-          list = list.filter(u => {
-              const uActive = u.isActive === true || String(u.isActive).toLowerCase() === 'true';
-              return filterStatus === 'ACTIVE' ? uActive : !uActive;
-          });
       }
 
       // 6. Filter by DIRESA
@@ -398,9 +392,18 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       return list;
   }, [
       scopedUsers,
-      searchTerm, filterProfession, filterRole, filterStatus, filterDiresa, filterOgess, filterUnget, filterLaborRegime, filterMicrored,
+      searchTerm, filterProfession, filterRole, filterDiresa, filterOgess, filterUnget, filterLaborRegime, filterMicrored,
       facilityMapLookup, microredMapLookup, ungetMapLookup, ogess, getExpandedHierarchy
   ]);
+
+  // 5. Filter by Status (los indicadores Usuarios / Activos / Inactivos)
+  const filteredUsers = useMemo(() => {
+      if (filterStatus === 'ALL') return usersMatchingFilters;
+      return usersMatchingFilters.filter(u => {
+          const uActive = u.isActive === true || String(u.isActive).toLowerCase() === 'true';
+          return filterStatus === 'ACTIVE' ? uActive : !uActive;
+      });
+  }, [usersMatchingFilters, filterStatus]);
 
   // --- LISTA DE USUARIOS: tabla paginada en escritorio, tarjetas que cargan al bajar en el celular ---
   const USERS_PAGE_SIZE = 10;
@@ -438,7 +441,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
   );
 
   const isUserActiveValue = (u: any) => u.isActive === true || String(u.isActive).toLowerCase() === 'true';
-  const activeUsersCount = useMemo(() => scopedUsers.filter(isUserActiveValue).length, [scopedUsers]);
+  const activeUsersCount = useMemo(() => usersMatchingFilters.filter(isUserActiveValue).length, [usersMatchingFilters]);
   const roleLabelOf = (u: any) => roles.find(r => r.role === u.role)?.label || u.role || '-';
 
   // Módulos asignables a un rol, agrupados como en el menú, con interruptores. Lo usan el
@@ -1450,7 +1453,8 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                         </>
                     );
 
-                    const inactiveUsersCount = scopedUsers.length - activeUsersCount;
+                    const inactiveUsersCount = usersMatchingFilters.length - activeUsersCount;
+                    const kpiFiltered = usersMatchingFilters.length !== scopedUsers.length;
                     const initialsOf = (u: any) => {
                         const first = (u.personnel?.firstName || u.username || '?').trim();
                         const last = (u.personnel?.lastName || '').trim();
@@ -1472,7 +1476,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                         <div className="space-y-4 md:space-y-5">
                             {/* Indicadores: tocarlos filtra la lista por estado */}
                             <KpiStrip cols="md:grid-cols-3">
-                                <KpiCard watermark label="Usuarios" value={scopedUsers.length} hint="en su jurisdicción" icon={<Users />} tone="info" onClick={() => setFilterStatus('ALL')} active={filterStatus === 'ALL'} />
+                                <KpiCard watermark label="Usuarios" value={usersMatchingFilters.length} hint={kpiFiltered ? `de ${scopedUsers.length} · con los filtros` : "en su jurisdicción"} icon={<Users />} tone="info" onClick={() => setFilterStatus('ALL')} active={filterStatus === 'ALL'} />
                                 <KpiCard watermark label="Activos" value={activeUsersCount} hint="pueden ingresar" icon={<UserCheck />} tone="success" onClick={() => setFilterStatus('ACTIVE')} active={filterStatus === 'ACTIVE'} />
                                 <KpiCard watermark label="Inactivos" value={inactiveUsersCount} hint="sin acceso" icon={<UserX />} tone="neutral" onClick={() => setFilterStatus('INACTIVE')} active={filterStatus === 'INACTIVE'} />
                             </KpiStrip>
