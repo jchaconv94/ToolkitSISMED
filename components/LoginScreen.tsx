@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   AlertCircle,
   ArrowRight,
+  BarChart3,
   Database,
   Eye,
   EyeOff,
@@ -23,6 +24,7 @@ const CLAVE_ANTIGUA_KEY = 'aura_saved_password';
 const VENTAJAS = [
   { Icon: Database, texto: 'Stock de toda la región, siempre a la mano' },
   { Icon: HardDriveDownload, texto: 'Backups SISMED con un clic' },
+  { Icon: BarChart3, texto: 'Análisis de requerimiento en minutos' },
 ];
 
 /**
