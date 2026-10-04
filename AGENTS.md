@@ -159,7 +159,7 @@ Olvidar cualquiera deja el módulo inaccesible, sin título o sin URL propia. El
 | `ADMIN_STOCK_ASSIGN` | Columnas de Stock | `components/AdminStockAssignmentModule.tsx` |
 | `ADMIN_SEND_KEYS` | Claves de envío | `components/AdminSendKeysModule.tsx` |
 | `ADMIN_BACKUPS` | Backups SISMED | `components/BackupsSismedModule.tsx` |
-| `PROFILE` | Perfil de Usuario | `components/UserProfile.tsx` |
+| `PROFILE` | Perfil de Usuario | `components/UserProfile.tsx` (todos lo ven desde el 2026-10-04: `hasPermission` siempre lo permite y ya no figura en Roles) |
 
 `ANALYSIS` sigue declarado en `AVAILABLE_MODULES` y en las rutas, pero no tiene pantalla propia.
 
@@ -237,7 +237,7 @@ justamente porque cuando estaba repetida solo se actualizó uno.
 - **Color con significado:** teal/cyan = información/stock; emerald = aplicado/cerrado/vigente; amber = pendiente/advertencia; red = vencido/error/bloqueo; blue = vista supervisora; slate = neutro.
 - **Densidad:** 1 tarjeta de cabecera, máximo 4–5 KPIs, filtros en **una sola barra** compacta; fechas y filtros avanzados en popover/colapsable, nunca en tarjeta alta.
 - **Tablas:** encabezado que se pega arriba al bajar con `useFloatingTableHead` + `FloatingTableHead` (`components/ui/FloatingTableHead.tsx`: a todo el ancho, sin bordes; no usar `sticky` en el `<thead>`), filas 52–60 px, descripción del producto a 13–14 px (no tamaño título), código SISMED en chip/monospace, estados en chips, acciones a la derecha.
-- **Administración, rediseño por pantallas (desde el 2026-10-04):** Gestión de Usuarios ya va sin el título grande que repetía la cabecera ni el recuadro alrededor; KPIs Usuarios/Activos/Inactivos, tabla única paginada en escritorio y tarjetas con menú ⋯ en el celular. Las demás pestañas de `AdminPanel` conservan su marco hasta rediseñarlas.
+- **Administración, rediseño por pantallas (desde el 2026-10-04):** Gestión de Usuarios ya va sin el título grande que repetía la cabecera ni el recuadro alrededor; KPIs Usuarios/Activos/Inactivos, tabla única paginada en escritorio y tarjetas con menú ⋯ en el celular. Configuración de Roles también (desde el mismo día): lista y detalle (en el celular, dos pantallas con la flecha de la cabecera), módulos agrupados por las secciones de `navigation.ts` con interruptores, y barra «Cambios sin guardar» con Descartar/Guardar. En Roles solo se asignan los módulos del menú: `ANALYSIS` (sin pantalla) y `PROFILE` ya no se muestran. Las demás pestañas de `AdminPanel` conservan su marco hasta rediseñarlas.
 - **Paginación numerada en toda tabla de escritorio; en el celular, lista que carga al bajar** (pedido del usuario, 2026-10-03). Ninguna tabla sin paginar: en escritorio `TablePagination` (`components/ui/TablePagination.tsx`); en el celular nada de páginas, `useIncrementalCount` + `LoadMoreSentinel` (`components/ui/IncrementalList.tsx`). Ejemplo: `AssignedIpressStockModule`.
 - **Modelo único de KPIs** (2026-10-03): `KpiCard watermark` dentro de `KpiStrip`, a todo el ancho, con `cols` según cuántos haya (`md:grid-cols-3`, `md:grid-cols-2 xl:grid-cols-4`…). Si filtran la tabla, van con `onClick` y `active`.
 - **Operación ≠ supervisión:** en vista propia **no** mostrar columnas de Ubicación/Ámbito (son implícitas en la sesión). Solo el supervisor ve filtros territoriales.

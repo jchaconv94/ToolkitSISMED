@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { RoleConfig, HealthFacility, AVAILABLE_MODULES, LaborRegime, Profession } from '../types';
 import { canAssignRole } from '../services/userManagementRules';
-import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench, Archive, MoreVertical, MoreHorizontal, MapPin, UserCheck, UserX, SlidersHorizontal } from 'lucide-react';
+import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench, Archive, MoreVertical, MoreHorizontal, MapPin, UserCheck, UserX, SlidersHorizontal, Plus, ChevronRight, Check } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -23,6 +23,8 @@ import { BottomSheet } from './ui/BottomSheet';
 import { LoadMoreSentinel, useIncrementalCount } from './ui/IncrementalList';
 import { FloatingTableHead, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead } from './ui/FloatingTableHead';
 import { useIsDesktop } from './ui/useIsDesktop';
+import { NAV_SECTIONS } from './navigation';
+import { useModuleHeaderOverride } from '../contexts/ModuleHeaderContext';
 
 export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) => {
   const activeTab = currentView ? currentView.replace('ADMIN_', '') as 'USERS' | 'ROLES' | 'PARAMS' | 'FACILITIES' | 'CATALOGS' : 'USERS';
@@ -422,6 +424,15 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       document.addEventListener('click', close);
       return () => document.removeEventListener('click', close);
   }, [userMenuFor]);
+
+  // Roles en el celular: primero la lista; al tocar un rol, su detalle (la flecha vuelve).
+  const [roleDetailOpen, setRoleDetailOpen] = useState(false);
+  const selectedRoleForHeader = roles.find(r => r.role === selectedRoleId);
+  useModuleHeaderOverride(
+      activeTab === 'ROLES' && !isDesktop && roleDetailOpen && selectedRoleForHeader
+          ? { title: selectedRoleForHeader.label || selectedRoleForHeader.role, subtitle: 'Roles', onBack: () => setRoleDetailOpen(false) }
+          : null
+  );
 
   const isUserActiveValue = (u: any) => u.isActive === true || String(u.isActive).toLowerCase() === 'true';
   const activeUsersCount = useMemo(() => scopedUsers.filter(isUserActiveValue).length, [scopedUsers]);
@@ -953,7 +964,38 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       setIsSavingUser(false);
   };
 
+  // Cambios sin guardar por rol: se guarda la versión anterior al primer cambio, para poder
+  // descartarlos y para avisar en la lista. Guardar o descartar la quita.
+  const [roleOriginals, setRoleOriginals] = useState<Record<string, RoleConfig>>({});
+  const rememberRoleOriginal = (roleName: string) => {
+      const original = roles.find(r => r.role === roleName);
+      if (!original) return;
+      setRoleOriginals(prev => (prev[roleName] ? prev : { ...prev, [roleName]: original }));
+  };
+  const forgetRoleOriginal = (roleName: string) => {
+      setRoleOriginals(prev => {
+          if (!prev[roleName]) return prev;
+          const next = { ...prev };
+          delete next[roleName];
+          return next;
+      });
+  };
+  const discardRoleChanges = (roleName: string) => {
+      const original = roleOriginals[roleName];
+      if (original) setRoles(prev => prev.map(r => (r.role === roleName ? original : r)));
+      forgetRoleOriginal(roleName);
+  };
+  const handleRoleSectionChange = (roleName: string, modules: string[], isChecked: boolean) => {
+      rememberRoleOriginal(roleName);
+      setRoles(prevRoles => prevRoles.map(r => {
+          if (r.role !== roleName) return r;
+          const rest = r.allowedModules.filter(m => !modules.includes(m));
+          return { ...r, allowedModules: (isChecked ? [...rest, ...modules] : rest) as any[] };
+      }));
+  };
+
   const handleRoleModuleChange = (roleName: string, module: string, isChecked: boolean) => {
+      rememberRoleOriginal(roleName);
       setRoles(prevRoles => prevRoles.map(r => {
           if (r.role === roleName) {
               const newModules = isChecked 
@@ -966,6 +1008,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
   };
 
   const handleRoleMaxUrlsChange = (roleName: string, maxUrlsStr: string) => {
+      rememberRoleOriginal(roleName);
       const maxUrls = maxUrlsStr ? parseInt(maxUrlsStr) : undefined;
       setRoles(prevRoles => prevRoles.map(r => 
           r.role === roleName ? { ...r, maxUrlsAllowed: isNaN(maxUrls as any) ? undefined : maxUrls } : r
@@ -981,11 +1024,16 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                   id: toastId,
                   description: 'Los permisos han sido modificados exitosamente.'
               });
-              
-              // Refresh roles to ensure sync
+              forgetRoleOriginal(roleConfig.role);
+
+              // Refresh roles to ensure sync. Los otros roles con cambios sin guardar
+              // conservan esos cambios: antes la recarga los borraba sin avisar.
               const updatedRoles = await api.getRolesConfig();
               if (updatedRoles && updatedRoles.length > 0) {
-                  setRoles(updatedRoles);
+                  setRoles(prev => updatedRoles.map(r => {
+                      if (r.role === roleConfig.role || !roleOriginals[r.role]) return r;
+                      return prev.find(p => p.role === r.role) || r;
+                  }));
                   localStorage.setItem('aura_roles_cache', JSON.stringify(updatedRoles));
               }
 
@@ -1000,15 +1048,12 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
               });
           }
       } catch (e) {
-          // OFFLINE FALLBACK UI FEEDBACK
-          toast.success(`Rol actualizado (Modo Offline)`, { 
-              id: toastId, 
-              description: "Los cambios se guardaron localmente." 
+          // Antes decía «Rol actualizado (Modo Offline)», pero el cambio no llegaba a la base:
+          // los permisos se guardan en Supabase o no se guardan.
+          toast.error('No se pudo guardar el rol', {
+              id: toastId,
+              description: 'Revise su conexión e intente de nuevo. Los cambios siguen en pantalla.'
           });
-          
-          if (currentUser && currentUser.role === roleConfig.role) {
-              await refreshUserData();
-          }
       }
   };
 
@@ -1099,10 +1144,10 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
     <>
     {/* Usuarios (rediseño 2026-10-04): sin el título grande, que repetía la cabecera, ni el
         recuadro alrededor de la lista; las demás pestañas conservan su marco por ahora. */}
-    <div className={activeTab === 'USERS'
+    <div className={(activeTab === 'USERS' || activeTab === 'ROLES')
         ? "max-w-[1700px] mx-auto pb-24 pt-1 md:pb-6 md:pt-4 animate-in fade-in"
         : "max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in slide-in-from-bottom-4"}>
-        {activeTab !== 'USERS' && (
+        {activeTab !== 'USERS' && activeTab !== 'ROLES' && (
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-100 pb-5">
             <div>
                 <h2 className="text-3xl font-black text-gray-900 tracking-tight">{headerInfo.title}</h2>
@@ -1113,7 +1158,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
 
         <div className="flex flex-col lg:flex-row gap-8 items-start">
             {/* Premium Spacious Content Container */}
-            <div className={activeTab === 'USERS'
+            <div className={(activeTab === 'USERS' || activeTab === 'ROLES')
                 ? "flex-1 min-w-0 w-full"
                 : "flex-1 bg-white rounded-2xl shadow-[0_5px_30px_rgba(0,0,0,0.018)] border border-gray-200/80 p-6 sm:p-8 overflow-hidden min-w-0 w-full animate-in fade-in duration-300"}>
                 {activeTab === 'USERS' && (() => {
@@ -1693,132 +1738,196 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                     );
                 })()}
 
-                {activeTab === 'ROLES' && (
-                    <div className="space-y-6">
-                        <div className="flex flex-col md:flex-row gap-6 items-start">
-                            {/* Panel Izquierdo: Lista de Roles */}
-                            <div className="w-full md:w-1/3 bg-white border border-gray-200 rounded-xl overflow-hidden shrink-0">
-                                <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-2">
-                                    <h5 className="font-bold text-gray-800 text-sm">Roles Existentes</h5>
-                                    <button 
-                                        onClick={() => {
-                                            setNewRoleForm({ role: '', label: '', maxUrlsAllowed: '', allowedModules: [], jurisdictionLevel: '' });
-                                            setIsNewRoleModalOpen(true);
-                                        }}
-                                        className="flex items-center gap-1.5 text-[10px] font-extrabold text-white bg-teal-600 hover:bg-teal-700 px-3 py-2 rounded-xl transition-all shadow-sm cursor-pointer uppercase tracking-wider shrink-0"
-                                    >
-                                        <Shield className="h-3.5 w-3.5" />
-                                        Nuevo Rol
+                {activeTab === 'ROLES' && (() => {
+                    const LEVEL_LABELS: Record<string, string> = { GLOBAL: 'Nacional', DIRESA: 'DIRESA', OGESS: 'OGESS', UNGET: 'UNGET', MICRORED: 'Microred', IPRESS: 'Establecimiento' };
+                    const SECTION_DOT: Record<string, string> = { teal: 'bg-teal-500', cyan: 'bg-cyan-500', violet: 'bg-violet-500', slate: 'bg-slate-500' };
+                    const usersByRole = new Map<string, number>();
+                    scopedUsers.forEach(u => usersByRole.set(u.role, (usersByRole.get(u.role) || 0) + 1));
+                    const countLabel = (n: number) => `${n} ${n === 1 ? 'usuario' : 'usuarios'}`;
+                    const allNavModules = NAV_SECTIONS.flatMap(sec => sec.items.map(it => it.module as string));
+                    const currentRole = roles.find(r => r.role === selectedRoleId) || null;
+                    const showList = isDesktop || !roleDetailOpen;
+                    const showDetail = isDesktop || roleDetailOpen;
+                    const openNewRole = () => {
+                        setNewRoleForm({ role: '', label: '', maxUrlsAllowed: '', allowedModules: [], jurisdictionLevel: '' });
+                        setIsNewRoleModalOpen(true);
+                    };
+
+                    const roleList = (
+                        <div className={isDesktop ? 'w-[320px] shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm' : 'space-y-2.5'}>
+                            {isDesktop && (
+                                <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+                                    <p className="text-sm font-black text-slate-900">Roles <span className="font-semibold text-slate-400">· {roles.length}</span></p>
+                                    <button type="button" onClick={openNewRole} className="flex h-9 items-center gap-1.5 rounded-xl bg-teal-600 px-3 text-[13px] font-bold text-white transition-colors hover:bg-teal-700 cursor-pointer">
+                                        <Plus className="h-4 w-4" /> Nuevo rol
                                     </button>
                                 </div>
-                                <div className="flex flex-col max-h-[600px] overflow-y-auto">
-                                    {isRolesLoading ? (
-                                        <div className="p-8 flex justify-center text-teal-600">
-                                            <RefreshCw className="h-6 w-6 animate-spin" />
-                                        </div>
-                                    ) : roles.length === 0 ? (
-                                        <div className="p-8 text-center text-gray-500 text-sm">
-                                            No hay roles configurados.
-                                        </div>
-                                    ) : roles.map((role) => (
-                                        <div key={role.role} className={`flex items-center justify-between border-b border-gray-100 transition-colors ${selectedRoleId === role.role ? 'bg-teal-50 border-l-4 border-l-teal-500' : 'hover:bg-gray-50 border-l-4 border-l-transparent'}`}>
+                            )}
+                            {isRolesLoading ? (
+                                <div className="flex justify-center p-8 text-teal-600"><RefreshCw className="h-6 w-6 animate-spin" /></div>
+                            ) : roles.length === 0 ? (
+                                <div className="rounded-2xl p-8 text-center text-sm text-slate-500">No hay roles configurados.</div>
+                            ) : (
+                                <div className={isDesktop ? 'divide-y divide-slate-100' : 'space-y-2.5'}>
+                                    {roles.map(role => {
+                                        const selected = isDesktop && selectedRoleId === role.role;
+                                        const level = LEVEL_LABELS[role.jurisdictionLevel || ''];
+                                        const unsaved = Boolean(roleOriginals[role.role]);
+                                        return (
                                             <button
-                                                onClick={() => setSelectedRoleId(role.role)}
-                                                className="flex-1 text-left p-4 focus:outline-none"
+                                                key={role.role}
+                                                type="button"
+                                                onClick={() => { setSelectedRoleId(role.role); setRoleDetailOpen(true); }}
+                                                aria-current={selected ? 'true' : undefined}
+                                                className={isDesktop
+                                                    ? `relative flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${selected ? 'bg-teal-50' : 'hover:bg-slate-50'}`
+                                                    : 'flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 text-left shadow-sm active:bg-slate-50'}
                                             >
-                                                <div className="font-bold text-sm text-gray-800">{role.label || role.role}</div>
-                                                <div className="text-[10px] text-gray-500 font-mono mt-1">{role.role}</div>
+                                                {selected && <span className="absolute inset-y-2 left-0 w-1 rounded-r-full bg-teal-500" />}
+                                                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${selected ? 'bg-teal-600 text-white' : 'bg-teal-50 text-teal-700'}`}>
+                                                    <Shield className="h-5 w-5" />
+                                                </span>
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block truncate text-[14px] font-bold text-slate-900">{role.label || role.role}</span>
+                                                    <span className="mt-0.5 block text-xs text-slate-500">
+                                                        {level ? `Nivel ${level} · ` : ''}{countLabel(usersByRole.get(role.role) || 0)}
+                                                    </span>
+                                                    {unsaved && <span className="mt-1 flex items-center gap-1.5 text-[11px] font-bold text-amber-700"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />Cambios sin guardar</span>}
+                                                </span>
+                                                <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
                                             </button>
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); handleOpenEditRole(role); }}
-                                                className="p-3 text-gray-400 hover:text-teal-600 transition-colors mr-2"
-                                                title="Editar nombre y código del rol"
-                                            >
-                                                <Edit className="h-4 w-4" />
-                                            </button>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
-                            </div>
-    
-                            {/* Panel Derecho: Detalles del Rol */}
-                            <div className="w-full md:w-2/3 bg-white border border-gray-200 rounded-xl overflow-hidden flex-1">
-                                {selectedRoleId && roles.find(r => r.role === selectedRoleId) ? (() => {
-                                    const currentRole = roles.find(r => r.role === selectedRoleId)!;
-                                    return (
-                                        <div className="flex flex-col h-full">
-                                            <div className="p-5 border-b border-gray-200 bg-gray-50 flex flex-col gap-2">
-                                                <div className="flex items-center justify-between gap-4">
-                                                    <h3 className="font-bold text-lg text-gray-800">{currentRole.label}</h3>
-                                                    <div className="flex items-center gap-1.5 shrink-0">
-                                                        <Shield className="h-3.5 w-3.5 text-teal-600" />
-                                                        <span className="text-xs font-mono font-bold bg-white border border-gray-200 px-3 py-1.5 rounded-md shadow-sm text-gray-700 uppercase">
-                                                            {currentRole.role}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        
-                                            <div className="p-6 space-y-8 flex-1 max-h-[480px] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                                                <div>
-                                                    <p className="text-sm font-bold text-gray-800 border-b border-gray-100 pb-2 mb-4">Módulos Permitidos</p>
-                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                        {AVAILABLE_MODULES.filter(module => module.id !== 'HOME').map(module => (
-                                                            <label key={module.id} className={`flex items-start gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${currentRole.allowedModules.includes(module.id) ? 'bg-teal-50 border-teal-200 shadow-sm' : 'bg-white border-gray-200 hover:bg-gray-50'}`} title={module.description}>
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    checked={currentRole.allowedModules.includes(module.id)}
-                                                                    onChange={(e) => handleRoleModuleChange(currentRole.role, module.id, e.target.checked)}
-                                                                    className="mt-0.5 shrink-0 rounded text-teal-600 focus:ring-teal-500 border border-gray-300"
-                                                                />
-                                                                <div className="flex flex-col">
-                                                                    <span className={`text-sm font-bold ${currentRole.allowedModules.includes(module.id) ? 'text-teal-900' : 'text-gray-800'}`}>{module.label}</span>
-                                                                    <span className="text-[10px] text-gray-500 leading-tight mt-0.5">{module.description}</span>
-                                                                </div>
-                                                            </label>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                        
-                                                <div>
-                                                    <p className="text-sm font-bold text-gray-800 border-b border-gray-100 pb-2 mb-4">Límites del Sistema</p>
-                                                    <div className="max-w-xs">
-                                                        <label className="block text-xs font-bold text-gray-600 mb-2">Máximo de URLs (SIG_SEARCH):</label>
-                                                        <input 
-                                                            type="number"
-                                                            min="1"
-                                                            placeholder="Ilimitado"
-                                                            value={currentRole.maxUrlsAllowed || ''}
-                                                            onChange={(e) => handleRoleMaxUrlsChange(currentRole.role, e.target.value)}
-                                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none"
-                                                        />
-                                                        <p className="text-[10px] text-gray-400 mt-1">Deje vacío para permitir búsquedas sin límite.</p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                        
-                                            <div className="p-4 bg-gray-50 border-t border-gray-200 flex justify-end mt-auto">
-                                                <button 
-                                                    onClick={() => handleSaveRoleConfig(currentRole)}
-                                                    className="text-sm font-bold text-white bg-gray-900 px-6 py-2.5 rounded-lg hover:bg-black transition-colors flex items-center gap-2 shadow-sm"
-                                                >
-                                                    <Save className="h-4 w-4" />
-                                                    Guardar Cambios
-                                                </button>
+                            )}
+                        </div>
+                    );
+
+                    const roleDetail = currentRole ? (() => {
+                        const enabled = new Set(currentRole.allowedModules as string[]);
+                        const enabledCount = allNavModules.filter(m => enabled.has(m)).length;
+                        const level = LEVEL_LABELS[currentRole.jurisdictionLevel || ''];
+                        const unsaved = Boolean(roleOriginals[currentRole.role]);
+                        return (
+                            <div className={isDesktop ? 'flex min-w-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm' : 'space-y-3 pb-24'}>
+                                <div className={isDesktop ? 'border-b border-slate-100 p-5' : 'rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'}>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            {isDesktop && <h3 className="text-lg font-black text-slate-900">{currentRole.label || currentRole.role}</h3>}
+                                            <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${isDesktop ? 'mt-1.5' : ''}`}>
+                                                <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] font-bold text-slate-600">{currentRole.role}</span>
+                                                {level && <span className="inline-flex items-center gap-1 text-[13px] text-slate-600"><MapPin className="h-3.5 w-3.5 text-slate-400" />Nivel <b className="text-slate-800">{level}</b></span>}
+                                                <span className="inline-flex items-center gap-1 text-[13px] text-slate-600"><Users className="h-3.5 w-3.5 text-slate-400" /><b className="text-slate-800">{usersByRole.get(currentRole.role) || 0}</b> {(usersByRole.get(currentRole.role) || 0) === 1 ? 'usuario' : 'usuarios'}</span>
                                             </div>
                                         </div>
-                                    );
-                                })() : (
-                                    <div className="flex flex-col items-center justify-center p-12 text-center text-gray-400 h-full min-h-[300px]">
-                                        <Shield className="h-12 w-12 text-gray-200 mb-4" />
-                                        <p className="text-base font-medium text-gray-500">Seleccione un rol de la lista</p>
-                                        <p className="text-sm text-gray-400 mt-1">El panel de configuración aparecerá aquí</p>
+                                        <button type="button" onClick={() => handleOpenEditRole(currentRole)} className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer">
+                                            <Edit className="h-4 w-4 text-slate-500" /> {isDesktop ? 'Editar nombre y nivel' : 'Editar'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className={isDesktop ? 'space-y-5 p-5' : 'space-y-3'}>
+                                    <p className={`text-[11px] font-black uppercase tracking-widest text-slate-400 ${isDesktop ? '' : 'px-1 pt-1'}`}>Módulos que puede abrir · {enabledCount} de {allNavModules.length}</p>
+                                    <div className={isDesktop ? 'grid gap-4 xl:grid-cols-2' : 'space-y-3'}>
+                                        {NAV_SECTIONS.map(section => {
+                                            const sectionModules = section.items.map(it => it.module as string);
+                                            const on = sectionModules.filter(m => enabled.has(m)).length;
+                                            const all = on === sectionModules.length;
+                                            return (
+                                                <div key={section.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                                                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
+                                                        <p className="flex items-center gap-2 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                                                            <span className={`h-2 w-2 rounded-full ${SECTION_DOT[section.tint]}`} />
+                                                            {section.label}
+                                                            <span className="font-bold normal-case tracking-normal text-slate-400">· {on} de {sectionModules.length}</span>
+                                                        </p>
+                                                        <button type="button" onClick={() => handleRoleSectionChange(currentRole.role, sectionModules, !all)} className="text-[12px] font-bold text-teal-700 hover:text-teal-900 cursor-pointer">
+                                                            {all ? 'Quitar todos' : 'Marcar todos'}
+                                                        </button>
+                                                    </div>
+                                                    <div className="divide-y divide-slate-100">
+                                                        {section.items.map(item => {
+                                                            const checked = enabled.has(item.module);
+                                                            const Icon = item.icon;
+                                                            return (
+                                                                <button
+                                                                    key={item.module}
+                                                                    type="button"
+                                                                    role="switch"
+                                                                    aria-checked={checked}
+                                                                    onClick={() => handleRoleModuleChange(currentRole.role, item.module, !checked)}
+                                                                    className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-slate-50 cursor-pointer"
+                                                                >
+                                                                    <Icon className={`h-[18px] w-[18px] shrink-0 ${checked ? 'text-teal-600' : 'text-slate-400'}`} />
+                                                                    <span className="min-w-0 flex-1">
+                                                                        <span className={`block text-[13.5px] font-bold ${checked ? 'text-slate-900' : 'text-slate-600'}`}>{item.label}</span>
+                                                                        <span className="block truncate text-xs text-slate-500">{item.description}</span>
+                                                                    </span>
+                                                                    <span className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? 'bg-teal-600' : 'bg-slate-200'}`}>
+                                                                        <span className={`absolute top-0.5 grid h-5 w-5 place-items-center rounded-full bg-white shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`}>
+                                                                            {checked && <Check className="h-3 w-3 text-teal-600" />}
+                                                                        </span>
+                                                                    </span>
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${isDesktop ? 'max-w-md' : ''}`}>
+                                        <label htmlFor="role-max-urls" className="block text-[13.5px] font-bold text-slate-900">Conexiones de Consulta Stock</label>
+                                        <p className="mt-0.5 text-xs text-slate-500">Cuántas hojas de Google puede conectar este rol. Vacío = sin límite.</p>
+                                        <input
+                                            id="role-max-urls"
+                                            type="number"
+                                            min="1"
+                                            placeholder="Sin límite"
+                                            value={currentRole.maxUrlsAllowed || ''}
+                                            onChange={(e) => handleRoleMaxUrlsChange(currentRole.role, e.target.value)}
+                                            className="mt-3 h-11 w-32 rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Barra de guardado: solo con cambios pendientes */}
+                                {unsaved && (
+                                    <div
+                                        className={isDesktop
+                                            ? 'sticky bottom-0 mt-auto flex items-center gap-3 rounded-b-2xl border-t border-slate-200 bg-white px-5 py-3'
+                                            : 'fixed inset-x-0 z-30 flex items-center gap-2 border-t border-slate-200 bg-white px-3 py-3 shadow-[0_-6px_16px_-10px_rgba(15,23,42,0.25)]'}
+                                        style={isDesktop ? undefined : { bottom: 'calc(4.5rem + env(safe-area-inset-bottom))' }}
+                                    >
+                                        <span className="flex items-center gap-2 text-[13px] font-semibold text-amber-700">
+                                            <span className="h-2 w-2 rounded-full bg-amber-500" />{isDesktop ? 'Cambios sin guardar' : 'Sin guardar'}
+                                        </span>
+                                        <button type="button" onClick={() => discardRoleChanges(currentRole.role)} className="ml-auto h-10 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer">
+                                            Descartar
+                                        </button>
+                                        <button type="button" onClick={() => handleSaveRoleConfig(currentRole)} className="flex h-10 items-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white transition-colors hover:bg-teal-700 cursor-pointer">
+                                            <Save className="h-4 w-4" /> Guardar
+                                        </button>
                                     </div>
                                 )}
                             </div>
+                        );
+                    })() : (
+                        <div className="flex min-h-[300px] flex-1 flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white p-12 text-center">
+                            <Shield className="mb-4 h-12 w-12 text-slate-200" />
+                            <p className="text-base font-medium text-slate-500">Seleccione un rol de la lista</p>
                         </div>
-                    </div>
-                )}
+                    );
+
+                    return (
+                        <div className={isDesktop ? 'flex items-start gap-5' : ''}>
+                            {showList && roleList}
+                            {showDetail && roleDetail}
+                            {!isDesktop && !roleDetailOpen && <FloatingActionButton icon={<Plus />} label="Nuevo rol" onClick={openNewRole} />}
+                        </div>
+                    );
+                })()}
 
                 {activeTab === 'PARAMS' && (
                      <div className="space-y-6">
@@ -2871,7 +2980,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                         <div className="flex flex-col h-full border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6 md:col-span-8">
                             <label className="block text-xs font-bold text-gray-700 mb-2">Permisos Iniciales</label>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1">
-                                {AVAILABLE_MODULES.filter(module => module.id !== 'HOME').map(module => {
+                                {AVAILABLE_MODULES.filter(module => NAV_SECTIONS.some(sec => sec.items.some(it => it.module === module.id))).map(module => {
                                     const isChecked = newRoleForm.allowedModules.includes(module.id as never);
                                     return (
                                         <label key={module.id} className="flex items-start gap-2 p-2.5 bg-gray-50 rounded border border-gray-100 hover:bg-gray-100 cursor-pointer transition-all" title={module.description}>
