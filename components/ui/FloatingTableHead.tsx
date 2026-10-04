@@ -20,6 +20,11 @@ export type FloatingHeadState = {
   width: number;
   height: number;
   cols: Array<{ left: number; width: number }>;
+  /**
+   * Parte visible de la tabla cuando su contenedor se desplaza de lado (relativa al área):
+   * las columnas que quedan fuera no se dibujan en el encabezado fijo.
+   */
+  clip?: { left: number; width: number };
 };
 
 export type HeadAlign = "left" | "right" | "center";
@@ -37,7 +42,9 @@ const scrollParentOf = (el: HTMLElement): HTMLElement | null => {
   let node = el.parentElement;
   while (node) {
     const { overflowY } = getComputedStyle(node);
-    if (overflowY === "auto" || overflowY === "scroll") return node;
+    // Solo cuenta si de verdad desplaza en vertical: un contenedor con desplazamiento
+    // lateral (overflow-x) también figura como «auto» en vertical, pero no se mueve.
+    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) return node;
     node = node.parentElement;
   }
   return null;
@@ -72,7 +79,19 @@ export const useFloatingTableHead = (deps: React.DependencyList) => {
         const r = cell.getBoundingClientRect();
         return { left: r.left - area.left, width: r.width };
       });
-      const next: FloatingHeadState = { top: area.top, left: area.left, width, height: head.height, cols };
+      // Contenedor con desplazamiento lateral entre la tabla y el área: recorta el encabezado.
+      let clip: FloatingHeadState["clip"];
+      let node = table.parentElement;
+      while (node && node !== scroller) {
+        const { overflowX } = getComputedStyle(node);
+        if ((overflowX === "auto" || overflowX === "scroll" || overflowX === "hidden") && node.scrollWidth > node.clientWidth) {
+          const r = node.getBoundingClientRect();
+          clip = { left: r.left - area.left, width: node.clientWidth };
+          break;
+        }
+        node = node.parentElement;
+      }
+      const next: FloatingHeadState = { top: area.top, left: area.left, width, height: head.height, cols, clip };
       setFloating((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     };
     update();
@@ -101,19 +120,24 @@ export const FloatingTableHead: React.FC<{
       className="fixed z-30 overflow-hidden border-b border-slate-200 bg-slate-50 shadow-[0_6px_12px_-8px_rgba(15,23,42,0.25)]"
       style={{ top: state.top, left: state.left, width: state.width, height: state.height }}
     >
-      {cells.map((cell) => {
-        const pos = state.cols[cell.index];
-        if (!pos) return null;
-        return (
-          <div
-            key={cell.key}
-            className={`absolute inset-y-0 flex items-center ${padding} ${tableHeadTextClass} ${headAlignClass(cell.align)}`}
-            style={{ left: pos.left, width: pos.width }}
-          >
-            {cell.content}
-          </div>
-        );
-      })}
+      <div
+        className="absolute inset-y-0 overflow-hidden"
+        style={state.clip ? { left: state.clip.left, width: state.clip.width } : { left: 0, right: 0 }}
+      >
+        {cells.map((cell) => {
+          const pos = state.cols[cell.index];
+          if (!pos) return null;
+          return (
+            <div
+              key={cell.key}
+              className={`absolute inset-y-0 flex items-center ${padding} ${tableHeadTextClass} ${headAlignClass(cell.align)}`}
+              style={{ left: pos.left - (state.clip?.left ?? 0), width: pos.width }}
+            >
+              {cell.content}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };

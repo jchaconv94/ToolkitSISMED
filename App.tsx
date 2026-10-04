@@ -1,4 +1,5 @@
 
+import { formatCorteDate } from "./services/requirementMonths";
 import React, { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
 import { InputSection } from './components/InputSection';
 import { MedicationInput, AuraAnalysisResult, StockStatus, AdditionalItem, AppModule, QuickFilterOption, AnalyzedMedication, DashboardViewMode, HealthFacility, Microred } from './types';
@@ -70,23 +71,6 @@ const ADDITIONAL_ITEMS_KEY = 'aura_additional_v1';
  */
 const SUCCESS_SHOWN_KEY = 'aura_success_shown_v1';
 const WELCOME_KEY = 'aura_welcome_shown_session'; // Clave de sesión
-
-const formatCorteDate = (dateStr: string): string => {
-    if (!dateStr) return '';
-    const parts = dateStr.trim().split('-');
-    if (parts.length === 2) {
-        const year = parts[0];
-        const monthNum = parseInt(parts[1], 10);
-        const months = [
-            'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
-            'JULIO', 'AGOSTO', 'SETIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
-        ];
-        if (monthNum >= 1 && monthNum <= 12) {
-            return `${months[monthNum - 1]} ${year}`;
-        }
-    }
-    return dateStr;
-};
 
 // --- MAIN APP COMPONENT WRAPPED IN AUTH CONTEXT ---
 const App: React.FC = () => {
@@ -874,11 +858,12 @@ const AnalysisModule: React.FC = () => {
     return { activeCpm, evalStock, months, status };
   }, [reviewedIds]);
 
-  const filteredMedications = useMemo(() => {
+  // Todos los ítems con el estado, los meses y el CPA del modo elegido (Stock inicial o
+  // Proyectado). La tabla los muestra así, y los filtros por columna sacan de aquí sus
+  // opciones y conteos: antes los sacaban del estado original y no cuadraban con la tabla.
+  const horizonMedications = useMemo(() => {
     if (!result) return [];
-    
-    // Recalculate status, months of provision, and display CPA dynamically for all medications based on active horizon mode
-    let items = result.medications.map(m => {
+    return result.medications.map(m => {
         const { activeCpm, months, status } = calculateHorizonMetrics(m, dashboardViewMode);
         return {
             ...m,
@@ -887,6 +872,12 @@ const AnalysisModule: React.FC = () => {
             monthsOfProvision: months
         };
     });
+  }, [result, dashboardViewMode, calculateHorizonMetrics]);
+
+  const filteredMedications = useMemo(() => {
+    if (!result) return [];
+
+    let items = horizonMedications;
 
     // Scope filter (DME vs ALL) from Diagnóstico de Disponibilidad
     if (dashboardScopeFilter === 'DME') {
@@ -936,7 +927,7 @@ const AnalysisModule: React.FC = () => {
     
     // Sort items alphabetically by name
     return [...items].sort((a, b) => (a.name || '').trim().localeCompare((b.name || '').trim(), 'es', { sensitivity: 'base' }));
-  }, [result, searchTerm, activeFilters, quickFilter, reviewedIds, dashboardViewMode, dashboardScopeFilter, calculateHorizonMetrics]);
+  }, [result, horizonMedications, searchTerm, activeFilters, quickFilter, reviewedIds, dashboardScopeFilter]);
 
   const dashboardMedications = useMemo(() => {
     if (!result) return [];
@@ -1285,7 +1276,7 @@ const AnalysisModule: React.FC = () => {
             
             <AnalysisTable 
                 medications={filteredMedications} 
-                allMedications={result.medications}
+                allMedications={horizonMedications}
                 referenceDate={result.referenceDate} 
                 viewMode={dashboardViewMode}
                 onMedicationUpdate={handleMedicationUpdate}
