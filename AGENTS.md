@@ -242,7 +242,7 @@ justamente porque cuando estaba repetida solo se actualizó uno.
 - **Botón principal: teal** (`bg-teal-600 hover:bg-teal-700 text-white`, como «Descargar» o «Generar clave»). Nada de botones negros (`bg-slate-900`), pedido del usuario el 2026-10-03.
 - **Nunca `window.confirm` / `alert`.** Usar modal propio (`components/ui/ConfirmationDialog.tsx`) para toda acción irreversible.
 - **Móvil:** tablas → tarjetas; filtros → bottom sheet; footer sticky en modales; **el botón principal es flotante** (`FloatingActionButton`, abajo a la derecha sobre la barra de secciones; el módulo deja `pb-24` en el celular).
-- **Barras de desplazamiento ocultas en todo el sistema** (pedido del usuario, 2026-10-04; `index.css`). No añadir `scrollbar-width: thin` ni estilos de barra.
+- **Barras de desplazamiento ocultas en todo el sistema** (pedido del usuario, 2026-10-04; `index.css`). No añadir `scrollbar-width: thin` ni estilos de barra. Única excepción: la clase `scrollbar-x` (barra horizontal fina) en tablas que no entran a lo ancho, como la Matriz de Requerimiento (pedido del usuario, 2026-10-04).
 - **Letra:** Inter en todo; `font-sans` también es Inter (`tailwind.config.js`).
 - **Acentos:** cuidado con mojibake. `Catálogo`, `Código`, `Redistribución` deben renderizarse correctos en pantalla **y en PDF/Excel** (ver `services/pdfUnicodeFont.ts`).
 

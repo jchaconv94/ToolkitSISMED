@@ -944,7 +944,10 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
       )}
 
       {/* TABLE */}
-      <div className={`overflow-x-auto ${isFullScreen ? 'flex-1 overflow-y-auto bg-white p-4' : 'min-h-[400px]'}`}>
+      {/* Si la tabla no entra a lo ancho, se ve una barra de desplazamiento horizontal al
+          final (las demás barras del sistema siguen ocultas). */}
+      <div className={isFullScreen ? 'flex-1 overflow-y-auto bg-white p-4' : 'min-h-[400px]'}>
+      <div className="overflow-x-auto scrollbar-x">
         <table ref={tableRef} className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 relative z-10">
             <tr>
@@ -989,30 +992,26 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                     {item.id}
                   </td>
                   <td className="px-2 py-2 2xl:px-3 2xl:py-3 whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                        <div className="text-sm font-semibold text-gray-900 truncate max-w-[200px] sm:max-w-[300px]" title={item.name}>{item.name}</div>
-                        {item.isSporadic && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 border border-purple-200 whitespace-nowrap gap-1">
-                                <Timer className="h-3 w-3" />
-                                Baja Rotación
-                            </span>
-                        )}
-                        {item.medtip === 'M' && item.medpet === 'P' && (item.medest === 'S' || item.medest === '_') && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700 border border-indigo-200 whitespace-nowrap gap-1">
-                                Esencial
-                            </span>
-                        )}
-                        {/* CPA Selection Indicator */}
-                        {item.selectedCpaMode === 'SIMPLE' && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap">
-                                MANUAL
-                            </span>
-                        )}
-                    </div>
-                    {/* ... (Price) ... */}
-                    <div className="flex gap-2 text-xs text-gray-400 mt-0.5">
-                       <span>S/ {(item.unitPrice || 0).toFixed(2)}</span>
-                    </div>
+                    {/* Nombre y, debajo, sus marcas como texto de color (sin recuadro ni
+                        precio): así la columna es más angosta. El precio sigue en el detalle
+                        y en el Excel. */}
+                    <div className="text-sm font-semibold text-gray-900 truncate max-w-[200px] sm:max-w-[300px]" title={item.name}>{item.name}</div>
+                    {(item.isSporadic || (item.medtip === 'M' && item.medpet === 'P' && (item.medest === 'S' || item.medest === '_')) || item.selectedCpaMode === 'SIMPLE') && (
+                        <div className="mt-0.5 flex items-center gap-2.5 text-[11px] font-bold">
+                            {item.isSporadic && (
+                                <span className="inline-flex items-center gap-1 text-purple-700">
+                                    <Timer className="h-3 w-3" />
+                                    Baja Rotación
+                                </span>
+                            )}
+                            {item.medtip === 'M' && item.medpet === 'P' && (item.medest === 'S' || item.medest === '_') && (
+                                <span className="text-indigo-700">Esencial</span>
+                            )}
+                            {item.selectedCpaMode === 'SIMPLE' && (
+                                <span className="text-blue-700">Manual</span>
+                            )}
+                        </div>
+                    )}
                   </td>
 
                   {/* ... (FF, Type, Pet, Est) ... */}
@@ -1154,6 +1153,7 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
             )}
           </tbody>
         </table>
+      </div>
       </div>
 
       {/* Paginación numerada, la misma del resto del sistema (antes «1 / 3»). */}

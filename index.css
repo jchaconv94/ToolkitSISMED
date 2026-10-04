@@ -29,6 +29,36 @@ body {
   -ms-overflow-style: none;
 }
 
+/*
+ * Excepción: tablas anchas que no entran a lo ancho (Matriz de Requerimiento). Llevan una
+ * barra horizontal fina, gris y teal al pasar el mouse, para que se note que hay más
+ * columnas (pedido del usuario, 2026-10-04).
+ */
+.scrollbar-x {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+.scrollbar-x:hover {
+  scrollbar-color: #14b8a6 #f1f5f9;
+}
+.scrollbar-x::-webkit-scrollbar {
+  display: block;
+  height: 10px;
+  width: 0;
+}
+.scrollbar-x::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 999px;
+}
+.scrollbar-x::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border: 2px solid #f1f5f9;
+  border-radius: 999px;
+}
+.scrollbar-x::-webkit-scrollbar-thumb:hover {
+  background: #14b8a6;
+}
+
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
