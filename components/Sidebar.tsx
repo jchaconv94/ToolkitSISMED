@@ -16,7 +16,7 @@ interface SidebarProps {
  *
  * - La marca lleva a Inicio (no hay un ítem «Inicio» aparte).
  * - Se contrae y expande con el botón de la cabecera (`App.tsx`); siempre arranca contraído.
- * - Contraído, al pasar el mouse (o llegar con el teclado) por un ícono, este crece, brilla
+ * - Contraído, al pasar el mouse (o llegar con el teclado) por un ícono, este crece
  *   y se estira en una pastilla teal con el nombre, como los botones de acción de Análisis.
  *   La pastilla va en un portal porque el `<nav>` recorta lo que sale por su borde; se puede
  *   tocar (lleva al módulo) y se queda mientras el mouse está encima (WCAG 1.4.13).
@@ -162,7 +162,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           onClick={() => go(pill.item.module)}
           onMouseLeave={hidePill}
           className={`fixed z-[100003] flex items-center overflow-hidden rounded-xl bg-teal-500 text-white transition-[box-shadow,transform] duration-300 ease-out motion-reduce:transition-none ${
-            pillOpen ? 'scale-105 shadow-[0_0_0_1px_rgba(94,234,212,0.45),0_0_22px_4px_rgba(20,184,166,0.55)]' : 'scale-100 shadow-none'
+            pillOpen ? 'scale-105 shadow-lg shadow-black/30' : 'scale-100 shadow-none'
           }`}
           style={{ top: pill.top, left: pill.left, height: pill.size, transformOrigin: 'left center' }}
         >
