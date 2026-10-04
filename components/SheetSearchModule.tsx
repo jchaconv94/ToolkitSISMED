@@ -132,12 +132,12 @@ import {
 } from "./DeficiencyCaptureModal";
 import { noticeSettingsApi } from "../services/noticeSettings";
 import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
-import { getExpirationState } from "../services/assignedIpressStock";
+import { getExpirationState, parseExpiryDate } from "../services/assignedIpressStock";
 import { KpiCard, KpiStrip, StatusChip } from "./ui/kit";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
 import type { StockSearchScope } from "./StockNetworkSearchModal";
 import { TablePagination } from "./ui/TablePagination";
-import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead } from "./ui/FloatingTableHead";
+import { FloatingTableHead, SortHeadButton, headAlignClass, nextSort, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type SortDir } from "./ui/FloatingTableHead";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
 import { BottomSheet } from "./ui/BottomSheet";
@@ -4252,26 +4252,65 @@ function processSheet(sheet) {
   // Lotes de la hoja: páginas numeradas en escritorio, lista que crece al bajar en el celular.
   const DATA_PAGE_SIZE = 50;
   const [dataPage, setDataPage] = useState(1);
-  useEffect(() => { setDataPage(1); }, [filteredData]);
-  const dataPageRows = filteredData.slice((dataPage - 1) * DATA_PAGE_SIZE, dataPage * DATA_PAGE_SIZE);
+
+  // Escritorio: orden por columna al tocar su título, como en la tabla de establecimientos.
+  // Sin orden elegido, el de siempre de la hoja.
+  type DataSortKey = "ipress" | "codigo" | "producto" | "saldo" | "lote" | "tipsum" | "ffinan";
+  const [dataSort, setDataSort] = useState<{ key: DataSortKey; dir: SortDir } | null>(null);
+  useEffect(() => { setDataSort(null); }, [selectedSourceId]);
+  const sortedData = useMemo(() => {
+    if (!dataSort) return filteredData;
+    const valueOf = (row: any): string | number => {
+      switch (dataSort.key) {
+        case "ipress": return readAlmCode(row);
+        case "codigo": return String(row.ID_Producto ?? "");
+        case "producto": return String(row.Nombre ?? "");
+        case "saldo": { const n = parseFloat(String(row.Saldo)); return isNaN(n) ? 0 : n; }
+        case "lote": return parseExpiryDate(row.Fec_Vencim)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        case "tipsum": return String(row.TIPSUM || row.DESC_TIPSUM || "");
+        case "ffinan": return String(row.FFINAN || row.DESC_FFINAN || "");
+      }
+    };
+    const mult = dataSort.dir === "asc" ? 1 : -1;
+    return [...filteredData].sort((a, b) => {
+      const va = valueOf(a);
+      const vb = valueOf(b);
+      const diff = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb), "es", { numeric: true });
+      return diff * mult;
+    });
+  }, [filteredData, dataSort]);
+  useEffect(() => { setDataPage(1); }, [filteredData, dataSort]);
+  const dataPageRows = sortedData.slice((dataPage - 1) * DATA_PAGE_SIZE, dataPage * DATA_PAGE_SIZE);
   const dataMobileList = useIncrementalCount(filteredData.length, filteredData, 50);
 
   // Escritorio: títulos de la tabla de lotes; se dibujan en la tabla y en el encabezado que
   // se pega arriba al bajar (el mismo de la tabla de establecimientos).
-  const dataHeadCells = useMemo(
-    () =>
-      [
-        ...(showsPharmacyInData ? [{ key: "ipress", content: "Código IPRESS" }] : []),
-        { key: "codigo", content: "Cód. SISMED / SIGA" },
-        { key: "producto", content: "Descripción del producto" },
-        { key: "saldo", content: "Saldo", align: "right" as const },
-        { key: "lote", content: "Lote / Vencimiento" },
-        { key: "tipsum", content: "Tipo sum." },
-        { key: "ffinan", content: "F. finan." },
-      ].map((cell, index) => ({ ...cell, index })),
-    [showsPharmacyInData],
-  );
-  const { tableRef: dataTableRef, floating: dataHeadFloating } = useFloatingTableHead([viewLevel, dataPage, dataPageRows.length, showsPharmacyInData]);
+  const dataHeadCells = useMemo(() => {
+    // Saldo empieza de mayor a menor; el vencimiento, del más próximo; el resto, de la A a la Z.
+    const columns: Array<{ key: DataSortKey; label: string; align?: "right"; firstDir: SortDir }> = [
+      ...(showsPharmacyInData ? [{ key: "ipress" as const, label: "Código IPRESS", firstDir: "asc" as const }] : []),
+      { key: "codigo", label: "Cód. SISMED / SIGA", firstDir: "asc" },
+      { key: "producto", label: "Descripción del producto", firstDir: "asc" },
+      { key: "saldo", label: "Saldo", align: "right", firstDir: "desc" },
+      { key: "lote", label: "Lote / Vencimiento", firstDir: "asc" },
+      { key: "tipsum", label: "Tipo sum.", firstDir: "asc" },
+      { key: "ffinan", label: "F. finan.", firstDir: "asc" },
+    ];
+    return columns.map((col, index) => ({
+      key: col.key,
+      index,
+      align: col.align,
+      dir: dataSort?.key === col.key ? dataSort.dir : null,
+      content: (
+        <SortHeadButton
+          label={col.label}
+          dir={dataSort?.key === col.key ? dataSort.dir : null}
+          onClick={() => setDataSort((current) => nextSort(current, col.key, col.firstDir))}
+        />
+      ),
+    }));
+  }, [showsPharmacyInData, dataSort]);
+  const { tableRef: dataTableRef, floating: dataHeadFloating } = useFloatingTableHead([viewLevel, dataPage, dataPageRows.length, showsPharmacyInData, dataSort]);
 
   const availableTipsums = useMemo(() => {
     const currentData = selectedSourceId
@@ -7146,6 +7185,7 @@ function processSheet(sheet) {
                                   <th
                                     key={cell.key}
                                     scope="col"
+                                    aria-sort={cell.dir === "asc" ? "ascending" : cell.dir === "desc" ? "descending" : "none"}
                                     className={`px-4 py-3 ${tableHeadCellClass} ${tableHeadTextClass} ${headAlignClass(cell.align)} ${i === 0 ? "rounded-tl-2xl" : ""} ${i === dataHeadCells.length - 1 ? "rounded-tr-2xl" : ""}`}
                                   >
                                     {cell.content}
