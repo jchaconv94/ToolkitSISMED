@@ -1117,38 +1117,12 @@ export const InputSection: React.FC<InputSectionProps> = ({
       {/* Item Preview */}
       {items.length > 0 && !hasAnalyzedData && (
         <div className="space-y-4 mt-4 pt-4 border-t border-dashed border-gray-200 animate-in fade-in duration-500">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center max-w-5xl mx-auto px-1 gap-4">
-            <div className="space-y-1.5 text-left">
-              <h3 className="text-sm font-black text-gray-700 uppercase tracking-wide flex flex-wrap items-center gap-2">
-                <span>Items Cargados ({items.length})</span>
-                <span className="text-xs font-semibold bg-gray-100 text-gray-500 px-2.5 py-0.5 rounded-full normal-case whitespace-nowrap border border-gray-200">
-                  Corte: {referenceDate}
-                </span>
-              </h3>
-              {(displayCodEess || displayEstablishmentName || displayMicrored) && (
-                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                  {(displayCodEess || displayEstablishmentName) && (
-                    <span className="text-[10px] font-extrabold text-teal-850 bg-teal-50 border border-teal-150 px-2 py-0.5 rounded uppercase flex items-center gap-1">
-                      <span>
-                        {displayCodEess ? `${displayCodEess} - ` : ''}
-                        {displayEstablishmentName ? displayEstablishmentName.toUpperCase() : 'ESTABLECIMIENTO'}
-                      </span>
-                    </span>
-                  )}
-                  {displayMicrored && (
-                    <span className="text-[10px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-150 px-2 py-0.5 rounded uppercase">
-                      MR: {displayMicrored}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            <button 
-              onClick={handleClearClick}
-              className="text-xs text-red-600 hover:text-red-800 flex items-center gap-1 bg-red-50 px-3 py-2 rounded hover:bg-red-100 transition-colors w-full sm:w-auto justify-center border border-red-100"
-            >
-              <Trash2 className="h-3 w-3" /> Limpiar Todo
-            </button>
+          {/* Solo el título: el establecimiento, la microred, el corte y «Limpiar todo» ya
+              están en la franja de arriba. */}
+          <div className="max-w-5xl mx-auto px-1 text-left">
+            <h3 className="text-sm font-black text-gray-700 uppercase tracking-wide">
+              Items Cargados ({items.length})
+            </h3>
           </div>
           
           {/* Scrollable Table Container for Mobile */}
