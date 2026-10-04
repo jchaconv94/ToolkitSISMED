@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { BrandMark } from './ui/BrandLogo';
 import { PinLogin } from './PinLogin';
+import { FingerprintLogin } from './FingerprintLogin';
 import { isDesktopPointer, readStoredDevice, type StoredDevice } from '../services/deviceAccess';
 
 /** Solo se recuerda el usuario. La contraseña nunca se guarda en el navegador. */
@@ -60,10 +61,12 @@ export const LoginScreen: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const usuarioRef = useRef<HTMLInputElement>(null);
   const claveRef = useRef<HTMLInputElement>(null);
-  // Con un PIN activado en esta PC se empieza por el PIN.
+  // Con acceso rápido activado se empieza por él: el PIN en la PC, la huella en el celular.
   const [pinDevice, setPinDevice] = useState<StoredDevice | null>(() => {
     const guardado = readStoredDevice();
-    return guardado?.kind === 'pin' && isDesktopPointer() ? guardado : null;
+    if (!guardado) return null;
+    const desktop = isDesktopPointer();
+    return (guardado.kind === 'pin' && desktop) || (guardado.kind === 'huella' && !desktop) ? guardado : null;
   });
 
   const usarContrasena = (mensaje?: string) => {
@@ -229,7 +232,9 @@ export const LoginScreen: React.FC = () => {
       <main className="relative -mt-16 flex flex-1 flex-col items-center justify-center gap-6 px-4 pb-8 sm:px-6 lg:mt-0 lg:py-14">
         <div className="w-full max-w-[440px] rounded-3xl bg-white px-6 py-8 shadow-[0_1px_2px_rgba(16,32,30,0.06),0_24px_60px_rgba(16,32,30,0.10)] sm:px-10 sm:py-11">
           {pinDevice ? (
-            <PinLogin device={pinDevice} onUsePassword={usarContrasena} />
+            pinDevice.kind === 'huella'
+              ? <FingerprintLogin device={pinDevice} onUsePassword={usarContrasena} />
+              : <PinLogin device={pinDevice} onUsePassword={usarContrasena} />
           ) : (
           <>
           <div className="mb-7 flex flex-col gap-2">

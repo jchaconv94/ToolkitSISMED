@@ -40,6 +40,14 @@ describe("equipo guardado", () => {
     expect(readStoredDevice(store)).toBeNull();
   });
 
+  it("la huella exige la credencial del lector", () => {
+    const store = memoria();
+    store.setItem("toolkit_acceso_rapido", JSON.stringify({ ...equipo, kind: "huella" }));
+    expect(readStoredDevice(store)).toBeNull();
+    store.setItem("toolkit_acceso_rapido", JSON.stringify({ ...equipo, kind: "huella", credentialId: "abc" }));
+    expect(readStoredDevice(store)?.credentialId).toBe("abc");
+  });
+
   it("sin nombre para saludar usa el usuario", () => {
     const store = memoria();
     store.setItem("toolkit_acceso_rapido", JSON.stringify({ ...equipo, displayName: "" }));
