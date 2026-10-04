@@ -8,11 +8,11 @@ import {
   RotateCcw,
   Save,
   Search,
-  SlidersHorizontal,
   Sparkles,
-  Table2,
 } from "lucide-react";
 import { api } from "../services/api";
+import { FloatingActionButton } from "./ui/FloatingActionButton";
+import { tableHeadCellClass, tableHeadTextClass } from "./ui/FloatingTableHead";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
 import { listUngetSheets, type UngetSheet } from "../services/ungetSheetCatalog";
@@ -29,6 +29,8 @@ interface OpcionDeSelector {
   label: string;
   /** Distintivo al margen del nombre. Se pinta como chip y solo dentro de la lista. */
   hint?: string;
+  /** Segunda línea, más tenue (la UNGET del establecimiento). También se busca. */
+  sub?: string;
 }
 
 const SearchableSelect = ({
@@ -37,12 +39,14 @@ const SearchableSelect = ({
   options,
   disabled,
   placeholder,
+  searchPlaceholder = "Buscar...",
 }: {
   value: string;
   onChange: (value: string) => void;
   options: OpcionDeSelector[];
   disabled?: boolean;
   placeholder: string;
+  searchPlaceholder?: string;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -58,9 +62,11 @@ const SearchableSelect = ({
 
   const consulta = searchQuery.trim().toLocaleLowerCase("es");
   const filteredOptions = options.filter(o =>
-    `${o.label} ${o.hint || ""}`.toLocaleLowerCase("es").includes(consulta),
+    `${o.label} ${o.hint || ""} ${o.sub || ""}`.toLocaleLowerCase("es").includes(consulta),
   );
   const selectedOption = options.find(o => o.value === value);
+  // Con muchos establecimientos la lista se corta: se muestran los primeros y se pide afinar.
+  const MAX_OPCIONES = 80;
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -86,7 +92,7 @@ const SearchableSelect = ({
               <input
                 type="text"
                 autoFocus
-                placeholder="Buscar..."
+                placeholder={searchPlaceholder}
                 className="w-full rounded-lg bg-slate-50 py-2 pl-8 pr-2 text-sm outline-none placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-teal-100"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
@@ -98,7 +104,7 @@ const SearchableSelect = ({
             {filteredOptions.length === 0 ? (
               <div className="p-4 text-center text-sm text-slate-400">No se encontraron resultados</div>
             ) : (
-              filteredOptions.map(opt => (
+              filteredOptions.slice(0, MAX_OPCIONES).map(opt => (
                 <div
                   key={opt.value}
                   className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
@@ -110,7 +116,10 @@ const SearchableSelect = ({
                     setSearchQuery("");
                   }}
                 >
-                  <span className="truncate">{opt.label}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate">{opt.label}</span>
+                    {opt.sub && <span className="block truncate text-[11px] font-medium text-slate-400">{opt.sub}</span>}
+                  </span>
                   {opt.hint && (
                     <span className="shrink-0 rounded-md border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
                       {opt.hint}
@@ -118,6 +127,11 @@ const SearchableSelect = ({
                   )}
                 </div>
               ))
+            )}
+            {filteredOptions.length > MAX_OPCIONES && (
+              <p className="px-3 py-2 text-center text-[11px] text-slate-400">
+                Y {filteredOptions.length - MAX_OPCIONES} más: escriba para afinar la búsqueda.
+              </p>
             )}
           </div>
         </div>
@@ -127,12 +141,14 @@ const SearchableSelect = ({
 };
 
 /** Rótulo numerado de cada paso, para que el orden se lea de un vistazo. */
-const Paso = ({ numero, titulo, children }: { numero: number; titulo: string; children?: React.ReactNode }) => (
+const Paso = ({ numero, titulo, children }: { numero?: number; titulo: string; children?: React.ReactNode }) => (
   <div className="flex flex-wrap items-center justify-between gap-2">
     <div className="flex items-center gap-2">
-      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-900 text-[10px] font-black text-white">
-        {numero}
-      </span>
+      {numero !== undefined && (
+        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-600 text-[10px] font-black text-white">
+          {numero}
+        </span>
+      )}
       <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">{titulo}</span>
     </div>
     {children}
@@ -203,6 +219,8 @@ export const AdminStockAssignmentModule: React.FC = () => {
 
   // Form State
   const [selectedFacilityCode, setSelectedFacilityCode] = useState("");
+  /** Filtro de UNGET de quien supervisa varias: "" = todas las que ve. */
+  const [ungetFilter, setUngetFilter] = useState("");
   const [selectedConnectionUrl, setSelectedConnectionUrl] = useState(""); // This is the Google App Script URL
   const [availableSheets, setAvailableSheets] = useState<UngetSheet[]>([]);
   const [loadingSheets, setLoadingSheets] = useState(false);
@@ -352,13 +370,35 @@ export const AdminStockAssignmentModule: React.FC = () => {
     }
   };
 
-  const handleConnectionChange = async (url: string) => {
+  /** La conexión de stock de una UNGET (una por UNGET, ver AGENTS.md §7 bis). */
+  const conexionDeLaUnget = (ungetId: unknown) =>
+    ungetConfigs.find((c: any) => c.ungetId && String(c.ungetId) === String(ungetId || "")) || null;
+
+  /**
+   * Se elige el establecimiento con un solo buscador; su UNGET, y por tanto la conexión de
+   * la que salen las hojas, se deduce sola. Las hojas solo se vuelven a leer si cambia la
+   * conexión.
+   */
+  const handleUngetFilterChange = (ungetId: string) => {
+    setUngetFilter(ungetId);
+    // El establecimiento elegido es de otra UNGET: se quita para no guardar donde no se ve.
+    const establecimiento = facilities.find((f: any) => f.code === selectedFacilityCode);
+    if (ungetId && establecimiento && String(establecimiento.ungetId || "") !== ungetId) {
+      setSelectedFacilityCode("");
+    }
+  };
+
+  const handleFacilityChange = (code: string) => {
+    setSelectedFacilityCode(code);
+    const establecimiento = facilities.find((f: any) => f.code === code);
+    const conexion = conexionDeLaUnget(establecimiento?.ungetId);
+    const url = conexion?.url || "";
+    if (url !== selectedConnectionUrl) void loadSheetsFor(url);
+  };
+
+  const loadSheetsFor = async (url: string) => {
     setSelectedConnectionUrl(url);
     setAvailableSheets([]);
-    // El establecimiento elegido pertenecía a la UNGET anterior: dejarlo puesto mostraría
-    // un vínculo que no es el suyo.
-    setSelectedFacilityCode("");
-    setVisibleColumns(DEFAULT_STOCK_COLUMN_KEYS);
     if (!url) return;
 
     setLoadingSheets(true);
@@ -448,10 +488,13 @@ export const AdminStockAssignmentModule: React.FC = () => {
     // el desplegable se filtraba únicamente por la jurisdicción de quien asigna, así que un
     // administrador podía colgar una IPRESS de Tocache de una hoja de Bellavista, y ese
     // usuario acababa viendo el stock de otro establecimiento.
-    const ungetDeLaConexion = String(conexionSeleccionada?.ungetId || "").trim();
+    // Un solo buscador: se ofrecen los establecimientos del ámbito de quien asigna cuya UNGET
+    // tiene conexión de stock. La conexión se deduce de la UNGET al elegir, así que ya no se
+    // puede colgar una IPRESS de la hoja de otra UNGET.
     return facilities
       .filter(f => {
-        if (ungetDeLaConexion && String(f.ungetId || "") !== ungetDeLaConexion) return false;
+        if (!conexionDeLaUnget(f.ungetId)) return false;
+        if (ungetFilter && String(f.ungetId || "") !== ungetFilter) return false;
 
         // Filtrar por ámbito/nivel de jurisdicción del usuario
         if (level === 'GLOBAL') return true;
@@ -474,8 +517,16 @@ export const AdminStockAssignmentModule: React.FC = () => {
         value: f.code,
         label: `${f.name} (${f.code})`,
         hint: conColumnasPropias.has(f.code) ? "propias" : undefined,
+        sub: conexionDeLaUnget(f.ungetId)?.name,
       }));
-  }, [facilities, conexionSeleccionada, conColumnasPropias, roles, currentUser]);
+  }, [facilities, ungetConfigs, ungetFilter, conColumnasPropias, roles, currentUser]);
+
+  // El filtro de UNGET solo lo ve quien supervisa varias. Al informático de una UNGET ya se
+  // le acota por su ámbito: el filtro no tendría nada que elegir.
+  const nivel = getJurisdictionLevel();
+  const conFiltroDeUnget = (nivel === "GLOBAL" || nivel === "DIRESA" || nivel === "OGESS") && ungetConfigs.length > 1;
+  const pasoEstablecimiento = conFiltroDeUnget ? 2 : 1;
+  const pasoColumnas = pasoEstablecimiento + 2;
 
   if (isLoading) {
     return (
@@ -488,36 +539,16 @@ export const AdminStockAssignmentModule: React.FC = () => {
   const sinConexiones = ungetConfigs.length === 0;
 
   return (
-    <div className="space-y-5 animate-in fade-in duration-300">
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="rounded-2xl bg-teal-50 p-3 text-teal-700"><SlidersHorizontal className="h-6 w-6" /></div>
-            <div>
-              <h2 className="text-xl font-black text-slate-900">Columnas visibles del stock</h2>
-              <p className="mt-1 max-w-2xl text-sm text-slate-500">
-                La hoja de cada establecimiento se reconoce sola por su código. Aquí solo se decide
-                qué columnas podrá consultar en “Stock SISMED”.
-              </p>
-            </div>
-          </div>
-          {selectedFacilityCode && (
-            <div className="flex shrink-0 items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-4 py-2.5">
-              <Table2 className="h-4 w-4 text-teal-600" />
-              <span className="text-sm font-black text-slate-900">{visibleColumns.length}</span>
-              <span className="text-xs font-bold text-slate-500">de {STOCK_COLUMNS.length} columnas</span>
-            </div>
-          )}
-        </div>
-      </section>
-
+    // Mismos márgenes que Consulta Stock. Sin tarjeta de cabecera: el título ya va en la barra
+    // superior. En el celular se deja sitio abajo para el botón flotante de guardar.
+    <div className="space-y-5 px-0 pb-24 animate-in fade-in duration-300 sm:px-10 sm:pb-6 sm:pt-6 lg:px-14 xl:px-16">
       {sinConexiones ? (
         <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
           <Sparkles className="mx-auto h-9 w-9 text-amber-600" />
           <h3 className="mt-3 font-black text-amber-950">No hay conexiones de stock disponibles</h3>
           <p className="mx-auto mt-1 max-w-xl text-sm leading-6 text-amber-800">
             Primero vaya a “Consulta Stock” y guarde la conexión de su UNGET. En cuanto exista,
-            aparecerá aquí para poder elegir sus establecimientos.
+            sus establecimientos aparecerán aquí.
           </p>
         </section>
       ) : (
@@ -527,45 +558,58 @@ export const AdminStockAssignmentModule: React.FC = () => {
            se llevaba una banda entera al final, con la mitad derecha en blanco. */
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]">
           <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="space-y-2">
-              <Paso numero={1} titulo="UNGET / Conexión" />
-              <SearchableSelect
-                value={selectedConnectionUrl}
-                onChange={handleConnectionChange}
-                placeholder="Seleccionar conexión..."
-                options={ungetConfigs.map(c => ({ value: c.url, label: c.name }))}
-              />
-            </div>
+            {conFiltroDeUnget && (
+              <div className="space-y-2">
+                <Paso numero={1} titulo="UNGET" />
+                <SearchableSelect
+                  value={ungetFilter}
+                  onChange={handleUngetFilterChange}
+                  placeholder="Todas las UNGET"
+                  searchPlaceholder="Buscar UNGET..."
+                  options={[
+                    { value: "", label: "Todas las UNGET" },
+                    ...ungetConfigs
+                      .filter((c: any) => c.ungetId)
+                      .map((c: any) => ({ value: String(c.ungetId), label: c.name }))
+                      .sort((x, y) => x.label.localeCompare(y.label, "es")),
+                  ]}
+                />
+              </div>
+            )}
 
             <div className="space-y-2">
-              <Paso numero={2} titulo="Establecimiento de salud" />
-              {/* Sin indicador de carga: los establecimientos ya están en memoria desde
-                  que se abrió el módulo. Lo que tarda es leer las hojas, y eso lo
-                  informa el paso 3. */}
+              <Paso numero={pasoEstablecimiento} titulo="Establecimiento de salud" />
+              {/* Los establecimientos ya están en memoria desde que se abrió el módulo; lo que
+                  tarda es leer las hojas de su UNGET, y eso lo informa el paso 2. */}
               <SearchableSelect
                 value={selectedFacilityCode}
-                onChange={setSelectedFacilityCode}
-                placeholder={selectedConnectionUrl ? "Seleccionar establecimiento..." : "Elija antes una conexión"}
-                disabled={!selectedConnectionUrl}
+                onChange={handleFacilityChange}
+                placeholder="Buscar establecimiento..."
+                searchPlaceholder="Buscar por nombre, código o UNGET..."
                 options={opcionesDeEstablecimiento}
               />
+              {conexionSeleccionada && selectedFacilityCode && !ungetFilter && (
+                <p className="text-[11px] text-slate-400">
+                  UNGET: <span className="font-bold text-slate-500">{conexionSeleccionada.name}</span>
+                </p>
+              )}
             </div>
 
             {/* La hoja no se elige: se deduce del código del establecimiento. */}
             <div className="space-y-2">
-              <Paso numero={3} titulo="Hoja vinculada">
+              <Paso numero={pasoEstablecimiento + 1} titulo="Hoja vinculada">
                 <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
                   Automática
                 </span>
               </Paso>
               {!selectedFacilityCode ? (
                 <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-3.5 text-sm text-slate-500">
-                  Elija una conexión y un establecimiento: su hoja se reconoce sola por el código.
+                  Elija un establecimiento: su hoja se reconoce sola por el código.
                 </div>
               ) : loadingSheets ? (
                 <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm font-semibold text-slate-500">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-teal-500 border-t-transparent" />
-                  Leyendo las hojas de la conexión...
+                  Leyendo las hojas de su UNGET...
                 </div>
               ) : (
                 <div
@@ -594,8 +638,11 @@ export const AdminStockAssignmentModule: React.FC = () => {
 
           <section className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex-1 space-y-2.5 p-5">
-              <Paso numero={4} titulo="Columnas que verá el establecimiento">
+              <Paso numero={pasoColumnas} titulo="Columnas que verá el establecimiento">
                 <div className="flex items-center gap-1">
+                  <span className="mr-2 rounded-md bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-700">
+                    {visibleColumns.length} de {STOCK_COLUMNS.length}
+                  </span>
                   <button
                     type="button"
                     onClick={() => setVisibleColumns(STOCK_COLUMNS.map(c => c.key))}
@@ -644,13 +691,14 @@ export const AdminStockAssignmentModule: React.FC = () => {
                       }`}>
                         {marcada && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
                       </span>
-                      <span className={`truncate text-[13px] font-bold ${marcada ? "text-teal-900" : "text-slate-600"}`}>
+                      <span className={`text-[13px] font-bold leading-tight ${marcada ? "text-teal-900" : "text-slate-600"}`}>
                         {col.label}
                       </span>
                     </button>
                   );
                 })}
               </div>
+
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-4">
@@ -680,7 +728,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
                   type="button"
                   onClick={() => guardarColumnas(visibleColumns)}
                   disabled={isSaving || !selectedFacilityCode || !selectedConnectionUrl || visibleColumns.length === 0}
-                  className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="hidden items-center gap-2 rounded-xl bg-teal-600 md:inline-flex px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isSaving
                     ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
@@ -690,7 +738,52 @@ export const AdminStockAssignmentModule: React.FC = () => {
               </div>
             </div>
           </section>
+
+          {/* Vista previa: los encabezados tal como los verá el establecimiento en Stock
+              SISMED, en el mismo orden (el de la hoja). */}
+          <section className="space-y-2.5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
+            <Paso titulo="Vista previa en Stock SISMED" />
+            {visibleColumns.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-3.5 text-sm text-slate-500">
+                Sin columnas: marque al menos una.
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="min-w-full text-left">
+                  <thead>
+                    <tr>
+                      {STOCK_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(col => (
+                        <th key={col.key} className={`whitespace-nowrap px-3 py-2.5 ${tableHeadCellClass} ${tableHeadTextClass}`}>
+                          {col.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {[0, 1].map(fila => (
+                      <tr key={fila}>
+                        {STOCK_COLUMNS.filter(col => visibleColumns.includes(col.key)).map((col, i) => (
+                          <td key={col.key} className="px-3 py-2.5">
+                            <span className={`block h-2.5 rounded-full bg-slate-100 ${i % 3 === 0 ? "w-16" : i % 3 === 1 ? "w-24" : "w-12"}`} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </div>
+      )}
+
+      {!sinConexiones && (
+        <FloatingActionButton
+          icon={isSaving ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <Save />}
+          label="Guardar columnas"
+          onClick={() => guardarColumnas(visibleColumns)}
+          disabled={isSaving || !selectedFacilityCode || !selectedConnectionUrl || visibleColumns.length === 0}
+        />
       )}
     </div>
   );
