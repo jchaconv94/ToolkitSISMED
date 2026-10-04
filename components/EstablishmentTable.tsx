@@ -56,12 +56,15 @@ export const EstablishmentSyncPanel: React.FC<{
   online: number;
   delayed: number;
   offline: number;
-  active: SyncFilter;
-  onSelect: (filter: SyncFilter) => void;
-}> = ({ total, online, delayed, offline, active, onSelect }) => {
+  active?: SyncFilter;
+  /** Sin `onSelect` las cajas solo informan (panel regional: no hay lista que filtrar). */
+  onSelect?: (filter: SyncFilter) => void;
+  totalHint?: string;
+}> = ({ total, online, delayed, offline, active = "all", onSelect, totalHint = "establecimientos a la vista" }) => {
   const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
   const alDia = Math.round(pct(online));
-  const pick = (filter: SyncFilter) => onSelect(active === filter ? "all" : filter);
+  const select = onSelect ? (filter: SyncFilter) => () => onSelect(filter === "all" || active === filter ? "all" : filter) : () => undefined;
+  const isActive = (filter: SyncFilter) => Boolean(onSelect) && active === filter;
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -84,10 +87,10 @@ export const EstablishmentSyncPanel: React.FC<{
 
       <div className="mt-4">
         <KpiStrip cols="md:grid-cols-4">
-          <KpiCard watermark tone="info" icon={<Building2 />} label="Todos" value={total} hint="establecimientos a la vista" onClick={() => onSelect("all")} active={active === "all"} />
-          <KpiCard watermark tone="success" icon={<Wifi />} label="Al día" value={online} hint="actualizados en la última hora" onClick={() => pick("al-dia")} active={active === "al-dia"} />
-          <KpiCard watermark tone="warning" icon={<FileClock />} label="Con retraso" value={delayed} hint="entre 1 y 24 horas sin actualizar" onClick={() => pick("retraso")} active={active === "retraso"} />
-          <KpiCard watermark tone="danger" icon={<WifiOff />} label="Sin actualizar" value={offline} hint="más de un día o sin datos" onClick={() => pick("sin-actualizar")} active={active === "sin-actualizar"} />
+          <KpiCard watermark tone="info" icon={<Building2 />} label="Todos" value={total} hint={totalHint} onClick={onSelect && select("all")} active={isActive("all")} />
+          <KpiCard watermark tone="success" icon={<Wifi />} label="Al día" value={online} hint="actualizados en la última hora" onClick={onSelect && select("al-dia")} active={isActive("al-dia")} />
+          <KpiCard watermark tone="warning" icon={<FileClock />} label="Con retraso" value={delayed} hint="entre 1 y 24 horas sin actualizar" onClick={onSelect && select("retraso")} active={isActive("retraso")} />
+          <KpiCard watermark tone="danger" icon={<WifiOff />} label="Sin actualizar" value={offline} hint="más de un día o sin datos" onClick={onSelect && select("sin-actualizar")} active={isActive("sin-actualizar")} />
         </KpiStrip>
       </div>
     </section>
