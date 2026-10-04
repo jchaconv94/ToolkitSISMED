@@ -2,7 +2,18 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AppModule } from '../types';
 import { BrandLogo, BrandMark } from './ui/BrandLogo';
-import { NavItem, visibleNavSections } from './navigation';
+import { NavItem, NavSection, NavTint, visibleNavSections } from './navigation';
+
+/**
+ * Color de cada sección en el lateral oscuro (el mismo tinte que en Inicio). Clases escritas
+ * enteras para que Tailwind las encuentre al compilar.
+ */
+const DARK_TINT: Record<NavTint, { label: string; dot: string; tile: string; tileHover: string }> = {
+  teal: { label: 'text-teal-300', dot: 'bg-teal-400', tile: 'bg-teal-400/15 text-teal-300', tileHover: 'group-hover:bg-teal-400/25' },
+  cyan: { label: 'text-cyan-300', dot: 'bg-cyan-400', tile: 'bg-cyan-400/15 text-cyan-300', tileHover: 'group-hover:bg-cyan-400/25' },
+  violet: { label: 'text-violet-300', dot: 'bg-violet-400', tile: 'bg-violet-400/15 text-violet-300', tileHover: 'group-hover:bg-violet-400/25' },
+  slate: { label: 'text-slate-300', dot: 'bg-slate-400', tile: 'bg-slate-400/15 text-slate-300', tileHover: 'group-hover:bg-slate-400/25' },
+};
 
 interface SidebarProps {
   currentView: AppModule;
@@ -15,6 +26,8 @@ interface SidebarProps {
  * Lateral de escritorio: las secciones de `navigation.ts`, planas y sin acordeones.
  *
  * - La marca lleva a Inicio (no hay un ítem «Inicio» aparte).
+ * - Expandido, cada sección lleva su color (punto en el título y cuadrito del ícono) y el
+ *   módulo abierto es una pastilla teal sólida, la misma del menú contraído.
  * - Se contrae y expande con el botón de la cabecera (`App.tsx`); siempre arranca contraído.
  * - Contraído, al pasar el mouse (o llegar con el teclado) por un ícono, este crece
  *   y se estira en una pastilla teal con el nombre, como los botones de acción de Análisis.
@@ -69,7 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCurrentView(module);
   };
 
-  const renderItem = (item: NavItem) => {
+  const renderItem = (item: NavItem, section: NavSection) => {
     const active = currentView === item.module;
     const Icon = item.icon;
     if (isCollapsed) {
@@ -97,12 +110,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         type="button"
         onClick={() => go(item.module)}
         aria-current={active ? 'page' : undefined}
-        className={`flex h-9 w-full items-center gap-3 rounded-xl px-3 text-left text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 ${
-          active ? 'bg-teal-500/15 text-teal-300' : 'text-slate-300 hover:bg-white/5 hover:text-white'
+        className={`group flex h-10 w-full items-center gap-3 rounded-xl px-1.5 text-left text-[13.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 ${
+          active ? 'bg-teal-500 font-bold text-white shadow-md shadow-black/20' : 'font-medium text-slate-300 hover:bg-white/10 hover:text-white'
         }`}
       >
-        <Icon className="h-[18px] w-[18px] shrink-0" />
-        <span className="truncate">{item.label}</span>
+        <span
+          className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg transition motion-reduce:transition-none ${
+            active ? 'bg-white/20 text-white' : `${DARK_TINT[section.tint].tile} ${DARK_TINT[section.tint].tileHover} group-hover:translate-x-0.5`
+          }`}
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+        <span className={`truncate transition-transform motion-reduce:transition-none ${active ? '' : 'group-hover:translate-x-0.5'}`}>{item.label}</span>
       </button>
     );
   };
@@ -111,27 +130,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      className={`relative z-[100002] flex h-full shrink-0 flex-col bg-slate-900 py-4 transition-[width] duration-300 ${
+      className={`relative z-[100002] flex h-full shrink-0 flex-col bg-slate-900 transition-[width] duration-300 ${
         isCollapsed ? 'w-[76px]' : 'w-[260px]'
       }`}
     >
-      {/* Marca: lleva a Inicio */}
-      <button
-        type="button"
-        onClick={() => go('HOME')}
-        aria-label="Ir a Inicio"
-        title="Ir a Inicio"
-        className={`mb-5 flex h-9 shrink-0 items-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 ${
-          isCollapsed ? 'mx-auto justify-center' : 'mx-3 px-2'
-        }`}
-      >
-        {isCollapsed ? <BrandMark size={34} tone="dark" animation="hover" /> : <BrandLogo size={16} tone="dark" animation="hover" />}
-      </button>
+      {/* Marca: lleva a Inicio. A la altura de la cabecera, con la línea que la continúa. */}
+      <div className="flex h-16 shrink-0 items-center border-b border-white/10">
+        <button
+          type="button"
+          onClick={() => go('HOME')}
+          aria-label="Ir a Inicio"
+          title="Ir a Inicio"
+          className={`flex h-10 shrink-0 items-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 ${
+            isCollapsed ? 'mx-auto justify-center px-1' : 'mx-3 px-2'
+          }`}
+        >
+          {isCollapsed ? <BrandMark size={34} tone="dark" animation="hover" /> : <BrandLogo size={16} tone="dark" animation="hover" />}
+        </button>
+      </div>
 
       <nav
         ref={navRef}
         aria-label="Navegación principal"
-        className={`flex-1 overflow-y-auto overflow-x-hidden ${isCollapsed ? 'px-2' : 'px-3'}`}
+        className={`flex-1 overflow-y-auto overflow-x-hidden py-4 ${isCollapsed ? 'px-2' : 'px-3'}`}
       >
         <div className={isCollapsed ? 'space-y-3' : 'space-y-4'}>
           {sections.map((section, index) => (
@@ -146,9 +167,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               }
             >
               {!isCollapsed && (
-                <p className="px-3 pb-1 text-[10.5px] font-black uppercase tracking-widest text-slate-500">{section.label}</p>
+                <p className={`flex items-center gap-2 px-2 pb-1.5 text-[11px] font-black uppercase tracking-widest ${DARK_TINT[section.tint].label}`}>
+                  <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${DARK_TINT[section.tint].dot}`} />
+                  {section.label}
+                </p>
               )}
-              {section.items.map(renderItem)}
+              {section.items.map(item => renderItem(item, section))}
             </div>
           ))}
         </div>
