@@ -91,7 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
       )}
 
-      <nav aria-label="Navegación principal" className={`flex-1 overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [scrollbar-color:rgba(148,163,184,0.25)_transparent] ${isCollapsed ? 'px-2' : 'px-3'}`}>
+      <nav aria-label="Navegación principal" className={`flex-1 overflow-y-auto overflow-x-hidden ${isCollapsed ? 'px-2' : 'px-3'}`}>
         <div className="pb-3">{renderItem(NAV_HOME)}</div>
 
         <div className={isCollapsed ? 'space-y-3' : 'space-y-4'}>

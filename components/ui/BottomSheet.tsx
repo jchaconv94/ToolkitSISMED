@@ -23,7 +23,9 @@ export const BottomSheet: React.FC<{
   children: React.ReactNode;
   centeredOnDesktop?: boolean;
   hideTitle?: boolean;
-}> = ({ open, title, onClose, children, centeredOnDesktop = false, hideTitle = false }) => {
+  /** Solo con `centeredOnDesktop`: ventana más ancha en escritorio (detalle con dos columnas). */
+  wide?: boolean;
+}> = ({ open, title, onClose, children, centeredOnDesktop = false, hideTitle = false, wide = false }) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ startY: number; startTime: number; dy: number; active: boolean } | null>(null);
 
@@ -87,7 +89,7 @@ export const BottomSheet: React.FC<{
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
-        className={`max-h-[85vh] w-full overflow-y-auto overscroll-contain rounded-t-3xl bg-white pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl animate-in slide-in-from-bottom duration-200 ${centeredOnDesktop ? "md:max-w-xl md:rounded-2xl md:pb-5" : ""}`}
+        className={`max-h-[85vh] w-full overflow-y-auto overscroll-contain rounded-t-3xl bg-white pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl animate-in slide-in-from-bottom duration-200 ${centeredOnDesktop ? `${wide ? "md:max-w-2xl" : "md:max-w-xl"} md:rounded-2xl md:pb-5` : ""}`}
       >
         {hideTitle ? (
           // Sin título, la X va en la fila de la barrita y no ocupa una fila propia.
