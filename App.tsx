@@ -30,7 +30,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { MaintenanceScreen } from './components/MaintenanceScreen';
 import { maintenanceMessage, shouldBlockForMaintenance } from './services/maintenanceMode';
 import { AdminPanel } from './components/AdminPanel';
-import { MODULE_HEADER_SLOT_ID } from './components/ui/ModuleHeaderSlot';
+import { MODULE_FOOTER_SLOT_ID, MODULE_HEADER_SLOT_ID } from './components/ui/ModuleHeaderSlot';
 import { HomeModule } from './components/HomeModule';
 import { UserMenu } from './components/UserMenu';
 import { ToolSearchDialog, ToolSearchTrigger, useToolSearchShortcut } from './components/ToolSearch';
@@ -382,6 +382,10 @@ const AuthenticatedApp: React.FC = () => {
                         </ErrorBoundary>
                     </div>
                 </main>
+
+                {/* Pie de acciones del módulo (p. ej. «Cambios sin guardar»): fuera del área que se
+                    desplaza, para que nunca tape el final del contenido. */}
+                <div id={MODULE_FOOTER_SLOT_ID} className="shrink-0 empty:hidden" />
 
                 {/* Teléfono: barra inferior de pestañas (Inicio y una por sección). */}
                 <MobileTabBar

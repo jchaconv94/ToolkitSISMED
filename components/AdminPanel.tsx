@@ -23,6 +23,7 @@ import { BottomSheet } from './ui/BottomSheet';
 import { LoadMoreSentinel, useIncrementalCount } from './ui/IncrementalList';
 import { FloatingTableHead, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead } from './ui/FloatingTableHead';
 import { useIsDesktop } from './ui/useIsDesktop';
+import { ModuleFooterPortal } from './ui/ModuleHeaderSlot';
 import { NAV_SECTIONS } from './navigation';
 import { useModuleHeaderOverride } from '../contexts/ModuleHeaderContext';
 
@@ -1809,7 +1810,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                         const level = LEVEL_LABELS[currentRole.jurisdictionLevel || ''];
                         const unsaved = Boolean(roleOriginals[currentRole.role]);
                         return (
-                            <div className={isDesktop ? 'flex min-w-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm' : 'space-y-3 pb-24'}>
+                            <div className={isDesktop ? 'flex min-w-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm' : 'space-y-3'}>
                                 <div className={isDesktop ? 'border-b border-slate-100 p-5' : 'rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'}>
                                     <div className="flex items-start justify-between gap-3">
                                         <div className="min-w-0">
@@ -1892,14 +1893,12 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                     </div>
                                 </div>
 
-                                {/* Barra de guardado: solo con cambios pendientes */}
+                                {/* Barra de guardado, solo con cambios pendientes: va en el pie de la app,
+                                    pegada abajo y fuera del área que se desplaza, así no tapa nada. */}
                                 {unsaved && (
-                                    <div
-                                        className={isDesktop
-                                            ? 'sticky bottom-0 mt-auto flex items-center gap-3 rounded-b-2xl border-t border-slate-200 bg-white px-5 py-3'
-                                            : 'fixed inset-x-0 z-30 flex items-center gap-2 border-t border-slate-200 bg-white px-3 py-3 shadow-[0_-6px_16px_-10px_rgba(15,23,42,0.25)]'}
-                                        style={isDesktop ? undefined : { bottom: 'calc(4.5rem + env(safe-area-inset-bottom))' }}
-                                    >
+                                    <ModuleFooterPortal>
+                                    <div className="border-t border-slate-200 bg-white">
+                                    <div className="mx-auto flex max-w-[1600px] items-center gap-2 px-3 py-2.5 sm:px-5 md:gap-3 2xl:px-6">
                                         <span className="flex items-center gap-2 text-[13px] font-semibold text-amber-700">
                                             <span className="h-2 w-2 rounded-full bg-amber-500" />{isDesktop ? 'Cambios sin guardar' : 'Sin guardar'}
                                         </span>
@@ -1910,6 +1909,8 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                             <Save className="h-4 w-4" /> Guardar
                                         </button>
                                     </div>
+                                    </div>
+                                    </ModuleFooterPortal>
                                 )}
                             </div>
                         );
