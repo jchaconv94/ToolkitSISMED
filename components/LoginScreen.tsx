@@ -302,22 +302,30 @@ export const LoginScreen: React.FC = () => {
             </div>
 
             {showHelp && (
-              <div className="flex flex-col gap-3 rounded-xl bg-[#F3F6F5] px-4 py-3.5 text-sm font-medium leading-relaxed text-[#24332F] animate-in fade-in">
-                <span>
-                  Para restablecerla, escríbale al administrador del sistema,{' '}
-                  <b className="text-[#10201E]">Ing. Jordan Chacon Villacis</b>.
+              // Tarjeta de contacto: quién restablece la contraseña y un acceso discreto a
+              // WhatsApp. El número no se muestra en pantalla: va solo en el enlace.
+              <a
+                href={WHATSAPP_SOPORTE}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 transition-all hover:border-teal-300 hover:shadow-[0_8px_24px_rgba(16,32,30,0.08)] animate-in fade-in"
+              >
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#0E8C80] to-[#0B5F57] text-sm font-extrabold text-white">
+                  JC
                 </span>
-                {/* El número no se muestra en pantalla: va solo en el enlace. */}
-                <a
-                  href={WHATSAPP_SOPORTE}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-10 items-center justify-center gap-2 self-start rounded-xl bg-[#25D366] px-4 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#1EBE5A]"
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-[#7A8A87]">Restablecer contraseña</span>
+                  <span className="block truncate text-sm font-bold text-[#10201E]">Ing. Jordan Chacon Villacis</span>
+                  <span className="block text-xs font-medium text-[#4E5F5C]">Administrador del sistema</span>
+                </span>
+                <span
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-[#25D366] transition-colors group-hover:border-[#25D366] group-hover:bg-[#25D366] group-hover:text-white"
+                  aria-label="Escribir por WhatsApp"
+                  title="Escribir por WhatsApp"
                 >
-                  <WhatsAppIcon className="h-[18px] w-[18px]" />
-                  Escribir por WhatsApp
-                </a>
-              </div>
+                  <WhatsAppIcon className="h-5 w-5" />
+                </span>
+              </a>
             )}
 
             <button
