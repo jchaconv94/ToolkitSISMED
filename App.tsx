@@ -8,7 +8,8 @@ import { analyzeInventoryWithAura } from './services/auraService';
 import { generateFullReportPDF } from './services/pdfService';
 import { 
   Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network, Tag,
-  ArrowLeft, Home, UserCircle2, Search
+  ArrowLeft, Home, UserCircle2, Search,
+  PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 
 // NEW IMPORTS
@@ -162,9 +163,10 @@ const AuthenticatedApp: React.FC = () => {
         if (isAuthenticated) setBuscadorAbierto(true);
     }, [isAuthenticated]);
     useToolSearchShortcut(abrirBuscador);
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    // El lateral siempre arranca contraído (solo íconos); se expande con el botón de la cabecera.
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
     
-    const wasSidebarCollapsedRef = React.useRef(false);
+    const wasSidebarCollapsedRef = React.useRef(true);
 
     // Welcome Modal State
 
@@ -254,7 +256,6 @@ const AuthenticatedApp: React.FC = () => {
                     currentView={currentView}
                     setCurrentView={setCurrentView}
                     isCollapsed={isSidebarCollapsed}
-                    setIsCollapsed={setIsSidebarCollapsed}
                     hasPermission={hasPermission}
                 />
             </div>
@@ -289,6 +290,16 @@ const AuthenticatedApp: React.FC = () => {
                         </div>
                     )}
                     <div className={`min-w-0 items-center gap-2 ${currentView === 'HOME' ? 'hidden md:flex' : 'flex'}`}>
+                        <button
+                            type="button"
+                            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                            aria-label={isSidebarCollapsed ? 'Expandir menú' : 'Contraer menú'}
+                            title={isSidebarCollapsed ? 'Expandir menú' : 'Contraer menú'}
+                            aria-expanded={!isSidebarCollapsed}
+                            className="-ml-1.5 hidden h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 md:grid"
+                        >
+                            {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+                        </button>
                         {currentView !== 'HOME' && (
                             <button
                                 type="button"
