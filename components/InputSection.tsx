@@ -73,6 +73,47 @@ const SAMPLE_DATA: MedicationInput[] = [
   }
 ];
 
+
+const ACCION_TONES = {
+  teal: { idle: 'text-teal-700 bg-teal-50 border-teal-100', active: 'sm:group-hover:bg-teal-600 sm:group-hover:text-white sm:group-hover:border-teal-600 sm:group-focus-visible:bg-teal-600 sm:group-focus-visible:text-white sm:group-focus-visible:ring-teal-300', label: 'text-slate-600' },
+  emerald: { idle: 'text-emerald-700 bg-emerald-50 border-emerald-100', active: 'sm:group-hover:bg-emerald-600 sm:group-hover:text-white sm:group-hover:border-emerald-600 sm:group-focus-visible:bg-emerald-600 sm:group-focus-visible:text-white sm:group-focus-visible:ring-emerald-300', label: 'text-slate-600' },
+  indigo: { idle: 'text-indigo-700 bg-indigo-50 border-indigo-100', active: 'sm:group-hover:bg-indigo-600 sm:group-hover:text-white sm:group-hover:border-indigo-600 sm:group-focus-visible:bg-indigo-600 sm:group-focus-visible:text-white sm:group-focus-visible:ring-indigo-300', label: 'text-slate-600' },
+  red: { idle: 'text-red-600 bg-red-50 border-red-100', active: 'sm:group-hover:bg-red-600 sm:group-hover:text-white sm:group-hover:border-red-600 sm:group-focus-visible:bg-red-600 sm:group-focus-visible:text-white sm:group-focus-visible:ring-red-300', label: 'text-red-600' },
+} as const;
+
+/**
+ * Acción de la franja del archivo: ícono grande (44 px) que en escritorio, al pasar el mouse
+ * o llegar con Tab, se estira y muestra su texto (200 ms, sin movimiento si el equipo pide
+ * reducirlo). En el celular no hay «pasar el mouse»: el texto va siempre debajo del ícono.
+ */
+const AccionExpandible: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  tone: keyof typeof ACCION_TONES;
+  onClick: (e: React.MouseEvent) => void;
+}> = ({ icon, label, tone, onClick }) => {
+  const t = ACCION_TONES[tone];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="group flex min-w-0 flex-1 flex-col items-center gap-1 outline-none sm:flex-none"
+    >
+      <span
+        className={`flex h-11 items-center justify-center overflow-hidden rounded-xl border px-[11px] transition-all duration-200 motion-reduce:transition-none sm:group-hover:shadow-md sm:group-focus-visible:shadow-md sm:group-focus-visible:ring-2 sm:group-focus-visible:ring-offset-1 ${t.idle} ${t.active}`}
+      >
+        {icon}
+        <span className="hidden max-w-0 overflow-hidden whitespace-nowrap text-sm font-bold opacity-0 transition-all duration-200 motion-reduce:transition-none sm:inline sm:group-hover:ml-2 sm:group-hover:max-w-[200px] sm:group-hover:opacity-100 sm:group-focus-visible:ml-2 sm:group-focus-visible:max-w-[200px] sm:group-focus-visible:opacity-100">
+          {label}
+        </span>
+      </span>
+      <span className={`text-center text-[10px] font-bold leading-tight sm:hidden ${t.label}`}>{label}</span>
+    </button>
+  );
+};
+
 export const InputSection: React.FC<InputSectionProps> = ({ 
     onAnalyze, 
     onReset, 
@@ -894,65 +935,80 @@ export const InputSection: React.FC<InputSectionProps> = ({
 
       {isUploadSectionCollapsed && items.length > 0 ? (
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 pr-10 sm:pr-0">
                   <div className="bg-teal-50 p-2 rounded-lg shrink-0">
                       <FileSpreadsheet className="h-5 w-5 text-teal-600" />
                   </div>
-                  <div>
-                      <h3 className="text-sm font-bold text-gray-900">
-                          {displayEstablishmentName ? displayEstablishmentName.toUpperCase() : "Requerimiento IPRESS Cargado"}
-                      </h3>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
-                          {displayCodEess && <span className="text-[10px] text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded">CÓD: {displayCodEess}</span>}
-                          {displayCategory && <span className="text-[10px] text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded">CAT: {displayCategory}</span>}
-                          {displayMicrored && <span className="text-[10px] text-teal-850 font-bold bg-teal-100/70 px-1.5 py-0.5 rounded">MR: {displayMicrored}</span>}
-                          <span className="text-xs font-bold text-teal-600">{items.length.toLocaleString()} registros</span>
-                          <span className="text-[10px] text-gray-400">•</span>
-                          <span className="text-xs text-gray-500">Corte: <strong className="text-gray-700">{referenceDate}</strong></span>
-                          <span className="text-[10px] text-gray-400">•</span>
-                          <span className="text-[10px] text-green-600 font-medium flex items-center gap-1">
-                              <CheckCircle className="h-3.5 w-3.5 text-green-500 fill-green-50" />
-                              Validado correctamente
-                          </span>
+                  {hasAnalyzedData ? (
+                      // Con resultados, los datos del establecimiento y el corte están abajo, en
+                      // «Resultados del Análisis»: aquí no se repiten.
+                      <div>
+                          <h3 className="text-sm font-bold text-gray-900">Requerimiento cargado</h3>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
+                              <span className="text-xs font-bold text-teal-600">{items.length.toLocaleString()} registros</span>
+                              <span className="text-[10px] text-gray-400">•</span>
+                              <span className="text-[10px] text-green-600 font-medium flex items-center gap-1">
+                                  <CheckCircle className="h-3.5 w-3.5 text-green-500 fill-green-50" />
+                                  Validado correctamente
+                              </span>
+                          </div>
                       </div>
-                  </div>
-              </div>
-              <div className="flex items-center gap-2 sm:mr-10">
-                  {/* Exportar Avance */}
-                  {hasAnalyzedData && (
-                      <button 
-                          onClick={handleExportSession}
-                          className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                          title="Exportar Avance"
-                      >
-                          <Download className="w-4 h-4" />
-                      </button>
+                  ) : (
+                      // Antes de analizar no hay «Resultados»: aquí sigue diciendo de quién es.
+                      <div>
+                          <h3 className="text-sm font-bold text-gray-900">
+                              {displayEstablishmentName ? displayEstablishmentName.toUpperCase() : "Requerimiento IPRESS Cargado"}
+                          </h3>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
+                              {displayCodEess && <span className="text-[10px] text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded">CÓD: {displayCodEess}</span>}
+                              {displayCategory && <span className="text-[10px] text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded">CAT: {displayCategory}</span>}
+                              {displayMicrored && <span className="text-[10px] text-teal-850 font-bold bg-teal-100/70 px-1.5 py-0.5 rounded">MR: {displayMicrored}</span>}
+                              <span className="text-xs font-bold text-teal-600">{items.length.toLocaleString()} registros</span>
+                              <span className="text-[10px] text-gray-400">•</span>
+                              <span className="text-xs text-gray-500">Corte: <strong className="text-gray-700">{referenceDate}</strong></span>
+                              <span className="text-[10px] text-gray-400">•</span>
+                              <span className="text-[10px] text-green-600 font-medium flex items-center gap-1">
+                                  <CheckCircle className="h-3.5 w-3.5 text-green-500 fill-green-50" />
+                                  Validado correctamente
+                              </span>
+                          </div>
+                      </div>
                   )}
-                  {/* Importar Avance */}
-                  <button 
+              </div>
+              {/* Acciones: íconos grandes que al pasar el mouse (o con Tab) muestran su texto; en
+                  el celular el texto va siempre debajo. «Limpiar todo» va aparte, en rojo, para
+                  que no se toque por error junto a las demás. */}
+              <div className="flex w-full items-start justify-between gap-2 border-t border-gray-100 pt-3 sm:mr-12 sm:w-auto sm:items-center sm:justify-end sm:border-0 sm:pt-0">
+                  <AccionExpandible
+                      icon={<RefreshCw className="h-5 w-5" />}
+                      label="Cargar nuevo archivo"
+                      tone="teal"
+                      onClick={triggerFileUpload}
+                  />
+                  <AccionExpandible
+                      icon={<Upload className="h-5 w-5" />}
+                      label="Importar avance"
+                      tone="emerald"
                       onClick={(e) => {
                           e.stopPropagation();
                           importInputRef.current?.click();
                       }}
-                      className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                      title="Importar Avance"
-                  >
-                      <Upload className="w-4 h-4" />
-                  </button>
-                  <button 
-                      onClick={triggerFileUpload}
-                      className="p-2 text-teal-600 hover:bg-teal-50 rounded-lg transition-all"
-                      title="Cargar nuevo archivo"
-                  >
-                      <RefreshCw className="w-4 h-4" />
-                  </button>
-                  <button 
+                  />
+                  {hasAnalyzedData && (
+                      <AccionExpandible
+                          icon={<Download className="h-5 w-5" />}
+                          label="Exportar avance"
+                          tone="indigo"
+                          onClick={handleExportSession}
+                      />
+                  )}
+                  <span className="mt-2 h-8 w-px shrink-0 bg-gray-200 sm:mx-1 sm:mt-0 sm:h-7" />
+                  <AccionExpandible
+                      icon={<Trash2 className="h-5 w-5" />}
+                      label="Limpiar todo"
+                      tone="red"
                       onClick={handleClearClick}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                      title="Limpiar Todo"
-                  >
-                      <Trash2 className="w-4 h-4" />
-                  </button>
+                  />
               </div>
           </div>
       ) : (
@@ -1061,39 +1117,8 @@ export const InputSection: React.FC<InputSectionProps> = ({
       {/* Item Preview */}
       {items.length > 0 && !hasAnalyzedData && (
         <div className="space-y-4 mt-4 pt-4 border-t border-dashed border-gray-200 animate-in fade-in duration-500">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center max-w-5xl mx-auto px-1 gap-4">
-            <div className="space-y-1.5 text-left">
-              <h3 className="text-sm font-black text-gray-700 uppercase tracking-wide flex flex-wrap items-center gap-2">
-                <span>Items Cargados ({items.length})</span>
-                <span className="text-xs font-semibold bg-gray-100 text-gray-500 px-2.5 py-0.5 rounded-full normal-case whitespace-nowrap border border-gray-200">
-                  Corte: {referenceDate}
-                </span>
-              </h3>
-              {(displayCodEess || displayEstablishmentName || displayMicrored) && (
-                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                  {(displayCodEess || displayEstablishmentName) && (
-                    <span className="text-[10px] font-extrabold text-teal-850 bg-teal-50 border border-teal-150 px-2 py-0.5 rounded uppercase flex items-center gap-1">
-                      <span>
-                        {displayCodEess ? `${displayCodEess} - ` : ''}
-                        {displayEstablishmentName ? displayEstablishmentName.toUpperCase() : 'ESTABLECIMIENTO'}
-                      </span>
-                    </span>
-                  )}
-                  {displayMicrored && (
-                    <span className="text-[10px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-150 px-2 py-0.5 rounded uppercase">
-                      MR: {displayMicrored}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            <button 
-              onClick={handleClearClick}
-              className="text-xs text-red-600 hover:text-red-800 flex items-center gap-1 bg-red-50 px-3 py-2 rounded hover:bg-red-100 transition-colors w-full sm:w-auto justify-center border border-red-100"
-            >
-              <Trash2 className="h-3 w-3" /> Limpiar Todo
-            </button>
-          </div>
+          {/* Sin título: la franja de arriba ya dice de qué establecimiento es, el corte,
+              cuántos registros hay y tiene «Limpiar todo». */}
           
           {/* Scrollable Table Container for Mobile */}
           <div className="bg-gray-50 rounded-lg border border-gray-200 max-h-60 overflow-y-auto max-w-5xl mx-auto shadow-sm overflow-x-auto">
