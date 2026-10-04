@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 /**
  * Encabezado de tabla que se queda arriba al bajar.
@@ -115,4 +116,34 @@ export const FloatingTableHead: React.FC<{
       })}
     </div>
   );
+};
+
+export type SortDir = "asc" | "desc";
+
+/** Título de columna que ordena al tocarlo, con la flecha del sentido actual. */
+export const SortHeadButton: React.FC<{ label: string; dir: SortDir | null; onClick: () => void }> = ({ label, dir, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`group inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-slate-800 ${dir ? "text-teal-700" : ""}`}
+  >
+    {label}
+    {dir === "asc" ? (
+      <ArrowUp className="h-3 w-3" />
+    ) : dir === "desc" ? (
+      <ArrowDown className="h-3 w-3" />
+    ) : (
+      <ArrowUpDown className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-60" />
+    )}
+  </button>
+);
+
+/**
+ * Siguiente orden al tocar una columna: primero en su sentido natural (`firstDir`), luego el
+ * contrario y, al tercer toque, sin orden (vuelve al de siempre).
+ */
+export const nextSort = <K extends string>(current: { key: K; dir: SortDir } | null, key: K, firstDir: SortDir): { key: K; dir: SortDir } | null => {
+  if (!current || current.key !== key) return { key, dir: firstDir };
+  if (current.dir === firstDir) return { key, dir: firstDir === "asc" ? "desc" : "asc" };
+  return null;
 };

@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Building2, Check, ChevronRight, FileClock, History, Monitor, Square, Wifi, WifiOff } from "lucide-react";
+import { Building2, Check, ChevronRight, FileClock, History, Monitor, Square, Wifi, WifiOff } from "lucide-react";
 import { KpiCard, KpiStrip, StatusChip, type Tone } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
-import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead } from "./ui/FloatingTableHead";
+import { FloatingTableHead, SortHeadButton, headAlignClass, nextSort, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead } from "./ui/FloatingTableHead";
 import { checkDatesMatch, getCardUpdateStatus, type EstablishmentCardData } from "./EstablishmentCard";
 
 /**
@@ -198,32 +198,12 @@ export const EstablishmentTable: React.FC<{
   const pageRows = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const toggleSort = (key: SortKey) => {
-    setSort((current) => {
-      if (!current || current.key !== key) return { key, dir: FIRST_DIR[key] };
-      if (current.dir === FIRST_DIR[key]) return { key, dir: FIRST_DIR[key] === "asc" ? "desc" : "asc" };
-      return null; // Tercer toque: vuelve al orden por urgencia.
-    });
+    setSort((current) => nextSort(current, key, FIRST_DIR[key])); // Tercer toque: vuelve al orden por urgencia.
   };
 
-  const sortButton = (k: SortKey, label: string) => {
-    const activeDir = sort?.key === k ? sort.dir : null;
-    return (
-      <button
-        type="button"
-        onClick={() => toggleSort(k)}
-        className={`group inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-slate-800 ${activeDir ? "text-teal-700" : ""}`}
-      >
-        {label}
-        {activeDir === "asc" ? (
-          <ArrowUp className="h-3 w-3" />
-        ) : activeDir === "desc" ? (
-          <ArrowDown className="h-3 w-3" />
-        ) : (
-          <ArrowUpDown className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-60" />
-        )}
-      </button>
-    );
-  };
+  const sortButton = (k: SortKey, label: string) => (
+    <SortHeadButton label={label} dir={sort?.key === k ? sort.dir : null} onClick={() => toggleSort(k)} />
+  );
 
   const { tableRef, floating } = useFloatingTableHead([pageRows.length, isCaptureMode, sort, page]);
 
