@@ -1,8 +1,8 @@
 
 import React, { useState, useRef } from 'react';
 import { toast } from 'sonner';
-import { currentCorte, findMesKey, formatCorteDate, isCorteFromPastMonth, TEMPLATE_MONTH_HEADERS } from '../services/requirementMonths';
-import { Trash2, Activity, Upload, FileSpreadsheet, Calendar, Check, AlertCircle, AlertTriangle, X, Syringe, Settings2, Play, RefreshCw, Sparkles, Download, ChevronDown, ChevronUp, CheckCircle, Ban, ListFilter, Building2, FolderOpen } from 'lucide-react';
+import { findMesKey, TEMPLATE_MONTH_HEADERS } from '../services/requirementMonths';
+import { Trash2, Activity, Upload, FileSpreadsheet, Calendar, Check, AlertCircle, AlertTriangle, X, Syringe, Settings2, Play, RefreshCw, Sparkles, Download, ChevronDown, ChevronUp, CheckCircle, Ban, ListFilter, Building2 } from 'lucide-react';
 import { read, utils, writeFile } from 'xlsx';
 import { MedicationInput, HealthFacility, Microred, RequirementExclusionItem } from '../types';
 import { api } from '../services/api';
@@ -259,9 +259,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
   const [isDragging, setIsDragging] = useState(false);
 
   // --- EXPORT PROGRESS ---
-  const handleExportSession = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    e?.preventDefault();
+  const handleExportSession = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
     try {
       const exportData: any = {
         version: "1.0",
@@ -893,88 +893,66 @@ export const InputSection: React.FC<InputSectionProps> = ({
       )}
 
       {isUploadSectionCollapsed && items.length > 0 ? (
-          <div className="space-y-3">
-              {/* El requerimiento cargado es de un mes ya pasado: se dice qué hacer. Al volver
-                  a fin de mes encontraban el trabajo anterior y no sabían por dónde empezar. */}
-              {isCorteFromPastMonth(referenceDate) && (
-                  <div className="flex flex-col gap-3 mr-9 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 sm:mr-10 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="flex items-start gap-2.5 text-sm text-amber-900">
-                          <Calendar className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                          <span>
-                              Tienes cargado el requerimiento de <strong>{formatCorteDate(referenceDate)}</strong>.
-                              ¿Vas a trabajar el de <strong>{formatCorteDate(currentCorte())}</strong>?
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div className="flex items-center gap-4">
+                  <div className="bg-teal-50 p-2 rounded-lg shrink-0">
+                      <FileSpreadsheet className="h-5 w-5 text-teal-600" />
+                  </div>
+                  <div>
+                      <h3 className="text-sm font-bold text-gray-900">
+                          {displayEstablishmentName ? displayEstablishmentName.toUpperCase() : "Requerimiento IPRESS Cargado"}
+                      </h3>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
+                          {displayCodEess && <span className="text-[10px] text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded">CÓD: {displayCodEess}</span>}
+                          {displayCategory && <span className="text-[10px] text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded">CAT: {displayCategory}</span>}
+                          {displayMicrored && <span className="text-[10px] text-teal-850 font-bold bg-teal-100/70 px-1.5 py-0.5 rounded">MR: {displayMicrored}</span>}
+                          <span className="text-xs font-bold text-teal-600">{items.length.toLocaleString()} registros</span>
+                          <span className="text-[10px] text-gray-400">•</span>
+                          <span className="text-xs text-gray-500">Corte: <strong className="text-gray-700">{referenceDate}</strong></span>
+                          <span className="text-[10px] text-gray-400">•</span>
+                          <span className="text-[10px] text-green-600 font-medium flex items-center gap-1">
+                              <CheckCircle className="h-3.5 w-3.5 text-green-500 fill-green-50" />
+                              Validado correctamente
                           </span>
-                      </p>
-                      <button
-                          onClick={triggerFileUpload}
-                          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700"
-                      >
-                          <Upload className="h-4 w-4" />
-                          Cargar el de {formatCorteDate(currentCorte()).split(' ')[0].toLowerCase()}
-                      </button>
-                  </div>
-              )}
-
-              <div className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:items-center">
-                  <div className="flex items-center gap-4">
-                      <div className="bg-teal-50 p-2 rounded-lg shrink-0">
-                          <FileSpreadsheet className="h-5 w-5 text-teal-600" />
-                      </div>
-                      <div>
-                          <h3 className="whitespace-nowrap text-sm font-bold text-gray-900">
-                              Requerimiento de {formatCorteDate(referenceDate)}
-                          </h3>
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
-                              <span className="text-xs font-bold text-teal-600">{items.length.toLocaleString()} registros</span>
-                              <span className="text-[10px] text-gray-400">•</span>
-                              <span className="text-[10px] text-green-600 font-medium flex items-center gap-1">
-                                  <CheckCircle className="h-3.5 w-3.5 text-green-500 fill-green-50" />
-                                  Validado correctamente
-                              </span>
-                          </div>
                       </div>
                   </div>
-                  {/* Botones con su nombre: antes eran cuatro íconos sin texto y no se sabía cuál
-                      cargaba el archivo del mes nuevo. */}
-                  <div className="flex flex-wrap items-center gap-2 lg:mr-10">
-                      <button
-                          onClick={triggerFileUpload}
-                          className="inline-flex h-10 items-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700"
-                          title="Reemplaza el requerimiento cargado por el archivo del nuevo mes"
+              </div>
+              <div className="flex items-center gap-2 sm:mr-10">
+                  {/* Exportar Avance */}
+                  {hasAnalyzedData && (
+                      <button 
+                          onClick={handleExportSession}
+                          className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                          title="Exportar Avance"
                       >
-                          <Upload className="h-4 w-4" />
-                          Cargar nuevo mes
+                          <Download className="w-4 h-4" />
                       </button>
-                      {hasAnalyzedData && (
-                          <button
-                              onClick={handleExportSession}
-                              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
-                              title="Descarga un archivo con tu avance para continuar después o en otra PC"
-                          >
-                              <Download className="h-4 w-4 text-teal-600" />
-                              Guardar avance
-                          </button>
-                      )}
-                      <button
-                          onClick={(e) => {
-                              e.stopPropagation();
-                              importInputRef.current?.click();
-                          }}
-                          className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
-                          title="Abre un avance guardado antes (archivo .json)"
-                      >
-                          <FolderOpen className="h-4 w-4 text-teal-600" />
-                          Abrir avance
-                      </button>
-                      <button
-                          onClick={handleClearClick}
-                          className="inline-flex h-10 items-center gap-2 rounded-xl border border-red-200 bg-white px-3.5 text-sm font-bold text-red-600 transition-colors hover:bg-red-50"
-                          title="Borra el requerimiento cargado y el análisis"
-                      >
-                          <Trash2 className="h-4 w-4" />
-                          Borrar todo
-                      </button>
-                  </div>
+                  )}
+                  {/* Importar Avance */}
+                  <button 
+                      onClick={(e) => {
+                          e.stopPropagation();
+                          importInputRef.current?.click();
+                      }}
+                      className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                      title="Importar Avance"
+                  >
+                      <Upload className="w-4 h-4" />
+                  </button>
+                  <button 
+                      onClick={triggerFileUpload}
+                      className="p-2 text-teal-600 hover:bg-teal-50 rounded-lg transition-all"
+                      title="Cargar nuevo archivo"
+                  >
+                      <RefreshCw className="w-4 h-4" />
+                  </button>
+                  <button 
+                      onClick={handleClearClick}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                      title="Limpiar Todo"
+                  >
+                      <Trash2 className="w-4 h-4" />
+                  </button>
               </div>
           </div>
       ) : (
@@ -1361,56 +1339,42 @@ export const InputSection: React.FC<InputSectionProps> = ({
       </div>
     )}
 
-    {/* NUEVO MES: confirmación antes de reemplazar el requerimiento cargado. Ofrece guardar
-        el avance primero, que es lo que se perdía sin darse cuenta. */}
+    {/* OVERWRITE WARNING MODAL */}
     {showOverwriteWarning && (
         <div className="fixed inset-0 z-[110000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 border border-gray-100">
-                <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
-                    <div className="flex items-start gap-3">
-                        <div className="rounded-xl bg-teal-50 p-2.5 text-teal-600">
-                            <Upload className="h-5 w-5" />
-                        </div>
-                        <div>
-                            <h3 className="text-base font-black text-slate-900">Cargar el requerimiento del nuevo mes</h3>
-                            <p className="mt-0.5 text-xs text-slate-500">Paso a paso, sin perder tu trabajo.</p>
-                        </div>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 border border-gray-100">
+                <div className="bg-amber-500 p-4 flex justify-between items-center text-white">
+                    <div className="flex items-center gap-2">
+                         <AlertTriangle className="h-6 w-6" />
+                         <h3 className="font-bold text-lg">¡Atención! Datos no guardados</h3>
                     </div>
-                    <button onClick={() => setShowOverwriteWarning(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Cerrar">
+                    <button onClick={() => setShowOverwriteWarning(false)} className="hover:bg-amber-600 p-1 rounded transition-colors">
                         <X className="h-5 w-5" />
                     </button>
                 </div>
-
-                <div className="space-y-4 p-5">
-                    <p className="text-sm leading-relaxed text-slate-700">
-                        Se reemplazará el requerimiento de <strong>{formatCorteDate(referenceDate)}</strong>
-                        {displayEstablishmentName ? <> de <strong>{displayEstablishmentName.toUpperCase()}</strong></> : null} y el avance de su validación.
+                
+                <div className="p-6">
+                    <p className="text-gray-700 mb-4 text-sm leading-relaxed">
+                        Actualmente hay un análisis realizado en pantalla. 
+                        <br/><br/>
+                        <strong>Si sube un nuevo archivo, los resultados actuales se perderán permanentemente</strong> si no los ha exportado (PDF/Excel).
                     </p>
-                    <ol className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-xs text-slate-600">
-                        <li className="flex gap-2"><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-teal-600 text-[10px] font-black text-white">1</span>Si quieres conservar lo trabajado, guarda tu avance (se descarga un archivo).</li>
-                        <li className="flex gap-2"><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-teal-600 text-[10px] font-black text-white">2</span>Elige el Excel del nuevo mes descargado del SISMED.</li>
-                        <li className="flex gap-2"><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-teal-600 text-[10px] font-black text-white">3</span>Confirma el mes de corte y ejecuta el análisis.</li>
-                    </ol>
-
-                    <div className="flex flex-col gap-2">
-                        <button
-                            onClick={() => { handleExportSession(); confirmOverwrite(); }}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700"
-                        >
-                            <Download className="h-4 w-4" />
-                            Guardar avance y continuar
-                        </button>
-                        <button
-                            onClick={confirmOverwrite}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
-                        >
-                            Continuar sin guardar
-                        </button>
-                        <button
+                    <p className="text-gray-500 text-xs italic mb-6">
+                        ¿Desea continuar y sobrescribir los datos actuales?
+                    </p>
+                    
+                    <div className="flex gap-3 justify-end">
+                        <button 
                             onClick={() => setShowOverwriteWarning(false)}
-                            className="py-1.5 text-xs font-bold text-slate-500 hover:text-slate-700"
+                            className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors"
                         >
                             Cancelar
+                        </button>
+                        <button 
+                            onClick={confirmOverwrite}
+                            className="px-4 py-2 bg-amber-600 text-white rounded-lg font-bold text-sm hover:bg-amber-700 transition-colors shadow-sm"
+                        >
+                            Continuar y Sobrescribir
                         </button>
                     </div>
                 </div>
