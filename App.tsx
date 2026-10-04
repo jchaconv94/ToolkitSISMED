@@ -1,4 +1,5 @@
 
+import { formatCorteDate } from "./services/requirementMonths";
 import React, { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
 import { InputSection } from './components/InputSection';
 import { MedicationInput, AuraAnalysisResult, StockStatus, AdditionalItem, AppModule, QuickFilterOption, AnalyzedMedication, DashboardViewMode, HealthFacility, Microred } from './types';
@@ -70,23 +71,6 @@ const ADDITIONAL_ITEMS_KEY = 'aura_additional_v1';
  */
 const SUCCESS_SHOWN_KEY = 'aura_success_shown_v1';
 const WELCOME_KEY = 'aura_welcome_shown_session'; // Clave de sesión
-
-const formatCorteDate = (dateStr: string): string => {
-    if (!dateStr) return '';
-    const parts = dateStr.trim().split('-');
-    if (parts.length === 2) {
-        const year = parts[0];
-        const monthNum = parseInt(parts[1], 10);
-        const months = [
-            'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
-            'JULIO', 'AGOSTO', 'SETIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
-        ];
-        if (monthNum >= 1 && monthNum <= 12) {
-            return `${months[monthNum - 1]} ${year}`;
-        }
-    }
-    return dateStr;
-};
 
 // --- MAIN APP COMPONENT WRAPPED IN AUTH CONTEXT ---
 const App: React.FC = () => {
@@ -1197,6 +1181,13 @@ const AnalysisModule: React.FC = () => {
                                         {activeCodEess ? `${activeCodEess} - ` : ''}
                                         {activeEstName.toUpperCase()}
                                     </span>
+                                </div>
+                            )}
+
+                            {/* CATEGORÍA: antes solo salía en la franja del archivo. */}
+                            {result.category && (
+                                <div className="flex items-center gap-1.5 text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold">
+                                    <span>CAT: {result.category}</span>
                                 </div>
                             )}
 

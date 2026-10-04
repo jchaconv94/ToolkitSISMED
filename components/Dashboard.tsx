@@ -280,6 +280,23 @@ export const Dashboard: React.FC<DashboardProps> = React.memo(({
             </div>
         </div>
         
+        {/* Esenciales (DME) sin ítems: se explica por qué sale en cero, en vez de dejar los
+            gráficos vacíos sin decir nada. */}
+        {scopeFilter === 'DME' && chartTotalItems === 0 && (
+            <div className="flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-indigo-900">
+                    <strong>No hay medicamentos esenciales (DME) en este archivo.</strong>{' '}
+                    Se consideran esenciales los ítems con MEDTIP «M», MEDPET «P» y MEDEST «S» o «_».
+                </p>
+                <button
+                    onClick={() => onScopeFilterChange?.('ALL')}
+                    className="shrink-0 rounded-xl border border-indigo-200 bg-white px-3.5 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
+                >
+                    Ver todos los ítems
+                </button>
+            </div>
+        )}
+
         {/* --- TOP SECTION: 3 COLUMNS --- */}
         {/* Layout: Changed to stack on mobile/tablet, and row on XL screens */}
         <div className="grid grid-cols-1 xl:grid-cols-[1.5fr_0.8fr_1.1fr] gap-4 2xl:gap-6 items-stretch">
