@@ -140,9 +140,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const hasPermission = useCallback((module: AppModule): boolean => {
       if (!state.user) return false;
       try {
-          // Inicio es la puerta de entrada: lo ve todo usuario con sesión, sin depender
-          // de roles_config.
-          if (module === 'HOME') return true;
+          // Inicio es la puerta de entrada y el Perfil es de cada uno (contraseña, PIN,
+          // huella): los ve todo usuario con sesión, sin depender de roles_config.
+          if (module === 'HOME' || module === 'PROFILE') return true;
           // El administrador total debe poder acceder a los modulos nuevos aun cuando
           // su configuracion de rol en Supabase todavia no haya sido actualizada.
           if (state.user.role === 'ADMIN' && (module === 'ANALYSIS_EXCLUSIONS' || module === 'ADMIN_SEND_KEYS' || module === 'ADMIN_BACKUPS')) return true;
