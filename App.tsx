@@ -7,7 +7,7 @@ import { api } from './services/api';
 import { analyzeInventoryWithAura } from './services/auraService';
 import { generateFullReportPDF } from './services/pdfService';
 import { 
-  Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network,
+  Info, FileText, Lock, ShieldCheck, ShieldAlert, ListFilter, Building2, Calendar, Clock, Network, Tag,
   ArrowLeft, Home, UserCircle2, Search
 } from 'lucide-react';
 
@@ -1175,89 +1175,93 @@ const AnalysisModule: React.FC = () => {
                 </div>
              )}
 
-             {!isFullScreen && (
-                <div className="flex flex-col xl:flex-row items-end xl:items-center justify-between gap-6 border-b border-gray-200 pb-4 2xl:pb-6">
-                    <div>
+             {!isFullScreen && (() => {
+                // Cabecera de resultados (pautas de NN/g, Carbon, Material y WCAG):
+                // - los datos del establecimiento en una línea de texto, no en pastillas de
+                //   colores (las pastillas parecen botones y los colores no significaban nada);
+                // - la validación y la descarga juntas, porque el informe depende de terminar;
+                // - el avance contado en ítems, y el porqué de que «Descargar» esté bloqueado.
+                const pendientes = Math.max(0, totalToReview - reviewedCount);
+                const corte = result.referenceDate ? formatCorteDate(result.referenceDate) : '';
+                const corteBonito = corte ? corte.charAt(0) + corte.slice(1).toLowerCase() : '';
+                return (
+                <div className="flex flex-col gap-5 border-b border-gray-200 pb-5 lg:flex-row lg:items-stretch lg:justify-between 2xl:pb-6">
+                    <div className="min-w-0 self-center">
                         <h2 className="text-2xl 2xl:text-3xl font-bold text-gray-900 tracking-tight">Resultados del Análisis</h2>
-                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                            {/* ESTABLECIMIENTO Y CÓDIGO */}
-                            {activeEstName && (
-                                <div className="flex items-center gap-1.5 text-teal-900 bg-teal-50/80 border border-teal-100 rounded-lg px-2.5 py-1 tracking-tight font-extrabold text-xs">
-                                    <Building2 className="h-3.5 w-3.5 text-teal-600 animate-pulse" />
-                                    <span>
-                                        {activeCodEess ? `${activeCodEess} - ` : ''}
-                                        {activeEstName.toUpperCase()}
-                                    </span>
-                                </div>
-                            )}
-
-                            {/* CATEGORÍA: la franja del archivo ya no repite los datos del establecimiento. */}
+                        {activeEstName && (
+                            <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[15px] font-bold text-slate-800">
+                                <Building2 className="h-4 w-4 text-teal-600" />
+                                {activeEstName.toUpperCase()}
+                                {activeCodEess && <span className="font-mono text-xs font-bold text-slate-400">{activeCodEess}</span>}
+                            </p>
+                        )}
+                        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-slate-600">
                             {result.category && (
-                                <div className="flex items-center gap-1.5 text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold">
-                                    <span>CAT: {result.category}</span>
-                                </div>
+                                <>
+                                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap"><Tag className="h-3.5 w-3.5 text-slate-400" />Categoría <b className="text-slate-800">{result.category}</b></span>
+                                </>
                             )}
-
-                            {/* MICRORED */}
                             {activeMicrored && (
-                                <div className="flex items-center gap-1.5 text-teal-800 bg-teal-50/50 border border-teal-100 rounded-lg px-2.5 py-1 text-xs font-semibold">
-                                    <Network className="h-3.5 w-3.5 text-teal-600" />
-                                    <span>MR: <span className="font-bold text-teal-800">{activeMicrored.toUpperCase()}</span></span>
-                                </div>
+                                <>
+                                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap"><Network className="h-3.5 w-3.5 text-slate-400" />Microred <b className="text-slate-800">{activeMicrored}</b></span>
+                                </>
                             )}
-
-                            {/* CORTE */}
-                            {result.referenceDate && (
-                                <div className="flex items-center gap-1.5 text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 text-xs font-bold uppercase tracking-wide">
-                                    <Calendar className="h-3.5 w-3.5 text-amber-600" />
-                                    <span>CORTE: {formatCorteDate(result.referenceDate)}</span>
-                                </div>
+                            {corteBonito && (
+                                <>
+                                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap"><Calendar className="h-3.5 w-3.5 text-slate-400" />Corte <b className="text-slate-800">{corteBonito}</b></span>
+                                </>
                             )}
-
-                            {/* GENERADO */}
-                            <div className="flex items-center gap-1.5 text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-medium">
-                                <Clock className="h-3.5 w-3.5 text-slate-400" />
-                                <span>Generado: {new Date(result.timestamp).toLocaleString()}</span>
-                            </div>
+                            <span className="inline-flex items-center gap-1.5 whitespace-nowrap"><Clock className="h-3.5 w-3.5 text-slate-400" />Generado {new Date(result.timestamp).toLocaleString('es-PE', { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                         </div>
                     </div>
-                    
-                    <div className="flex flex-col sm:flex-row items-stretch gap-4 w-full xl:w-auto">
-                        <div className={`rounded-2xl border p-4 w-full sm:w-[360px] flex flex-col justify-between gap-3 shadow-sm transition-all duration-300 ${isReviewComplete ? 'bg-white border-teal-200' : 'bg-white border-amber-200'}`}>
-                            <div className="flex justify-between items-start">
-                                <div className="flex items-center gap-3">
-                                    <div className={`p-2 rounded-lg ${isReviewComplete ? 'bg-teal-100 text-teal-600' : 'bg-amber-100 text-amber-600'}`}>
-                                        {isReviewComplete ? <ShieldCheck className="h-5 w-5" /> : <ShieldAlert className="h-5 w-5" />}
-                                    </div>
-                                    <div>
-                                        <h4 className={`text-xs font-black uppercase tracking-wider ${isReviewComplete ? 'text-teal-700' : 'text-amber-700'}`}>{isReviewComplete ? 'Auditoría Finalizada' : 'Auditoría en Curso'}</h4>
-                                        <div className="text-[10px] text-gray-500 font-medium mt-0.5">{isReviewComplete ? 'Todos los ítems validados' : `${reviewedCount} de ${totalToReview} ítems revisados`}</div>
-                                    </div>
+
+                    <div className={`w-full rounded-2xl border bg-white p-4 shadow-sm transition-colors duration-300 lg:w-[460px] ${isReviewComplete ? 'border-teal-200' : 'border-amber-200'}`}>
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <span className={`rounded-lg p-2 ${isReviewComplete ? 'bg-teal-100 text-teal-600' : 'bg-amber-100 text-amber-600'}`}>
+                                    {isReviewComplete ? <ShieldCheck className="h-5 w-5" /> : <ShieldAlert className="h-5 w-5" />}
+                                </span>
+                                <div>
+                                    <h4 className={`text-xs font-black uppercase tracking-wider ${isReviewComplete ? 'text-teal-700' : 'text-amber-700'}`}>
+                                        {isReviewComplete ? 'Validación completa' : 'Validación en curso'}
+                                    </h4>
+                                    <p className="mt-0.5 text-[13px] text-slate-600">
+                                        <b className="text-slate-900">{reviewedCount}</b> de {totalToReview} ítems validados
+                                    </p>
                                 </div>
-                                <span className={`text-2xl font-black ${isReviewComplete ? 'text-teal-500' : 'text-amber-500'}`}>{reviewProgress}%</span>
                             </div>
-                            <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden border border-gray-100">
-                                <div className={`h-full transition-all duration-500 rounded-full ${isReviewComplete ? 'bg-teal-500' : 'bg-amber-500'}`} style={{ width: `${reviewProgress}%` }} />
-                            </div>
+                            <span className={`text-2xl font-black ${isReviewComplete ? 'text-teal-600' : 'text-amber-500'}`}>{reviewProgress}%</span>
+                        </div>
+                        <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-gray-100">
+                            <div className={`h-full rounded-full transition-all duration-500 ${isReviewComplete ? 'bg-teal-500' : 'bg-amber-500'}`} style={{ width: `${reviewProgress}%` }} />
+                        </div>
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                             {!isReviewComplete && (
-                                <button onClick={() => setQuickFilter(quickFilter === 'PENDING' ? 'ALL' : 'PENDING')} className={`w-full py-1.5 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${quickFilter === 'PENDING' ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-gray-50 text-gray-600 hover:bg-amber-50 hover:text-amber-700 border border-gray-200 hover:border-amber-200'}`}>
-                                    <ListFilter className="h-3.5 w-3.5" />
-                                    {quickFilter === 'PENDING' ? "Mostrando Solo Pendientes" : "Filtrar Pendientes de Validar"}
+                                <button
+                                    onClick={() => setQuickFilter(quickFilter === 'PENDING' ? 'ALL' : 'PENDING')}
+                                    className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-bold transition-colors ${quickFilter === 'PENDING' ? 'border-amber-300 bg-amber-100 text-amber-900' : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'}`}
+                                >
+                                    <ListFilter className="h-4 w-4" />
+                                    {quickFilter === 'PENDING' ? 'Mostrando pendientes · Ver todos' : `Ver pendientes (${pendientes})`}
                                 </button>
                             )}
+                            <button
+                                onClick={handleDownloadClick}
+                                className={`inline-flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 py-2.5 text-xs font-bold transition-colors ${isReviewComplete ? 'bg-teal-600 text-white shadow-sm hover:bg-teal-700' : 'border border-gray-200 bg-gray-50 text-gray-400'}`}
+                            >
+                                {isReviewComplete ? <FileText className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                                Descargar informe PDF
+                            </button>
                         </div>
-
-                        <button onClick={handleDownloadClick} className={`group relative flex items-center justify-center gap-3 px-6 py-4 rounded-2xl transition-all shadow-md font-bold text-sm overflow-hidden w-full sm:w-auto ${isReviewComplete ? 'bg-gray-900 text-white hover:bg-black hover:shadow-xl hover:-translate-y-0.5' : 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200'}`}>
-                            <div className="flex flex-col items-center">
-                                {isReviewComplete ? <FileText className="h-6 w-6 mb-1" /> : <Lock className="h-6 w-6 mb-1" />}
-                                <span>Descargar</span>
-                                <span className="text-[10px] opacity-70 font-normal">Informe PDF</span>
-                            </div>
-                            {isReviewComplete && <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent z-20" />}
-                        </button>
+                        {!isReviewComplete && (
+                            <p className="mt-2 text-[11px] text-slate-500">
+                                El informe se habilita al validar {pendientes === 1 ? 'el ítem que falta' : `los ${pendientes} ítems que faltan`}.
+                            </p>
+                        )}
                     </div>
                 </div>
-            )}
+                );
+             })()}
             
             {!isFullScreen && (
                 <Dashboard 
