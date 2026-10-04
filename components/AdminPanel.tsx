@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { RoleConfig, HealthFacility, AVAILABLE_MODULES, LaborRegime, Profession } from '../types';
 import { canAssignRole } from '../services/userManagementRules';
-import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench, Archive, MoreVertical, MoreHorizontal, MapPin, UserCheck, UserX, SlidersHorizontal, Plus, ChevronRight, Check } from 'lucide-react';
+import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench, Archive, MoreVertical, MoreHorizontal, MapPin, UserCheck, UserX, SlidersHorizontal, Plus, ChevronRight, Check, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -16,7 +16,9 @@ import { noticeSettingsApi } from '../services/noticeSettings';
 import { DEFAULT_NOTICE_THRESHOLDS, NoticeThresholds } from '../services/notifications';
 import { NoticeSettingsCard } from './NoticeSettingsCard';
 import { CustomSelect } from './ui/CustomSelect';
-import { KpiCard, KpiStrip, StatusChip } from './ui/kit';
+import { KpiCard, KpiStrip, StatusChip, FormField, inputClass } from './ui/kit';
+import { ResponsiveDialog, DialogSection, DialogRow, dialogPrimaryButton, dialogSecondaryButton } from './ui/ResponsiveDialog';
+import { ConfirmationDialog } from './ui/ConfirmationDialog';
 import { TablePagination } from './ui/TablePagination';
 import { FloatingActionButton } from './ui/FloatingActionButton';
 import { BottomSheet } from './ui/BottomSheet';
@@ -438,6 +440,65 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
   const isUserActiveValue = (u: any) => u.isActive === true || String(u.isActive).toLowerCase() === 'true';
   const activeUsersCount = useMemo(() => scopedUsers.filter(isUserActiveValue).length, [scopedUsers]);
   const roleLabelOf = (u: any) => roles.find(r => r.role === u.role)?.label || u.role || '-';
+
+  // Módulos asignables a un rol, agrupados como en el menú, con interruptores. Lo usan el
+  // detalle del rol y la ventana «Nuevo rol».
+  const SECTION_DOT: Record<string, string> = { teal: 'bg-teal-500', cyan: 'bg-cyan-500', violet: 'bg-violet-500', slate: 'bg-slate-500' };
+  const renderModuleGroups = (
+      enabled: Set<string>,
+      onToggle: (module: string, on: boolean) => void,
+      onSection: (modules: string[], on: boolean) => void,
+      twoColumns: boolean
+  ) => (
+      <div className={twoColumns ? 'grid gap-4 xl:grid-cols-2' : 'space-y-3'}>
+          {NAV_SECTIONS.map(section => {
+              const sectionModules = section.items.map(it => it.module as string);
+              const on = sectionModules.filter(m => enabled.has(m)).length;
+              const all = on === sectionModules.length;
+              return (
+                  <div key={section.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
+                          <p className="flex items-center gap-2 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                              <span className={`h-2 w-2 rounded-full ${SECTION_DOT[section.tint]}`} />
+                              {section.label}
+                              <span className="font-bold normal-case tracking-normal text-slate-400">· {on} de {sectionModules.length}</span>
+                          </p>
+                          <button type="button" onClick={() => onSection(sectionModules, !all)} className="text-[12px] font-bold text-teal-700 hover:text-teal-900 cursor-pointer">
+                              {all ? 'Quitar todos' : 'Marcar todos'}
+                          </button>
+                      </div>
+                      <div className="divide-y divide-slate-100">
+                          {section.items.map(item => {
+                              const checked = enabled.has(item.module);
+                              const Icon = item.icon;
+                              return (
+                                  <button
+                                      key={item.module}
+                                      type="button"
+                                      role="switch"
+                                      aria-checked={checked}
+                                      onClick={() => onToggle(item.module, !checked)}
+                                      className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-slate-50 cursor-pointer"
+                                  >
+                                      <Icon className={`h-[18px] w-[18px] shrink-0 ${checked ? 'text-teal-600' : 'text-slate-400'}`} />
+                                      <span className="min-w-0 flex-1">
+                                          <span className={`block text-[13.5px] font-bold ${checked ? 'text-slate-900' : 'text-slate-600'}`}>{item.label}</span>
+                                          <span className="block truncate text-xs text-slate-500">{item.description}</span>
+                                      </span>
+                                      <span className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? 'bg-teal-600' : 'bg-slate-200'}`}>
+                                          <span className={`absolute top-0.5 grid h-5 w-5 place-items-center rounded-full bg-white shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`}>
+                                              {checked && <Check className="h-3 w-3 text-teal-600" />}
+                                          </span>
+                                      </span>
+                                  </button>
+                              );
+                          })}
+                      </div>
+                  </div>
+              );
+          })}
+      </div>
+  );
 
   // Nombre de la jurisdicción de un usuario según el nivel de su rol.
   const jurisdictionOf = (u: any): string => {
@@ -1704,11 +1765,15 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                             <StatusChip label={active ? 'Activo' : 'Inactivo'} tone={active ? 'success' : 'neutral'} />
                                                             <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700">{roleLabelOf(u)}</span>
                                                         </div>
-                                                        {jurisdiction !== '-' && (
-                                                            <p className="mt-2 flex items-center gap-1.5 text-[13px] text-slate-600"><MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{jurisdiction}</span></p>
-                                                        )}
-                                                        {u.personnel?.phone && (
-                                                            <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-slate-600"><Phone className="h-3.5 w-3.5 shrink-0 text-slate-400" />{u.personnel.phone}</p>
+                                                        {(jurisdiction !== '-' || u.personnel?.phone) && (
+                                                            <div className="mt-2 flex items-center gap-3 text-[13px] text-slate-600">
+                                                                {jurisdiction !== '-' && (
+                                                                    <span className="flex min-w-0 items-center gap-1.5"><MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{jurisdiction}</span></span>
+                                                                )}
+                                                                {u.personnel?.phone && (
+                                                                    <span className="flex shrink-0 items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-slate-400" />{u.personnel.phone}</span>
+                                                                )}
+                                                            </div>
                                                         )}
                                                     </div>
                                                 </div>
@@ -1741,7 +1806,6 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
 
                 {activeTab === 'ROLES' && (() => {
                     const LEVEL_LABELS: Record<string, string> = { GLOBAL: 'Nacional', DIRESA: 'DIRESA', OGESS: 'OGESS', UNGET: 'UNGET', MICRORED: 'Microred', IPRESS: 'Establecimiento' };
-                    const SECTION_DOT: Record<string, string> = { teal: 'bg-teal-500', cyan: 'bg-cyan-500', violet: 'bg-violet-500', slate: 'bg-slate-500' };
                     const usersByRole = new Map<string, number>();
                     scopedUsers.forEach(u => usersByRole.set(u.role, (usersByRole.get(u.role) || 0) + 1));
                     const countLabel = (n: number) => `${n} ${n === 1 ? 'usuario' : 'usuarios'}`;
@@ -1829,54 +1893,12 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
 
                                 <div className={isDesktop ? 'space-y-5 p-5' : 'space-y-3'}>
                                     <p className={`text-[11px] font-black uppercase tracking-widest text-slate-400 ${isDesktop ? '' : 'px-1 pt-1'}`}>Módulos que puede abrir · {enabledCount} de {allNavModules.length}</p>
-                                    <div className={isDesktop ? 'grid gap-4 xl:grid-cols-2' : 'space-y-3'}>
-                                        {NAV_SECTIONS.map(section => {
-                                            const sectionModules = section.items.map(it => it.module as string);
-                                            const on = sectionModules.filter(m => enabled.has(m)).length;
-                                            const all = on === sectionModules.length;
-                                            return (
-                                                <div key={section.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                                                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
-                                                        <p className="flex items-center gap-2 text-[12px] font-black uppercase tracking-widest text-slate-600">
-                                                            <span className={`h-2 w-2 rounded-full ${SECTION_DOT[section.tint]}`} />
-                                                            {section.label}
-                                                            <span className="font-bold normal-case tracking-normal text-slate-400">· {on} de {sectionModules.length}</span>
-                                                        </p>
-                                                        <button type="button" onClick={() => handleRoleSectionChange(currentRole.role, sectionModules, !all)} className="text-[12px] font-bold text-teal-700 hover:text-teal-900 cursor-pointer">
-                                                            {all ? 'Quitar todos' : 'Marcar todos'}
-                                                        </button>
-                                                    </div>
-                                                    <div className="divide-y divide-slate-100">
-                                                        {section.items.map(item => {
-                                                            const checked = enabled.has(item.module);
-                                                            const Icon = item.icon;
-                                                            return (
-                                                                <button
-                                                                    key={item.module}
-                                                                    type="button"
-                                                                    role="switch"
-                                                                    aria-checked={checked}
-                                                                    onClick={() => handleRoleModuleChange(currentRole.role, item.module, !checked)}
-                                                                    className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-slate-50 cursor-pointer"
-                                                                >
-                                                                    <Icon className={`h-[18px] w-[18px] shrink-0 ${checked ? 'text-teal-600' : 'text-slate-400'}`} />
-                                                                    <span className="min-w-0 flex-1">
-                                                                        <span className={`block text-[13.5px] font-bold ${checked ? 'text-slate-900' : 'text-slate-600'}`}>{item.label}</span>
-                                                                        <span className="block truncate text-xs text-slate-500">{item.description}</span>
-                                                                    </span>
-                                                                    <span className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? 'bg-teal-600' : 'bg-slate-200'}`}>
-                                                                        <span className={`absolute top-0.5 grid h-5 w-5 place-items-center rounded-full bg-white shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`}>
-                                                                            {checked && <Check className="h-3 w-3 text-teal-600" />}
-                                                                        </span>
-                                                                    </span>
-                                                                </button>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                                    {renderModuleGroups(
+                                        enabled,
+                                        (module, on) => handleRoleModuleChange(currentRole.role, module, on),
+                                        (modules, on) => handleRoleSectionChange(currentRole.role, modules, on),
+                                        isDesktop
+                                    )}
 
                                     <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${isDesktop ? 'max-w-md' : ''}`}>
                                         <label htmlFor="role-max-urls" className="block text-[13.5px] font-bold text-slate-900">Conexiones de Consulta Stock</label>
@@ -2151,974 +2173,504 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
     </div>
 
     {/* --- CUSTOM CONFIRMATION MODAL --- */}
-    {userToToggle && (
-        <div className="fixed inset-0 z-[110000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border border-gray-100">
-                <div className="p-6 text-center">
-                    <div className={`mx-auto flex items-center justify-center h-12 w-12 rounded-full mb-4 ${userToToggle.currentStatus ? 'bg-red-100' : 'bg-green-100'}`}>
-                        <Power className={`h-6 w-6 ${userToToggle.currentStatus ? 'text-red-600' : 'text-green-600'}`} />
+    {/* --- ACTIVAR / DESACTIVAR Y ELIMINAR: confirmaciones (panel inferior en el celular) --- */}
+    {(() => {
+        const nameOf = (username?: string) => {
+            const target = users.find(x => x.username === username);
+            return target?.personnel ? `${target.personnel.firstName} ${target.personnel.lastName}` : `@${username}`;
+        };
+        return (
+            <>
+                <ConfirmationDialog
+                    isOpen={!!userToToggle}
+                    tone="warning"
+                    icon={<Power />}
+                    title={userToToggle?.currentStatus ? `¿Desactivar a ${nameOf(userToToggle?.username)}?` : `¿Activar a ${nameOf(userToToggle?.username)}?`}
+                    description={userToToggle?.currentStatus
+                        ? 'No podrá ingresar al sistema hasta que lo vuelva a activar. Sus datos se conservan.'
+                        : 'Podrá volver a ingresar al sistema con su usuario y contraseña.'}
+                    confirmLabel={userToToggle?.currentStatus ? 'Desactivar' : 'Activar'}
+                    onConfirm={executeToggleStatus}
+                    onCancel={() => setUserToToggle(null)}
+                />
+                <ConfirmationDialog
+                    isOpen={!!userToDelete}
+                    tone="danger"
+                    icon={<Trash2 />}
+                    isConfirming={isDeletingUser}
+                    title={`¿Eliminar a ${nameOf(userToDelete?.username)}?`}
+                    description={`Se borran su cuenta (@${userToDelete?.username || ''}) y su ficha de personal. No se puede deshacer.`}
+                    confirmLabel="Eliminar definitivamente"
+                    onConfirm={executeDeleteUser}
+                    onCancel={() => setUserToDelete(null)}
+                >
+                    <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-800">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span>Si solo quiere quitarle el acceso, use «Desactivar».</span>
                     </div>
-                    <h3 className="text-lg font-bold text-gray-900 mb-2">
-                        {userToToggle.currentStatus ? 'Inactivar Usuario' : 'Activar Usuario'}
-                    </h3>
-                    <p className="text-sm text-gray-500 mb-6">
-                        ¿Está seguro que desea {userToToggle.currentStatus ? 'deshabilitar' : 'habilitar'} el acceso para <strong>{userToToggle.username}</strong>?
-                    </p>
-                    <div className="flex gap-3 justify-center">
-                        <button 
-                            onClick={() => setUserToToggle(null)}
-                            className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors"
-                        >
-                            Cancelar
-                        </button>
-                        <button 
-                            onClick={executeToggleStatus}
-                            className={`px-4 py-2 text-white rounded-lg font-bold text-sm transition-colors shadow-sm ${userToToggle.currentStatus ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
-                        >
-                            {userToToggle.currentStatus ? 'Sí, Inactivar' : 'Sí, Activar'}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    )}
+                </ConfirmationDialog>
+            </>
+        );
+    })()}
 
-    {/* --- ELIMINAR USUARIO DEFINITIVO (SUPERADMIN) --- */}
-    {userToDelete && (
-        <div className="fixed inset-0 z-[110000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 border border-gray-100">
-                <div className="p-6">
-                    <div className="text-center">
-                        <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full mb-4 bg-rose-50 border border-rose-100">
-                            <Trash2 className="h-7 w-7 text-rose-600" />
-                        </div>
-                        <h3 className="text-xl font-bold text-gray-900 mb-2">
-                            ¿Eliminar Usuario de Forma Permanente?
-                        </h3>
-                        <p className="text-sm text-gray-500 mb-4 leading-relaxed">
-                            Esta acción es <strong className="text-rose-600">IRREVERSIBLE</strong>. Se eliminará definitivamente la cuenta de acceso <strong>@{userToDelete.username}</strong> del sistema, incluyendo sus credenciales y configuraciones de rol, así como su perfil de personal vinculado si corresponde.
-                        </p>
-                    </div>
-                    
-                    <div className="bg-amber-50 rounded-lg border border-amber-100 text-[11px] p-3 text-amber-800 mb-6 flex gap-2">
-                        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-                        <span><strong>Atención:</strong> Asegúrese de que este personal no tenga dependencias críticas antes de proceder. No se puede deshacer un borrado definitivo.</span>
-                    </div>
-
-                    <div className="flex gap-3 justify-end">
-                        <button 
-                            onClick={() => setUserToDelete(null)}
-                            disabled={isDeletingUser}
-                            className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
-                        >
-                            Cancelar
-                        </button>
-                        <button 
-                            onClick={executeDeleteUser}
-                            disabled={isDeletingUser}
-                            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-sm transition-colors shadow-sm flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                            {isDeletingUser ? 'Eliminando...' : 'Sí, Eliminar Definitivamente'}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    )}
-
-    {/* --- USER FORM MODAL --- */}
-    {isUserModalOpen && (
-        <div className="fixed inset-0 z-[110000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-                <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-teal-500/25 p-2 rounded-xl border border-teal-500/30">
-                            <Users className="h-5 w-5 text-teal-400" />
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-bold tracking-tight">{editingUser ? 'Editar Usuario' : 'Nuevo Usuario'}</h3>
-                            <p className="text-xs text-gray-400">Complete los datos de perfil y configure el ámbito de acceso organizacional.</p>
+    {/* --- NUEVO / EDITAR USUARIO: asistente de 3 pasos (pantalla completa en el celular) --- */}
+    {(() => {
+        const STEP_LABELS = ['Datos personales', 'Cuenta y rol', 'Jurisdicción'];
+        const selectedRole = roles.find(r => r.role === userForm.role);
+        const levelName: Record<string, string> = { GLOBAL: 'nacional', DIRESA: 'DIRESA', OGESS: 'OGESS', UNGET: 'UNGET', MICRORED: 'Microred', IPRESS: 'Establecimiento' };
+        const nextStepHint = userModalLevel === 'GLOBAL'
+            ? 'Nivel nacional: no necesita elegir jurisdicción.'
+            : userModalLevel
+                ? `Nivel ${levelName[userModalLevel]}: en el siguiente paso elige su ${userModalLevel === 'IPRESS' ? 'establecimiento' : levelName[userModalLevel]}.`
+                : '';
+        const hierarchyPath = [resolvedHierarchy.diresa, resolvedHierarchy.ogess, resolvedHierarchy.unget, resolvedHierarchy.microred, resolvedHierarchy.ipress].filter(Boolean).join(' › ');
+        const fullName = `${userForm.firstName} ${userForm.lastName}`.trim();
+        return (
+            <ResponsiveDialog
+                open={isUserModalOpen}
+                onClose={() => setIsUserModalOpen(false)}
+                onSubmit={handleSaveUser}
+                busy={isSavingUser}
+                size="lg"
+                title={editingUser ? 'Editar usuario' : 'Nuevo usuario'}
+                subtitle={editingUser ? fullName : undefined}
+                top={
+                    <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
+                        <p className="text-[12.5px] font-black text-teal-700">Paso {userModalStep} de 3 · {STEP_LABELS[userModalStep - 1]}</p>
+                        <div className="mt-2 grid grid-cols-3 gap-1.5" aria-hidden="true">
+                            {[1, 2, 3].map(n => <span key={n} className={`h-1.5 rounded-full transition-colors ${n <= userModalStep ? 'bg-teal-600' : 'bg-slate-200'}`} />)}
                         </div>
                     </div>
-                    <button 
-                        onClick={() => setIsUserModalOpen(false)}
-                        className="text-gray-400 hover:text-white transition-colors hover:bg-white/10 p-1.5 rounded-full"
-                    >
-                        <X className="h-5 w-5" />
-                    </button>
-                </div>
-
-                <form onSubmit={handleSaveUser} className="flex-1 flex flex-col overflow-hidden">
-                    {/* Premium Stepper Progress Header Container */}
-                    <div className="px-6 pt-6 shrink-0 bg-white z-10">
-                        <div className="relative flex items-center justify-between pb-4 border-b border-gray-100">
-                            <div className="absolute left-0 top-4 right-0 h-0.5 bg-gray-100 -z-10">
-                            <div 
-                                className="h-full bg-teal-600 transition-all duration-300" 
-                                style={{ width: userModalStep === 1 ? '0%' : userModalStep === 2 ? '50%' : '100%' }}
-                            />
-                        </div>
-                        {[
-                            { step: 1, label: 'Datos Personales', desc: 'Identificación y Contacto', icon: Users },
-                            { step: 2, label: 'Cuenta y Rol', desc: 'Credenciales y Nivel', icon: Shield },
-                            { step: 3, label: 'Ámbito de Jurisdicción', desc: 'Asignación Organizacional', icon: Building2 }
-                        ].map(s => {
-                            const IconComponent = s.icon;
-                            return (
-                                <button
-                                    key={s.step}
-                                    type="button"
-                                    disabled={
-                                        (s.step === 2 && !isStep1Valid) ||
-                                        (s.step === 3 && (!isStep1Valid || !isStep2Valid))
-                                    }
-                                    onClick={() => setUserModalStep(s.step)}
-                                    className="flex items-center gap-3.5 bg-white px-3 disabled:opacity-50 disabled:cursor-not-allowed group text-left outline-none"
-                                >
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${userModalStep === s.step ? 'bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100' : 'bg-gray-50 border-gray-200 text-gray-400 group-hover:border-gray-300'}`}>
-                                        <IconComponent className="h-4 w-4" />
-                                    </div>
-                                    <div>
-                                        <span className={`block text-[11px] font-bold uppercase tracking-wider ${userModalStep === s.step ? 'text-teal-700' : 'text-gray-400'}`}>{s.label}</span>
-                                        <span className="block text-[10px] text-gray-400 font-medium">{s.desc}</span>
-                                    </div>
-                                </button>
-                            );
-                        })}
-                        </div>
-                    </div>
-
-                    <div className="px-6 py-6 overflow-y-auto flex-1 min-h-[200px] flex flex-col justify-start">
-                        {/* Step 1: Personal Identification */}
-                        {userModalStep === 1 && (
-                            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-                                {/* Sub-Sección 1: Datos Personales */}
-                                <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100/80 space-y-4">
-                                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-1.5">
-                                        <div className="w-1.5 h-3 bg-teal-500 rounded-sm" /> Datos de Identificación
-                                    </h4>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">Nombres *</label>
-                                            <input 
-                                                type="text" required
-                                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white text-gray-900 placeholder-gray-400 font-medium"
-                                                value={userForm.firstName}
-                                                onChange={e => setUserForm({...userForm, firstName: e.target.value})}
-                                                placeholder="Nombres completos"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">Apellidos *</label>
-                                            <input 
-                                                type="text" required
-                                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white text-gray-900 placeholder-gray-400 font-medium"
-                                                value={userForm.lastName}
-                                                onChange={e => setUserForm({...userForm, lastName: e.target.value})}
-                                                placeholder="Apellidos"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">DNI *</label>
-                                            <input 
-                                                type="text" required maxLength={8}
-                                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white text-gray-900 placeholder-gray-400 font-mono font-medium tracking-wider"
-                                                value={userForm.dni}
-                                                onChange={e => setUserForm({...userForm, dni: e.target.value})}
-                                                placeholder="DNI de 8 dígitos/cédula"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">Correo Electrónico</label>
-                                            <input 
-                                                type="email"
-                                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white text-gray-900 placeholder-gray-400 font-medium"
-                                                value={userForm.email}
-                                                onChange={e => setUserForm({...userForm, email: e.target.value})}
-                                                placeholder="email@ejemplo.com"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">Teléfono</label>
-                                            <input 
-                                                type="text"
-                                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white text-gray-900 placeholder-gray-400 font-medium"
-                                                value={userForm.phone}
-                                                onChange={e => setUserForm({...userForm, phone: e.target.value})}
-                                                placeholder="Ej. 987654321"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">Régimen Laboral</label>
-                                            <CustomSelect
-                                                className="w-full border border-gray-300 rounded-lg"
-                                                value={userForm.laborRegimeId || ''}
-                                                onChange={rId => {
-                                                    const matched = laborRegimes.find(r => r.id === rId);
-                                                    setUserForm({
-                                                        ...userForm,
-                                                        laborRegimeId: rId,
-                                                        laborRegime: matched ? matched.name : ''
-                                                    });
-                                                }}
-                                                placeholder="-- Seleccionar Régimen --"
-                                                options={[
-                                                    { value: '', label: '-- Seleccionar Régimen --' },
-                                                    ...laborRegimes.map(r => ({ value: r.id, label: r.name }))
-                                                ]}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">Profesión</label>
-                                            <CustomSelect
-                                                className="w-full border border-gray-300 rounded-lg"
-                                                value={userForm.professionId || ''}
-                                                onChange={val => setUserForm({ ...userForm, professionId: val })}
-                                                placeholder="-- Seleccionar Profesión --"
-                                                options={[
-                                                    { value: '', label: '-- Seleccionar Profesión --' },
-                                                    ...professions.map(p => ({ value: p.id, label: p.name }))
-                                                ]}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Step 2: Account and Access */}
-                        {userModalStep === 2 && (
-                            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-                                {/* Sub-Sección 2: Credenciales de Acceso */}
-                                <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100/80 space-y-4">
-                                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4 flex items-center gap-1.5">
-                                        <div className="w-1.5 h-3 bg-teal-500 rounded-sm" /> Credenciales y Rol de Acceso
-                                    </h4>
-                                    
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {/* Identidad de Acceso (Usuario / Contraseña) */}
-                                        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm space-y-4 relative">
-                                            <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Identidad de Acceso</h5>
-                                            <div>
-                                                <label className="block text-xs font-bold text-gray-700 mb-1">Usuario Sistema *</label>
-                                                <input 
-                                                    type="text" required
-                                                    disabled={!!editingUser}
-                                                    className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none font-mono font-medium tracking-wide ${editingUser ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : 'bg-white text-gray-900 shadow-sm'}`}
-                                                    value={userForm.username}
-                                                    onChange={e => setUserForm({...userForm, username: e.target.value})}
-                                                    placeholder="jsmith"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-bold text-gray-700 mb-1">
-                                                    {editingUser ? 'Nueva Contraseña' : 'Contraseña de Acceso *'}
-                                                </label>
-                                                <input 
-                                                    type="password"
-                                                    required={!editingUser}
-                                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white text-gray-900 placeholder-gray-400 font-mono shadow-sm"
-                                                    value={userForm.password}
-                                                    placeholder={editingUser ? "Dejar en blanco" : "Contraseña"}
-                                                    onChange={e => setUserForm({...userForm, password: e.target.value})}
-                                                />
-                                            </div>
-                                        </div>
-
-                                        {/* Nivel de Privilegios (Rol) */}
-                                        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm space-y-4 relative">
-                                            <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Nivel de Privilegios</h5>
-                                            <div>
-                                                <label className="block text-xs font-bold text-gray-700 mb-1">Rol de Permisos *</label>
-                                                <CustomSelect
-                                                    className="w-full border border-gray-300 rounded-lg text-gray-900 font-bold"
-                                                    value={userForm.role}
-                                                    onChange={roleVal => {
-                                                        const newLvl = getLevelForRole(roleVal);
-                                                        setUserModalLevel(newLvl);
-                                                        setUserForm(prev => ({
-                                                            ...prev,
-                                                            role: roleVal,
-                                                            diresaId: '',
-                                                            ogessId: '',
-                                                            ungetId: '',
-                                                            microredId: '',
-                                                            facilityCode: ''
-                                                        }));
-                                                    }}
-                                                    options={roles
-                                                        .filter(r => canAssignRoleKey(r.role))
-                                                        .map(r => ({ value: r.role, label: r.label || r.role }))}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Step 3: Jurisdictional Assignment */}
-                        {userModalStep === 3 && (
-                            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-
-                                {userModalLevel === 'GLOBAL' && (
-                                    <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100 shadow-sm text-center max-w-xl mx-auto my-4">
-                                        <div className="bg-blue-100 text-blue-700 p-3 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
-                                            <Shield className="h-6 w-6" />
-                                        </div>
-                                        <h5 className="text-sm font-extrabold text-blue-900">Acceso Administrativo Global</h5>
-                                        <p className="text-xs text-blue-700 mt-1.5 leading-relaxed">
-                                            Este usuario cuenta con atribuciones globales a nivel central. Posee visibilidad ilimitada sobre todas las DIRESA, OGESS, UNGET, Microredes e IPRESS del territorio nacional. No se requiere asignación de nodo secundario.
-                                        </p>
-                                    </div>
-                                )}
-
-                                {userModalLevel && userModalLevel !== 'GLOBAL' && (
-                                    <div className="space-y-6">
-                                        {/* Unified Section Banner with Jurisdiction Indicator and its Selection Combobox side-by-side */}
-                                        <div className="bg-slate-50 border border-slate-200/50 rounded-2xl p-5 mb-2 text-left">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                                                {/* Nivel de Jurisdicción Detectado */}
-                                                <div className="flex flex-col text-left">
-                                                    <span className="text-[10px] uppercase font-black tracking-widest text-green-600 mb-1 block">NIVEL DE JURISDICCIÓN DETECTADO</span>
-                                                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-wide flex items-center gap-2">
-                                                        <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                                                        {userModalLevel || 'No Determinado'}
-                                                    </h4>
-                                                </div>
-
-                                                {/* Conditional Selector (Rendered directly side-by-side inside the same section wrapper) */}
-                                                <div className="text-left w-full">
-                                                    {userModalLevel === 'DIRESA' && (
-                                                        <div className="space-y-1">
-                                                            <label className="block text-[10px] font-black text-slate-900 uppercase tracking-wider">SELECCIONE DIRESA JURISDICCIONAL *</label>
-                                                            <CustomSelect
-                                                                className="w-full border border-gray-350 rounded-xl px-4 py-2.5 text-xs font-bold bg-white"
-                                                                value={userForm.diresaId || ''}
-                                                                onChange={selId => {
-                                                                    setUserForm({
-                                                                        ...userForm,
-                                                                        diresaId: selId,
-                                                                        ogessId: '',
-                                                                        ungetId: '',
-                                                                        microredId: '',
-                                                                        facilityCode: ''
-                                                                    });
-                                                                }}
-                                                                placeholder="Seleccione DIRESA..."
-                                                                options={[
-                                                                    { value: '', label: 'Seleccione DIRESA...' },
-                                                                    ...diresas.filter(d => isSuperAdmin || !userDiresaId || d.id === userDiresaId).map(d => ({ value: d.id, label: d.name }))
-                                                                ]}
-                                                            />
-                                                        </div>
-                                                    )}
-
-                                                    {userModalLevel === 'OGESS' && (
-                                                        <div className="space-y-1">
-                                                            <label className="block text-[10px] font-black text-slate-900 uppercase tracking-wider">SELECCIONE OGESS JURISDICCIONAL *</label>
-                                                            <CustomSelect
-                                                                className="w-full border border-gray-350 rounded-xl px-4 py-2.5 text-xs font-bold bg-white"
-                                                                value={userForm.ogessId || ''}
-                                                                onChange={selId => {
-                                                                    const selO = ogess.find(o => o.id === selId);
-                                                                    if (selO) {
-                                                                        setUserForm({
-                                                                            ...userForm,
-                                                                            ogessId: selId,
-                                                                            ungetId: '',
-                                                                            microredId: '',
-                                                                            facilityCode: '',
-                                                                            diresaId: selO.diresaId || ''
-                                                                        });
-                                                                    } else {
-                                                                        setUserForm({ ...userForm, ogessId: '', diresaId: '' });
-                                                                    }
-                                                                }}
-                                                                placeholder="Seleccione OGESS..."
-                                                                options={[
-                                                                    { value: '', label: 'Seleccione OGESS...' },
-                                                                    ...ogess.filter(o => {
-                                                                        if (isSuperAdmin) return true;
-                                                                        if (userOgessId && o.id !== userOgessId) return false;
-                                                                        if (!isSuperAdmin && userDiresaId && o.diresaId !== userDiresaId) return false;
-                                                                        return true;
-                                                                    }).map(o => ({ value: o.id, label: o.name }))
-                                                                ]}
-                                                            />
-                                                        </div>
-                                                    )}
-
-                                                    {userModalLevel === 'UNGET' && (
-                                                        <div className="space-y-1">
-                                                            <label className="block text-[10px] font-black text-slate-900 uppercase tracking-wider">SELECCIONE UNGET JURISDICCIONAL *</label>
-                                                            <CustomSelect
-                                                                className="w-full border border-gray-350 rounded-xl px-4 py-2.5 text-xs font-bold bg-white"
-                                                                value={userForm.ungetId || ''}
-                                                                onChange={selId => {
-                                                                    const selUn = ungets.find(un => un.id === selId);
-                                                                    if (selUn) {
-                                                                        const selO = ogess.find(o => o.id === selUn.ogessId);
-                                                                        setUserForm({
-                                                                            ...userForm,
-                                                                            ungetId: selId,
-                                                                            microredId: '',
-                                                                            facilityCode: '',
-                                                                            ogessId: selUn.ogessId || '',
-                                                                            diresaId: selO?.diresaId || ''
-                                                                        });
-                                                                    } else {
-                                                                        setUserForm({ ...userForm, ungetId: '', ogessId: '', diresaId: '' });
-                                                                    }
-                                                                }}
-                                                                placeholder="Seleccione UNGET..."
-                                                                options={[
-                                                                    { value: '', label: 'Seleccione UNGET...' },
-                                                                    ...ungets.filter(un => {
-                                                                        if (isSuperAdmin) return true;
-                                                                        if (userUngetId && un.id !== userUngetId) return false;
-                                                                        if (userOgessId && un.ogessId !== userOgessId) return false;
-                                                                        return true;
-                                                                    }).map(u => ({ value: u.id, label: u.name }))
-                                                                ]}
-                                                            />
-                                                        </div>
-                                                    )}
-
-                                                    {userModalLevel === 'MICRORED' && (
-                                                        <div className="space-y-1">
-                                                            <label className="block text-[10px] font-black text-slate-900 uppercase tracking-wider">SELECCIONE MICRORED JURISDICCIONAL *</label>
-                                                            <CustomSelect
-                                                                className="w-full border border-gray-350 rounded-xl px-4 py-2.5 text-xs font-bold bg-white"
-                                                                value={userForm.microredId || ''}
-                                                                onChange={selId => {
-                                                                    const selM = microredes.find(m => m.id === selId);
-                                                                    if (selM) {
-                                                                        const selU = ungets.find(un => un.id === selM.ungetId);
-                                                                        const selO = ogess.find(o => o.id === selU?.ogessId);
-                                                                        setUserForm({
-                                                                            ...userForm,
-                                                                            microredId: selId,
-                                                                            facilityCode: '',
-                                                                            ungetId: selM.ungetId || '',
-                                                                            ogessId: selU?.ogessId || '',
-                                                                            diresaId: selO?.diresaId || ''
-                                                                        });
-                                                                    } else {
-                                                                        setUserForm({ ...userForm, microredId: '', ungetId: '', ogessId: '', diresaId: '' });
-                                                                    }
-                                                                }}
-                                                                placeholder="Seleccione MICRORED..."
-                                                                options={[
-                                                                    { value: '', label: 'Seleccione MICRORED...' },
-                                                                    ...microredes.filter(m => {
-                                                                        if (isSuperAdmin) return true;
-                                                                        if (userMicroredId && m.id !== userMicroredId) return false;
-                                                                        if (userUngetId && m.ungetId !== userUngetId) return false;
-                                                                        return true;
-                                                                    }).map(m => ({ value: m.id, label: m.name }))
-                                                                ]}
-                                                            />
-                                                        </div>
-                                                    )}
-
-                                                    {userModalLevel === 'IPRESS' && (
-                                                        <div className="space-y-1">
-                                                            <label className="block text-[10px] font-black text-black uppercase tracking-wider mb-1">SELECCIONE IPRESS (ESTABLECIMIENTO DE SALUD) *</label>
-                                                            <CustomSelect
-                                                                className="w-full border border-gray-300 rounded-xl px-4 py-2 text-xs font-bold bg-white"
-                                                                value={userForm.facilityCode || ''}
-                                                                onChange={selId => {
-                                                                    const sel = facilities.find(f => f.code === selId);
-                                                                    if (sel) {
-                                                                        const selM = microredes.find(m => m.id === sel?.microredId);
-                                                                        const selU = ungets.find(un => un.id === (selM?.ungetId || sel?.ungetId));
-                                                                        const selO = ogess.find(o => o.id === (selU?.ogessId || sel?.ogessId));
-                                                                        setUserForm({
-                                                                            ...userForm,
-                                                                            facilityCode: selId,
-                                                                            microredId: sel.microredId || '',
-                                                                            ungetId: sel.ungetId || selM?.ungetId || '',
-                                                                            ogessId: sel.ogessId || selU?.ogessId || '',
-                                                                            diresaId: sel.diresaId || selO?.diresaId || ''
-                                                                        });
-                                                                    } else {
-                                                                        setUserForm({ ...userForm, facilityCode: '', microredId: '', ungetId: '', ogessId: '', diresaId: '' });
-                                                                    }
-                                                                }}
-                                                                placeholder="Seleccione IPRESS..."
-                                                                options={[
-                                                                    { value: '', label: 'Seleccione IPRESS...' },
-                                                                    ...facilities.filter(f => {
-                                                                        if (isSuperAdmin) return true;
-                                                                        if (userFacilityCode && f.code !== userFacilityCode) return false;
-                                                                        if (userMicroredId && f.microredId !== userMicroredId) return false;
-                                                                        if (userUngetId && f.ungetId !== userUngetId) return false;
-                                                                        if (userOgessId && f.ogessId !== userOgessId) return false;
-                                                                        return true;
-                                                                    }).map(fac => ({ value: fac.code, label: `${fac.code} - ${fac.name}` }))
-                                                                ]}
-                                                            />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-                                            {/* Columna 1: Resumen del Personal Asignado */}
-                                            <div className="bg-slate-50/50 border border-slate-200/55 rounded-2xl p-5 text-left space-y-4 shadow-sm animate-in fade-in duration-300">
-                                                <div className="flex items-center gap-2 border-b border-slate-200/60 pb-3">
-                                                    <div className="h-6 w-6 rounded-lg bg-teal-50 flex items-center justify-center text-teal-600 shrink-0">
-                                                        <Users className="h-3.5 w-3.5" />
-                                                    </div>
-                                                    <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider">
-                                                        Resumen del Personal Asignado
-                                                    </span>
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-y-5 gap-x-4 text-xs">
-                                                    <div className="col-span-2">
-                                                        <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Nombre Completo</div>
-                                                        <div className="font-extrabold text-slate-800 mt-1 truncate leading-tight">
-                                                            {userForm.firstName || userForm.lastName ? `${userForm.firstName} ${userForm.lastName}`.trim() : <span className="text-slate-400 italic font-normal">Sin registrar</span>}
-                                                        </div>
-                                                    </div>
-
-                                                    <div>
-                                                        <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Usuario / Cuenta</div>
-                                                        <div className="font-extrabold text-slate-800 mt-1 truncate">
-                                                            {userForm.username ? (
-                                                                <span className="font-mono bg-teal-50 text-teal-800 border border-teal-100/35 px-1.5 py-0.5 rounded text-[10px]">
-                                                                    @{userForm.username}
-                                                                </span>
-                                                            ) : (
-                                                                <span className="text-slate-400 italic font-normal">Sin registrar</span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    <div>
-                                                        <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">DNI Identificación</div>
-                                                        <div className="font-extrabold text-slate-700 mt-1 font-mono tracking-wider">
-                                                            {userForm.dni || <span className="text-slate-400 italic font-normal font-sans tracking-normal">-</span>}
-                                                        </div>
-                                                    </div>
-
-                                                    <div>
-                                                        <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Rol de Acceso</div>
-                                                        <div className="font-extrabold text-slate-800 mt-1 truncate leading-tight">
-                                                            {(() => {
-                                                                const rObj = roles.find(r => r.role === userForm.role);
-                                                                return rObj?.label || userForm.role || <span className="text-slate-400 italic font-normal">-</span>;
-                                                            })()}
-                                                        </div>
-                                                    </div>
-
-                                                    <div>
-                                                        <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Profesión</div>
-                                                        <div className="font-extrabold text-slate-800 mt-1 truncate leading-tight">
-                                                            {professionMapLookup.get(userForm.professionId)?.name || <span className="text-slate-400 italic font-normal">Sin registrar</span>}
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="col-span-2 border-t border-slate-200/50 pt-3 mt-1 grid grid-cols-2 gap-4">
-                                                        <div>
-                                                            <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Correo Electrónico</div>
-                                                            <div className="font-extrabold text-slate-700 mt-1 truncate leading-tight">
-                                                                {userForm.email || <span className="text-slate-400 italic font-normal">Sin registrar</span>}
-                                                            </div>
-                                                        </div>
-                                                        <div>
-                                                            <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Número de Celular</div>
-                                                            <div className="font-extrabold text-slate-700 mt-1 truncate leading-tight">
-                                                                {userForm.phone || <span className="text-slate-400 italic font-normal">Sin registrar</span>}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Columna 2: Visualización Jerárquica */}
-                                            <div className="space-y-4">
-                                                {/* Visualizador Jerárquico */}
-                                                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm animate-in fade-in zoom-in-95 duration-200 text-left">
-                                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-5 flex items-center gap-1.5 border-b border-slate-100 pb-2.5 text-left">
-                                                        <Building2 className="h-3.5 w-3.5 text-teal-500 shrink-0" />
-                                                        ESTRUCTURA JERÁRQUICA
-                                                    </h4>
-                                                    
-                                                    <div className="relative pt-1 pl-4 border-l-2 border-slate-200 space-y-4 ml-1">
-                                                        {/* DIRESA */}
-                                                        <div className="relative text-left">
-                                                            <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-4 ring-white" />
-                                                            <div>
-                                                                <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">DIRESA</div>
-                                                                <div className="text-xs font-bold text-slate-800">
-                                                                    {resolvedHierarchy.diresa || <span className="text-slate-400 italic font-normal text-[11px]">Pendiente de selección...</span>}
-                                                                </div>
-                                                            </div>
-                                                        </div>
-
-                                                        {/* OGESS */}
-                                                        {['OGESS', 'UNGET', 'MICRORED', 'IPRESS'].includes(userModalLevel) && (
-                                                            <div className="relative text-left">
-                                                                <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-4 ring-white" />
-                                                                <div>
-                                                                    <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">OGESS / RED DE SALUD</div>
-                                                                    <div className="text-xs font-bold text-slate-800">
-                                                                        {resolvedHierarchy.ogess || <span className="text-slate-400 italic font-normal text-[11px]">Autocompletado desde nodo</span>}
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        )}
-
-                                                        {/* UNGET */}
-                                                        {['UNGET', 'MICRORED', 'IPRESS'].includes(userModalLevel) && (
-                                                            <div className="relative text-left">
-                                                                <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-4 ring-white" />
-                                                                <div>
-                                                                    <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">UNGET / UNIDAD DE GESTIÓN TERRITORIAL</div>
-                                                                    <div className="text-xs font-bold text-slate-800">
-                                                                        {resolvedHierarchy.unget || <span className="text-slate-400 italic font-normal text-[11px]">Autocompletado desde nodo</span>}
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        )}
-
-                                                        {/* MICRORED */}
-                                                        {['MICRORED', 'IPRESS'].includes(userModalLevel) && (
-                                                            <div className="relative text-left">
-                                                                <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-4 ring-white" />
-                                                                <div>
-                                                                    <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">MICRORED DE SALUD</div>
-                                                                    <div className="text-xs font-bold text-slate-800">
-                                                                        {resolvedHierarchy.microred || <span className="text-slate-400 italic font-normal text-[11px]">Autocompletado desde nodo</span>}
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        )}
-
-                                                        {/* IPRESS */}
-                                                        {userModalLevel === 'IPRESS' && (
-                                                            <div className="relative text-left">
-                                                                <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-teal-600 ring-4 ring-white" />
-                                                                <div>
-                                                                    <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">ESTABLECIMIENTO DE SALUD (IPRESS)</div>
-                                                                    {resolvedHierarchy.ipress ? (
-                                                                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                                                            <span className="text-[10px] font-bold text-teal-800 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded font-mono shrink-0">
-                                                                                {userForm.facilityCode}
-                                                                            </span>
-                                                                            <span className="text-xs font-bold text-slate-800 leading-tight border-b-none">
-                                                                                {resolvedHierarchy.ipress}
-                                                                            </span>
-                                                                        </div>
-                                                                     ) : (
-                                                                        <div className="text-xs font-medium text-slate-400 italic text-[11px] mt-0.5">Seleccione arriba...</div>
-                                                                     )}
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Sticky, Solid-Colored, Forward-Facing Footer Bar */}
-                    <div className="px-6 py-4 bg-slate-50 border-t border-slate-200/60 flex justify-between items-center shrink-0 z-20">
+                }
+                footer={
+                    <>
                         {userModalStep > 1 ? (
-                            <button 
-                                key="btn-back"
-                                type="button"
-                                onClick={() => setUserModalStep(userStep => userStep - 1)}
-                                className="px-5 py-2 text-xs font-black uppercase text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 rounded-xl transition-all border border-slate-200/80 flex items-center gap-1 shadow-sm"
-                            >
-                                Atrás
+                            <button type="button" onClick={() => setUserModalStep(step => step - 1)} className={`${dialogSecondaryButton} flex items-center gap-1.5`}>
+                                <ArrowLeft className="h-4 w-4" /> Atrás
                             </button>
                         ) : (
-                            <button 
-                                key="btn-cancel"
-                                type="button"
-                                onClick={() => setIsUserModalOpen(false)}
-                                className="px-5 py-2 text-xs font-black uppercase text-slate-500 hover:text-red-650 hover:bg-red-50 rounded-xl transition-all border border-transparent"
-                            >
+                            <button type="button" onClick={() => setIsUserModalOpen(false)} className={dialogSecondaryButton}>
                                 Cancelar
                             </button>
                         )}
-                        
                         {userModalStep === 1 && (
-                            <button 
-                                key="btn-next-step-1"
-                                type="button"
-                                onClick={() => setUserModalStep(2)}
-                                disabled={!isStep1Valid}
-                                className="bg-slate-900 border border-slate-950 text-white font-black text-xs uppercase py-2 px-6 rounded-xl hover:bg-black transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                            >
-                                Siguiente
-                            </button>
+                            <button type="button" onClick={() => setUserModalStep(2)} disabled={!isStep1Valid} className={dialogPrimaryButton}>Siguiente</button>
                         )}
                         {userModalStep === 2 && (
-                            <button 
-                                key="btn-next-step-2"
-                                type="button"
-                                onClick={() => setUserModalStep(3)}
-                                disabled={!isStep2Valid}
-                                className="bg-slate-900 border border-slate-950 text-white font-black text-xs uppercase py-2 px-6 rounded-xl hover:bg-black transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                            >
-                                Siguiente
-                            </button>
+                            <button type="button" onClick={() => setUserModalStep(3)} disabled={!isStep2Valid} className={dialogPrimaryButton}>Siguiente</button>
                         )}
                         {userModalStep === 3 && (
-                            <button 
-                                key="btn-submit-save"
-                                type="submit"
-                                disabled={isSavingUser || !isStep3Valid}
-                                className="bg-[#00a896] hover:bg-[#028074] border border-[#009b8b] text-white font-black text-xs uppercase py-2.5 px-6 rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
+                            <button type="submit" disabled={isSavingUser || !isStep3Valid} className={dialogPrimaryButton}>
                                 <Save className="h-4 w-4" />
-                                {isSavingUser ? 'Guardando...' : 'Finalizar y Guardar'}
+                                {isSavingUser ? 'Guardando…' : 'Guardar'}
                             </button>
                         )}
-                    </div>
-                </form>
-            </div>
-        </div>
-    )}
-
-    {/* --- NEW ROLE MODAL --- */}
-    {isNewRoleModalOpen && (
-        <div className="fixed inset-0 z-[110000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
-                <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-teal-500/20 p-2 rounded-lg">
-                            <Shield className="h-5 w-5 text-teal-400" />
-                        </div>
+                    </>
+                }
+            >
+                {userModalStep === 1 && (
+                    <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2">
+                        <FormField label="Nombres" required>
+                            <input type="text" required className={inputClass} value={userForm.firstName} onChange={e => setUserForm({ ...userForm, firstName: e.target.value })} placeholder="Nombres completos" />
+                        </FormField>
+                        <FormField label="Apellidos" required>
+                            <input type="text" required className={inputClass} value={userForm.lastName} onChange={e => setUserForm({ ...userForm, lastName: e.target.value })} placeholder="Apellidos" />
+                        </FormField>
+                        <FormField label="DNI" required>
+                            <input type="text" required maxLength={8} inputMode="numeric" className={inputClass} value={userForm.dni} onChange={e => setUserForm({ ...userForm, dni: e.target.value })} placeholder="8 dígitos" />
+                        </FormField>
+                        <FormField label="Celular">
+                            <input type="tel" className={inputClass} value={userForm.phone} onChange={e => setUserForm({ ...userForm, phone: e.target.value })} placeholder="Ej. 987654321" />
+                        </FormField>
+                        <FormField label="Correo electrónico">
+                            <input type="email" className={inputClass} value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })} placeholder="correo@ejemplo.com" />
+                        </FormField>
                         <div>
-                            <h3 className="text-lg font-bold">Crear Nuevo Rol</h3>
-                            <p className="text-xs text-gray-400">Defina el código y los permisos del nuevo rol.</p>
-                        </div>
-                    </div>
-                    <button 
-                        onClick={() => setIsNewRoleModalOpen(false)}
-                        className="text-gray-400 hover:text-white transition-colors hover:bg-white/10 p-1 rounded-full"
-                    >
-                        <X className="h-6 w-6" />
-                    </button>
-                </div>
-
-                <form onSubmit={handleCreateRole} className="p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6 pb-2">
-                        {/* Columna Izquierda: Identificador, Nombre y Límites (col-span-4) */}
-                        <div className="space-y-4 md:col-span-4">
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 mb-1">Identificador del Rol *</label>
-                                <input 
-                                    type="text"
-                                    required
-                                    placeholder="Ej: AUDITOR"
-                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 uppercase outline-none"
-                                    value={newRoleForm.role}
-                                    onChange={e => setNewRoleForm({...newRoleForm, role: e.target.value})}
-                                />
-                                <p className="text-[10px] text-gray-400 mt-1">Código único sin espacios (Ej: MEDICO, ANALISTA).</p>
-                            </div>
-                            
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 mb-1">Nombre Descriptivo</label>
-                                <input 
-                                    type="text"
-                                    placeholder="Ej: Personal Auditor"
-                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none"
-                                    value={newRoleForm.label}
-                                    onChange={e => setNewRoleForm({...newRoleForm, label: e.target.value})}
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 mb-1">Nivel de Jurisdicción</label>
-                                <CustomSelect
-                                    className="w-full border border-gray-300 rounded-lg"
-                                    value={newRoleForm.jurisdictionLevel || ''}
-                                    onChange={val => setNewRoleForm({...newRoleForm, jurisdictionLevel: val as any})}
-                                    options={[
-                                        { value: '', label: 'Automático / Predeterminado' },
-                                        { value: 'GLOBAL', label: 'GLOBAL (Nacional)' },
-                                        { value: 'DIRESA', label: 'DIRESA' },
-                                        { value: 'OGESS', label: 'OGESS' },
-                                        { value: 'UNGET', label: 'UNGET' },
-                                        { value: 'MICRORED', label: 'MICRORED' },
-                                        { value: 'IPRESS', label: 'IPRESS (Establecimiento)' }
-                                    ]}
-                                />
-                                <p className="text-[10px] text-gray-500 mt-1">Define el alcance si el usuario usará la plataforma bajo cierta jurisdicción.</p>
-                            </div>
-
-                            <div className="pt-2">
-                                <label className="block text-xs font-bold text-gray-700 mb-2">Límites del Sistema</label>
-                                <div className="bg-gray-50 border border-gray-100 p-3 rounded-lg">
-                                    <label className="block text-xs font-bold text-gray-600 mb-2">Máximo de URLs (SIG_SEARCH):</label>
-                                    <input 
-                                        type="number"
-                                        min="1"
-                                        placeholder="Ilimitado"
-                                        value={newRoleForm.maxUrlsAllowed}
-                                        onChange={(e) => setNewRoleForm({...newRoleForm, maxUrlsAllowed: e.target.value})}
-                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none"
-                                    />
-                                    <p className="text-[10px] text-gray-400 mt-1">Deje vacío para permitir búsquedas sin límite.</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Columna Derecha: Permisos Iniciales (col-span-8) */}
-                        <div className="flex flex-col h-full border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6 md:col-span-8">
-                            <label className="block text-xs font-bold text-gray-700 mb-2">Permisos Iniciales</label>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1">
-                                {AVAILABLE_MODULES.filter(module => NAV_SECTIONS.some(sec => sec.items.some(it => it.module === module.id))).map(module => {
-                                    const isChecked = newRoleForm.allowedModules.includes(module.id as never);
-                                    return (
-                                        <label key={module.id} className="flex items-start gap-2 p-2.5 bg-gray-50 rounded border border-gray-100 hover:bg-gray-100 cursor-pointer transition-all" title={module.description}>
-                                            <input 
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={(e) => {
-                                                    const newMods = e.target.checked 
-                                                        ? [...newRoleForm.allowedModules, module.id]
-                                                        : newRoleForm.allowedModules.filter(m => m !== module.id);
-                                                    setNewRoleForm({...newRoleForm, allowedModules: newMods as any});
-                                                }}
-                                                className="rounded text-teal-600 focus:ring-teal-500 mt-0.5 animate-none"
-                                            />
-                                            <div className="flex flex-col">
-                                                <span className="text-xs font-bold text-gray-700">{module.label}</span>
-                                                <span className="text-[9px] text-gray-400 leading-tight">{module.description}</span>
-                                            </div>
-                                        </label>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="mt-8 flex justify-end gap-3 pt-4 border-t border-gray-100">
-                        <button 
-                            type="button"
-                            onClick={() => setIsNewRoleModalOpen(false)}
-                            className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
-                        >
-                            Cancelar
-                        </button>
-                        <button 
-                            type="submit"
-                            disabled={isSavingRole || !newRoleForm.role}
-                            className="bg-teal-600 text-white font-bold py-2.5 px-6 rounded-lg shadow-md hover:bg-teal-700 transition-all flex items-center gap-2 disabled:opacity-70"
-                        >
-                            <Save className="h-4 w-4" />
-                            {isSavingRole ? 'Creando...' : 'Crear Rol'}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    )}
-
-    {/* --- EDIT ROLE MODAL --- */}
-    {isEditRoleModalOpen && (
-        <div className="fixed inset-0 z-[110000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
-                <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-teal-500/20 p-2 rounded-lg">
-                            <Edit className="h-5 w-5 text-teal-400" />
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-bold">Editar Datos del Rol</h3>
-                            <p className="text-xs text-gray-400">Actualizar nombre y código del rol.</p>
-                        </div>
-                    </div>
-                    <button 
-                        onClick={() => setIsEditRoleModalOpen(false)}
-                        className="text-gray-400 hover:text-white transition-colors hover:bg-white/10 p-1 rounded-full"
-                    >
-                        <X className="h-6 w-6" />
-                    </button>
-                </div>
-
-                <form onSubmit={handleSaveEditRole} className="p-6 overflow-y-auto custom-scrollbar flex-1">
-                    <div className="space-y-5">
-                        <div>
-                            <label className="block text-xs font-bold text-gray-700 mb-1">Nombre Descriptivo</label>
-                            <input 
-                                type="text"
-                                placeholder="Ej: Responsable Farmacia"
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none"
-                                value={editRoleForm.label}
-                                onChange={e => setEditRoleForm({...editRoleForm, label: e.target.value})}
-                                required
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-xs font-bold text-gray-700 mb-1">CÓDIGO (Identificador Único)</label>
-                            <input 
-                                type="text"
-                                placeholder="Ej: FARMACIA"
-                                className="w-full border border-gray-300 bg-gray-50 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-teal-500 outline-none uppercase"
-                                value={editRoleForm.role}
-                                onChange={e => setEditRoleForm({...editRoleForm, role: e.target.value.toUpperCase().replace(/\s+/g, '_')})}
-                                required
-                            />
-                            <p className="text-[10px] text-gray-500 mt-1">Este código se usa internamente y debe ser único. Sin espacios (use guión bajo).</p>
-                        </div>
-
-                        <div>
-                            <label className="block text-xs font-bold text-gray-700 mb-1">Nivel de Jurisdicción</label>
+                            <span className="mb-1.5 block text-xs font-black text-slate-700">Profesión</span>
                             <CustomSelect
-                                className="w-full border border-gray-300 rounded-lg"
-                                value={editRoleForm.jurisdictionLevel || ''}
-                                onChange={val => setEditRoleForm({...editRoleForm, jurisdictionLevel: val as any})}
+                                className="h-11 text-sm"
+                                value={userForm.professionId || ''}
+                                onChange={val => setUserForm({ ...userForm, professionId: val })}
+                                placeholder="Seleccionar profesión"
                                 options={[
-                                    { value: '', label: 'Automático / Predeterminado' },
-                                    { value: 'GLOBAL', label: 'GLOBAL (Nacional)' },
+                                    { value: '', label: 'Seleccionar profesión' },
+                                    ...professions.map(p => ({ value: p.id, label: p.name }))
+                                ]}
+                            />
+                        </div>
+                        <div>
+                            <span className="mb-1.5 block text-xs font-black text-slate-700">Régimen laboral</span>
+                            <CustomSelect
+                                className="h-11 text-sm"
+                                value={userForm.laborRegimeId || ''}
+                                onChange={rId => {
+                                    const matched = laborRegimes.find(r => r.id === rId);
+                                    setUserForm({ ...userForm, laborRegimeId: rId, laborRegime: matched ? matched.name : '' });
+                                }}
+                                placeholder="Seleccionar régimen"
+                                options={[
+                                    { value: '', label: 'Seleccionar régimen' },
+                                    ...laborRegimes.map(r => ({ value: r.id, label: r.name }))
+                                ]}
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {userModalStep === 2 && (
+                    <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2">
+                        <FormField label="Usuario" required hint={editingUser ? 'El usuario no se puede cambiar.' : undefined}>
+                            <input
+                                type="text" required autoCapitalize="none" autoCorrect="off"
+                                disabled={!!editingUser}
+                                className={inputClass}
+                                value={userForm.username}
+                                onChange={e => setUserForm({ ...userForm, username: e.target.value })}
+                                placeholder="Ej. jsmith"
+                            />
+                        </FormField>
+                        <FormField label={editingUser ? 'Nueva contraseña' : 'Contraseña'} required={!editingUser}>
+                            <input
+                                type="password"
+                                required={!editingUser}
+                                autoComplete="new-password"
+                                className={inputClass}
+                                value={userForm.password}
+                                placeholder={editingUser ? 'Dejar en blanco para no cambiarla' : 'Contraseña'}
+                                onChange={e => setUserForm({ ...userForm, password: e.target.value })}
+                            />
+                        </FormField>
+                        <div className="md:col-span-2">
+                            <span className="mb-1.5 block text-xs font-black text-slate-700">Rol <span className="text-red-500">*</span></span>
+                            <CustomSelect
+                                className="h-11 text-sm"
+                                value={userForm.role}
+                                onChange={roleVal => {
+                                    const newLvl = getLevelForRole(roleVal);
+                                    setUserModalLevel(newLvl);
+                                    setUserForm(prev => ({
+                                        ...prev,
+                                        role: roleVal,
+                                        diresaId: '',
+                                        ogessId: '',
+                                        ungetId: '',
+                                        microredId: '',
+                                        facilityCode: ''
+                                    }));
+                                }}
+                                options={roles
+                                    .filter(r => canAssignRoleKey(r.role))
+                                    .map(r => ({ value: r.role, label: r.label || r.role }))}
+                            />
+                            {nextStepHint && <span className="mt-1 block text-[11px] font-semibold text-slate-400">{nextStepHint}</span>}
+                        </div>
+                    </div>
+                )}
+
+                {userModalStep === 3 && (
+                    <div className="space-y-3">
+                        {userModalLevel === 'GLOBAL' && (
+                            <div className="flex gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-[14px] text-blue-900">
+                                <Shield className="h-5 w-5 shrink-0 text-blue-600" />
+                                <span><b>Acceso nacional.</b> Este rol ve todas las DIRESA, OGESS, UNGET, microredes y establecimientos; no necesita elegir jurisdicción.</span>
+                            </div>
+                        )}
+                        {userModalLevel && userModalLevel !== 'GLOBAL' && (
+                            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                                    {userModalLevel === 'DIRESA' && (
+                                        <div className="space-y-1">
+                                            <label className="mb-1.5 block text-[13px] font-bold text-slate-700">DIRESA <span className="text-red-500">*</span></label>
+                                            <CustomSelect
+                                                className="h-11 text-sm"
+                                                value={userForm.diresaId || ''}
+                                                onChange={selId => {
+                                                    setUserForm({
+                                                        ...userForm,
+                                                        diresaId: selId,
+                                                        ogessId: '',
+                                                        ungetId: '',
+                                                        microredId: '',
+                                                        facilityCode: ''
+                                                    });
+                                                }}
+                                                placeholder="Seleccione DIRESA..."
+                                                options={[
+                                                    { value: '', label: 'Seleccione DIRESA...' },
+                                                    ...diresas.filter(d => isSuperAdmin || !userDiresaId || d.id === userDiresaId).map(d => ({ value: d.id, label: d.name }))
+                                                ]}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {userModalLevel === 'OGESS' && (
+                                        <div className="space-y-1">
+                                            <label className="mb-1.5 block text-[13px] font-bold text-slate-700">OGESS <span className="text-red-500">*</span></label>
+                                            <CustomSelect
+                                                className="h-11 text-sm"
+                                                value={userForm.ogessId || ''}
+                                                onChange={selId => {
+                                                    const selO = ogess.find(o => o.id === selId);
+                                                    if (selO) {
+                                                        setUserForm({
+                                                            ...userForm,
+                                                            ogessId: selId,
+                                                            ungetId: '',
+                                                            microredId: '',
+                                                            facilityCode: '',
+                                                            diresaId: selO.diresaId || ''
+                                                        });
+                                                    } else {
+                                                        setUserForm({ ...userForm, ogessId: '', diresaId: '' });
+                                                    }
+                                                }}
+                                                placeholder="Seleccione OGESS..."
+                                                options={[
+                                                    { value: '', label: 'Seleccione OGESS...' },
+                                                    ...ogess.filter(o => {
+                                                        if (isSuperAdmin) return true;
+                                                        if (userOgessId && o.id !== userOgessId) return false;
+                                                        if (!isSuperAdmin && userDiresaId && o.diresaId !== userDiresaId) return false;
+                                                        return true;
+                                                    }).map(o => ({ value: o.id, label: o.name }))
+                                                ]}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {userModalLevel === 'UNGET' && (
+                                        <div className="space-y-1">
+                                            <label className="mb-1.5 block text-[13px] font-bold text-slate-700">UNGET <span className="text-red-500">*</span></label>
+                                            <CustomSelect
+                                                className="h-11 text-sm"
+                                                value={userForm.ungetId || ''}
+                                                onChange={selId => {
+                                                    const selUn = ungets.find(un => un.id === selId);
+                                                    if (selUn) {
+                                                        const selO = ogess.find(o => o.id === selUn.ogessId);
+                                                        setUserForm({
+                                                            ...userForm,
+                                                            ungetId: selId,
+                                                            microredId: '',
+                                                            facilityCode: '',
+                                                            ogessId: selUn.ogessId || '',
+                                                            diresaId: selO?.diresaId || ''
+                                                        });
+                                                    } else {
+                                                        setUserForm({ ...userForm, ungetId: '', ogessId: '', diresaId: '' });
+                                                    }
+                                                }}
+                                                placeholder="Seleccione UNGET..."
+                                                options={[
+                                                    { value: '', label: 'Seleccione UNGET...' },
+                                                    ...ungets.filter(un => {
+                                                        if (isSuperAdmin) return true;
+                                                        if (userUngetId && un.id !== userUngetId) return false;
+                                                        if (userOgessId && un.ogessId !== userOgessId) return false;
+                                                        return true;
+                                                    }).map(u => ({ value: u.id, label: u.name }))
+                                                ]}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {userModalLevel === 'MICRORED' && (
+                                        <div className="space-y-1">
+                                            <label className="mb-1.5 block text-[13px] font-bold text-slate-700">Microred <span className="text-red-500">*</span></label>
+                                            <CustomSelect
+                                                className="h-11 text-sm"
+                                                value={userForm.microredId || ''}
+                                                onChange={selId => {
+                                                    const selM = microredes.find(m => m.id === selId);
+                                                    if (selM) {
+                                                        const selU = ungets.find(un => un.id === selM.ungetId);
+                                                        const selO = ogess.find(o => o.id === selU?.ogessId);
+                                                        setUserForm({
+                                                            ...userForm,
+                                                            microredId: selId,
+                                                            facilityCode: '',
+                                                            ungetId: selM.ungetId || '',
+                                                            ogessId: selU?.ogessId || '',
+                                                            diresaId: selO?.diresaId || ''
+                                                        });
+                                                    } else {
+                                                        setUserForm({ ...userForm, microredId: '', ungetId: '', ogessId: '', diresaId: '' });
+                                                    }
+                                                }}
+                                                placeholder="Seleccione MICRORED..."
+                                                options={[
+                                                    { value: '', label: 'Seleccione MICRORED...' },
+                                                    ...microredes.filter(m => {
+                                                        if (isSuperAdmin) return true;
+                                                        if (userMicroredId && m.id !== userMicroredId) return false;
+                                                        if (userUngetId && m.ungetId !== userUngetId) return false;
+                                                        return true;
+                                                    }).map(m => ({ value: m.id, label: m.name }))
+                                                ]}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {userModalLevel === 'IPRESS' && (
+                                        <div className="space-y-1">
+                                            <label className="mb-1.5 block text-[13px] font-bold text-slate-700">Establecimiento <span className="text-red-500">*</span></label>
+                                            <CustomSelect
+                                                className="h-11 text-sm"
+                                                value={userForm.facilityCode || ''}
+                                                onChange={selId => {
+                                                    const sel = facilities.find(f => f.code === selId);
+                                                    if (sel) {
+                                                        const selM = microredes.find(m => m.id === sel?.microredId);
+                                                        const selU = ungets.find(un => un.id === (selM?.ungetId || sel?.ungetId));
+                                                        const selO = ogess.find(o => o.id === (selU?.ogessId || sel?.ogessId));
+                                                        setUserForm({
+                                                            ...userForm,
+                                                            facilityCode: selId,
+                                                            microredId: sel.microredId || '',
+                                                            ungetId: sel.ungetId || selM?.ungetId || '',
+                                                            ogessId: sel.ogessId || selU?.ogessId || '',
+                                                            diresaId: sel.diresaId || selO?.diresaId || ''
+                                                        });
+                                                    } else {
+                                                        setUserForm({ ...userForm, facilityCode: '', microredId: '', ungetId: '', ogessId: '', diresaId: '' });
+                                                    }
+                                                }}
+                                                placeholder="Seleccione IPRESS..."
+                                                options={[
+                                                    { value: '', label: 'Seleccione IPRESS...' },
+                                                    ...facilities.filter(f => {
+                                                        if (isSuperAdmin) return true;
+                                                        if (userFacilityCode && f.code !== userFacilityCode) return false;
+                                                        if (userMicroredId && f.microredId !== userMicroredId) return false;
+                                                        if (userUngetId && f.ungetId !== userUngetId) return false;
+                                                        if (userOgessId && f.ogessId !== userOgessId) return false;
+                                                        return true;
+                                                    }).map(fac => ({ value: fac.code, label: `${fac.code} - ${fac.name}` }))
+                                                ]}
+                                            />
+                                        </div>
+                                    )}
+                                <span className="mt-1 block text-[11px] font-semibold text-slate-400">Los niveles de arriba se completan solos.</span>
+                            </div>
+                        )}
+                        {!userModalLevel && (
+                            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-[14px] text-amber-800">
+                                El rol elegido no tiene nivel de jurisdicción. Configúrelo en Roles antes de continuar.
+                            </div>
+                        )}
+                        <DialogSection title="Resumen">
+                            <DialogRow label="Nombre">{fullName || '—'}</DialogRow>
+                            <DialogRow label="Usuario · Rol">{userForm.username ? `@${userForm.username}` : '—'} · {selectedRole?.label || userForm.role || '—'}</DialogRow>
+                            {userModalLevel !== 'GLOBAL' && <DialogRow label="Jurisdicción">{hierarchyPath || <span className="font-normal text-slate-400">Pendiente de elegir</span>}</DialogRow>}
+                        </DialogSection>
+                    </div>
+                )}
+            </ResponsiveDialog>
+        );
+    })()}
+
+    {/* --- NUEVO ROL (pantalla completa en el celular) --- */}
+    <ResponsiveDialog
+        open={isNewRoleModalOpen}
+        onClose={() => setIsNewRoleModalOpen(false)}
+        onSubmit={handleCreateRole}
+        busy={isSavingRole}
+        size="lg"
+        title="Nuevo rol"
+        footer={
+            <>
+                <button type="button" onClick={() => setIsNewRoleModalOpen(false)} className={dialogSecondaryButton}>Cancelar</button>
+                <button type="submit" disabled={isSavingRole || !newRoleForm.role} className={dialogPrimaryButton}>
+                    <Save className="h-4 w-4" /> {isSavingRole ? 'Creando…' : 'Crear rol'}
+                </button>
+            </>
+        }
+    >
+        <div className="mb-4 grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2">
+            <FormField label="Nombre">
+                <input type="text" placeholder="Ej.: Personal auditor" className={inputClass} value={newRoleForm.label} onChange={e => setNewRoleForm({ ...newRoleForm, label: e.target.value })} />
+            </FormField>
+            <FormField label="Código" required hint="Único, sin espacios.">
+                <input type="text" required placeholder="Ej.: AUDITOR" className={`${inputClass} font-mono uppercase`} value={newRoleForm.role} onChange={e => setNewRoleForm({ ...newRoleForm, role: e.target.value })} />
+            </FormField>
+            <div>
+                <span className="mb-1.5 block text-xs font-black text-slate-700">Nivel de jurisdicción</span>
+                <CustomSelect
+                    className="h-11 text-sm"
+                    value={newRoleForm.jurisdictionLevel || ''}
+                    onChange={val => setNewRoleForm({ ...newRoleForm, jurisdictionLevel: val as any })}
+                    options={[
+                                    { value: '', label: 'Elegir nivel' },
+                                    { value: 'GLOBAL', label: 'Nacional' },
                                     { value: 'DIRESA', label: 'DIRESA' },
                                     { value: 'OGESS', label: 'OGESS' },
                                     { value: 'UNGET', label: 'UNGET' },
-                                    { value: 'MICRORED', label: 'MICRORED' },
-                                    { value: 'IPRESS', label: 'IPRESS (Establecimiento)' }
+                                    { value: 'MICRORED', label: 'Microred' },
+                                    { value: 'IPRESS', label: 'Establecimiento' }
                                 ]}
-                            />
-                            <p className="text-[10px] text-gray-500 mt-1">Nivel jerárquico organizacional al que pertenece este rol.</p>
-                        </div>
-                    </div>
+                />
+            </div>
+            <FormField label="Conexiones de Consulta Stock" hint="Vacío = sin límite.">
+                <input type="number" min="1" placeholder="Sin límite" className={inputClass} value={newRoleForm.maxUrlsAllowed} onChange={e => setNewRoleForm({ ...newRoleForm, maxUrlsAllowed: e.target.value })} />
+            </FormField>
+        </div>
+        <p className="mb-2 px-1 text-[11px] font-black uppercase tracking-widest text-slate-400">Módulos que puede abrir</p>
+        {renderModuleGroups(
+            new Set(newRoleForm.allowedModules as string[]),
+            (module, on) => setNewRoleForm(prev => ({
+                ...prev,
+                allowedModules: (on ? [...prev.allowedModules, module] : prev.allowedModules.filter(m => m !== module)) as any
+            })),
+            (modules, on) => setNewRoleForm(prev => {
+                const rest = (prev.allowedModules as string[]).filter(m => !modules.includes(m));
+                return { ...prev, allowedModules: (on ? [...rest, ...modules] : rest) as any };
+            }),
+            isDesktop
+        )}
+    </ResponsiveDialog>
 
-                    <div className="mt-8 flex justify-end gap-3 pt-4 border-t border-gray-100">
-                        <button 
-                            type="button"
-                            onClick={() => setIsEditRoleModalOpen(false)}
-                            className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
-                        >
-                            Cancelar
-                        </button>
-                        <button 
-                            type="submit"
-                            disabled={isSavingRole || !editRoleForm.role || !editRoleForm.label}
-                            className="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-bold transition-colors shadow-sm focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
-                        >
-                            <Save className="h-4 w-4" />
-                            {isSavingRole ? 'Guardando...' : 'Guardar Cambios'}
-                        </button>
-                    </div>
-                </form>
+    {/* --- EDITAR NOMBRE, CÓDIGO Y NIVEL DEL ROL --- */}
+    <ResponsiveDialog
+        open={isEditRoleModalOpen}
+        onClose={() => setIsEditRoleModalOpen(false)}
+        onSubmit={handleSaveEditRole}
+        busy={isSavingRole}
+        title="Editar rol"
+        subtitle={roles.find(r => r.role === editRoleForm.originalRole)?.label || editRoleForm.originalRole}
+        footer={
+            <>
+                <button type="button" onClick={() => setIsEditRoleModalOpen(false)} className={dialogSecondaryButton}>Cancelar</button>
+                <button type="submit" disabled={isSavingRole || !editRoleForm.role || !editRoleForm.label} className={dialogPrimaryButton}>
+                    <Save className="h-4 w-4" /> {isSavingRole ? 'Guardando…' : 'Guardar'}
+                </button>
+            </>
+        }
+    >
+        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
+            <FormField label="Nombre" required>
+                <input type="text" required placeholder="Ej.: Responsable Farmacia" className={inputClass} value={editRoleForm.label} onChange={e => setEditRoleForm({ ...editRoleForm, label: e.target.value })} />
+            </FormField>
+            <FormField label="Código" required hint="Único, sin espacios (use guion bajo).">
+                <input type="text" required placeholder="Ej.: FARMACIA" className={`${inputClass} font-mono uppercase`} value={editRoleForm.role} onChange={e => setEditRoleForm({ ...editRoleForm, role: e.target.value.toUpperCase().replace(/\s+/g, '_') })} />
+            </FormField>
+            <div>
+                <span className="mb-1.5 block text-xs font-black text-slate-700">Nivel de jurisdicción</span>
+                <CustomSelect
+                    className="h-11 text-sm"
+                    value={editRoleForm.jurisdictionLevel || ''}
+                    onChange={val => setEditRoleForm({ ...editRoleForm, jurisdictionLevel: val as any })}
+                    options={[
+                                    { value: '', label: 'Elegir nivel' },
+                                    { value: 'GLOBAL', label: 'Nacional' },
+                                    { value: 'DIRESA', label: 'DIRESA' },
+                                    { value: 'OGESS', label: 'OGESS' },
+                                    { value: 'UNGET', label: 'UNGET' },
+                                    { value: 'MICRORED', label: 'Microred' },
+                                    { value: 'IPRESS', label: 'Establecimiento' }
+                                ]}
+                />
             </div>
         </div>
-    )}
+    </ResponsiveDialog>
 
     {/* --- MODERN USER VISUALIZATION DETAIL MODAL --- */}
     {viewingUser && (() => {
@@ -3197,244 +2749,85 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
             }
         }
 
-        const initials = personnelName
-            .split(' ')
-            .filter(Boolean)
-            .map(n => n[0])
-            .slice(0, 2)
-            .join('')
-            .toUpperCase() || 'US';
+        const isActive = u.isActive === true || String(u.isActive).toLowerCase() === 'true';
+        const canEdit = canAssignRoleKey(u.role);
+        const hierarchyRows = [
+            ['DIRESA', diresaName],
+            ['OGESS', ogessName],
+            ['UNGET', ungetName],
+            ['Microred', microredName],
+            ['Establecimiento', facilityCodeStr ? `${facilityName} · ${facilityCodeStr}` : '-'],
+        ].filter(([, value]) => value && value !== '-');
 
-        return createPortal(
-            <div className="fixed inset-0 z-[111000] flex items-center justify-center p-4 animate-in fade-in duration-200">
-                {/* Backdrop with elegant blur */}
-                <div 
-                    onClick={() => setViewingUser(null)} 
-                    className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm cursor-pointer"
-                />
-
-                {/* Modal box */}
-                <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[92vh] border border-slate-100">
-                    
-                    {/* Header: Visual Profile */}
-                    <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-teal-950 text-white p-6 shrink-0 relative overflow-hidden">
-                        {/* Decorative subtle background waves */}
-                        <div className="absolute right-0 top-0 bottom-0 w-1/3 opacity-10 bg-[radial-gradient(circle_at_right,_var(--tw-gradient-stops))] from-teal-400 to-transparent pointer-events-none" />
-
-                        <div className="flex justify-between items-start relative z-10">
-                            <div className="flex items-center gap-4">
-                                {/* Large Avatar */}
-                                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center font-bold text-xl text-white shadow-xl shadow-teal-950/40 border border-teal-400/20 tracking-wider shrink-0">
-                                    {initials}
-                                </div>
-                                <div className="space-y-1">
-                                    <h3 className="text-xl font-extrabold tracking-tight leading-tight">{personnelName}</h3>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <span className="text-[10px] uppercase font-extrabold bg-blue-500/20 text-blue-300 border border-blue-500/20 px-2 py-0.5 rounded-full">
-                                            Rol: {roleLabel}
-                                        </span>
-                                    </div>
-                                </div>
+        return (
+            <ResponsiveDialog
+                open
+                onClose={() => setViewingUser(null)}
+                size="lg"
+                title={personnelName}
+                subtitle={`@${u.username}`}
+                footer={
+                    <>
+                        <button type="button" onClick={() => setViewingUser(null)} className={dialogSecondaryButton}>Cerrar</button>
+                        {canEdit && (
+                            <button type="button" onClick={() => { setViewingUser(null); handleEditUserClick(u); }} className={dialogPrimaryButton}>
+                                <Edit className="h-4 w-4" /> Editar
+                            </button>
+                        )}
+                    </>
+                }
+            >
+                <div className="space-y-3">
+                    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+                        <span className={`grid h-14 w-14 shrink-0 place-items-center rounded-full text-lg font-black ${isActive ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-400'}`}>
+                            {personnelName.split(' ').filter(Boolean).map(n => n[0]).slice(0, 2).join('').toUpperCase() || 'US'}
+                        </span>
+                        <div className="min-w-0">
+                            <p className="text-[16px] font-black text-slate-900">{personnelName}</p>
+                            <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                <StatusChip label={isActive ? 'Activo' : 'Inactivo'} tone={isActive ? 'success' : 'neutral'} />
+                                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700">{roleLabel}</span>
                             </div>
-                            <div className="flex items-center gap-3">
-                                <span className={`text-[10px] uppercase tracking-wider font-extrabold px-2.5 py-1 rounded-full ${u.isActive ? 'bg-emerald-500/20 text-emerald-350 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-350 border border-rose-500/30'}`}>
-                                    {u.isActive ? 'Activo' : 'Inactivo'}
+                        </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                        <DialogSection title="Identificación">
+                            <DialogRow label="DNI">{detailDni}</DialogRow>
+                            <DialogRow label="Profesión">{detailProfession}</DialogRow>
+                            <DialogRow label="Régimen laboral">{detailLaborRegime}</DialogRow>
+                            {u.personnel?.birthDate && <DialogRow label="Fecha de nacimiento">{detailBirthDate}</DialogRow>}
+                        </DialogSection>
+                        <DialogSection title="Contacto">
+                            <DialogRow label="Correo" icon={<Mail className="h-4 w-4" />}>
+                                {detailEmail !== '-' ? <a href={`mailto:${detailEmail}`} className="text-teal-700 hover:underline">{detailEmail.toLowerCase()}</a> : <span className="font-normal text-slate-400">No registrado</span>}
+                            </DialogRow>
+                            <DialogRow label="Celular" icon={<Phone className="h-4 w-4" />}>
+                                {detailPhone !== '-' ? <a href={`tel:${String(detailPhone).replace(/\s+/g, '')}`} className="text-teal-700 hover:underline">{detailPhone}</a> : <span className="font-normal text-slate-400">No registrado</span>}
+                            </DialogRow>
+                        </DialogSection>
+                    </div>
+
+                    <DialogSection title={`Jurisdicción${jurisdictionLevel && jurisdictionLevel !== 'No especificado' ? ` · nivel ${jurisdictionLevel === 'GLOBAL' ? 'nacional' : jurisdictionLevel}` : ''}`}>
+                        {jurisdictionLevel === 'GLOBAL' ? (
+                            <DialogRow label="Alcance">Nacional: ve toda la red</DialogRow>
+                        ) : hierarchyRows.length === 0 ? (
+                            <DialogRow label="Alcance"><span className="font-normal text-slate-400">Sin jurisdicción asignada</span></DialogRow>
+                        ) : hierarchyRows.map(([label, value], index) => (
+                            <div key={label} className="relative flex gap-3 px-4 py-2.5">
+                                <span className="relative mt-1.5 flex w-3 shrink-0 justify-center">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-teal-500" />
+                                    {index < hierarchyRows.length - 1 && <span className="absolute top-3 h-[calc(100%+8px)] w-0.5 bg-slate-200" />}
                                 </span>
-                                <button 
-                                    onClick={() => setViewingUser(null)}
-                                    className="text-slate-300 hover:text-white hover:bg-white/10 p-2 rounded-full transition-all duration-150"
-                                >
-                                    <X className="h-5 w-5" />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Scrollable Content */}
-                    <div className="p-6 overflow-y-auto custom-scrollbar flex-1 space-y-6 bg-slate-50/50 text-left">
-                        
-                        {/* Grid: 2 Columns for details */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            
-                            {/* Card 1: Personal, Professional & Contract Info */}
-                            <div className="bg-white rounded-xl p-5 border border-slate-100 hover:border-slate-200 shadow-sm space-y-4 text-left">
-                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-100 pb-2.5 text-left">
-                                    <Users className="h-3.5 w-3.5 text-teal-500 shrink-0" />
-                                    Identificación y Profesión
-                                </h4>
-                                
-                                <div className="space-y-3.5">
-                                    <div>
-                                        <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Nombre de Usuario</span>
-                                        <span className="text-sm font-bold text-teal-800 bg-teal-50 border border-teal-100/50 px-2 py-0.5 rounded font-mono inline-block mt-0.5">@{u.username}</span>
-                                    </div>
-
-                                    <div>
-                                        <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Documento (DNI)</span>
-                                        <span className="text-sm font-mono font-bold text-slate-700">{detailDni}</span>
-                                    </div>
-                                    
-                                    <div>
-                                        <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Profesión / Especialidad</span>
-                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold bg-teal-50 text-teal-800 border border-teal-100/50 capitalize mt-1">
-                                            <Briefcase className="h-3 w-3 shrink-0" />
-                                            {detailProfession}
-                                        </span>
-                                    </div>
-
-                                    <div>
-                                        <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Régimen Laboral</span>
-                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold bg-blue-50 text-blue-800 border border-blue-100/50 capitalize mt-1">
-                                            <Sliders className="h-3 w-3 shrink-0" />
-                                            {detailLaborRegime}
-                                        </span>
-                                    </div>
-
-                                    {u.personnel?.birthDate && (
-                                        <div>
-                                            <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Fecha de Nacimiento</span>
-                                            <span className="text-xs font-medium text-slate-600 flex items-center gap-1.5 mt-1">
-                                                <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                                                {detailBirthDate}
-                                            </span>
-                                        </div>
-                                    )}
+                                <div className="min-w-0">
+                                    <p className="text-xs text-slate-500">{label}</p>
+                                    <p className="text-[15px] font-semibold text-slate-900">{value}</p>
                                 </div>
                             </div>
-
-                            {/* Card 2: Contact Information */}
-                            <div className="bg-white rounded-xl p-5 border border-slate-100 hover:border-slate-200 shadow-sm space-y-4 flex flex-col justify-between text-left">
-                                <div>
-                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-100 pb-2.5 text-left">
-                                        <Phone className="h-3.5 w-3.5 text-teal-500 shrink-0" />
-                                        Información de Contacto
-                                    </h4>
-                                    
-                                    <div className="space-y-4 mt-3.5">
-                                        <div>
-                                            <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Correo Electrónico</span>
-                                            {detailEmail !== '-' ? (
-                                                <a 
-                                                    href={`mailto:${detailEmail}`}
-                                                    className="inline-flex items-center gap-2 text-sm font-semibold text-teal-600 hover:text-teal-700 hover:underline bg-teal-50/40 px-2.5 py-1 rounded-lg border border-teal-100/20"
-                                                >
-                                                    <Mail className="h-3.5 w-3.5 shrink-0 text-teal-500" />
-                                                    <span className="truncate max-w-[200px]">{detailEmail}</span>
-                                                </a>
-                                            ) : (
-                                                <span className="text-slate-400 font-medium text-xs">No registrado</span>
-                                            )}
-                                        </div>
-
-                                        <div>
-                                            <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Teléfono / Celular</span>
-                                            {detailPhone !== '-' ? (
-                                                <a 
-                                                    href={`tel:${detailPhone}`}
-                                                    className="inline-flex items-center gap-2 text-sm font-semibold text-teal-600 hover:text-teal-700 hover:underline bg-teal-50/40 px-2.5 py-1 rounded-lg border border-teal-100/20"
-                                                >
-                                                    <Phone className="h-3.5 w-3.5 shrink-0 text-teal-500" />
-                                                    {detailPhone}
-                                                </a>
-                                            ) : (
-                                                <span className="text-slate-400 font-medium text-xs">No registrado</span>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="mt-4 pt-3 border-t border-slate-100 bg-slate-50/50 p-3 rounded-lg text-[11px] text-slate-500 flex gap-2 items-start leading-relaxed">
-                                    <Lock className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-                                    <span>Para actualizar o modificar estos datos privados de personal, por favor use el botón <strong>Editar</strong> en el menú de acciones rápidas.</span>
-                                </div>
-                            </div>
-
-                        </div>
-
-                        {/* Card 3: Adscripción Territorial de Salud / Red (Visual Hierarchical Flow) */}
-                        <div className="bg-white rounded-xl p-5 border border-slate-100 hover:border-slate-200 shadow-sm space-y-4 text-left">
-                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-100 pb-2.5 text-left">
-                                <Building2 className="h-3.5 w-3.5 text-teal-500 shrink-0" />
-                                Adscripción Territorial y Red de Salud 
-                            </h4>
-
-                            <div className="relative pt-2 pl-4 border-l-2 border-slate-200 space-y-4 ml-1">
-                                {/* DIRESA */}
-                                <div className="relative">
-                                    <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-4 ring-white" />
-                                    <div>
-                                        <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">DIRESA</div>
-                                        <div className="text-xs font-bold text-slate-800">{diresaName}</div>
-                                    </div>
-                                </div>
-
-                                {/* OGESS */}
-                                <div className="relative">
-                                    <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-4 ring-white" />
-                                    <div>
-                                        <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">OGESS / Red de Salud</div>
-                                        <div className="text-xs font-bold text-slate-800">{ogessName}</div>
-                                    </div>
-                                </div>
-
-                                {/* UNGET */}
-                                <div className="relative">
-                                    <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-4 ring-white" />
-                                    <div>
-                                        <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">UNGET / Unidad de Gestión Territorial</div>
-                                        <div className="text-xs font-bold text-slate-800">{ungetName}</div>
-                                    </div>
-                                </div>
-
-                                {/* Microred */}
-                                <div className="relative">
-                                    <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-4 ring-white" />
-                                    <div>
-                                        <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">Microred de Salud</div>
-                                        <div className="text-xs font-bold text-slate-800">{microredName}</div>
-                                    </div>
-                                </div>
-
-                                {/* Establecimiento */}
-                                <div className="relative">
-                                    <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-teal-600 ring-4 ring-white" />
-                                    <div>
-                                        <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">Establecimiento de Salud (IPRESS)</div>
-                                        {facilityCodeStr ? (
-                                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                                <span className="text-xs font-bold text-teal-800 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded-md font-mono shrink-0">
-                                                    {facilityCodeStr}
-                                                </span>
-                                                <span className="text-xs font-bold text-slate-800 leading-tight">
-                                                    {facilityName}
-                                                </span>
-                                            </div>
-                                        ) : (
-                                            <div className="text-xs font-medium text-slate-400 text-slate-450">Sin Establecimiento IPRESS</div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                    </div>
-
-                    {/* Footer buttons */}
-                    <div className="bg-slate-50 px-6 py-4 flex justify-between items-center shrink-0 border-t border-slate-100">
-                        <div className="text-[10px] text-slate-400 font-semibold font-mono">
-                            SISMED TOOLKIT • ID: {u.personnelId || 'SYSTEM_AUTH'}
-                        </div>
-                        <button 
-                            onClick={() => setViewingUser(null)}
-                            className="bg-slate-800 hover:bg-slate-900 border border-slate-700 hover:border-slate-850 px-6 py-2 rounded-xl text-xs font-bold text-white transition-colors cursor-pointer shadow-sm"
-                        >
-                            Cerrar Vista
-                        </button>
-                    </div>
-
+                        ))}
+                    </DialogSection>
                 </div>
-            </div>,
-            document.body
+            </ResponsiveDialog>
         );
     })()}
     </>
