@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { KeyRound, Loader2, Monitor, Smartphone, Trash2 } from 'lucide-react';
+import { Fingerprint, KeyRound, Loader2, Monitor, Smartphone, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,6 +9,9 @@ import {
   isDesktopPointer,
   isValidPin,
   newDeviceSecret,
+  createFingerprintCredential,
+  fingerprintAvailable,
+  wasCancelled,
   readStoredDevice,
   saveStoredDevice,
   type DeviceInfo,
@@ -52,6 +55,12 @@ export const QuickAccessCard: React.FC = () => {
   const [toRemove, setToRemove] = useState<DeviceInfo | null>(null);
   const [removing, setRemoving] = useState(false);
   const desktop = isDesktopPointer();
+  // En el celular solo se ofrece la huella si el teléfono tiene un lector que el navegador pueda usar.
+  const [hasReader, setHasReader] = useState(false);
+  const [enrolling, setEnrolling] = useState(false);
+  useEffect(() => {
+    if (!desktop) void fingerprintAvailable().then(setHasReader);
+  }, [desktop]);
 
   const load = useCallback(async () => {
     try {
@@ -73,6 +82,39 @@ export const QuickAccessCard: React.FC = () => {
   if (!user || devices === null || devices === undefined) return null;
 
   const pinHere = local?.kind === 'pin' && local.username === user.username ? local : null;
+  const fingerprintHere = local?.kind === 'huella' && local.username === user.username ? local : null;
+
+  // «JORDAN» → «Jordan»: el saludo del login va en tipo título.
+  const nombreParaSaludo = () => {
+    const primerNombre = user.personnelData?.firstName?.trim().split(/\s+/)[0] || '';
+    return primerNombre ? primerNombre.charAt(0).toLocaleUpperCase('es') + primerNombre.slice(1).toLocaleLowerCase('es') : user.username;
+  };
+
+  const activarHuella = async () => {
+    setEnrolling(true);
+    try {
+      const displayName = nombreParaSaludo();
+      let credentialId: string;
+      try {
+        credentialId = await createFingerprintCredential(user.username, displayName);
+      } catch (e) {
+        if (wasCancelled(e)) return;
+        // Los errores del lector llegan en inglés y en jerga técnica.
+        throw new Error('No se pudo registrar la huella en este celular. Revise que tenga una huella configurada en el teléfono.');
+      }
+      const secret = newDeviceSecret();
+      const id = await api.registerDevice('huella', deviceNameFrom(navigator.userAgent), secret, null);
+      const nuevo = { id, secret, kind: 'huella' as const, username: user.username, displayName, credentialId };
+      saveStoredDevice(nuevo);
+      setLocal(nuevo);
+      toast.success('Huella activada. La próxima vez podrá entrar con ella en este celular.');
+      await load();
+    } catch (e: any) {
+      if (!wasCancelled(e)) toast.error(e?.message || 'No se pudo activar la huella.');
+    } finally {
+      setEnrolling(false);
+    }
+  };
 
   const crear = async () => {
     setFormError('');
@@ -82,9 +124,7 @@ export const QuickAccessCard: React.FC = () => {
     try {
       const secret = newDeviceSecret();
       const id = await api.registerDevice('pin', deviceNameFrom(navigator.userAgent), secret, pin);
-      // «JORDAN» → «Jordan»: el saludo del login va en tipo título.
-      const primerNombre = user.personnelData?.firstName?.trim().split(/\s+/)[0] || '';
-      const displayName = primerNombre ? primerNombre.charAt(0).toLocaleUpperCase('es') + primerNombre.slice(1).toLocaleLowerCase('es') : user.username;
+      const displayName = nombreParaSaludo();
       const nuevo = { id, secret, kind: 'pin' as const, username: user.username, displayName };
       saveStoredDevice(nuevo);
       setLocal(nuevo);
@@ -144,6 +184,28 @@ export const QuickAccessCard: React.FC = () => {
           >
             <KeyRound className="h-4 w-4" />
             Crear PIN para esta PC
+          </button>
+        )
+      )}
+
+      {!desktop && hasReader && (
+        fingerprintHere ? (
+          <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3">
+            <Fingerprint className="h-5 w-5 shrink-0 text-emerald-700" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-emerald-900">Huella activa en este celular</p>
+              <p className="text-xs text-emerald-800">Al entrar podrá usar su huella.</p>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void activarHuella()}
+            disabled={enrolling}
+            className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700 disabled:opacity-60"
+          >
+            {enrolling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Fingerprint className="h-4 w-4" />}
+            Activar huella en este celular
           </button>
         )
       )}
