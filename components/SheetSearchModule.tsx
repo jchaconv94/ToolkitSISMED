@@ -133,10 +133,11 @@ import {
 import { noticeSettingsApi } from "../services/noticeSettings";
 import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
 import { getExpirationState } from "../services/assignedIpressStock";
-import { KpiCard, KpiStrip, StatusChip, TableHeaderCell as HeaderCell } from "./ui/kit";
+import { KpiCard, KpiStrip, StatusChip } from "./ui/kit";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
 import type { StockSearchScope } from "./StockNetworkSearchModal";
 import { TablePagination } from "./ui/TablePagination";
+import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead } from "./ui/FloatingTableHead";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
 import { BottomSheet } from "./ui/BottomSheet";
@@ -4255,6 +4256,23 @@ function processSheet(sheet) {
   const dataPageRows = filteredData.slice((dataPage - 1) * DATA_PAGE_SIZE, dataPage * DATA_PAGE_SIZE);
   const dataMobileList = useIncrementalCount(filteredData.length, filteredData, 50);
 
+  // Escritorio: títulos de la tabla de lotes; se dibujan en la tabla y en el encabezado que
+  // se pega arriba al bajar (el mismo de la tabla de establecimientos).
+  const dataHeadCells = useMemo(
+    () =>
+      [
+        ...(showsPharmacyInData ? [{ key: "ipress", content: "Código IPRESS" }] : []),
+        { key: "codigo", content: "Cód. SISMED / SIGA" },
+        { key: "producto", content: "Descripción del producto" },
+        { key: "saldo", content: "Saldo", align: "right" as const },
+        { key: "lote", content: "Lote / Vencimiento" },
+        { key: "tipsum", content: "Tipo sum." },
+        { key: "ffinan", content: "F. finan." },
+      ].map((cell, index) => ({ ...cell, index })),
+    [showsPharmacyInData],
+  );
+  const { tableRef: dataTableRef, floating: dataHeadFloating } = useFloatingTableHead([viewLevel, dataPage, dataPageRows.length, showsPharmacyInData]);
+
   const availableTipsums = useMemo(() => {
     const currentData = selectedSourceId
       ? rowsForSource(selectedSourceId)
@@ -4839,6 +4857,23 @@ function processSheet(sheet) {
           Configurar
         </button>
       )}
+      {/* Hoja abierta: su Excel. Con puestos comunales y «Todos», se elige cómo armarlo; con un
+          establecimiento elegido, o en una hoja de una sola farmacia, descarga directamente. */}
+      {viewLevel === "data" && (
+        hojaConPuestosComunales && dataFilterPharmacy === "all" ? (
+          <SheetExportMenu onExport={exportCurrentSheetToExcel} />
+        ) : (
+          <button
+            type="button"
+            onClick={() => exportCurrentSheetToExcel()}
+            aria-label="Exportar stock"
+            className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
+          >
+            <Download className="h-4 w-4 text-emerald-600" />
+            Exportar stock
+          </button>
+        )
+      )}
       {/* Dentro de una UNGET: los reportes de sus establecimientos (Excel y foto de deficiencias). */}
       {viewLevel === "sheets" && (
       <div className="relative z-30">
@@ -4983,22 +5018,18 @@ function processSheet(sheet) {
                 Panel regional
               </button>
             )}
-            <p className={`truncate font-black text-slate-900 ${viewLevel === "sheets" ? "text-2xl tracking-tight" : "text-[15px] sm:text-base"}`}>
+            <p className="truncate text-2xl font-black tracking-tight text-slate-900">
               {viewLevel === "data"
-                ? (() => {
-                    const name = sources.find((s) => s.id === selectedSourceId)?.name || "Hoja";
-                    const code = selectedSourceId ? codeForSheet(selectedSourceId) : "";
-                    return (
-                      <>
-                        {describeSheetName(name)}
-                        {code && <span className="ml-2 font-mono text-xs font-bold text-slate-400">{code}</span>}
-                      </>
-                    );
-                  })()
+                ? describeSheetName(sources.find((s) => s.id === selectedSourceId)?.name || "Hoja")
                 : viewLevel === "sheets" && selectedUngetIndex !== null
                   ? formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "Documento")
                   : "Panel regional"}
             </p>
+            {viewLevel === "data" && selectedSourceId && codeForSheet(selectedSourceId) && (
+              <p className="mt-0.5 text-sm font-medium text-slate-500">
+                Código <span className="font-mono font-bold text-slate-600">{codeForSheet(selectedSourceId)}</span>
+              </p>
+            )}
             {viewLevel === "sheets" && (
               <p className="mt-0.5 text-sm font-medium text-slate-500">
                 {ungetSheetTotal} establecimiento{ungetSheetTotal === 1 ? "" : "s"} monitoreado{ungetSheetTotal === 1 ? "" : "s"}
@@ -5965,7 +5996,7 @@ function processSheet(sheet) {
       <div
         className={`flex flex-col mx-0 sm:mx-10 lg:mx-14 xl:mx-16 ${
           viewLevel === "data"
-            ? "bg-white sm:rounded-[1.25rem] border-y sm:border border-slate-200 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] sm:overflow-hidden h-auto shrink-0 mb-8"
+            ? "bg-white border-y border-slate-200 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.05)] sm:border-0 sm:bg-transparent sm:shadow-none h-auto shrink-0 mb-8"
             // Panel regional y establecimientos: sin recuadro alrededor, cada uno en su
             // propia tarjeta (así se ve como una app).
             : ""
@@ -5974,12 +6005,16 @@ function processSheet(sheet) {
         {/* TOOLBAR */}
         <div className={`sticky z-30 flex flex-col gap-4 ${
           viewLevel === "data"
-            ? "top-0 bg-white sm:static p-3 sm:p-5 border-b border-slate-100"
-            : "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:static sm:pt-0 sm:pb-4"
+            ? "top-0 bg-white p-3 border-b border-slate-100 sm:static sm:bg-transparent sm:p-0 sm:pb-4 sm:border-0"
+            : viewLevel === "sheets" && sheetsViewMode === "grid"
+              // En Tarjetas, la barra se queda arriba al bajar, con el fondo de la página
+              // a todo el ancho (la sombra recortada lo extiende a los lados).
+              ? "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:-top-3 sm:-mt-3 sm:pt-3 sm:pb-4 sm:shadow-[0_0_0_100vmax_#f6f7f9] sm:[clip-path:inset(0_-100vmax)]"
+              : "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:static sm:pt-0 sm:pb-4"
         }`}>
           {/* Search & Actions */}
           <div className="flex gap-3 items-center justify-between w-full flex-row">
-            <div className={`relative min-w-0 flex-1 w-full group ${viewLevel === "sheets" ? "" : "md:max-w-[50%]"}`}>
+            <div className={`relative min-w-0 flex-1 w-full group ${viewLevel === "ungets" ? "md:max-w-[50%]" : ""}`}>
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
               </div>
@@ -6225,7 +6260,7 @@ function processSheet(sheet) {
                     placeholder="Buscar medicamento en esta hoja..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-32 sm:pr-48 py-2.5 bg-slate-50/85 md:bg-slate-50 border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
+                    className="w-full pl-10 pr-32 sm:pr-48 md:pr-10 py-2.5 bg-slate-50/85 md:bg-white border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
                   />
                   <div className="absolute inset-y-0 right-0 pr-1.5 flex items-center gap-1.5">
                     {searchTerm && (
@@ -6241,7 +6276,7 @@ function processSheet(sheet) {
                     <button
                       type="button"
                       onClick={() => setIsAdvancedFiltersSidebarOpen(true)}
-                      className="flex items-center gap-1.5 bg-white hover:bg-slate-50 active:scale-95 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200/85 text-xs font-black transition-all shrink-0 relative shadow-sm cursor-pointer hover:border-slate-300 active:bg-slate-100"
+                      className="flex items-center gap-1.5 bg-white hover:bg-slate-50 active:scale-95 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200/85 text-xs font-black transition-all shrink-0 relative shadow-sm cursor-pointer hover:border-slate-300 active:bg-slate-100 md:hidden"
                     >
                       <Filter className="h-3.5 w-3.5 text-teal-600" />
                       <span className="hidden sm:inline">Filtros avanzados</span>
@@ -6261,6 +6296,22 @@ function processSheet(sheet) {
             {/* Filtro por establecimiento dentro de la hoja. Solo en las hojas que traen
                 puestos comunales —una IPRESS que envía sin consolidar—: en las demás hay una
                 sola farmacia y no habría nada que elegir. */}
+            {viewLevel === "data" && (
+              <button
+                type="button"
+                onClick={() => setIsAdvancedFiltersSidebarOpen(true)}
+                className="relative hidden h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 md:flex"
+              >
+                <Filter className="h-4 w-4 text-teal-600" />
+                Filtros
+                {(dataFilterTipsum !== "all" ||
+                  dataFilterFFinan !== "all" ||
+                  dataFilterStock !== "all" ||
+                  dataFilterExpiration !== "all") && (
+                  <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-teal-500" />
+                )}
+              </button>
+            )}
             {viewLevel === "data" && hojaConPuestosComunales && (
               <div className="w-full md:w-72 shrink-0">
                 <CustomSelect
@@ -6280,25 +6331,6 @@ function processSheet(sheet) {
             )}
 
             <div className="flex items-center gap-2 overflow-x-auto md:overflow-visible hide-scrollbar shrink-0 md:ml-auto relative z-30 w-auto">
-              {viewLevel === "data" && (
-                <>
-                  {/* Con puestos comunales y «Todos», se elige cómo armar el Excel. Con un
-                      establecimiento elegido, o en una hoja de una sola farmacia, no hay nada
-                      que consolidar y el botón descarga directamente. */}
-                  {hojaConPuestosComunales && dataFilterPharmacy === "all" ? (
-                    <div className="hidden sm:block"><SheetExportMenu onExport={exportCurrentSheetToExcel} /></div>
-                  ) : (
-                    <button
-                      onClick={() => exportCurrentSheetToExcel()}
-                      aria-label="Exportar stock"
-                      className="hidden sm:flex h-[42px] items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-4 rounded-xl border border-slate-200 text-xs font-bold transition-all shrink-0 whitespace-nowrap"
-                    >
-                      <Download className="h-4 w-4 text-emerald-600 shrink-0" />
-                      <span className="hidden sm:inline">Exportar Stock</span>
-                    </button>
-                  )}
-                </>
-              )}
 
               {viewLevel === "sheets" && (
                 <>
@@ -6485,7 +6517,7 @@ function processSheet(sheet) {
         </div>
 
         <div
-          className={`flex-1 scrollbar-thin ${viewLevel === "data" ? "bg-gray-50/30 overflow-visible" : ""}`}
+          className={`flex-1 ${viewLevel === "data" ? "bg-gray-50/30 overflow-visible sm:bg-transparent" : ""}`}
         >
           {isConfigLoading && scriptUrls.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-teal-600 gap-3 py-20">
@@ -6510,7 +6542,7 @@ function processSheet(sheet) {
             </div>
           ) : (
             <div
-              className={`flex flex-col gap-6 ${viewLevel === "data" ? "p-4 sm:p-6 pb-4 sm:pb-4" : "px-0 pt-2 pb-32 sm:p-0 sm:pb-6"}`}
+              className={`flex flex-col gap-6 ${viewLevel === "data" ? "p-4 sm:p-0 sm:pb-6" : "px-0 pt-2 pb-32 sm:p-0 sm:pb-6"}`}
             >
               {/* NIVEL 1: PANEL REGIONAL. Una tarjeta por UNGET (una fila en el celular) con
                   dónde está, cuántos establecimientos tiene y cómo están de actualizados.
@@ -7055,7 +7087,7 @@ function processSheet(sheet) {
 
               {/* LEVEL 3: DATA TABLE — mismo diseño que Stock SISMED (piezas en StockLotParts). */}
               {viewLevel === "data" && (
-                <div className="animate-in fade-in duration-300 -mx-4 md:-mx-6 -mt-4 md:-mt-6 font-sans">
+                <div className="animate-in fade-in duration-300 -mx-4 -mt-4 sm:mx-0 sm:mt-0">
                   {filteredData.length === 0 ? (
                     <div className="px-4 py-12 text-center text-sm text-slate-500">No se encontraron coincidencias para su búsqueda.</div>
                   ) : (
@@ -7077,18 +7109,21 @@ function processSheet(sheet) {
                       </div>
 
                       {/* Escritorio: tabla paginada; al tocar una fila, el detalle. */}
-                      <div className="hidden bg-white sm:block">
-                        <div className="max-h-[calc(100vh-420px)] min-h-[320px] overflow-auto custom-scrollbar">
-                          <table className="min-w-full text-left">
-                            <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_rgb(226_232_240)]">
+                      <div className="hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:block">
+                        <FloatingTableHead state={dataHeadFloating} cells={dataHeadCells} padding="px-4" />
+                        <div className="overflow-x-auto rounded-t-2xl xl:overflow-visible">
+                          <table ref={dataTableRef} className="w-full text-left">
+                            <thead>
                               <tr>
-                                {showsPharmacyInData && <HeaderCell>Código IPRESS</HeaderCell>}
-                                <HeaderCell>Cód. SISMED / SIGA</HeaderCell>
-                                <HeaderCell>Descripción del producto</HeaderCell>
-                                <HeaderCell align="right">Saldo</HeaderCell>
-                                <HeaderCell>Lote / Vencimiento</HeaderCell>
-                                <HeaderCell>Tipo sum.</HeaderCell>
-                                <HeaderCell>F. finan.</HeaderCell>
+                                {dataHeadCells.map((cell, i) => (
+                                  <th
+                                    key={cell.key}
+                                    scope="col"
+                                    className={`px-4 py-3 ${tableHeadCellClass} ${tableHeadTextClass} ${headAlignClass(cell.align)} ${i === 0 ? "rounded-tl-2xl" : ""} ${i === dataHeadCells.length - 1 ? "rounded-tr-2xl" : ""}`}
+                                  >
+                                    {cell.content}
+                                  </th>
+                                ))}
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">

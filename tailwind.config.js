@@ -1,3 +1,5 @@
+const defaultTheme = require("tailwindcss/defaultTheme");
+
 /** @type {import('tailwindcss').Config} */
 export default {
   // Archivos donde buscar clases. Todo lo que no aparezca aquí se elimina del CSS final,
@@ -20,7 +22,13 @@ export default {
   // defecto, y el objetivo de este cambio es que se vea exactamente igual. Los colores y
   // tipografías propios, si se quieren, van en un paso aparte y revisable.
   theme: {
-    extend: {},
+    extend: {
+      // `font-sans` era la letra del sistema (Segoe UI en Windows), distinta de la Inter
+      // del resto: las pantallas que la usaban se veían con otra letra. Ahora es Inter.
+      fontFamily: {
+        sans: ["Inter", ...defaultTheme.fontFamily.sans],
+      },
+    },
   },
 
   // `animate-in`, `fade-in`, `zoom-in-*` y `slide-in-from-*` se usan en toda la interfaz

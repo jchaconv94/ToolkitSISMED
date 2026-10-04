@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Building2, Check, ChevronRight, FileClock, History, Monitor, Square, Wifi, WifiOff } from "lucide-react";
 import { KpiCard, KpiStrip, StatusChip, type Tone } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
+import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead } from "./ui/FloatingTableHead";
 import { checkDatesMatch, getCardUpdateStatus, type EstablishmentCardData } from "./EstablishmentCard";
 
 /**
@@ -140,7 +141,17 @@ const byUrgency = (a: EstablishmentCardData, b: EstablishmentCardData) =>
   b.expiringThisMonthCount - a.expiringThisMonthCount ||
   a.name.localeCompare(b.name);
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
+
+const COLUMNS: Array<{ k: SortKey; label: string; align: "left" | "right" | "center" }> = [
+  { k: "name", label: "Establecimiento", align: "left" },
+  { k: "status", label: "Estado", align: "left" },
+  { k: "update", label: "Última actualización", align: "left" },
+  { k: "movement", label: "Últ. movimiento", align: "left" },
+  { k: "expiring", label: "Por vencer", align: "center" },
+  { k: "expired", label: "Vencidos", align: "center" },
+  { k: "items", label: "Ítems", align: "right" },
+];
 
 export const EstablishmentTable: React.FC<{
   rows: EstablishmentCardData[];
@@ -189,32 +200,27 @@ export const EstablishmentTable: React.FC<{
     });
   };
 
-  const th = (k: SortKey, children: React.ReactNode, align: "left" | "right" | "center" = "left", className = "") => {
+  const sortButton = (k: SortKey, label: string) => {
     const activeDir = sort?.key === k ? sort.dir : null;
     return (
-      <th
-        key={k}
-        scope="col"
-        aria-sort={activeDir === "asc" ? "ascending" : activeDir === "desc" ? "descending" : "none"}
-        className={`sticky -top-3 z-10 bg-slate-50 px-2.5 py-3 text-[10px] leading-tight font-black uppercase tracking-wide text-slate-500 shadow-[inset_0_-1px_0_rgb(226_232_240)] ${align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"} ${className}`}
+      <button
+        type="button"
+        onClick={() => toggleSort(k)}
+        className={`group inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-slate-800 ${activeDir ? "text-teal-700" : ""}`}
       >
-        <button
-          type="button"
-          onClick={() => toggleSort(k)}
-          className={`group inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-slate-800 ${activeDir ? "text-teal-700" : ""}`}
-        >
-          {children}
-          {activeDir === "asc" ? (
-            <ArrowUp className="h-3 w-3" />
-          ) : activeDir === "desc" ? (
-            <ArrowDown className="h-3 w-3" />
-          ) : (
-            <ArrowUpDown className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-60" />
-          )}
-        </button>
-      </th>
+        {label}
+        {activeDir === "asc" ? (
+          <ArrowUp className="h-3 w-3" />
+        ) : activeDir === "desc" ? (
+          <ArrowDown className="h-3 w-3" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-60" />
+        )}
+      </button>
     );
   };
+
+  const { tableRef, floating } = useFloatingTableHead([pageRows.length, isCaptureMode, sort, page]);
 
   const count = (value: number, tone: "amber" | "red") =>
     value > 0 ? (
@@ -227,19 +233,30 @@ export const EstablishmentTable: React.FC<{
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      {/* Pegado arriba al bajar: las mismas columnas (sin la de captura ni la flecha). */}
+      <FloatingTableHead
+        state={floating}
+        cells={COLUMNS.map((col, i) => ({ key: col.k, index: i + (isCaptureMode ? 1 : 0), align: col.align, content: sortButton(col.k, col.label) }))}
+      />
       <div className="overflow-x-auto rounded-t-2xl xl:overflow-visible">
-        <table className="w-full text-left">
+        <table ref={tableRef} className="w-full text-left">
           <thead>
             <tr>
-              {isCaptureMode && <th className="sticky -top-3 z-10 w-10 rounded-tl-2xl bg-slate-50 px-4 py-3 shadow-[inset_0_-1px_0_rgb(226_232_240)]" />}
-              {th("name", "Establecimiento", "left", isCaptureMode ? "" : "rounded-tl-2xl")}
-              {th("status", "Estado")}
-              {th("update", "Última actualización")}
-              {th("movement", "Últ. movimiento")}
-              {th("expiring", "Por vencer", "center")}
-              {th("expired", "Vencidos", "center")}
-              {th("items", "Ítems", "right")}
-              <th className="sticky -top-3 z-10 w-10 rounded-tr-2xl bg-slate-50 shadow-[inset_0_-1px_0_rgb(226_232_240)]" aria-label="Abrir" />
+              {isCaptureMode && <th className={`w-10 rounded-tl-2xl px-4 py-3 ${tableHeadCellClass}`} />}
+              {COLUMNS.map((col, i) => {
+                const activeDir = sort?.key === col.k ? sort.dir : null;
+                return (
+                  <th
+                    key={col.k}
+                    scope="col"
+                    aria-sort={activeDir === "asc" ? "ascending" : activeDir === "desc" ? "descending" : "none"}
+                    className={`px-2.5 py-3 ${tableHeadCellClass} ${tableHeadTextClass} ${headAlignClass(col.align)} ${i === 0 && !isCaptureMode ? "rounded-tl-2xl" : ""}`}
+                  >
+                    {sortButton(col.k, col.label)}
+                  </th>
+                );
+              })}
+              <th className={`w-10 rounded-tr-2xl ${tableHeadCellClass}`} aria-label="Abrir" />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
