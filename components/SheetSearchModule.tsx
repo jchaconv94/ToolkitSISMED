@@ -5055,6 +5055,10 @@ function processSheet(sheet) {
             setFilter_gray(all || redGray);
           };
           const allOn = filter_emerald && filter_amber && filter_red && filter_gray;
+          // «Última sincronización: 03/10/2026 22:16 · hace 5 min»: cuándo leyó el sistema las hojas.
+          const ultimaSincronizacion = lastGlobalSync
+            ? `Última sincronización: ${lastGlobalSync.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" })} ${lastGlobalSync.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })} · ${noticeWhen(lastGlobalSync.getTime())}`
+            : "";
           // En el panel regional solo informan: el filtro de estado se aplica a
           // establecimientos, y pulsarlos aquí no cambiaba nada a la vista.
           const clickable = viewLevel === "sheets";
@@ -5065,7 +5069,29 @@ function processSheet(sheet) {
                 <KpiCard watermark tone="danger" icon={<WifiOff />} label="Fuera de línea" value={summary.offline} hint="más de un día o sin datos" onClick={clickable ? () => only(false, false, true) : undefined} active={clickable && !allOn && !filter_emerald && !filter_amber && filter_red} />
               </KpiStrip>
           );
-          if (viewLevel === "ungets") return strip;
+          // Panel regional: el mismo panel en escritorio, solo informativo (no hay lista de
+          // establecimientos que filtrar). En el celular, los tres indicadores de siempre.
+          if (viewLevel === "ungets")
+            return (
+              <>
+                <div className="md:hidden">{strip}</div>
+                <div className="hidden md:block">
+                  <EstablishmentSyncPanel
+                    total={summary.total}
+                    online={summary.online}
+                    delayed={summary.delayed}
+                    offline={summary.offline}
+                    totalHint="establecimientos en la región"
+                    subtitle={
+                      <>
+                        {scriptUrls.length} UNGET conectada{scriptUrls.length === 1 ? "" : "s"}
+                        {ultimaSincronizacion && <> · {ultimaSincronizacion}</>}
+                      </>
+                    }
+                  />
+                </div>
+              </>
+            );
           // Dentro de una UNGET, en escritorio: el panel «Estado de sincronización» (solo de
           // Consulta Stock), con la barra de avance y las mismas cuatro cajas que filtran.
           // En el celular siguen los tres indicadores de siempre.
@@ -5095,6 +5121,7 @@ function processSheet(sheet) {
                   offline={summary.offline}
                   active={syncFilter}
                   onSelect={selectSync}
+                  subtitle={ultimaSincronizacion}
                 />
               </div>
             </div>
@@ -6006,8 +6033,8 @@ function processSheet(sheet) {
         <div className={`sticky z-30 flex flex-col gap-4 ${
           viewLevel === "data"
             ? "top-0 bg-white p-3 border-b border-slate-100 sm:static sm:bg-transparent sm:p-0 sm:pb-4 sm:border-0"
-            : viewLevel === "sheets" && sheetsViewMode === "grid"
-              // En Tarjetas, la barra se queda arriba al bajar, con el fondo de la página
+            : viewLevel === "ungets" || (viewLevel === "sheets" && sheetsViewMode === "grid")
+              // En el panel regional y en Tarjetas, la barra se queda arriba al bajar, con el fondo de la página
               // a todo el ancho (la sombra recortada lo extiende a los lados).
               ? "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:-top-3 sm:-mt-3 sm:pt-3 sm:pb-4 sm:shadow-[0_0_0_100vmax_#f6f7f9] sm:[clip-path:inset(0_-100vmax)]"
               : "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:static sm:pt-0 sm:pb-4"
