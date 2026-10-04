@@ -1,7 +1,6 @@
 import React from "react";
-import { AlertTriangle, Clock, Pill } from "lucide-react";
+import { AlertTriangle, CalendarClock, Clock, Hash, Package, Pill, ShieldCheck, X } from "lucide-react";
 import { formatStockDate, parseExpiryDate, parseStockNumber, type ExpirationState } from "../services/assignedIpressStock";
-import { StatusChip, type Tone } from "./ui/kit";
 import { BottomSheet } from "./ui/BottomSheet";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import type { PharmacyLabel } from "../services/facilitySheetLink";
@@ -96,16 +95,18 @@ const expiryDistance = (value: unknown): string => {
   return days > 0 ? `en ${amount}` : `hace ${amount}`;
 };
 
-const STATE_CHIP: Record<ExpirationState, { label: string; tone: Tone }> = {
-  NORMAL: { label: "Vigente", tone: "success" },
-  EXPIRING: { label: "Por vencer", tone: "warning" },
-  EXPIRED: { label: "Vencido", tone: "danger" },
+/** Estado del lote en la cabecera oscura: color e ícono. */
+const STATE_BADGE: Record<ExpirationState, { label: string; className: string; icon: React.ReactNode }> = {
+  NORMAL: { label: "Vigente", className: "text-emerald-300", icon: <ShieldCheck className="h-3.5 w-3.5" /> },
+  EXPIRING: { label: "Por vencer", className: "text-amber-300", icon: <Clock className="h-3.5 w-3.5" /> },
+  EXPIRED: { label: "Vencido", className: "text-red-300", icon: <AlertTriangle className="h-3.5 w-3.5" /> },
 };
 
 /**
  * Detalle completo de un lote, al tocar una fila o una tarjeta: abajo en el celular, ventana
- * centrada en escritorio. Arriba el producto y su estado; luego saldo, vencimiento y lote en
- * tres recuadros; el resto agrupado por tema. Solo muestra las columnas que `canShow` permite.
+ * centrada en escritorio. Cabecera oscura con el producto, su código y estado, y saldo,
+ * vencimiento y lote en tres recuadros; abajo, el resto de campos en dos columnas. Solo
+ * muestra las columnas que `canShow` permite.
  */
 export const LotDetailSheet: React.FC<{
   row: LotRow | null;
@@ -114,118 +115,111 @@ export const LotDetailSheet: React.FC<{
   canShow?: CanShow;
   pharmacy?: PharmacyLabel | null;
 }> = ({ row, state, onClose, canShow = showAll, pharmacy }) => {
-  type Field = [string, string, boolean?];
-  const keep = (fields: Field[]) => fields.filter(([, value]) => value && value !== "—");
-  const groups: Array<{ title: string; fields: Field[] }> = row
-    ? [
-        {
-          title: "Identificación",
-          fields: keep([
-            ["Código SISMED", canShow("Id_Producto") ? lotCode(row) : "", true],
-            ["Código SIGA", canShow("CODIGO_SIG") ? lotCell(row.CODIGO_SIG) : "", true],
-            ["Registro sanitario", canShow("Reg_Sanitario") ? lotCell(row.Reg_Sanitario) : ""],
-          ]),
-        },
-        {
-          title: "Origen y ubicación",
-          fields: keep([
-            ["Tipo de suministro", canShow("DESC_TIPSUM") ? codeAndText(row.TIPSUM, row.DESC_TIPSUM) : ""],
-            ["Fuente de financiamiento", canShow("DESC_FFINAN") ? codeAndText(row.FFINAN, row.DESC_FFINAN) : ""],
-            ["Almacén", canShow("DESC_ALM") ? lotCell(row.DESC_ALM) : ""],
-            ["Farmacia", pharmacy ? [pharmacy.code, pharmacy.name].filter(Boolean).join(" · ") : canShow("ALMCOD") ? lotCell(row.ALMCOD) : ""],
-          ]),
-        },
-        {
-          title: "Precios",
-          fields: keep([
-            ["Precio detalle", canShow("Precio_Det") ? money(row.Precio_Det) : ""],
-            ["Precio paquete", canShow("Precio_Cab") ? money(row.Precio_Cab) : ""],
-          ]),
-        },
-        {
-          title: "Sincronización",
-          fields: keep([
-            ["Fecha del equipo", canShow("FECHA_DEL_EQUIPO") ? lotCell(row.FECHA_DEL_EQUIPO) : ""],
-            ["Última actualización", canShow("ULTIMA_ACTUALIZACION") ? lotCell(row.ULTIMA_ACTUALIZACION ?? row.Ultima_Actualizacion) : ""],
-          ]),
-        },
-      ].filter((group) => group.fields.length > 0)
+  const fields: Array<[string, string, boolean?]> = row
+    ? ([
+        ["Código SIGA", canShow("CODIGO_SIG") ? lotCell(row.CODIGO_SIG) : "", true],
+        ["Registro sanitario", canShow("Reg_Sanitario") ? lotCell(row.Reg_Sanitario) : ""],
+        ["Tipo de suministro", canShow("DESC_TIPSUM") ? codeAndText(row.TIPSUM, row.DESC_TIPSUM) : ""],
+        ["Fuente de financiamiento", canShow("DESC_FFINAN") ? codeAndText(row.FFINAN, row.DESC_FFINAN) : ""],
+        ["Almacén", canShow("DESC_ALM") ? lotCell(row.DESC_ALM) : ""],
+        ["Farmacia", pharmacy ? [pharmacy.code, pharmacy.name].filter(Boolean).join(" · ") : canShow("ALMCOD") ? lotCell(row.ALMCOD) : ""],
+        ["Precio detalle", canShow("Precio_Det") ? money(row.Precio_Det) : ""],
+        ["Precio paquete", canShow("Precio_Cab") ? money(row.Precio_Cab) : ""],
+        ["Fecha del equipo", canShow("FECHA_DEL_EQUIPO") ? lotCell(row.FECHA_DEL_EQUIPO) : ""],
+        ["Última actualización", canShow("ULTIMA_ACTUALIZACION") ? lotCell(row.ULTIMA_ACTUALIZACION ?? row.Ultima_Actualizacion) : ""],
+      ] as Array<[string, string, boolean?]>).filter(([, value]) => value && value !== "—")
     : [];
 
-  const chip = STATE_CHIP[state];
-  const expiryTone = state === "EXPIRED" ? "text-red-600" : state === "EXPIRING" ? "text-amber-700" : "text-slate-900";
-  const tile = "rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-3.5 py-3";
-  const tileLabel = "text-[10px] font-black uppercase tracking-wider text-slate-400";
+  const badge = STATE_BADGE[state];
+  const tiles: Array<{ key: string; label: string; icon: React.ReactNode; value: string; hint?: string; className: string }> = row
+    ? [
+        canShow("Saldo") && {
+          key: "saldo",
+          label: "Saldo",
+          icon: <Package className="h-3.5 w-3.5" />,
+          value: parseStockNumber(row.Saldo).toLocaleString("es-PE"),
+          hint: "unidades",
+          className: `text-2xl ${state === "EXPIRED" ? "text-red-300" : "text-white"}`,
+        },
+        canShow("Fec_Vencim") && {
+          key: "vence",
+          label: "Vence",
+          icon: <CalendarClock className="h-3.5 w-3.5" />,
+          value: formatStockDate(row.Fec_Vencim),
+          hint: expiryDistance(row.Fec_Vencim),
+          className: `text-[15px] ${state === "EXPIRED" ? "text-red-300" : state === "EXPIRING" ? "text-amber-300" : "text-white"}`,
+        },
+        canShow("Lote") && {
+          key: "lote",
+          label: "Lote",
+          icon: <Hash className="h-3.5 w-3.5" />,
+          value: lotCell(row.Lote) || "—",
+          className: "break-all font-mono text-[15px] text-white",
+        },
+      ].filter(Boolean) as Array<{ key: string; label: string; icon: React.ReactNode; value: string; hint?: string; className: string }>
+    : [];
 
   return (
-    <BottomSheet open={Boolean(row)} title="Detalle del lote" onClose={onClose} centeredOnDesktop hideTitle wide>
+    <BottomSheet open={Boolean(row)} title="Detalle del lote" onClose={onClose} centeredOnDesktop wide bare>
       {row && (
-        <div className="space-y-5 pb-2 md:px-2">
-          {/* Producto */}
-          <div className="flex items-start gap-3.5 pr-6">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-teal-50 text-teal-600">
-              <Pill className="h-6 w-6" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-[17px] font-black leading-snug text-slate-900">{canShow("Nombre") ? lotCell(row.Nombre) || "—" : "—"}</p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                {canShow("Id_Producto") && lotCode(row) && (
-                  <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[12px] font-bold text-slate-700">{lotCode(row)}</span>
-                )}
-                <StatusChip label={chip.label} tone={chip.tone} />
+        <>
+          {/* Cabecera oscura: producto y lo esencial del lote. */}
+          <div className="relative bg-slate-900 px-5 pb-5 pt-5 text-white">
+            <div className="mx-auto -mt-2 mb-3 h-1.5 w-12 rounded-full bg-white/25 md:hidden" />
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Cerrar"
+              className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <div className="flex items-center gap-3 pr-8">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-teal-500/20 text-teal-300">
+                <Pill className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[16px] font-black leading-snug">{canShow("Nombre") ? lotCell(row.Nombre) || "—" : "—"}</p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-slate-400">
+                  {canShow("Id_Producto") && lotCode(row) && (
+                    <>
+                      <span className="font-mono font-bold text-teal-300">{lotCode(row)}</span>
+                      <span>·</span>
+                    </>
+                  )}
+                  <span className={`inline-flex items-center gap-1 font-bold ${badge.className}`}>{badge.icon}{badge.label}</span>
+                </p>
               </div>
             </div>
-          </div>
-
-          {state !== "NORMAL" && (
-            <p className={`flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-[13px] font-semibold ${state === "EXPIRED" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-800"}`}>
-              {state === "EXPIRED" ? <AlertTriangle className="h-4 w-4 shrink-0" /> : <Clock className="h-4 w-4 shrink-0" />}
-              {state === "EXPIRED" ? "Lote vencido y todavía con saldo: retírelo del stock disponible." : "Lote por vencer: priorice su uso o redistribución."}
-            </p>
-          )}
-
-          {/* Lo esencial */}
-          <div className="grid grid-cols-3 gap-2.5">
-            {canShow("Saldo") && (
-              <div className={tile}>
-                <p className={tileLabel}>Saldo</p>
-                <p className={`mt-1 text-2xl font-black leading-none tabular-nums ${state === "EXPIRED" ? "text-red-600" : "text-slate-900"}`}>{parseStockNumber(row.Saldo).toLocaleString("es-PE")}</p>
-                <p className="mt-1 text-[11px] font-medium text-slate-400">unidades</p>
-              </div>
-            )}
-            {canShow("Fec_Vencim") && (
-              <div className={tile}>
-                <p className={tileLabel}>Vencimiento</p>
-                <p className={`mt-1 text-[17px] font-black leading-tight tabular-nums ${expiryTone}`}>{formatStockDate(row.Fec_Vencim)}</p>
-                <p className="mt-1 text-[11px] font-medium text-slate-400">{expiryDistance(row.Fec_Vencim)}</p>
-              </div>
-            )}
-            {canShow("Lote") && (
-              <div className={tile}>
-                <p className={tileLabel}>Lote</p>
-                <p className="mt-1 break-all font-mono text-[15px] font-bold leading-tight text-slate-900">{lotCell(row.Lote) || "—"}</p>
-              </div>
-            )}
-          </div>
-
-          {/* El resto, por tema */}
-          {groups.map((group) => (
-            <section key={group.title}>
-              <h4 className="mb-2 text-[11px] font-black uppercase tracking-wider text-slate-400">{group.title}</h4>
-              <dl className="grid gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 sm:grid-cols-2">
-                {group.fields.map(([label, value, mono], i) => (
-                  <div
-                    key={label}
-                    className={`bg-white px-3.5 py-2.5 ${i === group.fields.length - 1 && group.fields.length % 2 === 1 ? "sm:col-span-2" : ""}`}
-                  >
-                    <dt className="text-[11px] font-semibold text-slate-400">{label}</dt>
-                    <dd className={`mt-0.5 text-[13.5px] font-bold text-slate-800 ${mono ? "font-mono" : ""}`}>{value}</dd>
+            {tiles.length > 0 && (
+              <div className={`mt-4 grid gap-2 ${tiles.length === 3 ? "grid-cols-3" : tiles.length === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
+                {tiles.map((t) => (
+                  <div key={t.key} className="rounded-xl bg-white/[0.06] px-3 py-2.5 ring-1 ring-white/10">
+                    <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{t.icon}{t.label}</p>
+                    <p className={`mt-1 font-black leading-none tabular-nums ${t.className}`}>{t.value}</p>
+                    {t.hint && <p className="mt-1 text-[11px] text-slate-400">{t.hint}</p>}
                   </div>
                 ))}
-              </dl>
-            </section>
-          ))}
-        </div>
+              </div>
+            )}
+          </div>
+
+          {/* El resto de campos, en dos columnas en escritorio. */}
+          <div className="px-5 pb-5 pt-2">
+            <dl className="grid gap-x-6 md:grid-cols-2">
+              {fields.map(([label, value, mono]) => (
+                <div key={label} className="border-b border-slate-100 py-2.5">
+                  <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</dt>
+                  <dd className={`mt-0.5 text-[13.5px] font-bold text-slate-800 ${mono ? "font-mono" : ""}`}>{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="mt-3 flex items-center gap-1.5 text-[11px] text-slate-400">
+              <Clock className="h-3.5 w-3.5" />
+              Datos leídos de la hoja del establecimiento.
+            </p>
+          </div>
+        </>
       )}
     </BottomSheet>
   );

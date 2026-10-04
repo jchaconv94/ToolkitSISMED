@@ -25,7 +25,9 @@ export const BottomSheet: React.FC<{
   hideTitle?: boolean;
   /** Solo con `centeredOnDesktop`: ventana más ancha en escritorio (detalle con dos columnas). */
   wide?: boolean;
-}> = ({ open, title, onClose, children, centeredOnDesktop = false, hideTitle = false, wide = false }) => {
+  /** Sin barra superior ni relleno: el contenido dibuja su propia cabecera (con la barrita y la X). */
+  bare?: boolean;
+}> = ({ open, title, onClose, children, centeredOnDesktop = false, hideTitle = false, wide = false, bare = false }) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ startY: number; startTime: number; dy: number; active: boolean } | null>(null);
 
@@ -89,9 +91,11 @@ export const BottomSheet: React.FC<{
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
-        className={`max-h-[85vh] w-full overflow-y-auto overscroll-contain rounded-t-3xl bg-white pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl animate-in slide-in-from-bottom duration-200 ${centeredOnDesktop ? `${wide ? "md:max-w-2xl" : "md:max-w-xl"} md:rounded-2xl md:pb-5` : ""}`}
+        className={`max-h-[85vh] w-full overflow-y-auto overscroll-contain rounded-t-3xl bg-white pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl animate-in slide-in-from-bottom duration-200 ${centeredOnDesktop ? `${wide ? "md:max-w-2xl" : "md:max-w-xl"} md:rounded-2xl ${bare ? "md:pb-0" : "md:pb-5"}` : ""}`}
       >
-        {hideTitle ? (
+        {bare ? (
+          <h2 className="sr-only">{title}</h2>
+        ) : hideTitle ? (
           // Sin título, la X va en la fila de la barrita y no ocupa una fila propia.
           <div className="sticky top-0 z-10 flex h-11 items-center justify-center bg-white px-4">
             <div className={`h-1.5 w-12 rounded-full bg-slate-300 ${centeredOnDesktop ? "md:hidden" : ""}`} />
@@ -107,7 +111,7 @@ export const BottomSheet: React.FC<{
             </div>
           </div>
         )}
-        <div className="px-4 pt-1">{children}</div>
+        {bare ? children : <div className="px-4 pt-1">{children}</div>}
       </div>
     </div>,
     document.body,
