@@ -127,3 +127,25 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .login-shape { animation: none !important; opacity: 1; }
 }
+
+/* Cada tanto, las piezas repiten la animación del logo: se encogen una tras otra y la
+   cruz gira un cuarto de vuelta (simétrica, así que al reiniciar no se nota el salto). */
+.login-piece { animation: login-hop 9s ease-in-out 3s infinite; }
+.login-piece--spin { animation-name: login-hop-spin; }
+.login-shape:nth-child(2) .login-piece { animation-delay: 3.12s; }
+.login-shape:nth-child(3) .login-piece { animation-delay: 3.24s; }
+.login-shape:nth-child(4) .login-piece { animation-delay: 3.36s; }
+@keyframes login-hop {
+  0%, 82%, 100% { transform: scale(1); }
+  88% { transform: scale(0.8); }
+  94% { transform: scale(1.04); }
+}
+@keyframes login-hop-spin {
+  0%, 82% { transform: scale(1) rotate(0deg); }
+  88% { transform: scale(0.8) rotate(45deg); }
+  94% { transform: scale(1.04) rotate(90deg); }
+  100% { transform: scale(1) rotate(90deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-piece { animation: none !important; }
+}

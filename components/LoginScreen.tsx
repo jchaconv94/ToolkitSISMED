@@ -119,12 +119,14 @@ export const LoginScreen: React.FC = () => {
           aria-hidden="true"
           className="pointer-events-none absolute -bottom-[80px] -right-[70px] grid h-[400px] w-[400px] -rotate-[14deg] grid-cols-2 gap-6"
         >
-          <div className="login-shape rounded-[56px] bg-[#1FA393] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" />
-          <div className="login-shape rounded-[56px] bg-[#6DD5C4] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" />
-          <div className="login-shape rounded-[56px] bg-[#F3F7F6] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" />
-          <div className="login-shape relative">
+          <div className="login-shape"><div className="login-piece h-full w-full rounded-[56px] bg-[#1FA393] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" /></div>
+          <div className="login-shape"><div className="login-piece h-full w-full rounded-[56px] bg-[#6DD5C4] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" /></div>
+          <div className="login-shape"><div className="login-piece h-full w-full rounded-[56px] bg-[#F3F7F6] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" /></div>
+          <div className="login-shape">
+            <div className="login-piece login-piece--spin relative h-full w-full">
             <div className="absolute left-[34%] top-0 h-full w-[32%] rounded-[22px] bg-[#F08A2C] shadow-[0_30px_60px_rgba(0,0,0,0.35)]" />
             <div className="absolute left-0 top-[34%] h-[32%] w-full rounded-[22px] bg-[#F08A2C]" />
+            </div>
           </div>
         </div>
 
@@ -163,7 +165,7 @@ export const LoginScreen: React.FC = () => {
       {/* Portada del celular: fondo oscuro con las piezas del logo flotando, título grande
           y la tarjeta del formulario montada encima de su borde inferior. */}
       <header
-        className="relative overflow-hidden px-6 pb-[190px] pt-12 text-white lg:hidden"
+        className="relative overflow-hidden px-6 pb-[112px] pt-10 text-white lg:hidden"
         style={{
           background:
             'radial-gradient(circle at 10% 0%, #17565A 0%, rgba(23,86,90,0) 60%), radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1.5px) 0 0 / 22px 22px, #081A1D',
@@ -171,14 +173,16 @@ export const LoginScreen: React.FC = () => {
       >
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute bottom-[52px] -right-5 grid h-[140px] w-[140px] rotate-[12deg] grid-cols-2 gap-2.5 opacity-90"
+          className="pointer-events-none absolute bottom-[30px] -right-4 grid h-[118px] w-[118px] rotate-[12deg] grid-cols-2 gap-2.5 opacity-90"
         >
-          <div className="login-shape rounded-[26px] bg-[#1FA393] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" />
-          <div className="login-shape rounded-[26px] bg-[#6DD5C4] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" />
-          <div className="login-shape rounded-[26px] bg-[#F3F7F6] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" />
-          <div className="login-shape relative">
-            <div className="absolute left-[34%] top-0 h-full w-[32%] rounded-[10px] bg-[#F08A2C]" />
-            <div className="absolute left-0 top-[34%] h-[32%] w-full rounded-[10px] bg-[#F08A2C]" />
+          <div className="login-shape"><div className="login-piece h-full w-full rounded-[16px] bg-[#1FA393] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" /></div>
+          <div className="login-shape"><div className="login-piece h-full w-full rounded-[16px] bg-[#6DD5C4] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" /></div>
+          <div className="login-shape"><div className="login-piece h-full w-full rounded-[16px] bg-[#F3F7F6] shadow-[0_16px_32px_rgba(0,0,0,0.35)]" /></div>
+          <div className="login-shape">
+            <div className="login-piece login-piece--spin relative h-full w-full">
+            <div className="absolute left-[34%] top-0 h-full w-[32%] rounded-[7px] bg-[#F08A2C]" />
+            <div className="absolute left-0 top-[34%] h-[32%] w-full rounded-[7px] bg-[#F08A2C]" />
+            </div>
           </div>
         </div>
         <div className="relative flex flex-col gap-4">
