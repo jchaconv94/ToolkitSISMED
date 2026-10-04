@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import { utils, writeFile } from 'xlsx';
 import { ConsumptionModal } from './ConsumptionModal';
+import { TablePagination } from './ui/TablePagination';
+import { FloatingTableHead, useFloatingTableHead } from './ui/FloatingTableHead';
 
 interface AnalysisTableProps {
   medications: AnalyzedMedication[]; // The FILTERED list to display
@@ -68,6 +70,178 @@ interface AnalysisTableProps {
 
 // Columns that can be filtered
 type FilterKey = 'ff' | 'medtip' | 'medpet' | 'medest' | 'status' | 'currentStock' | 'cpm' | 'rawCpm' | 'monthsOfProvision' | 'anomalyDetails' | 'quantityToOrder' | 'isSporadic';
+
+
+// Nombres de las columnas filtrables, para el filtro y los chips de filtros activos.
+const FILTER_LABELS: Record<string, string> = {
+  isSporadic: 'Medicamento',
+  ff: 'F.F.',
+  medtip: 'Tipo',
+  medpet: 'Pet',
+  medest: 'Est',
+  currentStock: 'Stock',
+  rawCpm: 'CPA (Simple)',
+  cpm: 'CPA (Ajust.)',
+  monthsOfProvision: 'Meses Prov.',
+  status: 'Estado',
+  anomalyDetails: 'Detalle Ajuste',
+  quantityToOrder: 'Requerimiento',
+};
+
+// Estados con su nombre y color, como en la tabla.
+const STATUS_LOOK: Record<string, { label: string; dot: string }> = {
+  [StockStatus.DESABASTECIDO]: { label: 'Desabastecido', dot: 'bg-red-500' },
+  [StockStatus.SUBSTOCK]: { label: 'SubStock', dot: 'bg-amber-500' },
+  [StockStatus.NORMOSTOCK]: { label: 'NormoStock', dot: 'bg-emerald-500' },
+  [StockStatus.SOBRESTOCK]: { label: 'SobreStock', dot: 'bg-indigo-500' },
+  [StockStatus.SIN_ROTACION]: { label: 'Sin Rotación', dot: 'bg-gray-400' },
+};
+
+const valueLabel = (field: string, value: string) => (field === 'status' ? STATUS_LOOK[value]?.label || value : value);
+
+type OpenFilter = { field: FilterKey; anchor: HTMLElement } | null;
+
+/** Título de columna con su botón de filtro. Se usa en la tabla y en el encabezado fijo. */
+const HeaderLabel: React.FC<{
+  label: string;
+  field?: FilterKey;
+  activeCount: number;
+  isOpen: boolean;
+  onOpen: (field: FilterKey, anchor: HTMLElement) => void;
+}> = ({ label, field, activeCount, isOpen, onOpen }) => (
+  <span className="inline-flex items-center gap-1">
+    <span className="whitespace-nowrap">{label}</span>
+    {field && (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpen(field, e.currentTarget);
+        }}
+        aria-label={`Filtrar por ${label}`}
+        title={`Filtrar por ${label}`}
+        className={`inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 transition-colors ${
+          activeCount > 0
+            ? 'bg-teal-600 text-white hover:bg-teal-700'
+            : isOpen
+              ? 'bg-slate-200 text-slate-700'
+              : 'text-gray-400 hover:bg-gray-200 hover:text-gray-700'
+        }`}
+      >
+        <Filter className="h-3.5 w-3.5" />
+        {activeCount > 0 && <span className="text-[10px] font-black leading-none">{activeCount}</span>}
+      </button>
+    )}
+  </span>
+);
+
+/**
+ * Lista de valores de una columna para filtrar: buscador, «Marcar todos» / «Quitar todos» y
+ * los estados con su color. Se abre junto al botón que se tocó (en la tabla o en el
+ * encabezado fijo).
+ */
+const FilterMenu: React.FC<{
+  open: NonNullable<OpenFilter>;
+  label: string;
+  options: { value: string; count: number }[];
+  selected: string[];
+  onToggle: (value: string) => void;
+  onSetAll: (values: string[]) => void;
+  onClose: () => void;
+}> = ({ open, label, options, selected, onToggle, onSetAll, onClose }) => {
+  const [query, setQuery] = useState('');
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<React.CSSProperties>({});
+
+  useEffect(() => {
+    const place = () => {
+      const rect = open.anchor.getBoundingClientRect();
+      const width = 256;
+      const left = Math.min(rect.left, window.innerWidth - width - 16);
+      setPos({ top: rect.bottom + 6, left: Math.max(8, left), maxHeight: Math.max(220, window.innerHeight - rect.bottom - 24) });
+    };
+    place();
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current?.contains(e.target as Node) || open.anchor.contains(e.target as Node)) return;
+      onClose();
+    };
+    // Si la página se desplaza (o la tabla cambia de alto al filtrar), la lista sigue a su
+    // botón. Solo se cierra si el botón ya no existe (el encabezado fijo se ocultó).
+    const onScroll = (e: Event) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      if (!open.anchor.isConnected) onClose();
+      else place();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', place);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open, onClose]);
+
+  const q = query.trim().toLowerCase();
+  const visible = options.filter(o => valueLabel(open.field, o.value).toLowerCase().includes(q));
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="fixed z-[120000] flex w-64 flex-col rounded-xl border border-gray-200 bg-white p-2.5 text-left font-normal normal-case shadow-xl"
+      style={pos}
+    >
+      <div className="mb-2 flex shrink-0 items-center justify-between border-b border-gray-100 pb-2">
+        <span className="text-xs font-bold text-gray-800">Filtrar por {label}</span>
+        <span className="text-[10px] text-gray-400">{selected.length > 0 ? `${selected.length} marcado${selected.length === 1 ? '' : 's'}` : 'Todos'}</span>
+      </div>
+      <div className="relative mb-2 shrink-0">
+        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+        <input
+          type="text"
+          autoFocus
+          placeholder="Buscar..."
+          className="w-full rounded-lg border border-gray-300 py-1.5 pl-8 pr-2 text-xs outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+      <div className="mb-1.5 flex shrink-0 items-center justify-between px-1 text-[11px] font-bold">
+        <button type="button" onClick={() => onSetAll(Array.from(new Set([...selected, ...visible.map(o => o.value)])))} className="text-teal-700 hover:underline">
+          Marcar {q ? 'los buscados' : 'todos'}
+        </button>
+        <button type="button" onClick={() => onSetAll([])} className="text-gray-500 hover:text-red-600 hover:underline" disabled={selected.length === 0}>
+          Quitar todos
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
+        {visible.map((opt) => {
+          const checked = selected.includes(opt.value);
+          const look = open.field === 'status' ? STATUS_LOOK[opt.value] : undefined;
+          return (
+            <label key={opt.value} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs ${checked ? 'bg-teal-50 text-teal-900' : 'text-gray-700 hover:bg-gray-50'}`}>
+              <input
+                type="checkbox"
+                className="h-4 w-4 cursor-pointer rounded border border-gray-300 accent-teal-600"
+                style={{ colorScheme: 'light' }}
+                checked={checked}
+                onChange={() => onToggle(opt.value)}
+              />
+              {look && <span className={`h-2 w-2 shrink-0 rounded-full ${look.dot}`} />}
+              <span className="flex-1 truncate">{valueLabel(open.field, opt.value)}</span>
+              <span className="text-[10px] text-gray-400">({opt.count})</span>
+            </label>
+          );
+        })}
+        {visible.length === 0 && <div className="py-2 text-center text-xs italic text-gray-400">No hay resultados</div>}
+      </div>
+    </div>,
+    document.body,
+  );
+};
 
 // --- HELPER: Recalculate Status Dynamically ---
 const calculateDynamicMetrics = (item: AnalyzedMedication) => {
@@ -159,7 +333,10 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedMedicationId, setSelectedMedicationId] = useState<string | null>(null);
-  const [openFilterDropdown, setOpenFilterDropdown] = useState<string | null>(null);
+  const [openFilter, setOpenFilter] = useState<OpenFilter>(null);
+  const closeFilter = React.useCallback(() => setOpenFilter(null), []);
+  const openFilterFor = (field: FilterKey, anchor: HTMLElement) =>
+    setOpenFilter(current => (current?.field === field && current.anchor === anchor ? null : { field, anchor }));
   const [isMainFilterOpen, setIsMainFilterOpen] = useState(false); // State for the main header filter dropdown
   
   const itemsPerPage = isFullScreen ? 15 : 10; // Show more items in full screen
@@ -276,7 +453,18 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
     const newFilters = { ...activeFilters };
     delete newFilters[key];
     onFilterChange(newFilters);
+    setCurrentPage(1);
   };
+
+  const setFilterValues = (key: string, values: string[]) => {
+    const newFilters = { ...activeFilters };
+    if (values.length === 0) delete newFilters[key];
+    else newFilters[key] = values;
+    onFilterChange(newFilters);
+    setCurrentPage(1);
+  };
+
+  const activeFilterKeys = Object.keys(activeFilters).filter(k => (activeFilters[k] || []).length > 0);
 
   // Ensure current page is valid if items change
   useEffect(() => {
@@ -397,142 +585,6 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
     }
   };
 
-  // Helper to render sortable/filterable headers
-  const RenderHeader = ({ 
-      label, 
-      field, 
-      align = 'left',
-      className = '',
-      textColor = 'text-gray-500'
-  }: { 
-      label: string, 
-      field?: FilterKey, 
-      align?: 'left'|'center'|'right',
-      className?: string,
-      textColor?: string
-  }) => {
-    const isActive = field && activeFilters[field]?.length > 0;
-    const isOpen = openFilterDropdown === field;
-    const triggerRef = useRef<HTMLTableHeaderCellElement>(null);
-    const localDropdownRef = useRef<HTMLDivElement>(null);
-    const [menuStyles, setMenuStyles] = useState<React.CSSProperties>({});
-    const [searchTerm, setSearchTerm] = useState('');
-
-    useEffect(() => {
-        if (!isOpen) {
-            setSearchTerm('');
-        }
-    }, [isOpen]);
-
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (isOpen && 
-                localDropdownRef.current && !localDropdownRef.current.contains(event.target as Node) &&
-                triggerRef.current && !triggerRef.current.contains(event.target as Node)) {
-                setOpenFilterDropdown(null);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [isOpen]);
-
-    useEffect(() => {
-        const updatePosition = () => {
-            if (isOpen && triggerRef.current) {
-                const rect = triggerRef.current.getBoundingClientRect();
-                const dropdownWidth = 224; // w-56 is 14rem = 224px
-                const left = rect.left + dropdownWidth > window.innerWidth 
-                    ? window.innerWidth - dropdownWidth - 16 
-                    : rect.left;
-                
-                setMenuStyles({
-                    top: rect.bottom + 4,
-                    left: left,
-                    maxHeight: window.innerHeight - rect.bottom - 20
-                });
-            }
-        };
-
-        if (isOpen) {
-            updatePosition();
-            window.addEventListener('scroll', updatePosition, true);
-            window.addEventListener('resize', updatePosition);
-        }
-
-        return () => {
-            window.removeEventListener('scroll', updatePosition, true);
-            window.removeEventListener('resize', updatePosition);
-        };
-    }, [isOpen]);
-    
-    return (
-        <th ref={triggerRef} scope="col" className={`px-2 py-2 2xl:px-3 2xl:py-3 text-${align} text-xs font-bold ${textColor} uppercase tracking-wider relative ${className}`}>
-            <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
-                <span className="whitespace-nowrap">{label}</span>
-                {field && (
-                    <button 
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenFilterDropdown(isOpen ? null : field);
-                        }}
-                        className={`p-0.5 rounded hover:bg-gray-200 transition-colors ${isActive ? 'bg-teal-100 text-teal-700' : 'text-gray-400'}`}
-                    >
-                        <Filter className="h-3 w-3" />
-                    </button>
-                )}
-            </div>
-
-            {/* Dropdown Menu */}
-            {isOpen && field && createPortal(
-                <div ref={localDropdownRef} className="fixed z-[120000] bg-white border border-gray-200 rounded-lg shadow-xl w-56 p-2 text-left font-normal normal-case flex flex-col" style={menuStyles}>
-                    <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-100 shrink-0">
-                        <span className="text-xs font-bold text-gray-700">Filtrar por {label}</span>
-                        {isActive && (
-                            <button onClick={() => clearFilter(field)} className="text-[10px] text-red-500 hover:text-red-700 flex items-center gap-1">
-                                <X className="h-3 w-3" /> Borrar
-                            </button>
-                        )}
-                    </div>
-                    <div className="relative mb-2 shrink-0">
-                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Buscar..."
-                            className="w-full pl-7 pr-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-teal-500 focus:border-teal-500 outline-none"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                        />
-                    </div>
-                    <div className="overflow-y-auto space-y-1 flex-1 min-h-0 custom-scrollbar">
-                        {getUniqueValues(field)
-                            .filter(opt => opt.value.toLowerCase().includes(searchTerm.toLowerCase()))
-                            .map((opt) => (
-                            <label key={opt.value} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer text-xs text-gray-600">
-                                <input 
-                                    type="checkbox" 
-                                    className="h-4 w-4 rounded border border-gray-300 text-teal-600 focus:ring-teal-500 bg-white accent-teal-600 cursor-pointer shadow-sm"
-                                    style={{ colorScheme: 'light' }}
-                                    checked={activeFilters[field]?.includes(opt.value) || false}
-                                    onChange={() => handleFilterToggle(field, opt.value)}
-                                />
-                                <span className="flex-1 truncate">{opt.value}</span>
-                                <span className="text-gray-400 text-[10px]">({opt.count})</span>
-                            </label>
-                        ))}
-                        {getUniqueValues(field).filter(opt => opt.value.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
-                            <div className="text-center py-2 text-gray-400 text-xs italic">
-                                No hay resultados
-                            </div>
-                        )}
-                    </div>
-                </div>,
-                document.body
-            )}
-        </th>
-    );
-  };
-
   // Main Filter Display Label Logic
   const getFilterLabel = (filter: QuickFilterOption) => {
       switch(filter) {
@@ -542,6 +594,42 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
           default: return 'Todos';
       }
   };
+
+  // Columnas de la tabla: las mismas de siempre, en el mismo orden. Se definen una vez para
+  // dibujarlas en la tabla y en el encabezado que se queda arriba al bajar.
+  const isSimpleCpa = viewMode === 'INITIAL' || viewMode === 'PROJECTED_SIMPLE';
+  const columns: Array<{ label: string; field?: FilterKey; align?: 'left' | 'right' | 'center'; className?: string; textColor?: string }> = [
+    { label: 'Código' },
+    { label: 'Medicamento', field: 'isSporadic' },
+    { label: 'F.F.', field: 'ff' },
+    { label: 'Tipo', field: 'medtip' },
+    { label: 'Pet', field: 'medpet' },
+    { label: 'Est', field: 'medest' },
+    { label: 'Stock', field: 'currentStock', align: 'right' },
+    {
+      label: isSimpleCpa ? 'CPA (Simple)' : 'CPA (Ajust.)',
+      field: isSimpleCpa ? 'rawCpm' : 'cpm',
+      align: 'right',
+      className: `border-b-2 whitespace-nowrap ${isSimpleCpa ? 'border-blue-500' : 'border-teal-500'}`,
+      textColor: isSimpleCpa ? 'text-blue-600' : 'text-teal-600',
+    },
+    { label: 'Meses Prov.', field: 'monthsOfProvision', align: 'right' },
+    { label: 'Estado', field: 'status', align: 'center' },
+    { label: 'Detalle Ajuste', field: 'anomalyDetails' },
+    { label: 'Requerimiento', field: 'quantityToOrder', align: 'right' },
+  ];
+
+  const headerContent = (col: (typeof columns)[number]) => (
+    <HeaderLabel
+      label={col.label}
+      field={col.field}
+      activeCount={col.field ? (activeFilters[col.field] || []).length : 0}
+      isOpen={Boolean(col.field && openFilter?.field === col.field)}
+      onOpen={openFilterFor}
+    />
+  );
+
+  const { tableRef, floating } = useFloatingTableHead([currentPage, currentItems.length, isFullScreen, viewMode, activeFilterKeys.length]);
 
   const containerClasses = isFullScreen 
     ? "fixed inset-0 z-[105000] bg-white flex flex-col h-screen w-screen animate-in fade-in duration-200"
@@ -809,32 +897,66 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
         </div>
       )}
 
+      {/* Filtros por columna activos, a la vista y con su ✕. Antes solo se notaban por el
+          color del embudo. */}
+      {activeFilterKeys.length > 0 && (
+        <div className={`flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-2.5 ${isFullScreen ? 'shrink-0' : ''}`}>
+          <span className="text-xs font-bold text-gray-500">Filtros:</span>
+          {activeFilterKeys.map(key => {
+            const values = activeFilters[key] || [];
+            const shown = values.slice(0, 3).map(v => valueLabel(key, v)).join(', ') + (values.length > 3 ? ` y ${values.length - 3} más` : '');
+            return (
+              <span key={key} className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 py-1 pl-3 pr-1 text-xs text-teal-900">
+                <span><strong>{FILTER_LABELS[key] || key}:</strong> {shown}</span>
+                <button type="button" onClick={() => clearFilter(key)} className="rounded-full p-0.5 text-teal-700 hover:bg-teal-100" aria-label={`Quitar filtro de ${FILTER_LABELS[key] || key}`}>
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => { onFilterChange({}); setCurrentPage(1); }}
+            className="ml-1 text-xs font-bold text-gray-500 hover:text-red-600 hover:underline"
+          >
+            Limpiar filtros
+          </button>
+        </div>
+      )}
+
+      {/* Encabezado que se queda arriba al bajar (solo la cabecera), como en Consulta Stock. */}
+      <FloatingTableHead
+        state={floating}
+        padding="px-2 2xl:px-3"
+        cells={columns.map((col, index) => ({ key: col.label, index, align: col.align, content: headerContent(col) }))}
+      />
+
+      {openFilter && (
+        <FilterMenu
+          open={openFilter}
+          label={FILTER_LABELS[openFilter.field] || openFilter.field}
+          options={getUniqueValues(openFilter.field)}
+          selected={activeFilters[openFilter.field] || []}
+          onToggle={(value) => handleFilterToggle(openFilter.field, value)}
+          onSetAll={(values) => setFilterValues(openFilter.field, values)}
+          onClose={closeFilter}
+        />
+      )}
+
       {/* TABLE */}
       <div className={`overflow-x-auto ${isFullScreen ? 'flex-1 overflow-y-auto bg-white p-4' : 'min-h-[400px]'}`}>
-        <table className="min-w-full divide-y divide-gray-200">
+        <table ref={tableRef} className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 relative z-10">
             <tr>
-              <RenderHeader label="Código" />
-              <RenderHeader label="Medicamento" field="isSporadic" />
-              <RenderHeader label="F.F." field="ff" />
-              <RenderHeader label="Tipo" field="medtip" />
-              <RenderHeader label="Pet" field="medpet" />
-              <RenderHeader label="Est" field="medest" />
-              
-              <RenderHeader label="Stock" field="currentStock" align="right" />
-              
-              <RenderHeader 
-                label={(viewMode === 'INITIAL' || viewMode === 'PROJECTED_SIMPLE') ? 'CPA (Simple)' : 'CPA (Ajust.)'} 
-                field={(viewMode === 'INITIAL' || viewMode === 'PROJECTED_SIMPLE') ? 'rawCpm' : 'cpm'} 
-                align="right" 
-                className={`border-b-2 whitespace-nowrap ${(viewMode === 'INITIAL' || viewMode === 'PROJECTED_SIMPLE') ? 'border-blue-500' : 'border-teal-500'}`} 
-                textColor={(viewMode === 'INITIAL' || viewMode === 'PROJECTED_SIMPLE') ? 'text-blue-600' : 'text-teal-600'} 
-              />
-              
-              <RenderHeader label="Meses Prov." field="monthsOfProvision" align="right" />
-              <RenderHeader label="Estado" field="status" align="center" />
-              <RenderHeader label="Detalle Ajuste" field="anomalyDetails" />
-              <RenderHeader label="Requerimiento" field="quantityToOrder" align="right" />
+              {columns.map(col => (
+                <th
+                  key={col.label}
+                  scope="col"
+                  className={`px-2 py-2 2xl:px-3 2xl:py-3 text-xs font-bold uppercase tracking-wider ${col.textColor || 'text-gray-500'} ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'} ${col.className || ''}`}
+                >
+                  {headerContent(col)}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200 relative z-0">
@@ -968,7 +1090,7 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                     {item.hasSpikes ? (
                       <div 
                         className="flex items-center gap-1.5 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-100 w-fit group-hover:bg-amber-100 transition-colors"
-                        title="Ver detalle del cálculo"
+                        title={item.anomalyDetails || "Ver detalle del cálculo"}
                       >
                           <Zap className="h-3 w-3" />
                           <span className="truncate max-w-[150px]">
@@ -1034,64 +1156,10 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
         </table>
       </div>
 
-      {/* Pagination (Unchanged) */}
-      {totalPages > 1 && (
-        <div className={`${isFullScreen ? 'bg-white border-t border-gray-200 px-6 py-4' : 'bg-gray-50 px-4 sm:px-6 py-3 border-t border-gray-200'} flex items-center justify-between shrink-0`}>
-             {/* ... (Pagination Code) ... */}
-              <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm text-gray-700">
-                    Mostrando <span className="font-medium">{startIndex + 1}</span> a <span className="font-medium">{Math.min(startIndex + itemsPerPage, filteredItems.length)}</span> de <span className="font-medium">{filteredItems.length}</span>
-                  </p>
-                </div>
-                <div>
-                  <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
-                    <button
-                      onClick={() => handlePageChange(currentPage - 1)}
-                      disabled={currentPage === 1}
-                      className={`relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium ${currentPage === 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}`}
-                    >
-                      <span className="sr-only">Anterior</span>
-                      <ChevronLeft className="h-5 w-5" aria-hidden="true" />
-                    </button>
-                    
-                    <span className="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">
-                      {currentPage} / {totalPages}
-                    </span>
-
-                    <button
-                      onClick={() => handlePageChange(currentPage + 1)}
-                      disabled={currentPage === totalPages}
-                      className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium ${currentPage === totalPages ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}`}
-                    >
-                      <span className="sr-only">Siguiente</span>
-                      <ChevronRight className="h-5 w-5" aria-hidden="true" />
-                    </button>
-                  </nav>
-                </div>
-              </div>
-              {/* Mobile Pagination */}
-              <div className="flex sm:hidden justify-between w-full items-center">
-                <button
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  className={`relative inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 ${currentPage === 1 ? 'opacity-50' : ''}`}
-                >
-                  Anterior
-                </button>
-                <span className="text-xs text-gray-700 font-medium">
-                  {currentPage} / {totalPages}
-                </span>
-                <button
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                  className={`ml-3 relative inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 ${currentPage === totalPages ? 'opacity-50' : ''}`}
-                >
-                  Siguiente
-                </button>
-              </div>
-        </div>
-      )}
+      {/* Paginación numerada, la misma del resto del sistema (antes «1 / 3»). */}
+      <div className={`shrink-0 ${isFullScreen ? 'bg-white' : 'bg-gray-50'}`}>
+        <TablePagination page={currentPage} pageSize={itemsPerPage} total={filteredItems.length} onPageChange={handlePageChange} itemLabel="ítems" />
+      </div>
     </div>
     
     {/* Use conditional rendering to force unmount on open/close for fresh state */}
