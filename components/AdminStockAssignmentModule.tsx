@@ -39,12 +39,14 @@ const SearchableSelect = ({
   options,
   disabled,
   placeholder,
+  searchPlaceholder = "Buscar...",
 }: {
   value: string;
   onChange: (value: string) => void;
   options: OpcionDeSelector[];
   disabled?: boolean;
   placeholder: string;
+  searchPlaceholder?: string;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -90,7 +92,7 @@ const SearchableSelect = ({
               <input
                 type="text"
                 autoFocus
-                placeholder="Buscar por nombre, código o UNGET..."
+                placeholder={searchPlaceholder}
                 className="w-full rounded-lg bg-slate-50 py-2 pl-8 pr-2 text-sm outline-none placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-teal-100"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
@@ -139,12 +141,14 @@ const SearchableSelect = ({
 };
 
 /** Rótulo numerado de cada paso, para que el orden se lea de un vistazo. */
-const Paso = ({ numero, titulo, children }: { numero: number; titulo: string; children?: React.ReactNode }) => (
+const Paso = ({ numero, titulo, children }: { numero?: number; titulo: string; children?: React.ReactNode }) => (
   <div className="flex flex-wrap items-center justify-between gap-2">
     <div className="flex items-center gap-2">
-      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-600 text-[10px] font-black text-white">
-        {numero}
-      </span>
+      {numero !== undefined && (
+        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-600 text-[10px] font-black text-white">
+          {numero}
+        </span>
+      )}
       <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">{titulo}</span>
     </div>
     {children}
@@ -215,6 +219,8 @@ export const AdminStockAssignmentModule: React.FC = () => {
 
   // Form State
   const [selectedFacilityCode, setSelectedFacilityCode] = useState("");
+  /** Filtro de UNGET de quien supervisa varias: "" = todas las que ve. */
+  const [ungetFilter, setUngetFilter] = useState("");
   const [selectedConnectionUrl, setSelectedConnectionUrl] = useState(""); // This is the Google App Script URL
   const [availableSheets, setAvailableSheets] = useState<UngetSheet[]>([]);
   const [loadingSheets, setLoadingSheets] = useState(false);
@@ -373,6 +379,15 @@ export const AdminStockAssignmentModule: React.FC = () => {
    * la que salen las hojas, se deduce sola. Las hojas solo se vuelven a leer si cambia la
    * conexión.
    */
+  const handleUngetFilterChange = (ungetId: string) => {
+    setUngetFilter(ungetId);
+    // El establecimiento elegido es de otra UNGET: se quita para no guardar donde no se ve.
+    const establecimiento = facilities.find((f: any) => f.code === selectedFacilityCode);
+    if (ungetId && establecimiento && String(establecimiento.ungetId || "") !== ungetId) {
+      setSelectedFacilityCode("");
+    }
+  };
+
   const handleFacilityChange = (code: string) => {
     setSelectedFacilityCode(code);
     const establecimiento = facilities.find((f: any) => f.code === code);
@@ -479,6 +494,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
     return facilities
       .filter(f => {
         if (!conexionDeLaUnget(f.ungetId)) return false;
+        if (ungetFilter && String(f.ungetId || "") !== ungetFilter) return false;
 
         // Filtrar por ámbito/nivel de jurisdicción del usuario
         if (level === 'GLOBAL') return true;
@@ -503,7 +519,14 @@ export const AdminStockAssignmentModule: React.FC = () => {
         hint: conColumnasPropias.has(f.code) ? "propias" : undefined,
         sub: conexionDeLaUnget(f.ungetId)?.name,
       }));
-  }, [facilities, ungetConfigs, conColumnasPropias, roles, currentUser]);
+  }, [facilities, ungetConfigs, ungetFilter, conColumnasPropias, roles, currentUser]);
+
+  // El filtro de UNGET solo lo ve quien supervisa varias. Al informático de una UNGET ya se
+  // le acota por su ámbito: el filtro no tendría nada que elegir.
+  const nivel = getJurisdictionLevel();
+  const conFiltroDeUnget = (nivel === "GLOBAL" || nivel === "DIRESA" || nivel === "OGESS") && ungetConfigs.length > 1;
+  const pasoEstablecimiento = conFiltroDeUnget ? 2 : 1;
+  const pasoColumnas = pasoEstablecimiento + 2;
 
   if (isLoading) {
     return (
@@ -535,17 +558,37 @@ export const AdminStockAssignmentModule: React.FC = () => {
            se llevaba una banda entera al final, con la mitad derecha en blanco. */
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]">
           <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            {conFiltroDeUnget && (
+              <div className="space-y-2">
+                <Paso numero={1} titulo="UNGET" />
+                <SearchableSelect
+                  value={ungetFilter}
+                  onChange={handleUngetFilterChange}
+                  placeholder="Todas las UNGET"
+                  searchPlaceholder="Buscar UNGET..."
+                  options={[
+                    { value: "", label: "Todas las UNGET" },
+                    ...ungetConfigs
+                      .filter((c: any) => c.ungetId)
+                      .map((c: any) => ({ value: String(c.ungetId), label: c.name }))
+                      .sort((x, y) => x.label.localeCompare(y.label, "es")),
+                  ]}
+                />
+              </div>
+            )}
+
             <div className="space-y-2">
-              <Paso numero={1} titulo="Establecimiento de salud" />
+              <Paso numero={pasoEstablecimiento} titulo="Establecimiento de salud" />
               {/* Los establecimientos ya están en memoria desde que se abrió el módulo; lo que
                   tarda es leer las hojas de su UNGET, y eso lo informa el paso 2. */}
               <SearchableSelect
                 value={selectedFacilityCode}
                 onChange={handleFacilityChange}
                 placeholder="Buscar establecimiento..."
+                searchPlaceholder="Buscar por nombre, código o UNGET..."
                 options={opcionesDeEstablecimiento}
               />
-              {conexionSeleccionada && selectedFacilityCode && (
+              {conexionSeleccionada && selectedFacilityCode && !ungetFilter && (
                 <p className="text-[11px] text-slate-400">
                   UNGET: <span className="font-bold text-slate-500">{conexionSeleccionada.name}</span>
                 </p>
@@ -554,7 +597,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
 
             {/* La hoja no se elige: se deduce del código del establecimiento. */}
             <div className="space-y-2">
-              <Paso numero={2} titulo="Hoja vinculada">
+              <Paso numero={pasoEstablecimiento + 1} titulo="Hoja vinculada">
                 <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
                   Automática
                 </span>
@@ -595,7 +638,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
 
           <section className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex-1 space-y-2.5 p-5">
-              <Paso numero={3} titulo="Columnas que verá el establecimiento">
+              <Paso numero={pasoColumnas} titulo="Columnas que verá el establecimiento">
                 <div className="flex items-center gap-1">
                   <span className="mr-2 rounded-md bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-700">
                     {visibleColumns.length} de {STOCK_COLUMNS.length}
@@ -656,41 +699,6 @@ export const AdminStockAssignmentModule: React.FC = () => {
                 })}
               </div>
 
-              {/* Vista previa: los encabezados tal como los verá el establecimiento en Stock
-                  SISMED, en el mismo orden (el de la hoja). */}
-              <div className="pt-2">
-                <p className="mb-2 text-[11px] font-black uppercase tracking-widest text-slate-500">Vista previa en Stock SISMED</p>
-                {visibleColumns.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-3.5 text-sm text-slate-500">
-                    Sin columnas: marque al menos una.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-xl border border-slate-200">
-                    <table className="min-w-full text-left">
-                      <thead>
-                        <tr>
-                          {STOCK_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(col => (
-                            <th key={col.key} className={`whitespace-nowrap px-3 py-2.5 ${tableHeadCellClass} ${tableHeadTextClass}`}>
-                              {col.label}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {[0, 1].map(fila => (
-                          <tr key={fila}>
-                            {STOCK_COLUMNS.filter(col => visibleColumns.includes(col.key)).map((col, i) => (
-                              <td key={col.key} className="px-3 py-2.5">
-                                <span className={`block h-2.5 rounded-full bg-slate-100 ${i % 3 === 0 ? "w-16" : i % 3 === 1 ? "w-24" : "w-12"}`} />
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-4">
@@ -729,6 +737,42 @@ export const AdminStockAssignmentModule: React.FC = () => {
                 </button>
               </div>
             </div>
+          </section>
+
+          {/* Vista previa: los encabezados tal como los verá el establecimiento en Stock
+              SISMED, en el mismo orden (el de la hoja). */}
+          <section className="space-y-2.5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
+            <Paso titulo="Vista previa en Stock SISMED" />
+            {visibleColumns.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-3.5 text-sm text-slate-500">
+                Sin columnas: marque al menos una.
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="min-w-full text-left">
+                  <thead>
+                    <tr>
+                      {STOCK_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(col => (
+                        <th key={col.key} className={`whitespace-nowrap px-3 py-2.5 ${tableHeadCellClass} ${tableHeadTextClass}`}>
+                          {col.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {[0, 1].map(fila => (
+                      <tr key={fila}>
+                        {STOCK_COLUMNS.filter(col => visibleColumns.includes(col.key)).map((col, i) => (
+                          <td key={col.key} className="px-3 py-2.5">
+                            <span className={`block h-2.5 rounded-full bg-slate-100 ${i % 3 === 0 ? "w-16" : i % 3 === 1 ? "w-24" : "w-12"}`} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         </div>
       )}
