@@ -5055,6 +5055,10 @@ function processSheet(sheet) {
             setFilter_gray(all || redGray);
           };
           const allOn = filter_emerald && filter_amber && filter_red && filter_gray;
+          // «Última sincronización: 03/10/2026 22:16 · hace 5 min»: cuándo leyó el sistema las hojas.
+          const ultimaSincronizacion = lastGlobalSync
+            ? `Última sincronización: ${lastGlobalSync.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" })} ${lastGlobalSync.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })} · ${noticeWhen(lastGlobalSync.getTime())}`
+            : "";
           // En el panel regional solo informan: el filtro de estado se aplica a
           // establecimientos, y pulsarlos aquí no cambiaba nada a la vista.
           const clickable = viewLevel === "sheets";
@@ -5078,6 +5082,12 @@ function processSheet(sheet) {
                     delayed={summary.delayed}
                     offline={summary.offline}
                     totalHint="establecimientos en la región"
+                    subtitle={
+                      <>
+                        {scriptUrls.length} UNGET conectada{scriptUrls.length === 1 ? "" : "s"}
+                        {ultimaSincronizacion && <> · {ultimaSincronizacion}</>}
+                      </>
+                    }
                   />
                 </div>
               </>
@@ -5111,6 +5121,7 @@ function processSheet(sheet) {
                   offline={summary.offline}
                   active={syncFilter}
                   onSelect={selectSync}
+                  subtitle={ultimaSincronizacion}
                 />
               </div>
             </div>

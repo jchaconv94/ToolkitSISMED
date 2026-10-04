@@ -60,7 +60,9 @@ export const EstablishmentSyncPanel: React.FC<{
   /** Sin `onSelect` las cajas solo informan (panel regional: no hay lista que filtrar). */
   onSelect?: (filter: SyncFilter) => void;
   totalHint?: string;
-}> = ({ total, online, delayed, offline, active = "all", onSelect, totalHint = "establecimientos a la vista" }) => {
+  /** Línea bajo el título: la última sincronización (y en el panel regional, las UNGET). */
+  subtitle?: React.ReactNode;
+}> = ({ total, online, delayed, offline, active = "all", onSelect, totalHint = "establecimientos a la vista", subtitle }) => {
   const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
   const alDia = Math.round(pct(online));
   const select = onSelect ? (filter: SyncFilter) => () => onSelect(filter === "all" || active === filter ? "all" : filter) : () => undefined;
@@ -70,7 +72,7 @@ export const EstablishmentSyncPanel: React.FC<{
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h3 className="text-sm font-black text-slate-900">Estado de sincronización</h3>
-          <p className="mt-0.5 text-xs text-slate-500">Hace cuánto se actualizó la hoja de cada establecimiento.</p>
+          {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
         </div>
         <p className="text-right">
           <span className="text-2xl font-black tabular-nums text-slate-900">{alDia}%</span>
