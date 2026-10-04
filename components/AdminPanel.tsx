@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { RoleConfig, HealthFacility, AVAILABLE_MODULES, LaborRegime, Profession } from '../types';
 import { canAssignRole } from '../services/userManagementRules';
-import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench, Archive } from 'lucide-react';
+import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench, Archive, MoreVertical, MoreHorizontal, MapPin, UserCheck, UserX, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -16,6 +16,13 @@ import { noticeSettingsApi } from '../services/noticeSettings';
 import { DEFAULT_NOTICE_THRESHOLDS, NoticeThresholds } from '../services/notifications';
 import { NoticeSettingsCard } from './NoticeSettingsCard';
 import { CustomSelect } from './ui/CustomSelect';
+import { KpiCard, KpiStrip, StatusChip } from './ui/kit';
+import { TablePagination } from './ui/TablePagination';
+import { FloatingActionButton } from './ui/FloatingActionButton';
+import { BottomSheet } from './ui/BottomSheet';
+import { LoadMoreSentinel, useIncrementalCount } from './ui/IncrementalList';
+import { FloatingTableHead, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead } from './ui/FloatingTableHead';
+import { useIsDesktop } from './ui/useIsDesktop';
 
 export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) => {
   const activeTab = currentView ? currentView.replace('ADMIN_', '') as 'USERS' | 'ROLES' | 'PARAMS' | 'FACILITIES' | 'CATALOGS' : 'USERS';
@@ -293,22 +300,25 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       return { diresaId, ogessId, ungetId, microredId, facilityCode };
   }, [facilityMapLookup, microredMapLookup, ungetMapLookup, ogess]);
 
-  const filteredUsers = useMemo(() => {
-      // 1. Hierarchy filter (authorized users list)
-      let list = users;
-      if (!isSuperAdmin) {
-          list = users.filter(u => {
-              const target = getExpandedHierarchy(u);
-              
-              if (userFacilityCode) return target.facilityCode === userFacilityCode;
-              if (userMicroredId) return target.microredId === userMicroredId;
-              if (userUngetId) return target.ungetId === userUngetId;
-              if (userOgessId) return target.ogessId === userOgessId;
-              if (userDiresaId) return target.diresaId === userDiresaId;
+  // 1. Hierarchy filter (authorized users list): los usuarios que esta cuenta puede ver.
+  // Los indicadores de la pantalla cuentan sobre esta lista, antes de buscar o filtrar.
+  const scopedUsers = useMemo(() => {
+      if (isSuperAdmin) return users;
+      return users.filter(u => {
+          const target = getExpandedHierarchy(u);
 
-              return false;
-          });
-      }
+          if (userFacilityCode) return target.facilityCode === userFacilityCode;
+          if (userMicroredId) return target.microredId === userMicroredId;
+          if (userUngetId) return target.ungetId === userUngetId;
+          if (userOgessId) return target.ogessId === userOgessId;
+          if (userDiresaId) return target.diresaId === userDiresaId;
+
+          return false;
+      });
+  }, [users, isSuperAdmin, userDiresaId, userOgessId, userUngetId, userMicroredId, userFacilityCode, getExpandedHierarchy]);
+
+  const filteredUsers = useMemo(() => {
+      let list = scopedUsers;
 
       // 2. Filter by search query (name, username, dni, email, phone)
       if (searchTerm.trim() !== '') {
@@ -382,10 +392,58 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
 
       return list;
   }, [
-      users, isSuperAdmin, userDiresaId, userOgessId, userUngetId, userMicroredId, userFacilityCode,
+      scopedUsers,
       searchTerm, filterProfession, filterRole, filterStatus, filterDiresa, filterOgess, filterUnget, filterLaborRegime, filterMicrored,
       facilityMapLookup, microredMapLookup, ungetMapLookup, ogess, getExpandedHierarchy
   ]);
+
+  // --- LISTA DE USUARIOS: tabla paginada en escritorio, tarjetas que cargan al bajar en el celular ---
+  const USERS_PAGE_SIZE = 10;
+  const isDesktop = useIsDesktop();
+  const usersFilterKey = [searchTerm, filterProfession, filterRole, filterStatus, filterDiresa, filterOgess, filterUnget, filterLaborRegime, filterMicrored].join('|');
+  const [usersPage, setUsersPage] = useState(1);
+  useEffect(() => setUsersPage(1), [usersFilterKey]);
+  const usersPageCount = Math.max(1, Math.ceil(filteredUsers.length / USERS_PAGE_SIZE));
+  useEffect(() => {
+      if (usersPage > usersPageCount) setUsersPage(usersPageCount);
+  }, [usersPage, usersPageCount]);
+  const pageUsers = useMemo(
+      () => filteredUsers.slice((usersPage - 1) * USERS_PAGE_SIZE, usersPage * USERS_PAGE_SIZE),
+      [filteredUsers, usersPage]
+  );
+  const mobileUsers = useIncrementalCount(filteredUsers.length, usersFilterKey);
+  const { tableRef: usersTableRef, floating: usersFloatingHead } = useFloatingTableHead([pageUsers, activeTab, isDesktop]);
+  // Menú «⋯» de una tarjeta del celular (por nombre de usuario) y menú de acciones de la barra.
+  const [userMenuFor, setUserMenuFor] = useState<string | null>(null);
+  const [usersActionsOpen, setUsersActionsOpen] = useState(false);
+  useEffect(() => {
+      if (!userMenuFor) return;
+      const close = () => setUserMenuFor(null);
+      document.addEventListener('click', close);
+      return () => document.removeEventListener('click', close);
+  }, [userMenuFor]);
+
+  const isUserActiveValue = (u: any) => u.isActive === true || String(u.isActive).toLowerCase() === 'true';
+  const activeUsersCount = useMemo(() => scopedUsers.filter(isUserActiveValue).length, [scopedUsers]);
+  const roleLabelOf = (u: any) => roles.find(r => r.role === u.role)?.label || u.role || '-';
+
+  // Nombre de la jurisdicción de un usuario según el nivel de su rol.
+  const jurisdictionOf = (u: any): string => {
+      const level = roles.find(r => r.role === u.role)?.jurisdictionLevel;
+      const h = getExpandedHierarchy(u);
+      if (level === 'GLOBAL') return 'Nacional';
+      if (level === 'DIRESA' || u.role === 'DIRESA') return diresaMapLookup.get(h.diresaId)?.name || '-';
+      if (level === 'OGESS' || u.role === 'OGESS') return ogessMapLookup.get(h.ogessId)?.name || '-';
+      if (level === 'UNGET' || u.role === 'UNGET') return ungetMapLookup.get(h.ungetId)?.name || '-';
+      if (level === 'MICRORED' || u.role === 'MICRORED') return microredMapLookup.get(h.microredId)?.name || '-';
+      if (level === 'IPRESS' || u.role === 'IPRESS') return facilityMapLookup.get(h.facilityCode)?.name || '-';
+      // Sin nivel configurado: el dato más específico que tenga.
+      if (h.ungetId) return ungetMapLookup.get(h.ungetId)?.name || '-';
+      if (h.ogessId) return ogessMapLookup.get(h.ogessId)?.name || '-';
+      if (h.diresaId) return diresaMapLookup.get(h.diresaId)?.name || '-';
+      if (h.facilityCode) return facilityMapLookup.get(h.facilityCode)?.name || '-';
+      return '-';
+  };
 
   const HIERARCHY_WEIGHTS: Record<string, number> = {
       'GLOBAL': 100,
@@ -1039,17 +1097,25 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
 
   return (
     <>
-    <div className="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in slide-in-from-bottom-4">
+    {/* Usuarios (rediseño 2026-10-04): sin el título grande, que repetía la cabecera, ni el
+        recuadro alrededor de la lista; las demás pestañas conservan su marco por ahora. */}
+    <div className={activeTab === 'USERS'
+        ? "max-w-[1700px] mx-auto pb-24 pt-1 md:pb-6 md:pt-4 animate-in fade-in"
+        : "max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in slide-in-from-bottom-4"}>
+        {activeTab !== 'USERS' && (
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-100 pb-5">
             <div>
                 <h2 className="text-3xl font-black text-gray-900 tracking-tight">{headerInfo.title}</h2>
                 <p className="text-gray-500 mt-2 text-sm font-medium">{headerInfo.description}</p>
             </div>
         </div>
+        )}
 
         <div className="flex flex-col lg:flex-row gap-8 items-start">
             {/* Premium Spacious Content Container */}
-            <div className="flex-1 bg-white rounded-2xl shadow-[0_5px_30px_rgba(0,0,0,0.018)] border border-gray-200/80 p-6 sm:p-8 overflow-hidden min-w-0 w-full animate-in fade-in duration-300">
+            <div className={activeTab === 'USERS'
+                ? "flex-1 min-w-0 w-full"
+                : "flex-1 bg-white rounded-2xl shadow-[0_5px_30px_rgba(0,0,0,0.018)] border border-gray-200/80 p-6 sm:p-8 overflow-hidden min-w-0 w-full animate-in fade-in duration-300"}>
                 {activeTab === 'USERS' && (() => {
                     const currentUserLevel = getLevelForRole(currentUser?.role || '');
                     const currentUserWeight = HIERARCHY_WEIGHTS[currentUserLevel] || 0;
@@ -1128,134 +1194,20 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                         canShowMicroredFilter && filterMicrored !== 'ALL'
                     ].filter(Boolean).length;
 
-                    return (
-                        <div className="space-y-6">
-                            {/* Header Actions for Users Table - Search and Action Buttons aligned on the same row */}
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-100 pb-5">
-                                {/* Search component on the left side of the same row */}
-                                <div className="relative flex-1 w-full sm:max-w-xs md:max-w-sm">
-                                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                                    <input
-                                        type="text"
-                                        placeholder="Buscar por Nombre, DNI, Usuario..."
-                                        className="w-full pl-10 pr-10 py-2.5 text-xs bg-gray-50 hover:bg-gray-100/50 focus:bg-white border border-gray-200 focus:border-teal-500 rounded-xl focus:ring-2 focus:ring-teal-100 outline-none transition-all placeholder:text-gray-400 font-semibold text-gray-800"
-                                        value={searchTerm}
-                                        onChange={e => setSearchTerm(e.target.value)}
-                                    />
-                                    {searchTerm && (
-                                        <button 
-                                            onClick={() => setSearchTerm('')}
-                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-extrabold text-teal-600 hover:text-teal-800 bg-teal-50 hover:bg-teal-100 px-1.5 py-0.5 rounded-md cursor-pointer transition-colors"
-                                        >
-                                            Borrar
-                                        </button>
-                                    )}
-                                </div>
+                    const clearUserFilters = () => {
+                        setFilterProfession('ALL');
+                        setFilterRole('ALL');
+                        setFilterStatus('ALL');
+                        setFilterDiresa('ALL');
+                        setFilterOgess('ALL');
+                        setFilterUnget('ALL');
+                        setFilterLaborRegime('ALL');
+                        setFilterMicrored('ALL');
+                    };
 
-                                {/* Action Buttons on the right side */}
-                                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                                    {/* Filters Sidebar Trigger */}
-                                    <button
-                                        onClick={() => setIsFiltersSidebarOpen(true)}
-                                        className={`flex items-center gap-2 text-xs font-bold px-4 py-2.5 rounded-xl transition-all border cursor-pointer relative ${
-                                            activeFiltersCount > 0
-                                                ? 'bg-teal-50 hover:bg-teal-100 text-teal-850 border-teal-200 shadow-sm'
-                                                : 'bg-white hover:bg-gray-50 text-gray-750 border-gray-200'
-                                        }`}
-                                    >
-                                        <Filter className="h-4 w-4 text-gray-500" />
-                                        <span>Filtros</span>
-                                        {activeFiltersCount > 0 && (
-                                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-teal-600 text-[10px] font-black text-white animate-pulse">
-                                                {activeFiltersCount}
-                                            </span>
-                                        )}
-                                    </button>
-
-                                    {/* Botón Descargar Registro en Excel */}
-                                    <button 
-                                        onClick={handleExportPersonnelExcel}
-                                        className="flex items-center gap-2 text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-4 py-2.5 rounded-xl transition-all shadow-sm cursor-pointer"
-                                        title="Descargar registro de personal en Excel (.xlsx)"
-                                    >
-                                        <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                                        <span>Descargar Excel</span>
-                                    </button>
-
-                                    <button 
-                                        onClick={handleAddUserClick}
-                                        className="flex items-center gap-2 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 px-4 py-2.5 rounded-xl transition-all shadow-sm cursor-pointer"
-                                    >
-                                        <UserPlus className="h-4 w-4" />
-                                        Nuevo Usuario
-                                    </button>
-                                    <button 
-                                        onClick={handleRefreshUsers}
-                                        className="flex items-center justify-center h-[38px] w-[38px] text-gray-500 hover:text-teal-600 bg-gray-50 hover:bg-teal-50 rounded-xl transition-all border border-gray-200 cursor-pointer shrink-0"
-                                        title="Actualizar lista desde el servidor"
-                                    >
-                                        <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingUsers ? 'animate-spin' : ''}`} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Active Filters inline indicator */}
-                            {activeFiltersCount > 0 && (
-                                <div className="flex items-center justify-between bg-teal-50/40 border border-teal-100/70 rounded-xl px-4 py-2 text-xs font-semibold text-teal-850 animate-in fade-in duration-200">
-                                    <span>
-                                        Filtros activos. Mostrando <strong>{filteredUsers.length}</strong> de <strong>{users.length}</strong> usuarios.
-                                    </span>
-                                    <button 
-                                        onClick={() => {
-                                            setSearchTerm('');
-                                            setFilterProfession('ALL');
-                                            setFilterRole('ALL');
-                                            setFilterStatus('ALL');
-                                            setFilterDiresa('ALL');
-                                            setFilterOgess('ALL');
-                                            setFilterUnget('ALL');
-                                            setFilterLaborRegime('ALL');
-                                            setFilterMicrored('ALL');
-                                        }}
-                                        className="text-xs font-black text-teal-700 hover:text-teal-950 underline uppercase tracking-wide cursor-pointer transition-colors"
-                                    >
-                                        Limpiar Todo
-                                    </button>
-                                </div>
-                            )}
-
-                            {/* FILTROS AVANZADOS SIDEBAR (DERECHA) */}
-                            {isFiltersSidebarOpen && createPortal(
-                                <div className="fixed inset-0 z-[110000] flex justify-end pointer-events-none">
-                                    {/* Backdrop overlay */}
-                                    <div 
-                                        className="absolute inset-0 bg-transparent pointer-events-auto cursor-pointer"
-                                        onClick={() => setIsFiltersSidebarOpen(false)}
-                                    />
-                                    
-                                    {/* Sidebar content container */}
-                                    <div className="relative w-full max-w-sm sm:max-w-md bg-white h-full shadow-2xl border-l border-gray-200 pointer-events-auto animate-in slide-in-from-right duration-300 flex flex-col overflow-hidden">
-                                        {/* Header */}
-                                        <div className="p-6 border-b border-gray-150 flex items-center justify-between sticky top-0 bg-white z-20 shrink-0">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center text-teal-600 shadow-sm border border-teal-100/50">
-                                                    <Filter className="h-5 w-5" />
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-extrabold text-gray-950 text-sm uppercase tracking-tight">Filtros de Búsqueda</h3>
-                                                    <p className="text-[10px] text-teal-600 font-extrabold tracking-widest uppercase">Gestión de Usuarios</p>
-                                                </div>
-                                            </div>
-                                            <button 
-                                                onClick={() => setIsFiltersSidebarOpen(false)}
-                                                className="p-2 hover:bg-gray-100 rounded-xl transition-all text-gray-400 hover:text-gray-900 cursor-pointer"
-                                            >
-                                                <X className="h-4.5 w-4.5" />
-                                            </button>
-                                        </div>
-
-                                        {/* Content Filters Grid */}
-                                        <div className="flex-1 p-6 space-y-5 overflow-y-auto font-sans">
+                    // Los mismos campos en el panel lateral (escritorio) y en el panel inferior (celular).
+                    const userFilterFields = (
+                        <>
                                             {/* Profession filter */}
                                             <div className="space-y-1.5 animate-in fade-in slide-in-from-right-3 duration-200">
                                                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Profesión</label>
@@ -1388,26 +1340,163 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                     />
                                                 </div>
                                             )}
-                                        </div>
+                        </>
+                    );
 
-                                        {/* Clear All / Footer Actions */}
+                    const inactiveUsersCount = scopedUsers.length - activeUsersCount;
+                    const initialsOf = (u: any) => {
+                        const first = (u.personnel?.firstName || u.username || '?').trim();
+                        const last = (u.personnel?.lastName || '').trim();
+                        return `${first.charAt(0)}${last.charAt(0)}`.toUpperCase();
+                    };
+                    const userHeadCells = [
+                        { key: 'usuario', label: 'Usuario' },
+                        { key: 'profesion', label: 'Profesión' },
+                        { key: 'jurisdiccion', label: 'Jurisdicción' },
+                        { key: 'rol', label: 'Rol' },
+                        { key: 'estado', label: 'Estado' },
+                        { key: 'telefono', label: 'Teléfono' },
+                        { key: 'acciones', label: 'Acciones', align: 'right' as const },
+                    ];
+                    const headTh = `px-4 py-3 ${tableHeadCellClass} ${tableHeadTextClass}`;
+                    const rowIconButton = 'grid h-8 w-8 place-items-center rounded-lg border border-slate-200 text-slate-500 transition-colors cursor-pointer';
+
+                    return (
+                        <div className="space-y-4 md:space-y-5">
+                            {/* Indicadores: tocarlos filtra la lista por estado */}
+                            <KpiStrip cols="md:grid-cols-3">
+                                <KpiCard watermark label="Usuarios" value={scopedUsers.length} hint="en su jurisdicción" icon={<Users />} tone="info" onClick={() => setFilterStatus('ALL')} active={filterStatus === 'ALL'} />
+                                <KpiCard watermark label="Activos" value={activeUsersCount} hint="pueden ingresar" icon={<UserCheck />} tone="success" onClick={() => setFilterStatus('ACTIVE')} active={filterStatus === 'ACTIVE'} />
+                                <KpiCard watermark label="Inactivos" value={inactiveUsersCount} hint="sin acceso" icon={<UserX />} tone="neutral" onClick={() => setFilterStatus('INACTIVE')} active={filterStatus === 'INACTIVE'} />
+                            </KpiStrip>
+
+                            {/* Barra: buscador, filtros y acciones */}
+                            <div className="flex items-center gap-2">
+                                <div className="relative min-w-0 flex-1 md:max-w-md">
+                                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        placeholder="Buscar por nombre, DNI o usuario…"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-16 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 md:h-10"
+                                        value={searchTerm}
+                                        onChange={e => setSearchTerm(e.target.value)}
+                                    />
+                                    {searchTerm && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setSearchTerm('')}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md bg-teal-50 px-1.5 py-0.5 text-[10px] font-extrabold text-teal-600 hover:bg-teal-100 hover:text-teal-800 cursor-pointer"
+                                        >
+                                            Borrar
+                                        </button>
+                                    )}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsFiltersSidebarOpen(true)}
+                                    aria-label="Filtros"
+                                    className={`relative flex h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-bold transition-colors cursor-pointer md:h-10 md:px-4 ${
+                                        activeFiltersCount > 0 ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                    }`}
+                                >
+                                    <SlidersHorizontal className="h-4 w-4 text-slate-500" />
+                                    <span className="hidden md:inline">Filtros</span>
+                                    {activeFiltersCount > 0 && (
+                                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-black text-white">
+                                            {activeFiltersCount}
+                                        </span>
+                                    )}
+                                </button>
+                                <div className="ml-auto hidden items-center gap-2 md:flex">
+                                    <button
+                                        type="button"
+                                        onClick={handleExportPersonnelExcel}
+                                        className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
+                                        title="Descargar registro de personal en Excel (.xlsx)"
+                                    >
+                                        <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                                        Exportar Excel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleRefreshUsers}
+                                        className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:text-teal-600 cursor-pointer"
+                                        title="Actualizar lista desde el servidor"
+                                        aria-label="Actualizar lista"
+                                    >
+                                        <RefreshCw className={`h-4 w-4 ${isRefreshingUsers ? 'animate-spin' : ''}`} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleAddUserClick}
+                                        className="flex h-10 items-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white transition-colors hover:bg-teal-700 cursor-pointer"
+                                    >
+                                        <UserPlus className="h-4 w-4" />
+                                        Nuevo usuario
+                                    </button>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setUsersActionsOpen(true)}
+                                    aria-label="Más acciones"
+                                    className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 md:hidden"
+                                >
+                                    <MoreHorizontal className="h-5 w-5" />
+                                </button>
+                            </div>
+
+                            {/* Active Filters inline indicator */}
+                            {activeFiltersCount > 0 && (
+                                <div className="flex items-center justify-between gap-3 rounded-xl border border-teal-100/70 bg-teal-50/40 px-4 py-2 text-xs font-semibold text-teal-800">
+                                    <span>
+                                        Filtros activos. Mostrando <strong>{filteredUsers.length}</strong> de <strong>{scopedUsers.length}</strong> usuarios.
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setSearchTerm(''); clearUserFilters(); }}
+                                        className="shrink-0 text-xs font-black uppercase tracking-wide text-teal-700 underline hover:text-teal-950 cursor-pointer"
+                                    >
+                                        Limpiar todo
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Escritorio: filtros en el panel lateral derecho */}
+                            {isFiltersSidebarOpen && isDesktop && createPortal(
+                                <div className="fixed inset-0 z-[110000] flex justify-end pointer-events-none">
+                                    <div
+                                        className="absolute inset-0 bg-transparent pointer-events-auto cursor-pointer"
+                                        onClick={() => setIsFiltersSidebarOpen(false)}
+                                    />
+                                    <div className="relative w-full max-w-sm sm:max-w-md bg-white h-full shadow-2xl border-l border-gray-200 pointer-events-auto animate-in slide-in-from-right duration-300 flex flex-col overflow-hidden">
+                                        <div className="p-6 border-b border-gray-150 flex items-center justify-between sticky top-0 bg-white z-20 shrink-0">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center text-teal-600 shadow-sm border border-teal-100/50">
+                                                    <Filter className="h-5 w-5" />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-extrabold text-gray-950 text-sm uppercase tracking-tight">Filtros de Búsqueda</h3>
+                                                    <p className="text-[10px] text-teal-600 font-extrabold tracking-widest uppercase">Gestión de Usuarios</p>
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={() => setIsFiltersSidebarOpen(false)}
+                                                className="p-2 hover:bg-gray-100 rounded-xl transition-all text-gray-400 hover:text-gray-900 cursor-pointer"
+                                            >
+                                                <X className="h-4.5 w-4.5" />
+                                            </button>
+                                        </div>
+                                        <div className="flex-1 p-6 space-y-5 overflow-y-auto font-sans">
+                                            {userFilterFields}
+                                        </div>
                                         <div className="p-6 border-t border-gray-150 bg-gray-50 flex items-center justify-between sticky bottom-0 shrink-0">
-                                            <button 
-                                                onClick={() => {
-                                                    setFilterProfession('ALL');
-                                                    setFilterRole('ALL');
-                                                    setFilterStatus('ALL');
-                                                    setFilterDiresa('ALL');
-                                                    setFilterOgess('ALL');
-                                                    setFilterUnget('ALL');
-                                                    setFilterLaborRegime('ALL');
-                                                    setFilterMicrored('ALL');
-                                                }}
+                                            <button
+                                                onClick={clearUserFilters}
                                                 className="text-xs font-extrabold text-gray-550 hover:text-gray-900 uppercase cursor-pointer"
                                             >
                                                 Limpiar
                                             </button>
-                                            <button 
+                                            <button
                                                 onClick={() => setIsFiltersSidebarOpen(false)}
                                                 className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm cursor-pointer"
                                             >
@@ -1419,176 +1508,188 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                 document.body
                             )}
 
-                        {/* --- SCROLLABLE RESPONSIVE TABLE WITH TRANSPARENT SCROLLBAR --- */}
-                        <div className="border border-gray-200/80 rounded-2xl overflow-hidden shadow-[0_4px_25px_rgba(0,0,0,0.012)] bg-white">
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                    <thead className="bg-gray-50/70 border-b border-gray-100/80 sticky top-0 z-10">
-                                        <tr>
-                                            <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-[240px]">Nombre (personal)</th>
-                                            <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-[180px]">Profesión</th>
-                                            <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-[150px]">Teléfono</th>
-                                            <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-[180px]">Jurisdicción</th>
-                                            <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-[100px]">Rol</th>
-                                            <th className="px-4 py-3.5 text-right text-xs font-bold text-gray-500 uppercase tracking-wider w-[110px]">Acciones</th>
-                                        </tr>
-                                    </thead>
-                                </table>
-                            </div>
-                            
-                            {/* Scrollable container with transparent webkit scrollbars & max-height limit to keep table neat */}
-                            <div className="max-h-[480px] overflow-y-auto overflow-x-auto custom-admin-scrollbar scroll-smooth">
-                                <style dangerouslySetInnerHTML={{__html: `
-                                    .custom-admin-scrollbar::-webkit-scrollbar {
-                                        width: 5px;
-                                        height: 5px;
-                                    }
-                                    .custom-admin-scrollbar::-webkit-scrollbar-track {
-                                        background: transparent;
-                                    }
-                                    .custom-admin-scrollbar::-webkit-scrollbar-thumb {
-                                        background: rgba(20, 184, 166, 0.12);
-                                        border-radius: 9999px;
-                                        transition: background 0.3s ease;
-                                    }
-                                    .custom-admin-scrollbar::-webkit-scrollbar-thumb:hover {
-                                        background: rgba(20, 184, 166, 0.28);
-                                    }
-                                `}} />
-                                <table className="min-w-full divide-y divide-gray-100">
-                                    <tbody className="bg-white divide-y divide-gray-100">
-                                        {filteredUsers.length === 0 && !isRefreshingUsers && (
-                                            <tr>
-                                                <td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-400 font-medium">
-                                                    No se encontraron usuarios que cumplan con los filtros seleccionados o nivel de acceso.
-                                                </td>
-                                            </tr>
-                                        )}
-                                        {filteredUsers.map((u: any, idx: number) => {
-                                            const isUserActive = u.isActive === true || String(u.isActive).toLowerCase() === 'true';
-                                            
-                                            // --- OPTIMIZED O(1) HIERARCHICAL LOOKUP ENGINE ---
-                                            let jurisdictionName = '-';
-                                            const rObj = roles.find(r => r.role === u.role);
-                                            const level = rObj?.jurisdictionLevel;
-                                            const h = getExpandedHierarchy(u);
+                            {/* Celular: filtros en el panel inferior */}
+                            <BottomSheet open={isFiltersSidebarOpen && !isDesktop} title="Filtros" onClose={() => setIsFiltersSidebarOpen(false)}>
+                                <div className="space-y-4">
+                                    {userFilterFields}
+                                    <div className="flex gap-2 pt-2">
+                                        <button type="button" onClick={clearUserFilters} className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-bold text-slate-700">
+                                            Limpiar
+                                        </button>
+                                        <button type="button" onClick={() => setIsFiltersSidebarOpen(false)} className="h-11 flex-1 rounded-xl bg-teal-600 text-sm font-bold text-white">
+                                            Ver {filteredUsers.length} {filteredUsers.length === 1 ? 'usuario' : 'usuarios'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </BottomSheet>
 
-                                            if (level === 'GLOBAL') {
-                                                jurisdictionName = 'Nacional';
-                                            } else if (level === 'DIRESA' || u.role === 'DIRESA') {
-                                                jurisdictionName = diresaMapLookup.get(h.diresaId)?.name || '-';
-                                            } else if (level === 'OGESS' || u.role === 'OGESS') {
-                                                jurisdictionName = ogessMapLookup.get(h.ogessId)?.name || '-';
-                                            } else if (level === 'UNGET' || u.role === 'UNGET') {
-                                                jurisdictionName = ungetMapLookup.get(h.ungetId)?.name || '-';
-                                            } else if (level === 'MICRORED' || u.role === 'MICRORED') {
-                                                jurisdictionName = microredMapLookup.get(h.microredId)?.name || '-';
-                                            } else if (level === 'IPRESS' || u.role === 'IPRESS') {
-                                                jurisdictionName = facilityMapLookup.get(h.facilityCode)?.name || '-';
-                                            } else {
-                                                // Fallback hierarchy waterfall: use the highest specificity set
-                                                if (h.ungetId) {
-                                                    jurisdictionName = ungetMapLookup.get(h.ungetId)?.name || '-';
-                                                } else if (h.ogessId) {
-                                                    jurisdictionName = ogessMapLookup.get(h.ogessId)?.name || '-';
-                                                } else if (h.diresaId) {
-                                                    jurisdictionName = diresaMapLookup.get(h.diresaId)?.name || '-';
-                                                } else if (h.facilityCode) {
-                                                    jurisdictionName = facilityMapLookup.get(h.facilityCode)?.name || '-';
-                                                }
-                                            }
-                                            
-                                            const name = u.personnel ? `${u.personnel.firstName} ${u.personnel.lastName}` : 'Sin datos de personal';
-                                            const email = u.personnel?.email || '';
-                                            const professionName = u.personnel?.professionData?.name || professionMapLookup.get(u.personnel?.professionId)?.name || '-';
- 
-                                            return (
-                                                <tr 
-                                                    key={idx} 
-                                                    onClick={() => setViewingUser(u)}
-                                                    className="hover:bg-slate-100/50 transition-colors group cursor-pointer"
-                                                >
-                                                    {/* Nombre (personal) */}
-                                                    <td className="px-5 py-3 whitespace-nowrap text-sm w-[240px] max-w-[240px] truncate">
-                                                        <div className="font-semibold text-gray-800 leading-tight truncate" title={name}>{name}</div>
-                                                    </td>
- 
-                                                    {/* Profesión */}
-                                                    <td className="px-5 py-3 whitespace-nowrap text-sm text-gray-600 font-semibold w-[180px] max-w-[180px] truncate">
-                                                        {professionName !== '-' ? (
-                                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-teal-50 text-teal-800 border border-teal-100/50 uppercase tracking-wide truncate" title={professionName}>
-                                                                {professionName}
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-gray-300">-</span>
-                                                        )}
-                                                    </td>
- 
-                                                    {/* Teléfono */}
-                                                    <td className="px-5 py-3 whitespace-nowrap text-xs text-gray-500 font-semibold w-[150px] max-w-[150px] truncate">
-                                                        {u.personnel?.phone ? (
-                                                            <div className="flex items-center gap-1 bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md w-fit text-gray-600">
-                                                                <Phone className="h-3 w-3 text-gray-400 shrink-0" />
-                                                                <span className="truncate">{u.personnel.phone}</span>
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-gray-300">-</span>
-                                                        )}
-                                                    </td>
- 
-                                                    {/* Jurisdicción */}
-                                                    <td className="px-5 py-3 text-xs w-[180px] max-w-[180px] truncate" title={jurisdictionName}>
-                                                        {jurisdictionName !== '-' ? (
-                                                            <span className="font-medium text-gray-700 bg-slate-55 border border-slate-100 px-2 py-0.5 rounded-md truncate block w-fit">{jurisdictionName}</span>
-                                                        ) : (
-                                                            <span className="text-gray-300">-</span>
-                                                        )}
-                                                    </td>
- 
-                                                    {/* Rol */}
-                                                    <td className="px-4 py-3 whitespace-nowrap text-sm w-[100px] max-w-[100px]">
-                                                        <span className={`px-2 py-0.5 inline-flex text-[10px] font-extrabold rounded-md uppercase tracking-wide ${u.role === 'ADMIN' ? 'bg-purple-100 text-purple-850' : 'bg-blue-50 text-blue-700 border border-blue-100/50'}`}>
-                                                            {u.role}
-                                                        </span>
-                                                    </td>
+                            {/* Celular: acciones de la barra («⋯») */}
+                            <BottomSheet open={usersActionsOpen} title="Acciones" onClose={() => setUsersActionsOpen(false)}>
+                                <div className="space-y-2">
+                                    <button type="button" onClick={() => { setUsersActionsOpen(false); handleExportPersonnelExcel(); }} className="flex h-12 w-full items-center gap-3 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700">
+                                        <FileSpreadsheet className="h-4 w-4 text-emerald-600" /> Exportar Excel
+                                    </button>
+                                    <button type="button" onClick={() => { setUsersActionsOpen(false); handleRefreshUsers(); }} className="flex h-12 w-full items-center gap-3 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700">
+                                        <RefreshCw className="h-4 w-4 text-slate-500" /> Actualizar lista
+                                    </button>
+                                </div>
+                            </BottomSheet>
 
-                                                    {/* Acciones (Contains Edit + Status indicator inside status icon color) */}
-                                                    <td className="px-4 py-3 whitespace-nowrap text-right text-xs font-medium w-[110px] max-w-[110px]">
-                                                        <div className="flex justify-end gap-1.5">
-                                                            {canAssignRoleKey(u.role) && (<>
-                                                            <button 
-                                                                onClick={(e) => { e.stopPropagation(); handleEditUserClick(u); }}
-                                                                className="text-gray-500 hover:text-teal-600 bg-gray-50 hover:bg-teal-50 border border-gray-200/80 hover:border-teal-200 p-1.5 rounded-lg transition-colors cursor-pointer" title="Editar"
-                                                            >
-                                                                <Edit className="h-3.5 w-3.5" />
-                                                            </button>
-                                                            <button 
-                                                                onClick={(e) => { e.stopPropagation(); handleToggleStatus(u.username, u.isActive); }}
-                                                                className={`p-1.5 rounded-lg border transition-all cursor-pointer ${isUserActive ? 'text-teal-600 hover:text-rose-600 bg-teal-50/50 hover:bg-rose-50 border-teal-200 hover:border-rose-200' : 'text-gray-400 hover:text-green-700 bg-gray-50 border-gray-200 hover:border-green-300'}`} 
-                                                                title={isUserActive ? "Activo (Haz clic para desactivar)" : "Inactivo (Haz clic para activar)"}
-                                                            >
-                                                                <Power className="h-3.5 w-3.5" />
-                                                            </button>
-                                                            </>)}
-                                                            {isSuperAdmin && currentUser?.username !== u.username && (
-                                                                <button 
-                                                                    onClick={(e) => { e.stopPropagation(); setUserToDelete({ username: u.username, personnelId: u.personnelId || null }); }}
-                                                                    className="text-gray-400 hover:text-red-600 bg-gray-50 hover:bg-rose-50 border border-gray-200 hover:border-red-200 p-1.5 rounded-lg transition-colors cursor-pointer" 
-                                                                    title="Eliminar permanentemente"
+                            <FloatingActionButton icon={<UserPlus />} label="Nuevo usuario" onClick={handleAddUserClick} />
+
+                            {filteredUsers.length === 0 && !isRefreshingUsers && (
+                                <div className="rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center text-sm font-medium text-slate-400">
+                                    No se encontraron usuarios que cumplan con los filtros seleccionados o nivel de acceso.
+                                </div>
+                            )}
+
+                            {/* Escritorio: una sola tabla, encabezado que se queda arriba al bajar y paginación */}
+                            {isDesktop && filteredUsers.length > 0 && (
+                                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                                    <FloatingTableHead state={usersFloatingHead} padding="px-4" cells={userHeadCells.map((c, index) => ({ key: c.key, index, content: c.label, align: c.align }))} />
+                                    <div className="overflow-x-auto scrollbar-x">
+                                        <table ref={usersTableRef} className="w-full min-w-[960px]">
+                                            <thead>
+                                                <tr>
+                                                    {userHeadCells.map(c => (
+                                                        <th key={c.key} className={`${headTh} ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {pageUsers.map((u: any) => {
+                                                    const active = isUserActiveValue(u);
+                                                    const name = u.personnel ? `${u.personnel.firstName} ${u.personnel.lastName}` : 'Sin datos de personal';
+                                                    const professionName = u.personnel?.professionData?.name || professionMapLookup.get(u.personnel?.professionId)?.name || '';
+                                                    const jurisdiction = jurisdictionOf(u);
+                                                    return (
+                                                        <tr key={u.username} onClick={() => setViewingUser(u)} className="h-[58px] cursor-pointer transition-colors hover:bg-slate-50">
+                                                            <td className="px-4 py-2">
+                                                                <div className="flex items-center gap-3">
+                                                                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-black ${active ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-400'}`}>{initialsOf(u)}</span>
+                                                                    <div className="min-w-0">
+                                                                        <p className="truncate text-[13.5px] font-bold text-slate-900" title={name}>{name}</p>
+                                                                        <p className="whitespace-nowrap text-xs text-slate-500">{u.username}{u.personnel?.dni ? ` · DNI ${u.personnel.dni}` : ''}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-4 py-2 text-[13px] text-slate-700">{professionName || <span className="text-slate-300">—</span>}</td>
+                                                            <td className="px-4 py-2 text-[13px] text-slate-700">{jurisdiction !== '-' ? jurisdiction : <span className="text-slate-300">—</span>}</td>
+                                                            <td className="px-4 py-2 text-[13px] font-semibold text-slate-800">{roleLabelOf(u)}</td>
+                                                            <td className="px-4 py-2"><StatusChip label={active ? 'Activo' : 'Inactivo'} tone={active ? 'success' : 'neutral'} /></td>
+                                                            <td className="whitespace-nowrap px-4 py-2 text-[13px] text-slate-600">{u.personnel?.phone || <span className="text-slate-300">—</span>}</td>
+                                                            <td className="px-4 py-2">
+                                                                <div className="flex justify-end gap-1.5">
+                                                                    {canAssignRoleKey(u.role) && (<>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={(e) => { e.stopPropagation(); handleEditUserClick(u); }}
+                                                                            className={`${rowIconButton} hover:border-teal-200 hover:bg-teal-50 hover:text-teal-600`}
+                                                                            title="Editar"
+                                                                            aria-label={`Editar a ${name}`}
+                                                                        >
+                                                                            <Edit className="h-4 w-4" />
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={(e) => { e.stopPropagation(); handleToggleStatus(u.username, u.isActive); }}
+                                                                            className={`${rowIconButton} ${active ? 'hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600' : 'hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-600'}`}
+                                                                            title={active ? 'Desactivar' : 'Activar'}
+                                                                            aria-label={`${active ? 'Desactivar' : 'Activar'} a ${name}`}
+                                                                        >
+                                                                            <Power className="h-4 w-4" />
+                                                                        </button>
+                                                                    </>)}
+                                                                    {isSuperAdmin && currentUser?.username !== u.username && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={(e) => { e.stopPropagation(); setUserToDelete({ username: u.username, personnelId: u.personnelId || null }); }}
+                                                                            className={`${rowIconButton} text-slate-400 hover:border-red-200 hover:bg-rose-50 hover:text-red-600`}
+                                                                            title="Eliminar permanentemente"
+                                                                            aria-label={`Eliminar a ${name}`}
+                                                                        >
+                                                                            <Trash2 className="h-4 w-4" />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <TablePagination page={usersPage} pageSize={USERS_PAGE_SIZE} total={filteredUsers.length} onPageChange={setUsersPage} itemLabel="usuarios" />
+                                </div>
+                            )}
+
+                            {/* Celular: tarjetas que cargan al bajar */}
+                            {!isDesktop && filteredUsers.length > 0 && (
+                                <div className="space-y-2.5">
+                                    {filteredUsers.slice(0, mobileUsers.count).map((u: any) => {
+                                        const active = isUserActiveValue(u);
+                                        const name = u.personnel ? `${u.personnel.firstName} ${u.personnel.lastName}` : 'Sin datos de personal';
+                                        const professionName = u.personnel?.professionData?.name || professionMapLookup.get(u.personnel?.professionId)?.name || '';
+                                        const jurisdiction = jurisdictionOf(u);
+                                        const canEdit = canAssignRoleKey(u.role);
+                                        const canDelete = isSuperAdmin && currentUser?.username !== u.username;
+                                        const menuOpen = userMenuFor === u.username;
+                                        return (
+                                            <div key={u.username} onClick={() => setViewingUser(u)} className="relative cursor-pointer rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm active:bg-slate-50">
+                                                <div className="flex items-start gap-3">
+                                                    <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-full text-sm font-black ${active ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-400'}`}>{initialsOf(u)}</span>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex items-start justify-between gap-2">
+                                                            <p className="min-w-0 truncate text-[15px] font-bold text-slate-900">{name}</p>
+                                                            {(canEdit || canDelete) && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => { e.stopPropagation(); setUserMenuFor(menuOpen ? null : u.username); }}
+                                                                    aria-label={`Acciones de ${name}`}
+                                                                    aria-expanded={menuOpen}
+                                                                    className="-mr-1.5 -mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-400 active:bg-slate-100"
                                                                 >
-                                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                                    <MoreVertical className="h-4 w-4" />
                                                                 </button>
                                                             )}
                                                         </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
+                                                        {professionName && <p className="text-[13px] text-slate-500">{professionName}</p>}
+                                                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                                            <StatusChip label={active ? 'Activo' : 'Inactivo'} tone={active ? 'success' : 'neutral'} />
+                                                            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700">{roleLabelOf(u)}</span>
+                                                        </div>
+                                                        {jurisdiction !== '-' && (
+                                                            <p className="mt-2 flex items-center gap-1.5 text-[13px] text-slate-600"><MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{jurisdiction}</span></p>
+                                                        )}
+                                                        {u.personnel?.phone && (
+                                                            <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-slate-600"><Phone className="h-3.5 w-3.5 shrink-0 text-slate-400" />{u.personnel.phone}</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {menuOpen && (
+                                                    <div onClick={(e) => e.stopPropagation()} className="absolute right-3 top-12 z-20 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
+                                                        {canEdit && (<>
+                                                            <button type="button" onClick={() => { setUserMenuFor(null); handleEditUserClick(u); }} className="flex h-11 w-full items-center gap-3 px-4 text-left text-sm font-semibold text-slate-700 active:bg-slate-50">
+                                                                <Edit className="h-4 w-4 text-slate-400" /> Editar
+                                                            </button>
+                                                            <button type="button" onClick={() => { setUserMenuFor(null); handleToggleStatus(u.username, u.isActive); }} className="flex h-11 w-full items-center gap-3 px-4 text-left text-sm font-semibold text-slate-700 active:bg-slate-50">
+                                                                <Power className="h-4 w-4 text-slate-400" /> {active ? 'Desactivar' : 'Activar'}
+                                                            </button>
+                                                        </>)}
+                                                        {canDelete && (
+                                                            <button type="button" onClick={() => { setUserMenuFor(null); setUserToDelete({ username: u.username, personnelId: u.personnelId || null }); }} className={`flex h-11 w-full items-center gap-3 px-4 text-left text-sm font-semibold text-red-600 active:bg-rose-50 ${canEdit ? 'border-t border-slate-100' : ''}`}>
+                                                                <Trash2 className="h-4 w-4" /> Eliminar
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                    <LoadMoreSentinel hasMore={mobileUsers.hasMore} onLoadMore={mobileUsers.loadMore} shown={mobileUsers.count} total={filteredUsers.length} itemLabel="usuarios" />
+                                </div>
+                            )}
                         </div>
-                    </div>
                     );
                 })()}
 

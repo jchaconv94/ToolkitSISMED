@@ -9,6 +9,7 @@ import { useNotifications } from "../contexts/NotificationsContext";
 import { Notice, NoticeIcon, badgeLabel, noticeWhen } from "../services/notifications";
 import { requestBackupsTab } from "../services/backupModule";
 import { toneIconClass } from "./ui/kit";
+import { useIsDesktop } from "./ui/useIsDesktop";
 
 /**
  * Campanita de avisos de la cabecera. En escritorio abre un panel bajo el botón; en el
@@ -25,20 +26,6 @@ const ICONS: Record<NoticeIcon, React.ElementType> = {
   ban: Ban,
   pill: Pill,
   boxes: Boxes,
-};
-
-const useIsDesktop = () => {
-  const query = "(min-width: 768px)";
-  const [desktop, setDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia?.(query).matches);
-  useEffect(() => {
-    const media = window.matchMedia?.(query);
-    if (!media) return;
-    const update = () => setDesktop(media.matches);
-    update();
-    media.addEventListener?.("change", update);
-    return () => media.removeEventListener?.("change", update);
-  }, []);
-  return Boolean(desktop);
 };
 
 /** Repinta cada 30 s, para que «hace X» no se quede quieto con el panel abierto. */
