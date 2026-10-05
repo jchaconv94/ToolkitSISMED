@@ -13,6 +13,7 @@
 import { api } from "./api";
 import { findConnectionForAssignment, readAssignedSheetRows } from "./assignedSheetReader";
 import { isLinkedToSheet, resolveFacilitySheet, rowsBelongingToFacility, type FacilitySheetLink } from "./facilitySheetLink";
+import { parentIpressCode } from "./facilityHierarchy";
 import { STOCK_COLUMNS } from "./stockColumns";
 import { listUngetSheets } from "./ungetSheetCatalog";
 import { pickOneConnectionPerUnget } from "./ungetConnections";
@@ -137,6 +138,11 @@ export interface AssignedStockResult {
   lastUpdateAt: number;
   /** Por qué no hay stock que mostrar, cuando no es un error de lectura. */
   message: string;
+  /**
+   * Puesto comunal cuya hoja llega consolidada (el Toolkit envía todas las farmacias de la
+   * IPRESS juntas): no hay filas con su ALMCOD y se muestra la hoja entera de su IPRESS.
+   */
+  consolidated?: boolean;
 }
 
 const empty = (message: string, extra: Partial<AssignedStockResult> = {}): AssignedStockResult => ({
@@ -153,8 +159,11 @@ export async function loadAssignedIpressStock(
 ): Promise<AssignedStockResult> {
   if (!facilityCode) return empty("El usuario no está vinculado a un código de establecimiento IPRESS.");
 
+  // Un puesto comunal (F02 en adelante) ve las columnas de su establecimiento principal:
+  // no se le configuran columnas propias (pedido del usuario del 2026-10-05).
+  const columnsFrom = parentIpressCode(facilityCode) || facilityCode;
   const [assignments, conexiones] = await Promise.all([
-    api.getMyStockAssignments(facilityCode),
+    api.getMyStockAssignments(columnsFrom),
     // La conexión vigente de la UNGET: su URL puede haber cambiado desde que se
     // creó la asignación, o puede que ya solo lea por hoja de cálculo.
     api.getAllUngetConfigs()
@@ -203,10 +212,13 @@ export async function loadAssignedIpressStock(
   }
 
   // La IPRESS ve su hoja entera —sus puestos comunales son suyos—; un puesto comunal
-  // solo las filas de su propio ALMCOD.
-  const propias = rowsBelongingToFacility(sheetRows, facilityCode, row =>
+  // solo las filas de su propio ALMCOD. Si la hoja llega consolidada no hay ninguna con su
+  // ALMCOD: entonces ve la hoja entera de su IPRESS, con aviso, en vez de una tabla vacía.
+  const suyas = rowsBelongingToFacility(sheetRows, facilityCode, row =>
     String(readStockValue(row, ["ALMCOD", "almcod"]) ?? ""),
   );
+  const consolidated = suyas.length === 0 && !!parentIpressCode(facilityCode);
+  const propias = consolidated ? sheetRows : suyas;
 
   const updateTimes = propias
     .map(row => String(readStockValue(row, UPDATE_FIELDS)))
@@ -219,5 +231,6 @@ export async function loadAssignedIpressStock(
     lastUpdate: [...updateTimes].sort().at(-1) || "",
     lastUpdateAt: updateTimes.reduce((max, value) => Math.max(max, parseUpdateTimestamp(value)), 0),
     message: "",
+    consolidated,
   };
 }

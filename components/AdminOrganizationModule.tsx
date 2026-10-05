@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { HealthFacility, Unget, Diresa, Ogess, Microred } from '../types';
-import { Building2, Plus, Edit, Trash2, MapPin, Search, ChevronLeft, ChevronRight, Save, X, Network, Globe, Filter, FilterX, Info, Copy, Check, Hash, Phone, Mail, Activity, ShieldAlert, ShieldCheck, FileSpreadsheet, Zap, PlugZap, Settings2, Link2, Link2Off, SlidersHorizontal, AlertTriangle } from 'lucide-react';
+import { Building2, Plus, Edit, Trash2, MapPin, Search, ChevronLeft, ChevronRight, Save, X, Network, Globe, Filter, FilterX, Info, Copy, Check, Hash, Phone, Mail, Activity, ShieldAlert, ShieldCheck, FileSpreadsheet, Zap, PlugZap, Settings2, Link2, Link2Off, SlidersHorizontal, AlertTriangle, Users, Columns3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { CustomSelect } from './ui/CustomSelect';
@@ -17,6 +17,7 @@ import { SortButton, ariaSort, tableSearchBoxClass, useTableSort, type SortDir }
 import { buildUngetConnectionStatus, pickOneConnectionPerUnget, type UngetConnectionState } from '../services/ungetConnections';
 import { isLinkedToSheet, resolveFacilitySheet } from '../services/facilitySheetLink';
 import { FACILITY_TYPES, allowedFacilityTypes, facilityTypeLabel, suggestedFacilityType } from '../services/facilityCodes';
+import { findParentFacility, inheritFromParent, isPharmacyType, parentIpressCode, pharmaciesToSync } from '../services/facilityHierarchy';
 import { listUngetSheets, type UngetSheet } from '../services/ungetSheetCatalog';
 import {
     DEFAULT_STOCK_COLUMN_KEYS,
@@ -233,6 +234,15 @@ export const AdminOrganizationModule: React.FC = () => {
     );
     // Tipos que admite el código (con F02 en adelante: puesto comunal o farmacia del hospital).
     const tiposDelCodigo = useMemo(() => allowedFacilityTypes(facilityForm.code), [facilityForm.code]);
+    // Farmacia de un hospital: solo código, nombre y tipo; el resto lo hereda de su IPRESS
+    // (services/facilityHierarchy.ts). Se guarda en un solo paso.
+    const esFarmacia = isPharmacyType(facilityForm.type);
+    const farmaciaPadre = useMemo(
+        () => (esFarmacia ? findParentFacility(facilityForm.code, facilities) : undefined),
+        [esFarmacia, facilityForm.code, facilities],
+    );
+    // Puesto comunal (F02 en adelante): ve las columnas de su establecimiento principal.
+    const esPuestoComunalDeIpress = facilityForm.type === 'PUESTO_COMUNAL' && !!parentIpressCode(facilityForm.code);
 
     useEffect(() => {
         // Solo cuando no hay tipo elegido: nunca se pisa lo que alguien puso a mano. Y solo
@@ -280,7 +290,8 @@ export const AdminOrganizationModule: React.FC = () => {
             setEditingFacilityOriginalCode(null);
             setFacilityForm({ code, name });
         }
-        setFacilityModalStep(4);
+        // Una farmacia no tiene paso 4: todo lo hereda de su IPRESS.
+        setFacilityModalStep(isPharmacyType(found?.type) ? 1 : 4);
         setIsFacilityModalOpen(true);
         prepareFacilityStep4(code, name);
     };
@@ -322,6 +333,10 @@ export const AdminOrganizationModule: React.FC = () => {
 
     // Facility step validations
     const isFacilityStep1Valid = useMemo(() => {
+        // Farmacia: código, nombre y su IPRESS registrada; lo demás lo hereda.
+        if (isPharmacyType(facilityForm.type)) {
+            return !!facilityForm.code?.trim() && !!facilityForm.name?.trim() && !!findParentFacility(facilityForm.code, facilities);
+        }
         // Un puesto comunal no tiene categoría de IPRESS: es una farmacia de la suya, y
         // las categorías (I-1, I-2, …) califican al establecimiento entero. Exigírsela
         // obligaría a inventar una, que es justo lo que llevó a usar `P.C.` como categoría.
@@ -330,7 +345,7 @@ export const AdminOrganizationModule: React.FC = () => {
                !!facilityForm.name?.trim() &&
                (!necesitaCategoria || !!facilityForm.category?.trim()) &&
                !!facilityForm.type;
-    }, [facilityForm.code, facilityForm.name, facilityForm.category, facilityForm.type]);
+    }, [facilityForm.code, facilityForm.name, facilityForm.category, facilityForm.type, facilities]);
 
     const isFacilityStep2Valid = useMemo(() => {
         return !!facilityForm.microredId || 
@@ -345,7 +360,7 @@ export const AdminOrganizationModule: React.FC = () => {
     }, [facilityForm.district, facilityForm.province]);
 
     // La hoja ya no se elige, así que el único requisito es que quede alguna columna visible.
-    const isFacilityStep4Valid = useMemo(() => linkVisibleColumns.length > 0, [linkVisibleColumns]);
+    const isFacilityStep4Valid = useMemo(() => esPuestoComunalDeIpress || linkVisibleColumns.length > 0, [esPuestoComunalDeIpress, linkVisibleColumns]);
 
     // Hierarchy Locks for non-ADMIN users
     const isSuperAdmin = user?.role === 'ADMIN';
@@ -1054,10 +1069,19 @@ export const AdminOrganizationModule: React.FC = () => {
     const handleSaveFacility = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         
+        // Una farmacia guarda los datos de su hospital, no los del formulario.
+        const padre = isPharmacyType(facilityForm.type) ? findParentFacility(facilityForm.code, facilities) : undefined;
+        if (isPharmacyType(facilityForm.type) && !padre) {
+            toast.error(`Registre primero la IPRESS ${parentIpressCode(facilityForm.code)}: la farmacia hereda sus datos.`);
+            return;
+        }
+        const form: Partial<HealthFacility> = padre ? inheritFromParent(facilityForm, padre) : facilityForm;
+        const sinColumnasPropias = !!padre || (form.type === 'PUESTO_COMUNAL' && !!parentIpressCode(form.code));
+
         // 1. Save Health Facility First
-        const res = await api.saveFacility(facilityForm as HealthFacility, editingFacilityOriginalCode || undefined);
+        const res = await api.saveFacility(form as HealthFacility, editingFacilityOriginalCode || undefined);
         if (res.success) { 
-            const finalCode = (facilityForm.code || editingFacilityOriginalCode || "").trim();
+            const finalCode = (form.code || editingFacilityOriginalCode || "").trim();
 
             // 2. Columnas visibles del stock. El vínculo con la hoja no se guarda: se deduce
             // del código en cada lectura (services/facilitySheetLink.ts).
@@ -1065,14 +1089,15 @@ export const AdminOrganizationModule: React.FC = () => {
 
             // Solo se escribe cuando hay algo que recordar: una elección distinta de la
             // predeterminada, o una fila que ya existía y hay que mantener al día.
-            if (finalCode && linkVisibleColumns.length > 0 && (linkHadPreferences || !sonLasPorOmision)) {
+            // Farmacias y puestos comunales no tienen columnas propias: usan las de su IPRESS.
+            if (!sinColumnasPropias && finalCode && linkVisibleColumns.length > 0 && (linkHadPreferences || !sonLasPorOmision)) {
                 const assigRes = await api.saveStockColumnPreferences({
                     adminUsername: user?.username || "",
                     facilityCode: finalCode,
                     // Informativos: quedan como referencia de la última hoja reconocida.
                     sheetName: linkResolved?.sheet?.name || "",
                     sheetUrl: linkConnection?.url || "",
-                    ungetId: facilityForm.ungetId || undefined,
+                    ungetId: form.ungetId || undefined,
                     visibleColumns: linkVisibleColumns
                 });
 
@@ -1085,21 +1110,21 @@ export const AdminOrganizationModule: React.FC = () => {
             // Immediate reactive update in memory
             const updatedItem: HealthFacility = {
                 code: finalCode,
-                name: (facilityForm.name || '').trim(),
-                category: (facilityForm.category || '').trim(),
-                type: facilityForm.type || undefined,
-                ungetId: facilityForm.ungetId || undefined,
-                microredId: facilityForm.microredId || undefined,
-                ogessId: facilityForm.ogessId || undefined,
-                diresaId: facilityForm.diresaId || undefined,
-                legalAddress: facilityForm.legalAddress || undefined,
-                website: facilityForm.website || undefined,
-                socialMedia: facilityForm.socialMedia || undefined,
-                phone: facilityForm.phone || undefined,
-                email: facilityForm.email || undefined,
-                department: facilityForm.department || undefined,
-                province: facilityForm.province || undefined,
-                district: facilityForm.district || undefined
+                name: (form.name || '').trim(),
+                category: (form.category || '').trim(),
+                type: form.type || undefined,
+                ungetId: form.ungetId || undefined,
+                microredId: form.microredId || undefined,
+                ogessId: form.ogessId || undefined,
+                diresaId: form.diresaId || undefined,
+                legalAddress: form.legalAddress || undefined,
+                website: form.website || undefined,
+                socialMedia: form.socialMedia || undefined,
+                phone: form.phone || undefined,
+                email: form.email || undefined,
+                department: form.department || undefined,
+                province: form.province || undefined,
+                district: form.district || undefined
             };
 
             setFacilities(prev => {
@@ -1112,6 +1137,14 @@ export const AdminOrganizationModule: React.FC = () => {
                 }
                 return [...prev, updatedItem];
             });
+
+            // Las farmacias de este establecimiento se actualizan solas con sus datos nuevos.
+            const farmacias = isPharmacyType(updatedItem.type) ? [] : pharmaciesToSync(updatedItem, facilities);
+            if (farmacias.length) {
+                const resultados = await Promise.all(farmacias.map(f => api.saveFacility(f, f.code)));
+                const fallidas = resultados.filter(r => !r.success).length;
+                if (fallidas) toast.warning(`No se pudieron actualizar ${fallidas} de sus ${farmacias.length} farmacias.`);
+            }
 
             toast.success(editingFacilityOriginalCode ? 'IPRESS actualizada correctamente' : 'IPRESS registrada correctamente'); 
             setIsFacilityModalOpen(false); 
@@ -3228,7 +3261,9 @@ export const AdminOrganizationModule: React.FC = () => {
                                     {editingFacilityOriginalCode ? 'Editar Establecimiento (IPRESS)' : 'Nuevo Establecimiento (IPRESS)'}
                                 </h3>
                                 <p className="mt-1 hidden text-xs text-gray-500 md:block">
-                                    {editingFacilityOriginalCode 
+                                    {esFarmacia
+                                        ? 'Una farmacia del hospital: solo código y nombre; lo demás lo hereda de su establecimiento.'
+                                        : editingFacilityOriginalCode 
                                         ? `Actualizando datos de la IPRESS [Código Original: ${editingFacilityOriginalCode}]` 
                                         : 'Configure los datos de identificación, jurisdicción y canales de contacto de la IPRESS.'}
                                 </p>
@@ -3242,13 +3277,13 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* Avance del asistente */}
-                        <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
+                        {/* Avance del asistente (la farmacia se guarda en un solo paso) */}
+                        {!esFarmacia && <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
                             <p className="text-[12.5px] font-black text-teal-700">Paso {facilityModalStep} de 4 · {['Identificación', 'Jurisdicción', 'Ubicación y Contacto', 'Hoja de stock'][facilityModalStep - 1]}</p>
                             <div className="mt-2 grid gap-1.5" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }} aria-hidden="true">
                                 {[1, 2, 3, 4].map(n => <span key={n} className={`h-1.5 rounded-full transition-colors ${n <= facilityModalStep ? 'bg-teal-600' : 'bg-slate-200'}`} />)}
                             </div>
-                        </div>
+                        </div>}
 
                         {/* Form */}
                         <form 
@@ -3301,19 +3336,6 @@ export const AdminOrganizationModule: React.FC = () => {
 
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 <div>
-                                                    <label className="block text-xs font-bold text-gray-700 mb-1">
-                                                        Categoría {facilityForm.type === 'PUESTO_COMUNAL' ? '' : '*'}
-                                                    </label>
-                                                    <input
-                                                        required={facilityForm.type !== 'PUESTO_COMUNAL'}
-                                                        type="text"
-                                                        placeholder={facilityForm.type === 'PUESTO_COMUNAL' ? 'No aplica a un puesto comunal' : 'Ej. I-3, I-4, II-1'}
-                                                        className="w-full border border-gray-200 p-2.5 rounded-lg text-sm bg-white text-gray-800 focus:ring-2 focus:ring-teal-500 outline-none"
-                                                        value={facilityForm.category || ''}
-                                                        onChange={e => setFacilityForm({...facilityForm, category: e.target.value})}
-                                                    />
-                                                </div>
-                                                <div>
                                                     <label className="block text-xs font-bold text-gray-700 mb-1">Tipo de Establecimiento *</label>
                                                     <CustomSelect
                                                         value={facilityForm.type || ''}
@@ -3333,8 +3355,65 @@ export const AdminOrganizationModule: React.FC = () => {
                                                         </p>
                                                     )}
                                                 </div>
+                                                {esFarmacia ? (
+                                                    <div className="flex items-end pb-3 text-[12px] text-slate-400">La categoría la toma de su establecimiento.</div>
+                                                ) : (
+                                                <div>
+                                                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                                                        Categoría {facilityForm.type === 'PUESTO_COMUNAL' ? '' : '*'}
+                                                    </label>
+                                                    <input
+                                                        required={facilityForm.type !== 'PUESTO_COMUNAL'}
+                                                        type="text"
+                                                        placeholder={facilityForm.type === 'PUESTO_COMUNAL' ? 'No aplica a un puesto comunal' : 'Ej. I-3, I-4, II-1'}
+                                                        className="w-full border border-gray-200 p-2.5 rounded-lg text-sm bg-white text-gray-800 focus:ring-2 focus:ring-teal-500 outline-none"
+                                                        value={facilityForm.category || ''}
+                                                        onChange={e => setFacilityForm({...facilityForm, category: e.target.value})}
+                                                    />
+                                                </div>
+                                                )}
                                             </div>
                                         </div>
+                                        {esFarmacia && (farmaciaPadre ? (
+                                            <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100/80 space-y-3">
+                                                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-1.5">
+                                                    <div className="w-1.5 h-3 bg-teal-500 rounded-sm" /> Hereda de su establecimiento
+                                                </h4>
+                                                <div className="flex items-center gap-3 rounded-xl border border-teal-200 bg-white p-3">
+                                                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-rose-50 text-rose-600"><Building2 className="h-5 w-5" /></span>
+                                                    <div className="min-w-0">
+                                                        <p className="truncate font-black text-slate-900">{farmaciaPadre.name}</p>
+                                                        <p className="font-mono text-[12px] text-teal-700">{farmaciaPadre.code}{farmaciaPadre.type ? ` · ${facilityTypeLabel(farmaciaPadre.type)}` : ''}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="divide-y divide-slate-100 rounded-xl bg-white px-4 text-[13px]">
+                                                    {[
+                                                        ['Categoría', farmaciaPadre.category || '—'],
+                                                        ['DIRESA · OGESS', `${farmaciaPadre.diresaId ? getDiresaName(farmaciaPadre.diresaId) : '—'} · ${farmaciaPadre.ogessId ? getOgessName(farmaciaPadre.ogessId) : '—'}`],
+                                                        ['UNGET · Microred', `${farmaciaPadre.ungetId ? getUngetName(farmaciaPadre.ungetId) : '—'} · ${farmaciaPadre.microredId ? getMicroredName(farmaciaPadre.microredId) : '—'}`],
+                                                        ['Ubicación', [farmaciaPadre.district, farmaciaPadre.province, farmaciaPadre.department].filter(Boolean).join(' · ') || '—'],
+                                                        ['Hoja de stock', `La de ${farmaciaPadre.code} (su ALMCOD ${String(facilityForm.code || '').trim().toUpperCase()})`],
+                                                    ].map(([k, v]) => (
+                                                        <div key={k} className="flex items-baseline justify-between gap-3 py-1.5"><span className="text-slate-500">{k}</span><span className="text-right font-semibold text-slate-800">{v}</span></div>
+                                                    ))}
+                                                </div>
+                                                <p className="flex items-start gap-2 text-[12px] text-slate-500"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />Si cambia algún dato del hospital, sus farmacias se actualizan solas.</p>
+                                                <p className="flex items-start gap-2 text-[12px] text-slate-500"><Users className="mt-0.5 h-3.5 w-3.5 shrink-0" />No se le asignan usuarios: su personal entra con el usuario del hospital, que ve todas sus farmacias.</p>
+                                            </div>
+                                        ) : parentIpressCode(facilityForm.code) ? (
+                                            <div className="flex gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-[13px] text-red-800">
+                                                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                                                <div>
+                                                    <p className="font-black">La IPRESS {parentIpressCode(facilityForm.code)} no está registrada</p>
+                                                    <p className="mt-0.5">Una farmacia hereda los datos de su establecimiento. Registre primero la IPRESS {parentIpressCode(facilityForm.code)} y vuelva a intentarlo.</p>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-[13px] text-amber-900">
+                                                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                                                <p>Una farmacia lleva el código de su IPRESS más la farmacia, por ejemplo <span className="font-mono font-bold">06502F02</span>.</p>
+                                            </div>
+                                        ))}
                                     </div>
                                 )}
 
@@ -3575,6 +3654,15 @@ export const AdminOrganizationModule: React.FC = () => {
                                             )}
                                         </div>
 
+                                        {esPuestoComunalDeIpress ? (
+                                            <div className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+                                                <Columns3 className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+                                                <div className="text-[13px] text-slate-700">
+                                                    <p className="font-black text-slate-900">Columnas: las de su establecimiento principal</p>
+                                                    <p className="mt-0.5">Ve las mismas columnas que {facilities.find(f => f.code === parentIpressCode(facilityForm.code))?.name || 'su IPRESS'} ({parentIpressCode(facilityForm.code)}). Se cambian desde ese establecimiento o en Columnas de Stock.</p>
+                                                </div>
+                                            </div>
+                                        ) : (
                                         <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100/80 space-y-4">
                                             <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-1 flex items-center gap-1.5">
                                                 <div className="w-1.5 h-3 bg-teal-500 rounded-sm" /> Restringir Columnas Visibles para este usuario
@@ -3605,6 +3693,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                 <p className="text-[10px] text-red-500 font-bold">Debe dejar al menos una columna visible.</p>
                                             )}
                                         </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -3629,7 +3718,16 @@ export const AdminOrganizationModule: React.FC = () => {
                                     </button>
                                 )}
 
-                                {facilityModalStep < 4 ? (
+                                {esFarmacia ? (
+                                    <button 
+                                        type="button" 
+                                        disabled={!isFacilityStep1Valid}
+                                        onClick={() => handleSaveFacility()}
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
+                                    >
+                                        <Save className="h-4 w-4" /> {editingFacilityOriginalCode ? 'Actualizar farmacia' : 'Guardar farmacia'}
+                                    </button>
+                                ) : facilityModalStep < 4 ? (
                                     <button 
                                         type="button" 
                                         disabled={
