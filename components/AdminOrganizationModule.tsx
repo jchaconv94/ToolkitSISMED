@@ -2,10 +2,17 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { HealthFacility, Unget, Diresa, Ogess, Microred } from '../types';
-import { Building2, Plus, Edit, Trash2, MapPin, Search, ChevronLeft, ChevronRight, Save, X, Network, Globe, Filter, FilterX, Info, Copy, Check, Hash, Phone, Mail, Activity, ShieldAlert, ShieldCheck, FileSpreadsheet, Zap, PlugZap, Settings2, Link2, Link2Off } from 'lucide-react';
+import { Building2, Plus, Edit, Trash2, MapPin, Search, ChevronLeft, ChevronRight, Save, X, Network, Globe, Filter, FilterX, Info, Copy, Check, Hash, Phone, Mail, Activity, ShieldAlert, ShieldCheck, FileSpreadsheet, Zap, PlugZap, Settings2, Link2, Link2Off, SlidersHorizontal, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { CustomSelect } from './ui/CustomSelect';
+import { useIsDesktop } from './ui/useIsDesktop';
+import { BottomSheet } from './ui/BottomSheet';
+import { FloatingActionButton } from './ui/FloatingActionButton';
+import { TablePagination } from './ui/TablePagination';
+import { LoadMoreSentinel, useIncrementalCount } from './ui/IncrementalList';
+import { FloatingTableHead, useFloatingTableHead } from './ui/FloatingTableHead';
+import { ConfirmationDialog } from './ui/ConfirmationDialog';
 import { buildUngetConnectionStatus, pickOneConnectionPerUnget, type UngetConnectionState } from '../services/ungetConnections';
 import { isLinkedToSheet, resolveFacilitySheet } from '../services/facilitySheetLink';
 import { FACILITY_TYPES, facilityTypeLabel, suggestedFacilityType } from '../services/facilityCodes';
@@ -73,6 +80,23 @@ const CONNECTION_STATE_UI_UNKNOWN: Record<'loading' | 'error', typeof CONNECTION
 };
 
 
+type OrgTab = 'DIRESA' | 'OGESS' | 'UNGET' | 'MICRORED' | 'IPRESS';
+
+/** Cómo se llama cada nivel en pantalla. «IPRESS» se muestra como «Establecimientos». */
+const TAB_LABEL: Record<OrgTab, string> = { DIRESA: 'DIRESA', OGESS: 'OGESS', UNGET: 'UNGET', MICRORED: 'Microred', IPRESS: 'Establecimientos' };
+const TAB_SINGULAR: Record<OrgTab, string> = { DIRESA: 'DIRESA', OGESS: 'OGESS', UNGET: 'UNGET', MICRORED: 'Microred', IPRESS: 'Establecimiento' };
+const TAB_NEW: Record<OrgTab, string> = { DIRESA: 'Nueva DIRESA', OGESS: 'Nueva OGESS', UNGET: 'Nueva UNGET', MICRORED: 'Nueva microred', IPRESS: 'Nuevo establecimiento' };
+const TAB_ICON: Record<OrgTab, React.ElementType> = { DIRESA: ShieldCheck, OGESS: Activity, UNGET: Building2, MICRORED: Network, IPRESS: MapPin };
+/** Títulos de columna de cada tabla, para el encabezado que se queda arriba al bajar. */
+const TAB_HEADS: Record<OrgTab, string[]> = {
+    DIRESA: ['DIRESA', 'RUC', 'Distrito', 'Provincia', 'Departamento', 'Acciones'],
+    OGESS: ['OGESS', 'Código / RUC', 'Distrito', 'Provincia', 'DIRESA', 'Acciones'],
+    UNGET: ['UNGET', 'Distrito', 'Provincia', 'OGESS', 'DIRESA', 'Conexión', 'Acciones'],
+    MICRORED: ['Microred', 'UNGET', 'OGESS', 'Acciones'],
+    IPRESS: ['Establecimiento', 'Categoría', 'Tipo', 'Microred', 'UNGET', 'OGESS', 'Acciones'],
+};
+const ORG_PAGE_SIZE = 10;
+
 export const AdminOrganizationModule: React.FC = () => {
     const { user, hasPermission } = useAuth();
 
@@ -106,37 +130,9 @@ export const AdminOrganizationModule: React.FC = () => {
         onChange: (val: string) => void,
         id: string
     ) => {
-        const isActive = !!value;
-        return (
-            <div 
-                id={`th-filter-${id}`}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    setActiveFilterTitle(title);
-                    setActiveFilterValue(value);
-                    setActiveFilterOptions(options || []);
-                    setActiveFilterOnChange(() => onChange);
-                    setActiveFilterTriggerRect(rect);
-                    setActiveFilterId(activeFilterId === id ? null : id);
-                    setHeaderFilterSearch('');
-                }}
-                className={`group select-none inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-all duration-200 cursor-pointer ${
-                    isActive 
-                        ? 'bg-teal-50 border-teal-200/80 text-teal-700 font-extrabold shadow-sm shadow-teal-50/20' 
-                        : 'bg-transparent border-transparent hover:bg-slate-100 hover:border-slate-200 text-slate-500 hover:text-slate-800'
-                }`}
-            >
-                <span className="font-extrabold uppercase tracking-wider text-[10px] whitespace-nowrap">{title}</span>
-                <Filter 
-                    className={`h-3 w-3 shrink-0 transition-transform duration-200 ${
-                        isActive 
-                            ? 'text-teal-600 fill-teal-100 scale-110' 
-                            : 'text-slate-400 group-hover:text-slate-600 group-hover:scale-105'
-                    }`} 
-                />
-            </div>
-        );
+        // Los filtros viven en la barra de arriba (y en el panel del celular): el encabezado solo nombra la columna.
+        void value; void options; void onChange; void id;
+        return <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 whitespace-nowrap">{title}</span>;
     };
 
     const [diresas, setDiresas] = useState<Diresa[]>([]);
@@ -668,9 +664,9 @@ export const AdminOrganizationModule: React.FC = () => {
         else if (activeTab === 'IPRESS') extractFrom(visibleFacilities);
 
         return {
-            departments: [{ value: '', label: 'Todos' }, ...Array.from(departments).sort().map(d => ({ value: d, label: d }))],
-            provinces: [{ value: '', label: 'Todas' }, ...Array.from(provinces).sort().map(p => ({ value: p, label: p }))],
-            districts: [{ value: '', label: 'Todos' }, ...Array.from(districts).sort().map(d => ({ value: d, label: d }))]
+            departments: [{ value: '', label: 'Todos los departamentos' }, ...Array.from(departments).sort().map(d => ({ value: d, label: d }))],
+            provinces: [{ value: '', label: 'Todas las provincias' }, ...Array.from(provinces).sort().map(p => ({ value: p, label: p }))],
+            districts: [{ value: '', label: 'Todos los distritos' }, ...Array.from(districts).sort().map(d => ({ value: d, label: d }))]
         };
     }, [activeTab, visibleDiresas, visibleOgess, visibleUngets, visibleMicroredes, visibleFacilities]);
 
@@ -812,20 +808,10 @@ export const AdminOrganizationModule: React.FC = () => {
         else toast.error(res.message);
     };
     const handleDeleteDiresa = async (id: string) => {
-        const item = diresas.find(d => d.id === id);
-        const name = item ? item.name : id;
-        toast(`¿Eliminar DIRESA "${name}"?`, {
-            description: "Esta acción eliminará toda la estructura y establecimientos dependientes.",
-            action: {
-                label: "Eliminar",
-                onClick: async () => {
-                    setDiresas(prev => prev.filter(d => d.id !== id));
-                    const res = await api.deleteDiresa(id);
-                    if (res.success) { toast.success('DIRESA eliminada'); await fetchData(true); }
-                    else { toast.error(res.message); await fetchData(true); }
-                }
-            }
-        });
+        setDiresas(prev => prev.filter(d => d.id !== id));
+        const res = await api.deleteDiresa(id);
+        if (res.success) { toast.success('DIRESA eliminada'); await fetchData(true); }
+        else { toast.error(res.message); await fetchData(true); }
     };
 
     // --- OGESS CRUD --- //
@@ -848,20 +834,10 @@ export const AdminOrganizationModule: React.FC = () => {
         else toast.error(res.message);
     };
     const handleDeleteOgess = async (id: string) => {
-        const item = ogess.find(o => o.id === id);
-        const name = item ? item.name : id;
-        toast(`¿Eliminar OGESS "${name}"?`, {
-            description: "Esta acción eliminará toda la estructura y establecimientos dependientes.",
-            action: {
-                label: "Eliminar",
-                onClick: async () => {
-                    setOgess(prev => prev.filter(o => o.id !== id));
-                    const res = await api.deleteOgess(id);
-                    if (res.success) { toast.success('OGESS eliminada'); await fetchData(true); }
-                    else { toast.error(res.message); await fetchData(true); }
-                }
-            }
-        });
+        setOgess(prev => prev.filter(o => o.id !== id));
+        const res = await api.deleteOgess(id);
+        if (res.success) { toast.success('OGESS eliminada'); await fetchData(true); }
+        else { toast.error(res.message); await fetchData(true); }
     };
 
     // --- UNGET CRUD --- //
@@ -884,20 +860,10 @@ export const AdminOrganizationModule: React.FC = () => {
         else toast.error(res.message);
     };
     const handleDeleteUnget = async (id: string) => {
-        const item = ungets.find(u => u.id === id);
-        const name = item ? item.name : id;
-        toast(`¿Eliminar UNGET "${name}"?`, {
-            description: "Esta acción eliminará toda la estructura y establecimientos dependientes.",
-            action: {
-                label: "Eliminar",
-                onClick: async () => {
-                    setUngets(prev => prev.filter(u => u.id !== id));
-                    const res = await api.deleteUnget(id);
-                    if (res.success) { toast.success('UNGET eliminada'); await fetchData(true); }
-                    else { toast.error(res.message); await fetchData(true); }
-                }
-            }
-        });
+        setUngets(prev => prev.filter(u => u.id !== id));
+        const res = await api.deleteUnget(id);
+        if (res.success) { toast.success('UNGET eliminada'); await fetchData(true); }
+        else { toast.error(res.message); await fetchData(true); }
     };
 
     // --- MICRORED CRUD --- //
@@ -920,20 +886,10 @@ export const AdminOrganizationModule: React.FC = () => {
         else toast.error(res.message);
     };
     const handleDeleteMicrored = async (id: string) => {
-        const item = microredes.find(m => m.id === id);
-        const name = item ? item.name : id;
-        toast(`¿Eliminar MICRORED "${name}"?`, {
-            description: "Esta acción eliminará referencias a ella en establecimientos.",
-            action: {
-                label: "Eliminar",
-                onClick: async () => {
-                    setMicroredes(prev => prev.filter(m => m.id !== id));
-                    const res = await api.deleteMicrored(id);
-                    if (res.success) { toast.success('MICRORED eliminada'); await fetchData(true); }
-                    else { toast.error(res.message); await fetchData(true); }
-                }
-            }
-        });
+        setMicroredes(prev => prev.filter(m => m.id !== id));
+        const res = await api.deleteMicrored(id);
+        if (res.success) { toast.success('MICRORED eliminada'); await fetchData(true); }
+        else { toast.error(res.message); await fetchData(true); }
     };
 
     // --- IPRESS CRUD --- //
@@ -1166,20 +1122,10 @@ export const AdminOrganizationModule: React.FC = () => {
         else toast.error(res.message);
     };
     const handleDeleteFacility = async (code: string) => {
-        const item = facilities.find(f => f.code === code);
-        const name = item ? item.name : code;
-        toast(`¿Eliminar IPRESS "${name}" (${code})?`, {
-            description: "Esta acción no se puede deshacer.",
-            action: {
-                label: "Eliminar",
-                onClick: async () => {
-                    setFacilities(prev => prev.filter(f => f.code !== code));
-                    const res = await api.deleteFacility(code);
-                    if (res.success) { toast.success('IPRESS eliminada'); await fetchData(true); }
-                    else { toast.error(res.message); await fetchData(true); }
-                }
-            }
-        });
+        setFacilities(prev => prev.filter(f => f.code !== code));
+        const res = await api.deleteFacility(code);
+        if (res.success) { toast.success('Establecimiento eliminado'); await fetchData(true); }
+        else { toast.error(res.message); await fetchData(true); }
     };
 
     const getDiresaName = (id?: string) => diresas.find(d => d.id === id)?.name || id || '-';
@@ -1325,13 +1271,53 @@ export const AdminOrganizationModule: React.FC = () => {
         }
     };
 
-    const handleConfirmDelete = (tab: string, item: any, e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (tab === 'DIRESA') handleDeleteDiresa(item.id);
-        else if (tab === 'OGESS') handleDeleteOgess(item.id);
-        else if (tab === 'UNGET') handleDeleteUnget(item.id);
-        else if (tab === 'MICRORED') handleDeleteMicrored(item.id);
-        else if (tab === 'IPRESS') handleDeleteFacility(item.code);
+    const handleConfirmDelete = (tab: string, item: any, e?: React.MouseEvent) => {
+        e?.stopPropagation();
+        setDeleteTarget({ tab: tab as OrgTab, item });
+    };
+
+    // --- ELIMINAR: confirmación con lo que depende del registro ---
+    const [deleteTarget, setDeleteTarget] = useState<{ tab: OrgTab; item: any } | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const executeDelete = async () => {
+        if (!deleteTarget) return;
+        const { tab, item } = deleteTarget;
+        setIsDeleting(true);
+        try {
+            if (tab === 'DIRESA') await handleDeleteDiresa(item.id);
+            else if (tab === 'OGESS') await handleDeleteOgess(item.id);
+            else if (tab === 'UNGET') await handleDeleteUnget(item.id);
+            else if (tab === 'MICRORED') await handleDeleteMicrored(item.id);
+            else if (tab === 'IPRESS') await handleDeleteFacility(item.code);
+            setDeleteTarget(null);
+            setSelectedDetailItem(null);
+            setSelectedDetailType(null);
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+    const deleteDependents = (tab: OrgTab, item: any): string => {
+        const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+        if (tab === 'DIRESA') {
+            const o = ogess.filter(x => x.diresaId === item.id).length;
+            const f = facilities.filter(x => x.diresaId === item.id).length;
+            return o || f ? `Dependen de ella ${plural(o, 'OGESS', 'OGESS')} y ${plural(f, 'establecimiento', 'establecimientos')}.` : '';
+        }
+        if (tab === 'OGESS') {
+            const u = ungets.filter(x => x.ogessId === item.id).length;
+            const f = facilities.filter(x => x.ogessId === item.id).length;
+            return u || f ? `Dependen de ella ${plural(u, 'UNGET', 'UNGET')} y ${plural(f, 'establecimiento', 'establecimientos')}.` : '';
+        }
+        if (tab === 'UNGET') {
+            const m = microredes.filter(x => x.ungetId === item.id).length;
+            const f = facilities.filter(x => x.ungetId === item.id).length;
+            return m || f ? `Dependen de ella ${plural(m, 'microred', 'microredes')} y ${plural(f, 'establecimiento', 'establecimientos')}.` : '';
+        }
+        if (tab === 'MICRORED') {
+            const f = facilities.filter(x => x.microredId === item.id).length;
+            return f ? `${plural(f, 'establecimiento pertenece', 'establecimientos pertenecen')} a esta microred y ${f === 1 ? 'quedará' : 'quedarán'} sin microred.` : '';
+        }
+        return '';
     };
 
     const popoverStyle = useMemo(() => {
@@ -1372,199 +1358,320 @@ export const AdminOrganizationModule: React.FC = () => {
         return resetOpt ? [resetOpt, ...matched] : matched;
     }, [activeFilterOptions, headerFilterSearch]);
 
+    // Abre el formulario para crear un registro del nivel abierto.
+    const openCreate = () => {
+            if (activeTab === 'DIRESA') { 
+                setDiresaForm({}); 
+                setDiresaModalStep(1);
+                setIsDiresaModalOpen(true); 
+            }
+            if (activeTab === 'OGESS') { 
+                const initialOgess: Partial<Ogess> = {};
+                if (!isSuperAdmin && userDiresaId) {
+                    initialOgess.diresaId = userDiresaId;
+                    const sDiresa = diresas.find(d => d.id === userDiresaId);
+                    if (sDiresa) initialOgess.department = sDiresa.department || '';
+                }
+                setOgessForm(initialOgess); 
+                setOgessModalStep(1);
+                setIsOgessModalOpen(true); 
+            }
+            if (activeTab === 'UNGET') { 
+                const initialUnget: Partial<Unget> = {};
+                if (!isSuperAdmin) {
+                    if (userOgessId) {
+                        initialUnget.ogessId = userOgessId;
+                        const sOgess = ogess.find(o => o.id === userOgessId);
+                        if (sOgess) {
+                            initialUnget.diresaId = sOgess.diresaId;
+                            const sDiresa = diresas.find(d => d.id === sOgess.diresaId);
+                            if (sDiresa) initialUnget.department = sDiresa.department || '';
+                        }
+                    } else if (userDiresaId) {
+                        initialUnget.diresaId = userDiresaId;
+                        const sDiresa = diresas.find(d => d.id === userDiresaId);
+                        if (sDiresa) initialUnget.department = sDiresa.department || '';
+                    }
+                }
+                setUngetForm(initialUnget); 
+                setUngetModalStep(1);
+                setIsUngetModalOpen(true); 
+            }
+            if (activeTab === 'MICRORED') { 
+                const initialMicrored: Partial<Microred> = {};
+                if (!isSuperAdmin && userUngetId) {
+                    initialMicrored.ungetId = userUngetId;
+                }
+                setMicroredForm(initialMicrored); 
+                setIsMicroredModalOpen(true); 
+            }
+            if (activeTab === 'IPRESS') { 
+                const initialFacility: Partial<HealthFacility> = {};
+                if (!isSuperAdmin) {
+                    if (userUngetId) {
+                        initialFacility.ungetId = userUngetId;
+                        const selectedUnget = ungets.find(u => u.id === userUngetId);
+                        if (selectedUnget) {
+                            let diresaIdToUse = selectedUnget.diresaId;
+                            if (selectedUnget.ogessId) {
+                                initialFacility.ogessId = selectedUnget.ogessId;
+                                const selectedOgess = ogess.find(o => o.id === selectedUnget.ogessId);
+                                if (selectedOgess) {
+                                    initialFacility.diresaId = selectedOgess.diresaId;
+                                    diresaIdToUse = selectedOgess.diresaId;
+                                }
+                            } else if (selectedUnget.diresaId) {
+                                initialFacility.diresaId = selectedUnget.diresaId;
+                            }
+                            if (diresaIdToUse) {
+                                const selectedDiresa = diresas.find(d => d.id === diresaIdToUse);
+                                if (selectedDiresa) {
+                                    initialFacility.department = selectedDiresa.department || '';
+                                }
+                            }
+                        }
+                    } else if (userOgessId) {
+                        initialFacility.ogessId = userOgessId;
+                        const selectedOgess = ogess.find(o => o.id === userOgessId);
+                        if (selectedOgess) {
+                            initialFacility.diresaId = selectedOgess.diresaId;
+                            if (selectedOgess.diresaId) {
+                                const selectedDiresa = diresas.find(d => d.id === selectedOgess.diresaId);
+                                if (selectedDiresa) {
+                                    initialFacility.department = selectedDiresa.department || '';
+                                }
+                            }
+                        }
+                    } else if (userDiresaId) {
+                        initialFacility.diresaId = userDiresaId;
+                        const selectedDiresa = diresas.find(d => d.id === userDiresaId);
+                        if (selectedDiresa) {
+                            initialFacility.department = selectedDiresa.department || '';
+                        }
+                    }
+                }
+                setEditingFacilityOriginalCode(null);
+                setFacilityForm(initialFacility); 
+                setFacilityModalStep(1);
+                prepareFacilityStep4("", "");
+                setIsFacilityModalOpen(true); 
+            }
+    };
+
+    // --- Lista: tabla paginada en escritorio, tarjetas que cargan al bajar en el celular ---
+    const isDesktop = useIsDesktop();
+    const [orgPage, setOrgPage] = useState(1);
+    const orgFilterKey = [activeTab, searchQuery, filterDiresaId, filterOgessId, filterUngetId, filterMicroredId, filterType, filterCategory, filterDepartment, filterProvince, filterDistrict].join('|');
+    useEffect(() => setOrgPage(1), [orgFilterKey]);
+    const currentTotal = countCurrentItems(activeTab);
+    useEffect(() => {
+        const pages = Math.max(1, Math.ceil(currentTotal / ORG_PAGE_SIZE));
+        if (orgPage > pages) setOrgPage(pages);
+    }, [orgPage, currentTotal]);
+    const pageItems = <T,>(list: T[]) => list.slice((orgPage - 1) * ORG_PAGE_SIZE, orgPage * ORG_PAGE_SIZE);
+    const mobileOrgList = useIncrementalCount(currentTotal, orgFilterKey);
+    const { tableRef: orgTableRef, floating: orgFloatingHead } = useFloatingTableHead([activeTab, orgPage, currentTotal, isDesktop]);
+
+    // Filtros de cada nivel: en escritorio van en la barra; en el celular, en el panel inferior.
+    type FilterField = { key: string; label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void };
+    const panelFilters: FilterField[] = (() => {
+        const diresaF: FilterField = { key: 'diresa', label: 'DIRESA', value: filterDiresaId, options: [{ value: '', label: 'Todas las DIRESA' }, ...diresas.map(d => ({ value: d.id, label: d.name }))], onChange: (v) => { setFilterDiresaId(v); setFilterOgessId(''); setFilterUngetId(''); setFilterMicroredId(''); } };
+        const ogessF: FilterField = { key: 'ogess', label: 'OGESS', value: filterOgessId, options: [{ value: '', label: 'Todas las OGESS' }, ...ogess.filter(o => !filterDiresaId || o.diresaId === filterDiresaId).map(o => ({ value: o.id, label: o.name }))], onChange: (v) => { setFilterOgessId(v); setFilterUngetId(''); setFilterMicroredId(''); } };
+        const ungetF: FilterField = { key: 'unget', label: 'UNGET', value: filterUngetId, options: [{ value: '', label: 'Todas las UNGET' }, ...ungets.filter(u => !filterOgessId || u.ogessId === filterOgessId).map(u => ({ value: u.id, label: u.name }))], onChange: (v) => { setFilterUngetId(v); setFilterMicroredId(''); } };
+        const microredF: FilterField = { key: 'microred', label: 'Microred', value: filterMicroredId, options: [{ value: '', label: 'Todas las microredes' }, ...microredes.filter(m => !filterUngetId || m.ungetId === filterUngetId).map(m => ({ value: m.id, label: m.name }))], onChange: setFilterMicroredId };
+        const categoryF: FilterField = { key: 'category', label: 'Categoría', value: filterCategory, options: [{ value: '', label: 'Todas las categorías' }, ...['I-1', 'I-2', 'I-3', 'I-4', 'II-1', 'II-2', 'III-1'].map(c => ({ value: c, label: c }))], onChange: setFilterCategory };
+        const typeF: FilterField = { key: 'type', label: 'Tipo', value: filterType, options: [{ value: '', label: 'Todos los tipos' }, ...FACILITY_TYPES.map(t => ({ value: t.value, label: t.label }))], onChange: setFilterType };
+        const departmentF: FilterField = { key: 'department', label: 'Departamento', value: filterDepartment, options: filterOptions.departments, onChange: setFilterDepartment };
+        const provinceF: FilterField = { key: 'province', label: 'Provincia', value: filterProvince, options: filterOptions.provinces, onChange: setFilterProvince };
+        const districtF: FilterField = { key: 'district', label: 'Distrito', value: filterDistrict, options: filterOptions.districts, onChange: setFilterDistrict };
+        if (activeTab === 'DIRESA') return [departmentF, provinceF, districtF];
+        if (activeTab === 'OGESS') return [diresaF, provinceF, districtF];
+        if (activeTab === 'UNGET') return [diresaF, ogessF, provinceF, districtF];
+        if (activeTab === 'MICRORED') return [ogessF, ungetF];
+        return [ogessF, ungetF, microredF, categoryF, typeF];
+    })();
+    // Etiquetas de los filtros aplicados (de cualquier nivel: los filtros son comunes a todos).
+    const activeFilterChips = [
+        { key: 'diresa', label: 'DIRESA', value: filterDiresaId && getDiresaName(filterDiresaId), clear: () => { setFilterDiresaId(''); setFilterOgessId(''); setFilterUngetId(''); setFilterMicroredId(''); } },
+        { key: 'ogess', label: 'OGESS', value: filterOgessId && getOgessName(filterOgessId), clear: () => { setFilterOgessId(''); setFilterUngetId(''); setFilterMicroredId(''); } },
+        { key: 'unget', label: 'UNGET', value: filterUngetId && getUngetName(filterUngetId), clear: () => { setFilterUngetId(''); setFilterMicroredId(''); } },
+        { key: 'microred', label: 'Microred', value: filterMicroredId && getMicroredName(filterMicroredId), clear: () => setFilterMicroredId('') },
+        { key: 'category', label: 'Categoría', value: filterCategory, clear: () => setFilterCategory('') },
+        { key: 'type', label: 'Tipo', value: filterType && facilityTypeLabel(filterType), clear: () => setFilterType('') },
+        { key: 'department', label: 'Departamento', value: filterDepartment, clear: () => setFilterDepartment('') },
+        { key: 'province', label: 'Provincia', value: filterProvince, clear: () => setFilterProvince('') },
+        { key: 'district', label: 'Distrito', value: filterDistrict, clear: () => setFilterDistrict('') },
+    ].filter(c => c.value);
+
+    const openDetail = (tab: OrgTab, item: any) => { setSelectedDetailItem(item); setSelectedDetailType(tab); };
+
+    // Tarjeta del celular: al tocarla se abre el detalle (desde ahí se edita o elimina).
+    const renderMobileCards = (tab: OrgTab, list: any[]) => {
+        const Icon = TAB_ICON[tab];
+        return (
+            <div className="space-y-2.5 md:hidden">
+                {list.slice(0, mobileOrgList.count).map((item: any) => {
+                    let sub = '';
+                    let sub2 = '';
+                    let chip: React.ReactNode = null;
+                    if (tab === 'DIRESA') { sub = [item.ruc && `RUC ${item.ruc}`, item.department].filter(Boolean).join(' · '); }
+                    if (tab === 'OGESS') { sub = [item.code, item.province].filter(Boolean).join(' · '); sub2 = getDiresaName(item.diresaId); }
+                    if (tab === 'UNGET') {
+                        sub = getOgessName(item.ogessId);
+                        const ui = getConnectionUi(item.id);
+                        chip = <span className={`mt-1.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold ${ui.chip}`}><ui.Icon className="h-3 w-3" />{ui.label}</span>;
+                    }
+                    if (tab === 'MICRORED') { sub = getUngetName(item.ungetId); }
+                    if (tab === 'IPRESS') { sub = [item.code, item.category, facilityTypeLabel(item.type)].filter(Boolean).join(' · '); sub2 = item.microredId ? getMicroredName(item.microredId) : getUngetName(item.ungetId); }
+                    return (
+                        <button
+                            key={item.id || item.code}
+                            type="button"
+                            onClick={() => openDetail(tab, item)}
+                            className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 text-left shadow-sm active:bg-slate-50"
+                        >
+                            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-teal-50 text-teal-700"><Icon className="h-5 w-5" /></span>
+                            <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[15px] font-bold text-slate-900">{item.name}</span>
+                                {sub && <span className="block truncate text-[13px] text-slate-500">{sub}</span>}
+                                {sub2 && <span className="block truncate text-[13px] text-slate-500">{sub2}</span>}
+                                {chip}
+                            </span>
+                            <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+                        </button>
+                    );
+                })}
+                <LoadMoreSentinel hasMore={mobileOrgList.hasMore} onLoadMore={mobileOrgList.loadMore} shown={mobileOrgList.count} total={list.length} itemLabel="registros" />
+            </div>
+        );
+    };
+
     return (
-        <div className="space-y-6 animate-in fade-in">
-            {/* Visual Hierarchy Navigation Tabs (Premium Counts and Microanimations) */}
-            <div className="bg-white/80 p-2 rounded-2xl border border-slate-200/80 shadow-sm backdrop-blur-md">
-                <div className="flex gap-1.5 flex-wrap">
-                    {availableTabs.length === 0 ? (
-                        <div className="text-sm font-bold text-slate-500 py-2 px-4 flex items-center gap-2">
-                            <ShieldAlert className="h-4 w-4 text-slate-400" />
-                            No tiene accesos asignados a esta sección de la jurisdicción territorial.
-                        </div>
-                     ) : availableTabs.map(tab => {
+        <div className="space-y-4 pb-24 pt-1 md:space-y-5 md:pb-6 md:pt-4 animate-in fade-in">
+            {/* Niveles: pestañas con subrayado en escritorio; fila deslizable en el celular */}
+            {availableTabs.length === 0 ? (
+                <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-500">
+                    <ShieldAlert className="h-4 w-4 text-slate-400" />
+                    No tiene accesos asignados a esta sección de la jurisdicción territorial.
+                </div>
+            ) : (
+                <div role="tablist" className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 hide-scrollbar md:mx-0 md:gap-1 md:overflow-visible md:border-b md:border-slate-200 md:px-0 md:pb-0">
+                    {(availableTabs as OrgTab[]).map(tab => {
                         const isActive = activeTab === tab;
                         const count = countCurrentItems(tab);
-                        let icon = <Building2 className="h-4 w-4" />;
-                        if (tab === 'DIRESA') icon = <ShieldCheck className="h-4 w-4" />;
-                        if (tab === 'OGESS') icon = <Activity className="h-4 w-4" />;
-                        if (tab === 'UNGET') icon = <Building2 className="h-4 w-4" />;
-                        if (tab === 'MICRORED') icon = <Network className="h-4 w-4" />;
-                        if (tab === 'IPRESS') icon = <MapPin className="h-4 w-4" />;
-
+                        const Icon = TAB_ICON[tab];
                         return (
-                            <button 
+                            <button
                                 key={tab}
-                                onClick={() => {
-                                    setActiveTab(tab as any);
-                                    setSearchQuery('');
-                                }}
-                                className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all duration-300 transform active:scale-95 cursor-pointer select-none ${
-                                    isActive 
-                                        ? 'bg-gradient-to-r from-teal-50 to-teal-100/50 text-teal-800 border-b-2 border-teal-600 shadow-sm' 
-                                        : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+                                type="button"
+                                role="tab"
+                                aria-selected={isActive}
+                                onClick={() => { setActiveTab(tab); setSearchQuery(''); }}
+                                className={`flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13.5px] font-bold transition-colors md:-mb-px md:h-auto md:gap-2 md:rounded-none md:border-0 md:border-b-2 md:px-4 md:py-3 ${
+                                    isActive
+                                        ? 'border-teal-600 bg-teal-600 text-white md:border-teal-600 md:bg-transparent md:text-teal-700'
+                                        : 'border-slate-200 bg-white text-slate-600 md:border-transparent md:bg-transparent md:text-slate-500 md:hover:text-slate-800'
                                 }`}
                             >
-                                {icon}
-                                <span>{tab}</span>
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wide transition-all ${
-                                    isActive ? 'bg-teal-600 text-white shadow-sm' : 'bg-slate-200 text-slate-600'
-                                }`}>
-                                    {count}
-                                </span>
+                                <Icon className="hidden h-4 w-4 md:block" />
+                                {TAB_LABEL[tab]}
+                                <span className={`text-[12px] md:rounded-full md:px-2 md:py-0.5 md:text-[11px] md:font-black ${isActive ? 'text-teal-100 md:bg-teal-600 md:text-white' : 'text-slate-400 md:bg-slate-200 md:text-slate-600'}`}>{count}</span>
                             </button>
                         );
-                     })}
+                    })}
+                    {canAddActiveTab && isDesktop && (
+                        <button
+                            type="button"
+                            onClick={openCreate}
+                            className="mb-2 ml-auto flex h-10 shrink-0 items-center gap-2 self-center rounded-xl bg-teal-600 px-4 text-sm font-bold text-white transition-colors hover:bg-teal-700"
+                        >
+                            <Plus className="h-4 w-4" /> {TAB_NEW[activeTab]}
+                        </button>
+                    )}
                 </div>
-            </div>
+            )}
 
             {availableTabs.length > 0 && (
-                <div className="bg-white rounded-3xl border border-slate-100 shadow-xl overflow-hidden shadow-slate-100/50">
-                    <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 bg-slate-50/40 backdrop-blur-sm">
-                        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center flex-1">
-                            {/* Search bar */}
-                            <div className="relative flex-1 max-w-md">
-                                <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                                <input 
-                                    type="text"
-                                    placeholder={`Buscar ${activeTab.toLowerCase()} por nombre o código...`}
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="pl-10 pr-4 py-2.5 w-full border border-slate-200 rounded-xl text-sm bg-white font-medium text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all shadow-inner"
-                                />
-                                {searchQuery && (
-                                    <button 
-                                        onClick={() => setSearchQuery('')}
-                                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 outline-none"
-                                    >
-                                        <X className="h-4 w-4" />
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Clear Filters Button (If any header filters are active) */}
-                            {hasActiveFilters && (
-                                <button 
-                                    onClick={clearAllFilters}
-                                    className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 hover:shadow-sm transition duration-200 cursor-pointer select-none animate-in fade-in"
-                                    title="Limpiar todos los filtros"
-                                >
-                                    <FilterX className="h-4 w-4 shrink-0 text-teal-600 animate-pulse" />
-                                    <span>Limpiar Filtros</span>
-                                    <span className="bg-teal-600 text-white font-black text-[9px] h-4 px-1 flex items-center justify-center rounded-full">
-                                        Activos
-                                    </span>
+                <>
+                    {/* Barra: buscador, filtros y nuevo */}
+                    <div className="flex items-center gap-2 md:flex-wrap">
+                        <div className="relative min-w-0 flex-1 md:min-w-[200px] md:max-w-xs">
+                            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Buscar por nombre o código…"
+                                aria-label={`Buscar ${TAB_LABEL[activeTab].toLowerCase()}`}
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-10 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 md:h-10"
+                            />
+                            {searchQuery && (
+                                <button type="button" onClick={() => setSearchQuery('')} aria-label="Borrar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                    <X className="h-4 w-4" />
                                 </button>
                             )}
                         </div>
-
-                        {canAddActiveTab && (
-                            <button 
-                                onClick={() => {
-                                    if (activeTab === 'DIRESA') { 
-                                        setDiresaForm({}); 
-                                        setDiresaModalStep(1);
-                                        setIsDiresaModalOpen(true); 
-                                    }
-                                    if (activeTab === 'OGESS') { 
-                                        const initialOgess: Partial<Ogess> = {};
-                                        if (!isSuperAdmin && userDiresaId) {
-                                            initialOgess.diresaId = userDiresaId;
-                                            const sDiresa = diresas.find(d => d.id === userDiresaId);
-                                            if (sDiresa) initialOgess.department = sDiresa.department || '';
-                                        }
-                                        setOgessForm(initialOgess); 
-                                        setOgessModalStep(1);
-                                        setIsOgessModalOpen(true); 
-                                    }
-                                    if (activeTab === 'UNGET') { 
-                                        const initialUnget: Partial<Unget> = {};
-                                        if (!isSuperAdmin) {
-                                            if (userOgessId) {
-                                                initialUnget.ogessId = userOgessId;
-                                                const sOgess = ogess.find(o => o.id === userOgessId);
-                                                if (sOgess) {
-                                                    initialUnget.diresaId = sOgess.diresaId;
-                                                    const sDiresa = diresas.find(d => d.id === sOgess.diresaId);
-                                                    if (sDiresa) initialUnget.department = sDiresa.department || '';
-                                                }
-                                            } else if (userDiresaId) {
-                                                initialUnget.diresaId = userDiresaId;
-                                                const sDiresa = diresas.find(d => d.id === userDiresaId);
-                                                if (sDiresa) initialUnget.department = sDiresa.department || '';
-                                            }
-                                        }
-                                        setUngetForm(initialUnget); 
-                                        setUngetModalStep(1);
-                                        setIsUngetModalOpen(true); 
-                                    }
-                                    if (activeTab === 'MICRORED') { 
-                                        const initialMicrored: Partial<Microred> = {};
-                                        if (!isSuperAdmin && userUngetId) {
-                                            initialMicrored.ungetId = userUngetId;
-                                        }
-                                        setMicroredForm(initialMicrored); 
-                                        setIsMicroredModalOpen(true); 
-                                    }
-                                    if (activeTab === 'IPRESS') { 
-                                        const initialFacility: Partial<HealthFacility> = {};
-                                        if (!isSuperAdmin) {
-                                            if (userUngetId) {
-                                                initialFacility.ungetId = userUngetId;
-                                                const selectedUnget = ungets.find(u => u.id === userUngetId);
-                                                if (selectedUnget) {
-                                                    let diresaIdToUse = selectedUnget.diresaId;
-                                                    if (selectedUnget.ogessId) {
-                                                        initialFacility.ogessId = selectedUnget.ogessId;
-                                                        const selectedOgess = ogess.find(o => o.id === selectedUnget.ogessId);
-                                                        if (selectedOgess) {
-                                                            initialFacility.diresaId = selectedOgess.diresaId;
-                                                            diresaIdToUse = selectedOgess.diresaId;
-                                                        }
-                                                    } else if (selectedUnget.diresaId) {
-                                                        initialFacility.diresaId = selectedUnget.diresaId;
-                                                    }
-                                                    if (diresaIdToUse) {
-                                                        const selectedDiresa = diresas.find(d => d.id === diresaIdToUse);
-                                                        if (selectedDiresa) {
-                                                            initialFacility.department = selectedDiresa.department || '';
-                                                        }
-                                                    }
-                                                }
-                                            } else if (userOgessId) {
-                                                initialFacility.ogessId = userOgessId;
-                                                const selectedOgess = ogess.find(o => o.id === userOgessId);
-                                                if (selectedOgess) {
-                                                    initialFacility.diresaId = selectedOgess.diresaId;
-                                                    if (selectedOgess.diresaId) {
-                                                        const selectedDiresa = diresas.find(d => d.id === selectedOgess.diresaId);
-                                                        if (selectedDiresa) {
-                                                            initialFacility.department = selectedDiresa.department || '';
-                                                        }
-                                                    }
-                                                }
-                                            } else if (userDiresaId) {
-                                                initialFacility.diresaId = userDiresaId;
-                                                const selectedDiresa = diresas.find(d => d.id === userDiresaId);
-                                                if (selectedDiresa) {
-                                                    initialFacility.department = selectedDiresa.department || '';
-                                                }
-                                            }
-                                        }
-                                        setEditingFacilityOriginalCode(null);
-                                        setFacilityForm(initialFacility); 
-                                        setFacilityModalStep(1);
-                                        prepareFacilityStep4("", "");
-                                        setIsFacilityModalOpen(true); 
-                                    }
-                                }}
-                                className="flex items-center justify-center gap-2 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-lg shadow-teal-100 hover:shadow-teal-200 transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0 duration-200"
+                        {isDesktop ? (
+                            <>
+                                {panelFilters.map(f => (
+                                    <div key={f.key} className="w-40 shrink-0" title={f.label}>
+                                        <CustomSelect className={`h-10 text-[13px] ${f.value ? '!border-teal-300 !bg-teal-50 !text-teal-800' : ''}`} value={f.value} onChange={f.onChange} options={f.options} />
+                                    </div>
+                                ))}
+                                {hasActiveFilters && (
+                                    <button type="button" onClick={clearAllFilters} className="flex h-10 shrink-0 items-center gap-1 px-2 text-[13px] font-bold text-teal-700 hover:text-teal-900">
+                                        <X className="h-3.5 w-3.5" /> Limpiar
+                                    </button>
+                                )}
+                            </>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => setIsFilterPaneOpen(true)}
+                                aria-label="Filtros"
+                                className={`flex h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-bold transition-colors ${hasActiveFilters ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-slate-200 bg-white text-slate-700'}`}
                             >
-                                <Plus className="h-4 w-3.5 stroke-[3px]" /> Agregar {activeTab}
+                                <SlidersHorizontal className="h-4 w-4 text-slate-500" />
+                                {activeFilterChips.length > 0 && (
+                                    <span className="grid h-5 min-w-5 place-items-center rounded-full bg-teal-600 px-1 text-[10px] font-black text-white">{activeFilterChips.length}</span>
+                                )}
                             </button>
                         )}
                     </div>
 
+                    {!isDesktop && activeFilterChips.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2">
+                            {activeFilterChips.map(c => (
+                                <span key={c.key} className="flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 py-1 pl-3 pr-1 text-[12.5px] font-bold text-teal-800">
+                                    {c.label}: {c.value}
+                                    <button type="button" onClick={c.clear} aria-label={`Quitar filtro ${c.label}`} className="grid h-6 w-6 place-items-center rounded-full hover:bg-teal-100"><X className="h-3.5 w-3.5" /></button>
+                                </span>
+                            ))}
+                            <button type="button" onClick={clearAllFilters} className="text-[12.5px] font-bold text-teal-700 hover:text-teal-900">Limpiar</button>
+                        </div>
+                    )}
+
+                    <BottomSheet open={isFilterPaneOpen && !isDesktop} title="Filtros" onClose={() => setIsFilterPaneOpen(false)}>
+                        <div className="space-y-4">
+                            {panelFilters.map(f => (
+                                <div key={f.key}>
+                                    <span className="mb-1.5 block text-xs font-black text-slate-700">{f.label}</span>
+                                    <CustomSelect className="h-11 text-sm" value={f.value} onChange={f.onChange} options={f.options} />
+                                </div>
+                            ))}
+                            <div className="flex gap-2 pt-2">
+                                <button type="button" onClick={clearAllFilters} className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-bold text-slate-700">Limpiar</button>
+                                <button type="button" onClick={() => setIsFilterPaneOpen(false)} className="h-11 flex-1 rounded-xl bg-teal-600 text-sm font-bold text-white">
+                                    Ver {currentTotal} {currentTotal === 1 ? 'registro' : 'registros'}
+                                </button>
+                            </div>
+                        </div>
+                    </BottomSheet>
+
+                    {canAddActiveTab && !isDesktop && <FloatingActionButton icon={<Plus />} label={TAB_NEW[activeTab]} onClick={openCreate} />}
+
+                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm max-md:border-0 max-md:bg-transparent max-md:shadow-none">
+                    <FloatingTableHead state={orgFloatingHead} padding="px-4" cells={TAB_HEADS[activeTab].map((label, index) => ({ key: label + index, index, content: label, align: label === 'Acciones' ? 'right' as const : 'left' as const }))} />
                     {/* Interactive Registry tables & list representations */}
                     <div className="w-full">
                         {/* Empty state conditional */}
@@ -1597,7 +1704,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <>
                                         {/* Desktop Premium Table */}
                                         <div className="hidden md:block overflow-x-auto">
-                                            <table className="w-full text-left text-sm border-collapse">
+                                            <table ref={orgTableRef} className="w-full text-left text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
                                                         <th className="p-4 px-6">DIRESA</th>
@@ -1615,7 +1722,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {finalFilteredDiresas.map(d => (
+                                                    {pageItems(finalFilteredDiresas).map(d => (
                                                         <tr 
                                                             key={d.id} 
                                                             onClick={() => { setSelectedDetailItem(d); setSelectedDetailType('DIRESA'); }}
@@ -1652,50 +1759,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             </table>
                                         </div>
 
-                                        {/* Mobile Responsive List-Grid */}
-                                        <div className="md:hidden divide-y divide-slate-100">
-                                            {finalFilteredDiresas.map(d => (
-                                                <div 
-                                                    key={d.id} 
-                                                    onClick={() => { setSelectedDetailItem(d); setSelectedDetailType('DIRESA'); }}
-                                                    className="p-4 hover:bg-slate-50/40 cursor-pointer active:bg-slate-100 transition relative flex flex-col gap-2 group"
-                                                >
-                                                    <div className="flex justify-between items-start gap-4">
-                                                        <div className="space-y-0.5">
-                                                            <h4 className="font-extrabold text-slate-900 group-hover:text-teal-700 transition flex items-center gap-1.5 leading-snug">
-                                                                <ShieldCheck className="h-4 w-4 text-slate-400 shrink-0" />
-                                                                <span>{d.name}</span>
-                                                            </h4>
-                                                            <div className="text-[10px] font-mono text-slate-400">RUC: {d.ruc || '-'}</div>
-                                                        </div>
-                                                        
-                                                        {/* Actions inline */}
-                                                        <div className="flex gap-1.5 shrink-0">
-                                                            <button 
-                                                                onClick={(e) => handleOpenEdit('DIRESA', d, e)} 
-                                                                className="p-2.5 text-slate-400 hover:text-teal-600 border border-slate-100 rounded-xl bg-slate-50 shadow-sm"
-                                                            >
-                                                                <Edit className="h-3.5 w-3.5" />
-                                                            </button>
-                                                            {isSuperAdmin && (
-                                                                <button 
-                                                                    onClick={(e) => handleConfirmDelete('DIRESA', d, e)} 
-                                                                    className="p-2.5 text-slate-400 hover:text-rose-600 border border-slate-100 rounded-xl bg-slate-50 shadow-sm"
-                                                                >
-                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-slate-500 font-bold text-[11px] pt-1">
-                                                        <div className="flex items-center gap-1"><MapPin className="h-3 w-3 text-slate-350" /> {d.district}</div>
-                                                        <div className="text-slate-300">•</div>
-                                                        <div>Dep: {d.department}</div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
+                                        {renderMobileCards('DIRESA', finalFilteredDiresas)}
                                     </>
                                 )}
                                 
@@ -1704,7 +1768,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <>
                                         {/* Desktop Premium Table */}
                                         <div className="hidden md:block overflow-x-auto">
-                                            <table className="w-full text-left text-sm border-collapse">
+                                            <table ref={orgTableRef} className="w-full text-left text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
                                                         <th className="p-4 px-6">OGESS</th>
@@ -1722,7 +1786,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {finalFilteredOgess.map(o => (
+                                                    {pageItems(finalFilteredOgess).map(o => (
                                                         <tr 
                                                             key={o.id} 
                                                             onClick={() => { setSelectedDetailItem(o); setSelectedDetailType('OGESS'); }}
@@ -1761,48 +1825,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             </table>
                                         </div>
 
-                                        {/* Mobile Responsive List-Grid */}
-                                        <div className="md:hidden divide-y divide-slate-100">
-                                            {finalFilteredOgess.map(o => (
-                                                <div 
-                                                    key={o.id} 
-                                                    onClick={() => { setSelectedDetailItem(o); setSelectedDetailType('OGESS'); }}
-                                                    className="p-4 hover:bg-slate-50/40 cursor-pointer active:bg-slate-100 transition relative flex flex-col gap-2 group"
-                                                >
-                                                    <div className="flex justify-between items-start gap-4">
-                                                        <div className="space-y-0.5">
-                                                            <h4 className="font-extrabold text-slate-900 group-hover:text-teal-700 transition flex items-center gap-1.5 leading-snug">
-                                                                <Activity className="h-4 w-4 text-teal-600" />
-                                                                <span>{o.name}</span>
-                                                            </h4>
-                                                            <div className="text-[10px] font-mono text-slate-400">Cod: {o.code || '-'} • RUC: {o.ruc || '-'}</div>
-                                                        </div>
-                                                        
-                                                        <div className="flex gap-1.5 shrink-0">
-                                                            <button 
-                                                                onClick={(e) => handleOpenEdit('OGESS', o, e)} 
-                                                                className="p-2.5 text-slate-400 hover:text-teal-600 border border-slate-100 rounded-xl bg-slate-50 shadow-sm"
-                                                            >
-                                                                <Edit className="h-3.5 w-3.5" />
-                                                            </button>
-                                                            {isSuperAdmin && (
-                                                                <button 
-                                                                    onClick={(e) => handleConfirmDelete('OGESS', o, e)} 
-                                                                    className="p-2.5 text-slate-400 hover:text-rose-600 border border-slate-100 rounded-xl bg-slate-50 shadow-sm"
-                                                                >
-                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <div className="flex flex-col gap-0.5 text-slate-500 text-[11px] pt-1">
-                                                        <div className="flex items-center gap-1"><MapPin className="h-3 w-3 text-slate-400" /> {o.district}, {o.province}</div>
-                                                        <div className="mt-1"><span className="bg-teal-50 border border-teal-100 text-[10px] text-teal-800 font-extrabold px-1.5 py-0.5 rounded-md">DIRESA: {getDiresaName(o.diresaId)}</span></div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
+                                        {renderMobileCards('OGESS', finalFilteredOgess)}
                                     </>
                                 )}
 
@@ -1811,7 +1834,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <>
                                         {/* Desktop Premium Table */}
                                         <div className="hidden md:block overflow-x-auto">
-                                            <table className="w-full text-left text-sm border-collapse">
+                                            <table ref={orgTableRef} className="w-full text-left text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
                                                         <th className="p-4 px-6">UNGET</th>
@@ -1839,7 +1862,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {finalFilteredUngets.map(u => (
+                                                    {pageItems(finalFilteredUngets).map(u => (
                                                         <tr 
                                                             key={u.id} 
                                                             onClick={() => { setSelectedDetailItem(u); setSelectedDetailType('UNGET'); }}
@@ -1892,59 +1915,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             </table>
                                         </div>
 
-                                        {/* Mobile Responsive List-Grid */}
-                                        <div className="md:hidden divide-y divide-slate-100">
-                                            {finalFilteredUngets.map(u => (
-                                                <div 
-                                                    key={u.id} 
-                                                    onClick={() => { setSelectedDetailItem(u); setSelectedDetailType('UNGET'); }}
-                                                    className="p-4 hover:bg-slate-50/40 cursor-pointer active:bg-slate-100 transition relative flex flex-col gap-2 group"
-                                                >
-                                                    <div className="flex justify-between items-start gap-4">
-                                                        <div className="space-y-0.5">
-                                                            <h4 className="font-extrabold text-slate-900 group-hover:text-teal-700 transition flex items-center gap-1.5 leading-snug">
-                                                                <Building2 className="h-4 w-4 text-slate-400" />
-                                                                <span>{u.name}</span>
-                                                            </h4>
-                                                        </div>
-                                                        
-                                                        <div className="flex gap-1.5 shrink-0">
-                                                            <button 
-                                                                onClick={(e) => handleOpenEdit('UNGET', u, e)} 
-                                                                className="p-2.5 text-slate-400 hover:text-teal-600 border border-slate-100 rounded-xl bg-slate-50 shadow-sm"
-                                                            >
-                                                                <Edit className="h-3.5 w-3.5" />
-                                                            </button>
-                                                            {isSuperAdmin && (
-                                                                <button 
-                                                                    onClick={(e) => handleConfirmDelete('UNGET', u, e)} 
-                                                                    className="p-2.5 text-slate-400 hover:text-rose-600 border border-slate-100 rounded-xl bg-slate-50 shadow-sm"
-                                                                >
-                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <div className="flex flex-col gap-1 text-slate-500 text-[11px] pt-1">
-                                                        <div className="flex items-center gap-1"><MapPin className="h-3 w-3 text-slate-400" /> {u.district}, {u.province}</div>
-                                                        <div className="flex flex-wrap gap-1.5 mt-1">
-                                                            <span className="bg-slate-100 text-slate-700 font-extrabold px-1.5 py-0.5 rounded text-[9px]">OGESS: {getOgessName(u.ogessId)}</span>
-                                                            <span className="bg-teal-50 border border-teal-100 text-teal-800 font-extrabold px-1.5 py-0.5 rounded text-[9px]">DIRESA: {getDiresaName(u.diresaId)}</span>
-                                                            {(() => {
-                                                                const ui = getConnectionUi(u.id);
-                                                                return (
-                                                                    <span className={`inline-flex items-center gap-1 border font-extrabold px-1.5 py-0.5 rounded text-[9px] ${ui.chip}`}>
-                                                                        <ui.Icon className="h-2.5 w-2.5 shrink-0" />
-                                                                        {ui.label}
-                                                                    </span>
-                                                                );
-                                                            })()}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
+                                        {renderMobileCards('UNGET', finalFilteredUngets)}
                                     </>
                                 )}
 
@@ -1953,7 +1924,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <>
                                         {/* Desktop Premium Table */}
                                         <div className="hidden md:block overflow-x-auto">
-                                            <table className="w-full text-left text-sm border-collapse">
+                                            <table ref={orgTableRef} className="w-full text-left text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
                                                         <th className="p-4 px-6">Microred</th>
@@ -1970,7 +1941,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {finalFilteredMicroredes.map(m => {
+                                                    {pageItems(finalFilteredMicroredes).map(m => {
                                                         const pUnget = ungets.find(u => u.id === m.ungetId);
                                                         return (
                                                             <tr 
@@ -2010,52 +1981,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             </table>
                                         </div>
 
-                                        {/* Mobile Responsive List-Grid */}
-                                        <div className="md:hidden divide-y divide-slate-100">
-                                            {finalFilteredMicroredes.map(m => {
-                                                const pUnget = ungets.find(u => u.id === m.ungetId);
-                                                return (
-                                                    <div 
-                                                        key={m.id} 
-                                                        onClick={() => { setSelectedDetailItem(m); setSelectedDetailType('MICRORED'); }}
-                                                        className="p-4 hover:bg-slate-50/40 cursor-pointer active:bg-slate-100 transition relative flex flex-col gap-2 group"
-                                                    >
-                                                        <div className="flex justify-between items-start gap-4">
-                                                            <div className="space-y-0.5">
-                                                                    <h4 className="font-extrabold text-slate-900 group-hover:text-teal-700 transition flex items-center gap-1.5 leading-snug">
-                                                                    <Network className="h-4 w-4 text-emerald-600" />
-                                                                    <span>{m.name}</span>
-                                                                </h4>
-                                                            </div>
-                                                            
-                                                            <div className="flex gap-1.5 shrink-0">
-                                                                <button 
-                                                                    onClick={(e) => handleOpenEdit('MICRORED', m, e)} 
-                                                                    className="p-2.5 text-slate-400 hover:text-teal-600 border border-slate-100 rounded-xl bg-slate-50 shadow-sm"
-                                                                >
-                                                                    <Edit className="h-3.5 w-3.5" />
-                                                                </button>
-                                                                {isSuperAdmin && (
-                                                                    <button 
-                                                                        onClick={(e) => handleConfirmDelete('MICRORED', m, e)} 
-                                                                        className="p-2.5 text-slate-400 hover:text-rose-600 border border-slate-100 rounded-xl bg-slate-50 shadow-sm"
-                                                                    >
-                                                                        <Trash2 className="h-3.5 w-3.5" />
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        
-                                                        <div className="flex flex-col gap-1 text-slate-500 text-[11px] pt-1">
-                                                            <div><span className="font-bold text-slate-400">UNGET:</span> {getUngetName(m.ungetId)}</div>
-                                                            {pUnget && (
-                                                                <div><span className="bg-slate-100 text-slate-700 font-bold px-1.5 py-0.5 rounded text-[9px]">OGESS: {getOgessName(pUnget.ogessId)}</span></div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
+                                        {renderMobileCards('MICRORED', finalFilteredMicroredes)}
                                     </>
                                 )}
 
@@ -2064,11 +1990,10 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <>
                                         {/* Desktop Premium Table */}
                                         <div className="hidden md:block overflow-x-auto">
-                                            <table className="w-full text-left text-sm border-collapse">
+                                            <table ref={orgTableRef} className="w-full text-left text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
-                                                        <th className="p-4 px-6">Establecimiento de Salud</th>
-                                                        <th className="p-4">Código IPRESS</th>
+                                                        <th className="p-4 px-6">Establecimiento</th>
                                                         <th className="p-4">
                                                             {renderHeaderFilter("Categoría", filterCategory, [{ value: '', label: 'Todas' }, ...['I-1', 'I-2', 'I-3', 'I-4', 'II-1', 'II-2', 'III-1'].map(cat => ({ value: cat, label: cat }))], setFilterCategory, "ipress-category")}
                                                         </th>
@@ -2098,7 +2023,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {finalFilteredFacilities.map(f => (
+                                                    {pageItems(finalFilteredFacilities).map(f => (
                                                         <tr 
                                                             key={f.code} 
                                                             onClick={() => { setSelectedDetailItem(f); setSelectedDetailType('IPRESS'); }}
@@ -2107,10 +2032,10 @@ export const AdminOrganizationModule: React.FC = () => {
                                                             <td className="p-4 px-6 font-extrabold text-slate-800 group-hover:text-teal-700 transition flex items-center gap-2">
                                                                 <div className="w-1.5 h-6 bg-teal-500/0 group-hover:bg-teal-500 rounded-sm -ml-2.5 transition-all duration-300" />
                                                                 <MapPin className="h-4 w-4 text-slate-400 group-hover:text-teal-600 transition" />
-                                                                <span>{f.name}</span>
-                                                            </td>
-                                                            <td className="p-4 font-mono font-bold text-xs text-slate-600">
-                                                                <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{f.code}</span>
+                                                                <span className="min-w-0">
+                                                                    <span className="block">{f.name}</span>
+                                                                    <span className="block font-mono text-xs font-semibold text-slate-500">{f.code}</span>
+                                                                </span>
                                                             </td>
                                                             <td className="p-4">
                                                                 <span className={`px-2.5 py-0.5 rounded-full text-[10px] uppercase font-black tracking-wide border ${getCategoryStyle(f.category)}`}>
@@ -2147,398 +2072,305 @@ export const AdminOrganizationModule: React.FC = () => {
                                             </table>
                                         </div>
 
-                                        {/* Mobile Responsive List-Grid */}
-                                        <div className="md:hidden divide-y divide-slate-100">
-                                            {finalFilteredFacilities.map(f => (
-                                                <div 
-                                                    key={f.code} 
-                                                    onClick={() => { setSelectedDetailItem(f); setSelectedDetailType('IPRESS'); }}
-                                                    className="p-4 hover:bg-slate-50/40 cursor-pointer active:bg-slate-100 transition relative flex flex-col gap-2.5 group"
-                                                >
-                                                    <div className="flex justify-between items-start gap-4">
-                                                        <div className="space-y-1">
-                                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                                                <span className="font-mono text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">{f.code}</span>
-                                                                <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase font-bold border ${getCategoryStyle(f.category)}`}>{f.category || '-'}</span>
-                                                            </div>
-                                                            <h4 className="font-extrabold text-slate-900 group-hover:text-teal-700 transition leading-snug">{f.name}</h4>
-                                                        </div>
-                                                        
-                                                        <div className="flex gap-1.5 shrink-0">
-                                                            <button 
-                                                                onClick={(e) => handleOpenEdit('IPRESS', f, e)} 
-                                                                className="p-2.5 text-slate-400 hover:text-teal-600 border border-slate-100 rounded-xl bg-slate-50 shadow-sm"
-                                                            >
-                                                                <Edit className="h-3.5 w-3.5" />
-                                                            </button>
-                                                            {isSuperAdmin && (
-                                                                <button 
-                                                                    onClick={(e) => handleConfirmDelete('IPRESS', f, e)} 
-                                                                    className="p-2.5 text-slate-400 hover:text-rose-600 border border-slate-100 rounded-xl bg-slate-50 shadow-sm"
-                                                                >
-                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <div className="flex flex-col gap-1 text-[11px] text-slate-500 pt-0.5 border-t border-slate-50">
-                                                        <div className="flex items-center gap-1"><MapPin className="h-3 w-3 text-slate-405" /> {f.district || '-'}, {f.province || '-'}</div>
-                                                        <div className="flex flex-wrap gap-1.5 mt-1">
-                                                            {f.microredId && <span className="bg-emerald-50/60 border border-emerald-100/50 text-emerald-800 px-1.5 py-0.5 rounded text-[9px] font-black">Microred: {getMicroredName(f.microredId)}</span>}
-                                                            <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px] font-medium">UNGET: {getUngetName(f.ungetId)}</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
+                                        {renderMobileCards('IPRESS', finalFilteredFacilities)}
                                     </>
                                 )}
                             </>
                         )}
                     </div>
+                    {isDesktop && <TablePagination page={orgPage} pageSize={ORG_PAGE_SIZE} total={currentTotal} onPageChange={setOrgPage} itemLabel="registros" />}
                 </div>
+                </>
             )}
 
-            {/* Interactive Registry Detail Explorer Modal (Stunning Sidebar/Card Bento Explorer Sheet) */}
-            {selectedDetailItem && selectedDetailType && createPortal(
-                <div 
-                    className="fixed inset-0 z-[300000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
-                    onClick={() => { setSelectedDetailItem(null); setSelectedDetailType(null); }}
-                >
-                    <div 
-                        className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl flex flex-col md:flex-row max-h-[90vh] md:max-h-[85vh] overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-300"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        {/* LEFT COLUMN: Visual Path & Stats (Dark Gradient) */}
-                        <div className="w-full md:w-80 bg-gradient-to-b from-slate-900 via-slate-900 to-teal-950 p-6 text-white flex flex-col gap-6 shrink-0 overflow-y-auto">
-                            <div className="space-y-1">
-                                <span className="bg-teal-500/10 text-teal-300 border border-teal-500/20 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full inline-block">
-                                    Expediente Técnico
-                                </span>
-                                <h3 className="font-extrabold text-lg text-white leading-tight">Mapa de Jurisdicción</h3>
-                                <p className="text-[10px] text-slate-400 mt-1">Estructura organizacional y dependencia jerárquica del nodo seleccionado.</p>
-                            </div>
+            {/* Detalle «premium»: en escritorio, panel oscuro con la jurisdicción a la izquierda; en el
+                celular, cabecera oscura compacta y todo lo demás en bloques claros. */}
+            {selectedDetailItem && selectedDetailType && (() => {
+                const item = selectedDetailItem;
+                const tab = selectedDetailType as OrgTab;
+                const close = () => { setSelectedDetailItem(null); setSelectedDetailType(null); };
+                const nodes = getDetailHierarchyNodes();
+                const stats = getRelatedStats();
+                const hasCode = !['DIRESA', 'UNGET', 'MICRORED'].includes(tab) && !!item.code;
+                const empty = <span className="font-normal text-slate-400">No registrado</span>;
+                const nodeLabel = (label: string) => label === 'IPRESS' ? 'Establecimiento' : label === 'MICRORED' ? 'Microred' : label;
+                const statLabel = (label: string) => label
+                    .replace('IPRESS Registradas', 'Establecimientos')
+                    .replace(' Dependientes', '')
+                    .replace('Microredes', 'Microredes');
 
-                            {/* Connected Nodes Path */}
-                            <div className="relative pl-4 space-y-5 flex-1 pr-1 py-1">
-                                {/* Connector Line */}
-                                <div className="absolute left-[21px] top-6 bottom-6 w-0.5 bg-slate-700/60" />
-                                
-                                {getDetailHierarchyNodes().map((node, index) => (
-                                    <div key={index} className="relative flex items-start gap-4">
-                                        <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center z-10 size-3.5 shrink-0 transition-all ${
-                                            node.isCurrent 
-                                                ? 'bg-teal-400 border-teal-400 shadow-lg shadow-teal-500/50 scale-125' 
-                                                : 'bg-slate-900 border-slate-600'
-                                        }`}>
-                                            <div className={`h-1 w-1 rounded-full ${node.isCurrent ? 'bg-slate-900' : 'bg-slate-550'}`} />
+                const darkPanel = (
+                    <>
+                        <span className="w-fit rounded-full border border-teal-400/30 bg-teal-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-teal-300">{TAB_SINGULAR[tab]}</span>
+                        <h3 className="mt-3 text-[22px] font-black leading-tight text-white">{item.name}</h3>
+                        {(item.code || item.category || item.type) && (
+                            <div className="mt-3 flex flex-wrap gap-1.5">
+                                {item.code && <span className="rounded-md border border-white/15 bg-white/10 px-2 py-0.5 font-mono text-[12px] font-bold text-white">{item.code}</span>}
+                                {item.category && <span className="rounded-md border border-teal-400/30 bg-teal-400/15 px-2 py-0.5 text-[12px] font-bold text-teal-200">{item.category}</span>}
+                                {item.type && <span className="rounded-md border border-white/15 bg-white/10 px-2 py-0.5 text-[12px] font-bold text-slate-200">{facilityTypeLabel(item.type)}</span>}
+                            </div>
+                        )}
+
+                        <div className="mt-6">
+                            <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Jurisdicción</p>
+                            {nodes.map((node, index) => {
+                                const last = index === nodes.length - 1;
+                                return (
+                                    <div key={index} className="relative flex gap-3 pb-4 last:pb-0">
+                                        <span className="relative flex w-3.5 shrink-0 justify-center pt-1">
+                                            <span className={`z-10 h-3 w-3 rounded-full ${node.isCurrent ? 'bg-teal-400 ring-4 ring-teal-400/25' : 'border-2 border-slate-500 bg-slate-900'}`} />
+                                            {!last && <span className="absolute top-4 h-full w-px bg-slate-700" />}
+                                        </span>
+                                        <div className="min-w-0">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{nodeLabel(node.label)}</p>
+                                            <p className={`break-words text-[14px] font-bold ${node.isCurrent ? 'text-teal-300' : 'text-white'}`}>{node.name}</p>
                                         </div>
-                                        <div className="space-y-0.5">
-                                            <span className="block text-[8px] uppercase tracking-widest font-black text-slate-400 leading-none">{node.label}</span>
-                                            <span className={`block text-xs font-bold leading-tight ${node.isCurrent ? 'text-teal-400' : 'text-slate-200'}`}>{node.name}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {stats && (
+                            <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                                <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-400">En su jurisdicción</p>
+                                <div className="divide-y divide-white/10">
+                                    {stats.map((stat, i) => (
+                                        <div key={i} className="flex items-center justify-between py-2 text-[13px]">
+                                            <span className="text-slate-300">{statLabel(stat.label)}</span>
+                                            <span className="rounded-lg bg-teal-400/15 px-2 py-0.5 text-[12px] font-black text-teal-200">{stat.value}</span>
                                         </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Conexión de stock: solo la UNGET tiene una. Sin el estado leído no se afirma nada. */}
+                        {tab === 'UNGET' && (() => {
+                            const estado = connectionsStatus === 'ready' ? connectionByUnget.get(String(item.id || '')) : undefined;
+                            const ui = getConnectionUi(item.id);
+                            return (
+                                <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                                    <p className="mb-2 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400"><FileSpreadsheet className="h-3 w-3 text-teal-400" />Conexión de stock</p>
+                                    <div className="divide-y divide-white/10">
+                                        <div className="flex items-center justify-between gap-2 py-2 text-[13px]">
+                                            <span className="text-slate-300">Estado</span>
+                                            <span className={`inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[12px] font-bold ${ui.dark}`}><ui.Icon className="h-3 w-3 shrink-0" />{ui.label}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-2 py-2 text-[13px]">
+                                            <span className="text-slate-300">La mantiene</span>
+                                            <span className="font-mono text-[12px] font-bold text-slate-200">{estado?.maintainer || '—'}</span>
+                                        </div>
+                                    </div>
+                                    <p className="pt-1 text-[12px] leading-snug text-slate-400">{ui.hint}</p>
+                                    {canReachStockConnections && (
+                                        <button type="button" onClick={goToStockConnections} className="mt-3 flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-teal-400/30 bg-teal-400/10 text-[13px] font-bold text-teal-200 transition hover:bg-teal-400/20">
+                                            <Settings2 className="h-4 w-4" /> Configurar conexión
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })()}
+                    </>
+                );
+
+                const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                        <p className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5 text-[11px] font-black uppercase tracking-widest text-slate-500"><span className="h-3 w-1 rounded-full bg-teal-500" />{title}</p>
+                        <div className="divide-y divide-slate-100">{children}</div>
+                    </div>
+                );
+                const Row: React.FC<{ label: string; children: React.ReactNode; icon?: React.ReactNode; action?: React.ReactNode }> = ({ label, children, icon, action }) => (
+                    <div className="flex items-center gap-3 px-4 py-3">
+                        {icon && <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-teal-50 text-teal-700">{icon}</span>}
+                        <div className="min-w-0 flex-1"><p className="text-xs text-slate-500">{label}</p><div className="break-words text-[15px] font-semibold text-slate-900">{children}</div></div>
+                        {action}
+                    </div>
+                );
+                const copyButton = (text: string, label: string) => (
+                    <button type="button" onClick={() => handleCopyText(text, label)} aria-label={`Copiar ${label}`} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-teal-600">
+                        {copiedField === text ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                    </button>
+                );
+
+                const dataBlocks = (
+                    <div className="space-y-3">
+                        <Section title="Identificación">
+                            <Row label={tab === 'IPRESS' ? 'Código RENIPRESS' : 'Código'} action={hasCode ? copyButton(item.code, tab === 'IPRESS' ? 'Código RENIPRESS' : 'Código') : undefined}>
+                                {hasCode ? <span className="font-mono">{item.code}</span> : empty}
+                            </Row>
+                            {tab === 'IPRESS' && <Row label="Categoría · Tipo">{[item.category, facilityTypeLabel(item.type)].filter(Boolean).join(' · ') || empty}</Row>}
+                            <Row label="RUC" action={item.ruc ? copyButton(item.ruc, 'RUC') : undefined}>{item.ruc ? <span className="font-mono">{item.ruc}</span> : empty}</Row>
+                        </Section>
+                        <Section title="Ubicación">
+                            <Row label="Distrito · Provincia · Departamento">{[item.district, item.province, item.department || 'San Martín'].filter(Boolean).join(' · ')}</Row>
+                            <Row
+                                label="Dirección"
+                                action={item.legalAddress ? (
+                                    <a
+                                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.legalAddress + ', ' + (item.district || '') + ', ' + (item.province || '') + ', Peru')}`}
+                                        target="_blank"
+                                        referrerPolicy="no-referrer"
+                                        rel="noopener noreferrer"
+                                        className="flex h-9 shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-3 text-[12px] font-bold text-teal-700 transition hover:bg-teal-50"
+                                    >
+                                        <Globe className="h-3.5 w-3.5" /> Mapa
+                                    </a>
+                                ) : undefined}
+                            >
+                                {item.legalAddress || empty}
+                            </Row>
+                        </Section>
+                        <Section title="Contacto">
+                            <Row label="Teléfono" icon={<Phone className="h-4 w-4" />}>{item.phone ? <a href={`tel:${item.phone}`} className="text-teal-700 hover:underline">{item.phone}</a> : empty}</Row>
+                            <Row label="Correo" icon={<Mail className="h-4 w-4" />}>{item.email ? <a href={`mailto:${item.email}`} className="text-teal-700 hover:underline">{item.email}</a> : empty}</Row>
+                            {item.website && <Row label="Sitio web" icon={<Globe className="h-4 w-4" />}><a href={item.website.startsWith('http') ? item.website : `https://${item.website}`} target="_blank" referrerPolicy="no-referrer" rel="noopener noreferrer" className="text-teal-700 hover:underline">{item.website}</a></Row>}
+                            {item.socialMedia && <Row label="Redes sociales">{item.socialMedia}</Row>}
+                        </Section>
+                    </div>
+                );
+
+                // En el celular la cabecera oscura queda compacta (tipo, nombre y chips); la
+                // jurisdicción, lo que depende y la conexión pasan al cuerpo como bloques claros.
+                const parentNodes = nodes.filter(node => !node.isCurrent);
+                const mobileHeader = (
+                    <div className="shrink-0 bg-gradient-to-br from-slate-900 via-slate-900 to-teal-950 px-4 pb-4 pt-3">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="w-fit rounded-full border border-teal-400/30 bg-teal-400/10 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-widest text-teal-300">{TAB_SINGULAR[tab]}</span>
+                            <button type="button" onClick={close} aria-label="Cerrar" className="-mr-2 grid h-10 w-10 place-items-center rounded-full text-slate-300"><X className="h-5 w-5" /></button>
+                        </div>
+                        <h3 className="text-[18px] font-black leading-snug text-white">{item.name}</h3>
+                        {(item.code || item.category || item.type) && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                {item.code && <span className="rounded-md border border-white/15 bg-white/10 px-2 py-0.5 font-mono text-[12px] font-bold text-white">{item.code}</span>}
+                                {item.category && <span className="rounded-md border border-teal-400/30 bg-teal-400/15 px-2 py-0.5 text-[12px] font-bold text-teal-200">{item.category}</span>}
+                                {item.type && <span className="rounded-md border border-white/15 bg-white/10 px-2 py-0.5 text-[12px] font-bold text-slate-200">{facilityTypeLabel(item.type)}</span>}
+                            </div>
+                        )}
+                    </div>
+                );
+                const mobileBlocks = (
+                    <div className="space-y-3">
+                        {parentNodes.length > 0 && (
+                            <Section title="Jurisdicción">
+                                {parentNodes.map((node, index) => <Row key={index} label={nodeLabel(node.label)}>{node.name}</Row>)}
+                            </Section>
+                        )}
+                        {stats && (
+                            <Section title="En su jurisdicción">
+                                {stats.map((stat, i) => (
+                                    <div key={i} className="flex items-center justify-between px-4 py-3 text-[14px]">
+                                        <span className="text-slate-600">{statLabel(stat.label)}</span>
+                                        <span className="rounded-lg bg-teal-50 px-2 py-0.5 text-[13px] font-black text-teal-700">{stat.value}</span>
                                     </div>
                                 ))}
-                            </div>
-
-                            {/* Dependent stats (if available) */}
-                            {getRelatedStats() && (
-                                <div className="space-y-2 border-t border-slate-800 pt-4 bg-slate-900/30 p-4 rounded-2xl">
-                                    <h4 className="text-[9px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                                        <Activity className="h-3 w-3 text-teal-400" /> Estadísticas de Red
-                                    </h4>
-                                    <div className="divide-y divide-slate-800">
-                                        {getRelatedStats()?.map((stat, i) => (
-                                            <div key={i} className="py-2 flex justify-between items-center text-xs font-bold">
-                                                <span className="text-slate-400 text-[11px]">{stat.label}</span>
-                                                <span className="bg-teal-500/10 text-teal-300 font-black px-2 py-0.5 rounded-lg text-[10px]">{stat.value}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Estado de la conexión de stock: solo la UNGET tiene una. */}
-                            {selectedDetailType === 'UNGET' && (() => {
-                                // Sin el estado leído no se afirma nada: `getConnectionUi` ya lo dice,
-                                // y quien la mantiene se deja en blanco en vez de inventarlo.
-                                const estado = connectionsStatus === 'ready'
-                                    ? connectionByUnget.get(String(selectedDetailItem.id || ''))
-                                    : undefined;
-                                const ui = getConnectionUi(selectedDetailItem.id);
-                                return (
-                                    <div className="space-y-2 border-t border-slate-800 pt-4 bg-slate-900/30 p-4 rounded-2xl">
-                                        <h4 className="text-[9px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                                            <FileSpreadsheet className="h-3 w-3 text-teal-400" /> Conexión de Stock
-                                        </h4>
-                                        <div className="divide-y divide-slate-800">
-                                            <div className="py-2 flex justify-between items-center gap-2 text-xs font-bold">
-                                                <span className="text-slate-400 text-[11px]">Estado</span>
-                                                <span className={`inline-flex items-center gap-1 border font-black px-2 py-0.5 rounded-lg text-[10px] ${ui.dark}`}>
-                                                    <ui.Icon className="h-3 w-3 shrink-0" />
-                                                    {ui.label}
-                                                </span>
-                                            </div>
-                                            <div className="py-2 flex justify-between items-center gap-2 text-xs font-bold">
-                                                <span className="text-slate-400 text-[11px]">La mantiene</span>
-                                                <span className="text-slate-300 font-mono font-black text-[10px]">{estado?.maintainer || '—'}</span>
-                                            </div>
-                                        </div>
-                                        <p className="text-[10px] text-slate-400 leading-snug pt-1">{ui.hint}</p>
+                            </Section>
+                        )}
+                        {tab === 'UNGET' && (() => {
+                            const estado = connectionsStatus === 'ready' ? connectionByUnget.get(String(item.id || '')) : undefined;
+                            const ui = getConnectionUi(item.id);
+                            return (
+                                <Section title="Conexión de stock">
+                                    <Row label="Estado"><span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[12px] font-bold ${ui.chip}`}><ui.Icon className="h-3 w-3 shrink-0" />{ui.label}</span></Row>
+                                    <Row label="La mantiene"><span className="font-mono text-[14px]">{estado?.maintainer || '—'}</span></Row>
+                                    <div className="px-4 py-3">
+                                        <p className="text-[13px] leading-snug text-slate-500">{ui.hint}</p>
                                         {canReachStockConnections && (
-                                            <button
-                                                onClick={goToStockConnections}
-                                                className="w-full mt-1 flex items-center justify-center gap-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-300 border border-teal-500/20 font-black uppercase tracking-wider text-[10px] px-3 py-2 rounded-xl transition cursor-pointer"
-                                            >
-                                                <Settings2 className="h-3 w-3" />
-                                                Configurar conexión
+                                            <button type="button" onClick={goToStockConnections} className="mt-3 flex h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 text-[14px] font-bold text-teal-700">
+                                                <Settings2 className="h-4 w-4" /> Configurar conexión
                                             </button>
                                         )}
                                     </div>
-                                );
-                            })()}
-
-                            {/* Tags section in left column */}
-                            <div className="space-y-2 border-t border-slate-800 pt-4 mt-auto bg-slate-900/30 p-4 rounded-2xl">
-                                <h4 className="text-[9px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                                    <Hash className="h-3 w-3 text-teal-400" /> Clasificación
-                                </h4>
-                                <div className="divide-y divide-slate-800">
-                                    {(!['DIRESA', 'UNGET', 'MICRORED'].includes(selectedDetailType) && selectedDetailItem.code) ? (
-                                        <div className="py-2 flex justify-between items-center text-xs font-bold">
-                                            <span className="text-slate-400 text-[11px]">Código</span>
-                                            <span className="bg-slate-800 text-slate-300 font-mono font-black px-2 py-0.5 rounded-lg text-[10px] flex items-center gap-1">
-                                                <Hash className="h-3 w-3" /> {selectedDetailItem.code}
-                                            </span>
-                                        </div>
-                                    ) : (
-                                        <div className="py-2 flex justify-between items-center text-xs font-bold">
-                                            <span className="text-slate-400 text-[11px]">Código</span>
-                                            <span className="text-slate-500 font-mono font-medium text-[10px]">No especificado</span>
-                                        </div>
-                                    )}
-                                    {selectedDetailItem.category && (
-                                        <div className="py-2 flex justify-between items-center text-xs font-bold">
-                                            <span className="text-slate-400 text-[11px]">Categoría</span>
-                                            <span className="bg-teal-500/10 text-teal-300 font-black px-2 py-0.5 rounded-lg text-[10px]">{selectedDetailItem.category}</span>
-                                        </div>
-                                    )}
-                                    {selectedDetailItem.type && (
-                                        <div className="py-2 flex justify-between items-center text-xs font-bold">
-                                            <span className="text-slate-400 text-[11px]">Tipo</span>
-                                            <span className="bg-slate-800 text-slate-300 font-black px-2 py-0.5 rounded-lg text-[10px]">{facilityTypeLabel(selectedDetailItem.type)}</span>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* RIGHT COLUMN: Bento-grid Registry Explorer Data */}
-                        <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/50">
-                            {/* Card Header area */}
-                            <div className="p-6 pb-4 border-b border-slate-100 flex justify-between items-center bg-white min-h-[80px]">
-                                <div className="space-y-1">
-                                    <h2 className="font-extrabold text-xl text-slate-900 leading-snug flex items-center gap-2">
-                                        {selectedDetailType === 'DIRESA' && <ShieldCheck className="h-5 w-5 text-teal-600 shrink-0" />}
-                                        {selectedDetailType === 'OGESS' && <Activity className="h-5 w-5 text-teal-600 shrink-0" />}
-                                        {selectedDetailType === 'UNGET' && <Building2 className="h-5 w-5 text-teal-600 shrink-0" />}
-                                        {selectedDetailType === 'MICRORED' && <Network className="h-5 w-5 text-teal-600 shrink-0" />}
-                                        {selectedDetailType === 'IPRESS' && <MapPin className="h-5 w-5 text-teal-600 shrink-0" />}
-                                        <span>{selectedDetailItem.name}</span>
-                                    </h2>
-                                </div>
-                                <button 
-                                    onClick={() => { setSelectedDetailItem(null); setSelectedDetailType(null); }}
-                                    className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
-                                >
-                                    <X className="h-5 w-5" />
-                                </button>
-                            </div>
-
-                            {/* Scrollable grid details explorer */}
-                            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                                {/* Subsection 1: Identificación e Inspección */}
-                                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                                        <div className="w-1.5 h-3 bg-teal-500 rounded-sm" /> Datos de Registro de Enlace
-                                    </h4>
-                                    
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        {/* RENIPRESS / ID row */}
-                                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center group relative">
-                                            <div>
-                                                <span className="block text-[10px] font-black uppercase text-slate-400 mb-0.5">
-                                                    {selectedDetailType === 'IPRESS' ? 'Código RENIPRESS' : 'Código Ejecutora'}
-                                                </span>
-                                                {['DIRESA', 'UNGET', 'MICRORED'].includes(selectedDetailType) ? (
-                                                    <code className="text-xs font-mono font-bold text-slate-500">
-                                                        No especificado
-                                                    </code>
-                                                ) : (
-                                                    <code className="text-xs font-mono font-bold text-slate-800">
-                                                        {selectedDetailItem.code || 'No especificado'}
-                                                    </code>
-                                                )}
-                                            </div>
-                                            {(!['DIRESA', 'UNGET', 'MICRORED'].includes(selectedDetailType) && selectedDetailItem.code) && (
-                                                <button 
-                                                    onClick={() => handleCopyText(selectedDetailItem.code, selectedDetailType === 'IPRESS' ? 'Código RENIPRESS' : 'Código Ejecutora')}
-                                                    className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-white rounded-lg border border-transparent hover:border-slate-150 transition cursor-pointer"
-                                                >
-                                                    {copiedField === selectedDetailItem.code ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-                                                </button>
-                                            )}
-                                        </div>
-
-                                        {/* RUC Row */}
-                                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center group relative">
-                                            <div>
-                                                <span className="block text-[10px] font-black uppercase text-slate-400 mb-0.5">RUC del Establecimiento</span>
-                                                <code className="text-xs font-mono font-bold text-slate-800">
-                                                    {selectedDetailItem.ruc || 'No especificado'}
-                                                </code>
-                                            </div>
-                                            {selectedDetailItem.ruc && (
-                                                <button 
-                                                    onClick={() => handleCopyText(selectedDetailItem.ruc, 'RUC')}
-                                                    className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-white rounded-lg border border-transparent hover:border-slate-150 transition cursor-pointer"
-                                                >
-                                                    {copiedField === selectedDetailItem.ruc ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Subsection 2: Geografía */}
-                                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                                        <div className="w-1.5 h-3 bg-emerald-500 rounded-sm" /> Localización Regional
-                                    </h4>
-                                    
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                        <div className="space-y-0.5">
-                                            <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Departamento</span>
-                                            <span className="text-sm font-bold text-slate-800">{selectedDetailItem.department || 'San Martín'}</span>
-                                        </div>
-                                        <div className="space-y-0.5">
-                                            <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Provincia</span>
-                                            <span className="text-sm font-bold text-slate-800">{selectedDetailItem.province || 'No especificado'}</span>
-                                        </div>
-                                        <div className="space-y-0.5">
-                                            <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Distrito / Ciudad</span>
-                                            <span className="text-sm font-bold text-slate-800">{selectedDetailItem.district || 'No especificado'}</span>
-                                        </div>
-                                    </div>
-
-                                    {/* Dirección Legal */}
-                                    <div className="pt-3 border-t border-slate-50 space-y-1">
-                                        <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Dirección Legal</span>
-                                        <div className="p-3 bg-slate-50 rounded-xl text-xs font-semibold text-slate-700 flex justify-between items-center gap-4">
-                                            <span className="leading-relaxed">{selectedDetailItem.legalAddress || 'Sin dirección legal asignada para este registro estatal.'}</span>
-                                            {selectedDetailItem.legalAddress && (
-                                                <a 
-                                                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedDetailItem.legalAddress + ', ' + (selectedDetailItem.district || '') + ', ' + (selectedDetailItem.province || '') + ', Peru')}`}
-                                                    target="_blank" 
-                                                    referrerPolicy="no-referrer"
-                                                    rel="noopener noreferrer"
-                                                    className="flex items-center gap-1 px-3 py-1.5 text-[10px] font-extrabold text-teal-700 hover:text-white hover:bg-teal-600 rounded-lg bg-white border border-slate-200 transition"
-                                                >
-                                                    <Globe className="h-3 w-3" /> Maps
-                                                </a>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Subsection 3: Datos de Contacto y Canales */}
-                                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                                        <div className="w-1.5 h-3 bg-blue-500 rounded-sm" /> Canales de Contacto Oficiales
-                                    </h4>
-
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        {/* Teléfono */}
-                                        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                            <div className="h-9 w-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center shrink-0 border border-blue-100">
-                                                <Phone className="h-4 w-4" />
-                                            </div>
-                                            <div className="space-y-0.5">
-                                                <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Teléfono Directo</span>
-                                                {selectedDetailItem.phone ? (
-                                                    <a href={`tel:${selectedDetailItem.phone}`} className="text-sm font-bold text-slate-800 hover:text-teal-600 transition">
-                                                        {selectedDetailItem.phone}
-                                                    </a>
-                                                ) : (
-                                                    <span className="text-xs font-semibold text-slate-404">No especificado</span>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        {/* Correo Electrónico */}
-                                        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                            <div className="h-9 w-9 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center shrink-0 border border-indigo-100">
-                                                <Mail className="h-4 w-4" />
-                                            </div>
-                                            <div className="space-y-0.5 overflow-hidden">
-                                                <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Correo Electrónico</span>
-                                                {selectedDetailItem.email ? (
-                                                    <a href={`mailto:${selectedDetailItem.email}`} className="text-sm font-bold text-slate-800 hover:text-teal-600 transition truncate block">
-                                                        {selectedDetailItem.email}
-                                                    </a>
-                                                ) : (
-                                                    <span className="text-xs font-semibold text-slate-404">No especificado</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Website y Redes */}
-                                    {(selectedDetailItem.website || selectedDetailItem.socialMedia) && (
-                                        <div className="pt-3 border-t border-slate-50 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                            {selectedDetailItem.website && (
-                                                <div className="space-y-1">
-                                                    <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Sitio Web Oficial</span>
-                                                    <a 
-                                                        href={selectedDetailItem.website.startsWith('http') ? selectedDetailItem.website : `https://${selectedDetailItem.website}`} 
-                                                        target="_blank" 
-                                                        referrerPolicy="no-referrer"
-                                                        rel="noopener noreferrer" 
-                                                        className="text-xs font-bold text-teal-700 hover:underline flex items-center gap-1"
-                                                    >
-                                                        <Globe className="h-3.5 w-3.5" /> Visitar sitio web oficial
-                                                    </a>
-                                                </div>
-                                            )}
-                                            {selectedDetailItem.socialMedia && (
-                                                <div className="space-y-1">
-                                                    <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Redes Sociales</span>
-                                                    <span className="text-xs font-semibold text-slate-700 block bg-slate-50 p-2 rounded-lg border border-slate-100">{selectedDetailItem.socialMedia}</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
+                                </Section>
+                            );
+                        })()}
+                        {dataBlocks}
                     </div>
-                </div>,
-                document.body
-            )}
+                );
+
+                const footer = (
+                    <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
+                        {isSuperAdmin && !isDesktop && (
+                            <button type="button" onClick={() => handleConfirmDelete(tab, item)} aria-label="Eliminar" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-slate-200 text-red-600"><Trash2 className="h-5 w-5" /></button>
+                        )}
+                        <button type="button" onClick={close} className="h-11 shrink-0 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50">Cerrar</button>
+                        {isSuperAdmin && isDesktop && (
+                            <button type="button" onClick={() => handleConfirmDelete(tab, item)} className="h-11 shrink-0 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-red-600 transition-colors hover:bg-rose-50">Eliminar</button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={(e) => { close(); handleOpenEdit(tab, item, e); }}
+                            className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 md:ml-auto md:flex-none"
+                        >
+                            <Edit className="h-4 w-4" /> Editar
+                        </button>
+                    </div>
+                );
+
+                return createPortal(
+                    <div
+                        className="fixed inset-0 z-[110000] flex bg-white animate-in fade-in duration-200 md:items-center md:justify-center md:bg-slate-900/50 md:p-6 md:backdrop-blur-sm"
+                        onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
+                    >
+                        <div role="dialog" aria-modal="true" aria-label={item.name} className="flex h-full w-full flex-col overflow-hidden bg-white md:h-auto md:max-h-[90vh] md:max-w-5xl md:flex-row md:rounded-2xl md:shadow-2xl">
+                            {isDesktop ? (
+                                <>
+                                    <aside className="flex w-[330px] shrink-0 flex-col overflow-y-auto bg-gradient-to-b from-slate-900 via-slate-900 to-teal-950 p-6">{darkPanel}</aside>
+                                    <div className="flex min-w-0 flex-1 flex-col">
+                                        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-3.5">
+                                            <p className="text-[13px] font-bold text-slate-500">Datos del registro</p>
+                                            <button type="button" onClick={close} aria-label="Cerrar" className="grid h-9 w-9 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100"><X className="h-5 w-5" /></button>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto bg-slate-50 p-6">{dataBlocks}</div>
+                                        {footer}
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    {mobileHeader}
+                                    <div className="flex-1 overflow-y-auto overscroll-contain bg-slate-50 p-4">{mobileBlocks}</div>
+                                    {footer}
+                                </>
+                            )}
+                        </div>
+                    </div>,
+                    document.body
+                );
+            })()}
+
+            {/* Eliminar: confirmación con lo que depende del registro */}
+            <ConfirmationDialog
+                isOpen={!!deleteTarget}
+                tone="danger"
+                icon={<Trash2 />}
+                isConfirming={isDeleting}
+                title={`¿Eliminar «${deleteTarget?.item?.name || ''}»?`}
+                description={deleteTarget?.tab === 'IPRESS' || deleteTarget?.tab === 'MICRORED'
+                    ? 'Se borra del registro. No se puede deshacer.'
+                    : 'Se eliminará también la estructura y los establecimientos que dependen de este registro. No se puede deshacer.'}
+                confirmLabel="Eliminar"
+                onConfirm={executeDelete}
+                onCancel={() => setDeleteTarget(null)}
+            >
+                {deleteTarget && deleteDependents(deleteTarget.tab, deleteTarget.item) && (
+                    <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-800">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span>{deleteDependents(deleteTarget.tab, deleteTarget.item)}</span>
+                    </div>
+                )}
+            </ConfirmationDialog>
 
                {/* Modals for Editing */}
             {isDiresaModalOpen && createPortal(
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-[200000] flex bg-white md:items-center md:justify-center md:bg-black/60 md:p-4 md:backdrop-blur-sm">
+                    <div className="flex h-full w-full flex-col overflow-hidden bg-white animate-in fade-in duration-200 md:h-auto md:max-h-[92vh] md:max-w-4xl md:rounded-2xl md:border md:border-gray-100 md:shadow-2xl">
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
                             <div>
-                                <h3 className="font-extrabold text-xl text-gray-900 tracking-tight flex items-center gap-2">
+                                <h3 className="flex items-center gap-2 text-[17px] font-black tracking-tight text-slate-900 md:text-xl">
                                     <Building2 className="h-5 w-5 text-teal-600" />
                                     Mantenimiento de DIRESA
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">Configure los datos de identificación, geografía y contacto de la Dirección Regional de Salud.</p>
+                                <p className="mt-1 hidden text-xs text-gray-500 md:block">Configure los datos de identificación, geografía y contacto de la Dirección Regional de Salud.</p>
                             </div>
                             <button 
                                 type="button"
@@ -2549,38 +2381,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* Premium Stepper Progress */}
-                        <div className="px-6 py-5 border-b border-gray-50 bg-white relative flex items-center justify-between shrink-0">
-                            <div className="absolute left-6 top-8 right-6 h-0.5 bg-gray-100 -z-10">
-                                <div 
-                                    className="h-full bg-teal-600 transition-all duration-300" 
-                                    style={{ width: diresaModalStep === 1 ? '0%' : diresaModalStep === 2 ? '50%' : '100%' }}
-                                />
+                        {/* Avance del asistente */}
+                        <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
+                            <p className="text-[12.5px] font-black text-teal-700">Paso {diresaModalStep} de 3 · {['Identificación', 'Ubicación', 'Contacto'][diresaModalStep - 1]}</p>
+                            <div className="mt-2 grid gap-1.5" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }} aria-hidden="true">
+                                {[1, 2, 3].map(n => <span key={n} className={`h-1.5 rounded-full transition-colors ${n <= diresaModalStep ? 'bg-teal-600' : 'bg-slate-200'}`} />)}
                             </div>
-                            {[
-                                { step: 1, label: 'Identificación', desc: 'Nombre y RUC', icon: Building2 },
-                                { step: 2, label: 'Ubicación', desc: 'Datos Geográficos', icon: Network },
-                                { step: 3, label: 'Contacto', desc: 'Canales y Dirección', icon: Globe }
-                            ].map(s => (
-                                <button
-                                    key={s.step}
-                                    type="button"
-                                    disabled={
-                                        (s.step === 2 && !isDiresaStep1Valid) ||
-                                        (s.step === 3 && (!isDiresaStep1Valid || !isDiresaStep2Valid))
-                                    }
-                                    onClick={() => setDiresaModalStep(s.step)}
-                                    className="flex items-center gap-3 bg-white px-3 disabled:opacity-50 disabled:cursor-not-allowed group text-left outline-none"
-                                >
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${diresaModalStep === s.step ? 'bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100' : 'bg-gray-50 border-gray-200 text-gray-400 group-hover:border-gray-300'}`}>
-                                        <s.icon className="h-4 w-4" />
-                                    </div>
-                                    <div className="hidden sm:block">
-                                        <span className={`block text-[11px] font-bold uppercase tracking-wider ${diresaModalStep === s.step ? 'text-teal-700' : 'text-gray-400'}`}>{s.label}</span>
-                                        <span className="block text-[10px] text-gray-400 font-medium">{s.desc}</span>
-                                    </div>
-                                </button>
-                            ))}
                         </div>
 
                         {/* Form */}
@@ -2593,7 +2399,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             }}
                             className="flex-1 flex flex-col overflow-hidden"
                         >
-                            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                            <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 md:p-6">
                                 {/* STEP 1: IDENTIFICACIÓN */}
                                 {diresaModalStep === 1 && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-200">
@@ -2747,12 +2553,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </div>
 
                             {/* Footer Buttons */}
-                            <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                            <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                                 {diresaModalStep > 1 ? (
                                     <button 
                                         type="button" 
                                         onClick={() => setDiresaModalStep(step => step - 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-900 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition-all flex items-center gap-1"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         <ChevronLeft className="h-4 w-4" /> Atrás
                                     </button>
@@ -2760,7 +2566,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => setIsDiresaModalOpen(false)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         Cancelar
                                     </button>
@@ -2771,7 +2577,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                         type="button" 
                                         disabled={diresaModalStep === 1 ? !isDiresaStep1Valid : !isDiresaStep2Valid}
                                         onClick={() => setDiresaModalStep(step => step + 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all flex items-center gap-1 text-center"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         Siguiente <ChevronRight className="h-4 w-4" />
                                     </button>
@@ -2779,7 +2585,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => handleSaveDiresa()}
-                                        className="px-6 py-2.5 text-sm font-black text-white bg-teal-600 hover:bg-teal-700 rounded-xl transition-all flex items-center gap-2 shadow-lg hover:shadow-teal-100"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         <Save className="h-4 w-4" /> Guardar DIRESA
                                     </button>
@@ -2792,16 +2598,16 @@ export const AdminOrganizationModule: React.FC = () => {
             )}
 
             {isOgessModalOpen && createPortal(
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-[200000] flex bg-white md:items-center md:justify-center md:bg-black/60 md:p-4 md:backdrop-blur-sm">
+                    <div className="flex h-full w-full flex-col overflow-hidden bg-white animate-in fade-in duration-200 md:h-auto md:max-h-[92vh] md:max-w-4xl md:rounded-2xl md:border md:border-gray-100 md:shadow-2xl">
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
                             <div>
-                                <h3 className="font-extrabold text-xl text-gray-900 tracking-tight flex items-center gap-2">
+                                <h3 className="flex items-center gap-2 text-[17px] font-black tracking-tight text-slate-900 md:text-xl">
                                     <Building2 className="h-5 w-5 text-teal-600" />
                                     Mantenimiento de OGESS
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">Configure los datos de identificación, jurisdicción regional y contacto de la OGESS.</p>
+                                <p className="mt-1 hidden text-xs text-gray-500 md:block">Configure los datos de identificación, jurisdicción regional y contacto de la OGESS.</p>
                             </div>
                             <button 
                                 type="button"
@@ -2812,38 +2618,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* Progress Stepper */}
-                        <div className="px-6 py-5 border-b border-gray-50 bg-white relative flex items-center justify-between shrink-0">
-                            <div className="absolute left-6 top-8 right-6 h-0.5 bg-gray-100 -z-10">
-                                <div 
-                                    className="h-full bg-teal-600 transition-all duration-300" 
-                                    style={{ width: ogessModalStep === 1 ? '0%' : ogessModalStep === 2 ? '50%' : '100%' }}
-                                />
+                        {/* Avance del asistente */}
+                        <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
+                            <p className="text-[12.5px] font-black text-teal-700">Paso {ogessModalStep} de 3 · {['Identificación', 'Ubicación', 'Contacto'][ogessModalStep - 1]}</p>
+                            <div className="mt-2 grid gap-1.5" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }} aria-hidden="true">
+                                {[1, 2, 3].map(n => <span key={n} className={`h-1.5 rounded-full transition-colors ${n <= ogessModalStep ? 'bg-teal-600' : 'bg-slate-200'}`} />)}
                             </div>
-                            {[
-                                { step: 1, label: 'Identificación', desc: 'Nombre, DIRESA y Código', icon: Building2 },
-                                { step: 2, label: 'Ubicación', desc: 'Datos Geográficos', icon: Network },
-                                { step: 3, label: 'Contacto', desc: 'Canales y Dirección', icon: Globe }
-                            ].map(s => (
-                                <button
-                                    key={s.step}
-                                    type="button"
-                                    disabled={
-                                        (s.step === 2 && !isOgessStep1Valid) ||
-                                        (s.step === 3 && (!isOgessStep1Valid || !isOgessStep2Valid))
-                                    }
-                                    onClick={() => setOgessModalStep(s.step)}
-                                    className="flex items-center gap-3 bg-white px-3 disabled:opacity-50 disabled:cursor-not-allowed group text-left outline-none"
-                                >
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${ogessModalStep === s.step ? 'bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100' : 'bg-gray-50 border-gray-200 text-gray-400 group-hover:border-gray-300'}`}>
-                                        <s.icon className="h-4 w-4" />
-                                    </div>
-                                    <div className="hidden sm:block">
-                                        <span className={`block text-[11px] font-bold uppercase tracking-wider ${ogessModalStep === s.step ? 'text-teal-700' : 'text-gray-400'}`}>{s.label}</span>
-                                        <span className="block text-[10px] text-gray-400 font-medium">{s.desc}</span>
-                                    </div>
-                                </button>
-                            ))}
                         </div>
 
                         {/* Form */}
@@ -2856,7 +2636,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             }}
                             className="flex-1 flex flex-col overflow-hidden"
                         >
-                            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                            <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 md:p-6">
                                 {/* STEP 1 */}
                                 {ogessModalStep === 1 && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-200">
@@ -3044,12 +2824,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </div>
 
                             {/* Footer Buttons */}
-                            <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                            <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                                 {ogessModalStep > 1 ? (
                                     <button 
                                         type="button" 
                                         onClick={() => setOgessModalStep(step => step - 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-900 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition-all flex items-center gap-1"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         <ChevronLeft className="h-4 w-4" /> Atrás
                                     </button>
@@ -3057,7 +2837,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => setIsOgessModalOpen(false)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         Cancelar
                                     </button>
@@ -3068,7 +2848,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                         type="button" 
                                         disabled={ogessModalStep === 1 ? !isOgessStep1Valid : !isOgessStep2Valid}
                                         onClick={() => setOgessModalStep(step => step + 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all flex items-center gap-1 text-center"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         Siguiente <ChevronRight className="h-4 w-4" />
                                     </button>
@@ -3076,7 +2856,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => handleSaveOgess()}
-                                        className="px-6 py-2.5 text-sm font-black text-white bg-teal-600 hover:bg-teal-700 rounded-xl transition-all flex items-center gap-2 shadow-lg hover:shadow-teal-100"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         <Save className="h-4 w-4" /> Guardar OGESS
                                     </button>
@@ -3089,16 +2869,16 @@ export const AdminOrganizationModule: React.FC = () => {
             )}
 
             {isUngetModalOpen && createPortal(
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-[200000] flex bg-white md:items-center md:justify-center md:bg-black/60 md:p-4 md:backdrop-blur-sm">
+                    <div className="flex h-full w-full flex-col overflow-hidden bg-white animate-in fade-in duration-200 md:h-auto md:max-h-[92vh] md:max-w-4xl md:rounded-2xl md:border md:border-gray-100 md:shadow-2xl">
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
                             <div>
-                                <h3 className="font-extrabold text-xl text-gray-900 tracking-tight flex items-center gap-2">
+                                <h3 className="flex items-center gap-2 text-[17px] font-black tracking-tight text-slate-900 md:text-xl">
                                     <Building2 className="h-5 w-5 text-teal-600" />
                                     Mantenimiento de UNGET
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">Configure los datos de la Unidad de Gestión Territorial (UNGET), su OGESS y canales de contacto.</p>
+                                <p className="mt-1 hidden text-xs text-gray-500 md:block">Configure los datos de la Unidad de Gestión Territorial (UNGET), su OGESS y canales de contacto.</p>
                             </div>
                             <button 
                                 type="button"
@@ -3109,38 +2889,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* Progress Stepper */}
-                        <div className="px-6 py-5 border-b border-gray-50 bg-white relative flex items-center justify-between shrink-0">
-                            <div className="absolute left-6 top-8 right-6 h-0.5 bg-gray-100 -z-10">
-                                <div 
-                                    className="h-full bg-teal-600 transition-all duration-300" 
-                                    style={{ width: ungetModalStep === 1 ? '0%' : ungetModalStep === 2 ? '50%' : '100%' }}
-                                />
+                        {/* Avance del asistente */}
+                        <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
+                            <p className="text-[12.5px] font-black text-teal-700">Paso {ungetModalStep} de 3 · {['Identificación', 'Ubicación', 'Contacto'][ungetModalStep - 1]}</p>
+                            <div className="mt-2 grid gap-1.5" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }} aria-hidden="true">
+                                {[1, 2, 3].map(n => <span key={n} className={`h-1.5 rounded-full transition-colors ${n <= ungetModalStep ? 'bg-teal-600' : 'bg-slate-200'}`} />)}
                             </div>
-                            {[
-                                { step: 1, label: 'Identificación', desc: 'Nombre, OGESS y DIRESA', icon: Building2 },
-                                { step: 2, label: 'Ubicación', desc: 'Ubicación Geográfica', icon: Network },
-                                { step: 3, label: 'Contacto', desc: 'Canales y Dirección', icon: Globe }
-                            ].map(s => (
-                                <button
-                                    key={s.step}
-                                    type="button"
-                                    disabled={
-                                        (s.step === 2 && !isUngetStep1Valid) ||
-                                        (s.step === 3 && (!isUngetStep1Valid || !isUngetStep2Valid))
-                                    }
-                                    onClick={() => setUngetModalStep(s.step)}
-                                    className="flex items-center gap-3 bg-white px-3 disabled:opacity-50 disabled:cursor-not-allowed group text-left outline-none"
-                                >
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${ungetModalStep === s.step ? 'bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100' : 'bg-gray-50 border-gray-200 text-gray-400 group-hover:border-gray-300'}`}>
-                                        <s.icon className="h-4 w-4" />
-                                    </div>
-                                    <div className="hidden sm:block">
-                                        <span className={`block text-[11px] font-bold uppercase tracking-wider ${ungetModalStep === s.step ? 'text-teal-700' : 'text-gray-400'}`}>{s.label}</span>
-                                        <span className="block text-[10px] text-gray-400 font-medium">{s.desc}</span>
-                                    </div>
-                                </button>
-                            ))}
                         </div>
 
                         {/* Form */}
@@ -3153,7 +2907,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             }}
                             className="flex-1 flex flex-col overflow-hidden"
                         >
-                            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                            <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 md:p-6">
                                 {/* STEP 1 */}
                                 {ungetModalStep === 1 && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-200">
@@ -3354,12 +3108,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </div>
 
                             {/* Footer Buttons */}
-                            <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                            <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                                 {ungetModalStep > 1 ? (
                                     <button 
                                         type="button" 
                                         onClick={() => setUngetModalStep(step => step - 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-900 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition-all flex items-center gap-1"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         <ChevronLeft className="h-4 w-4" /> Atrás
                                     </button>
@@ -3367,7 +3121,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => setIsUngetModalOpen(false)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         Cancelar
                                     </button>
@@ -3378,7 +3132,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                         type="button" 
                                         disabled={ungetModalStep === 1 ? !isUngetStep1Valid : !isUngetStep2Valid}
                                         onClick={() => setUngetModalStep(step => step + 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all flex items-center gap-1 text-center"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         Siguiente <ChevronRight className="h-4 w-4" />
                                     </button>
@@ -3386,7 +3140,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => handleSaveUnget()}
-                                        className="px-6 py-2.5 text-sm font-black text-white bg-teal-600 hover:bg-teal-700 rounded-xl transition-all flex items-center gap-2 shadow-lg hover:shadow-teal-100"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         <Save className="h-4 w-4" /> Guardar UNGET
                                     </button>
@@ -3399,16 +3153,16 @@ export const AdminOrganizationModule: React.FC = () => {
             )}
 
             {isMicroredModalOpen && createPortal(
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col border border-gray-100 animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
+                <div className="fixed inset-0 z-[200000] flex bg-white md:items-center md:justify-center md:bg-black/60 md:p-4 md:backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="flex h-full w-full flex-col overflow-hidden bg-white animate-in fade-in duration-200 md:h-auto md:max-h-[92vh] md:max-w-xl md:rounded-2xl md:border md:border-gray-100 md:shadow-2xl">
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
                             <div>
-                                <h3 className="font-extrabold text-xl text-gray-900 tracking-tight flex items-center gap-2">
+                                <h3 className="flex items-center gap-2 text-[17px] font-black tracking-tight text-slate-900 md:text-xl">
                                     <Building2 className="h-5 w-5 text-teal-600" />
                                     Mantenimiento de MICRORED
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">Configure los datos de la Microred de salud.</p>
+                                <p className="mt-1 hidden text-xs text-gray-500 md:block">Configure los datos de la Microred de salud.</p>
                             </div>
                             <button 
                                 type="button"
@@ -3420,8 +3174,8 @@ export const AdminOrganizationModule: React.FC = () => {
                         </div>
 
                         {/* Form */}
-                        <form onSubmit={(e) => e.preventDefault()} className="p-6 space-y-4">
-                            <div className="space-y-4">
+                        <form onSubmit={(e) => e.preventDefault()} className="flex flex-1 flex-col overflow-hidden">
+                            <div className="flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 md:p-6">
                                 <div>
                                     <label className="block text-xs font-bold text-gray-600 mb-1">Nombre de la Microred *</label>
                                     <input 
@@ -3454,18 +3208,18 @@ export const AdminOrganizationModule: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="flex justify-end gap-2 pt-4 border-t border-gray-104 mt-4">
+                            <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                                 <button 
                                     type="button" 
                                     onClick={() => setIsMicroredModalOpen(false)} 
-                                    className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition rounded-xl text-sm font-bold"
+                                    className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                 >
                                     Cancelar
                                 </button>
                                 <button 
                                     type="button" 
                                     onClick={() => handleSaveMicrored()}
-                                    className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white transition rounded-xl text-sm font-bold shadow-md hover:shadow-teal-100"
+                                    className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                 >
                                     Guardar Microred
                                 </button>
@@ -3477,16 +3231,16 @@ export const AdminOrganizationModule: React.FC = () => {
             )}
 
             {isFacilityModalOpen && createPortal(
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-[200000] flex bg-white md:items-center md:justify-center md:bg-black/60 md:p-4 md:backdrop-blur-sm">
+                    <div className="flex h-full w-full flex-col overflow-hidden bg-white animate-in fade-in duration-200 md:h-auto md:max-h-[92vh] md:max-w-4xl md:rounded-2xl md:border md:border-gray-100 md:shadow-2xl">
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
                             <div>
-                                <h3 className="font-extrabold text-xl text-gray-900 tracking-tight flex items-center gap-2">
+                                <h3 className="flex items-center gap-2 text-[17px] font-black tracking-tight text-slate-900 md:text-xl">
                                     <Building2 className="h-5 w-5 text-teal-600" />
                                     {editingFacilityOriginalCode ? 'Editar Establecimiento (IPRESS)' : 'Nuevo Establecimiento (IPRESS)'}
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">
+                                <p className="mt-1 hidden text-xs text-gray-500 md:block">
                                     {editingFacilityOriginalCode 
                                         ? `Actualizando datos de la IPRESS [Código Original: ${editingFacilityOriginalCode}]` 
                                         : 'Configure los datos de identificación, jurisdicción y canales de contacto de la IPRESS.'}
@@ -3501,40 +3255,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* Premium Stepper Progress */}
-                        <div className="px-6 py-5 border-b border-gray-50 bg-white relative flex items-center justify-between shrink-0">
-                            <div className="absolute left-6 top-8 right-6 h-0.5 bg-gray-100 -z-10">
-                                <div 
-                                    className="h-full bg-teal-600 transition-all duration-300" 
-                                    style={{ width: facilityModalStep === 1 ? '0%' : facilityModalStep === 2 ? '33.3%' : facilityModalStep === 3 ? '66.6%' : '100%' }}
-                                />
+                        {/* Avance del asistente */}
+                        <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
+                            <p className="text-[12.5px] font-black text-teal-700">Paso {facilityModalStep} de 4 · {['Identificación', 'Jurisdicción', 'Ubicación y Contacto', 'Hoja de stock'][facilityModalStep - 1]}</p>
+                            <div className="mt-2 grid gap-1.5" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }} aria-hidden="true">
+                                {[1, 2, 3, 4].map(n => <span key={n} className={`h-1.5 rounded-full transition-colors ${n <= facilityModalStep ? 'bg-teal-600' : 'bg-slate-200'}`} />)}
                             </div>
-                            {[
-                                { step: 1, label: 'Identificación', desc: 'Códigos y Categoría', icon: Building2 },
-                                { step: 2, label: 'Jurisdicción', desc: 'Asociaciones y UNGET', icon: Network },
-                                { step: 3, label: 'Ubicación y Contacto', desc: 'Geografía y Canales', icon: Globe },
-                                { step: 4, label: 'Vinculación de Hoja (Stock)', desc: 'Conexión y Columnas', icon: FileSpreadsheet }
-                            ].map(s => (
-                                <button
-                                    key={s.step}
-                                    type="button"
-                                    disabled={
-                                        (s.step === 2 && !isFacilityStep1Valid) ||
-                                        (s.step === 3 && (!isFacilityStep1Valid || !isFacilityStep2Valid)) ||
-                                        (s.step === 4 && (!isFacilityStep1Valid || !isFacilityStep2Valid || !isFacilityStep3Valid))
-                                    }
-                                    onClick={() => setFacilityModalStep(s.step)}
-                                    className="flex items-center gap-3 bg-white px-3 disabled:opacity-50 disabled:cursor-not-allowed group text-left outline-none"
-                                >
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${facilityModalStep === s.step ? 'bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100' : 'bg-gray-50 border-gray-200 text-gray-400 group-hover:border-gray-300'}`}>
-                                        <s.icon className="h-4 w-4" />
-                                    </div>
-                                    <div className="hidden sm:block">
-                                        <span className={`block text-[11px] font-bold uppercase tracking-wider ${facilityModalStep === s.step ? 'text-teal-700' : 'text-gray-400'}`}>{s.label}</span>
-                                        <span className="block text-[10px] text-gray-400 font-medium">{s.desc}</span>
-                                    </div>
-                                </button>
-                            ))}
                         </div>
 
                         {/* Form */}
@@ -3547,7 +3273,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             }}
                             className="flex-1 flex flex-col overflow-hidden"
                         >
-                            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                            <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 md:p-6">
                                 {/* STEP 1: IDENTIFICACIÓN Y CATEGORÍA */}
                                 {facilityModalStep === 1 && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-200">
@@ -3897,12 +3623,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </div>
 
                             {/* Footer Buttons */}
-                            <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                            <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                                 {facilityModalStep > 1 ? (
                                     <button 
                                         type="button" 
                                         onClick={() => setFacilityModalStep(step => step - 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-900 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition-all flex items-center gap-1"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         <ChevronLeft className="h-4 w-4" /> Atrás
                                     </button>
@@ -3910,7 +3636,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => setIsFacilityModalOpen(false)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         Cancelar
                                     </button>
@@ -3925,7 +3651,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             !isFacilityStep3Valid
                                         }
                                         onClick={() => setFacilityModalStep(step => step + 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all flex items-center gap-1 text-center"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         Siguiente <ChevronRight className="h-4 w-4" />
                                     </button>
@@ -3934,7 +3660,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                         type="button" 
                                         disabled={!isFacilityStep4Valid}
                                         onClick={() => handleSaveFacility()}
-                                        className="px-6 py-2.5 text-sm font-black text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all flex items-center gap-2 shadow-lg hover:shadow-teal-100"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         <Save className="h-4 w-4" /> {editingFacilityOriginalCode ? 'Actualizar IPRESS' : 'Guardar IPRESS'}
                                     </button>
