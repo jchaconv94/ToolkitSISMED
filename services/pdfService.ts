@@ -3,7 +3,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { ensurePdfUnicodeFont, PDF_UNICODE_FONT } from "./pdfUnicodeFont";
 import { AuraAnalysisResult, StockStatus, AnalyzedMedication, AdditionalItem, DashboardViewMode } from "../types";
-import { classifyStock } from "./stockStatus";
+import { classifyStock, formatOneDecimal } from "./stockStatus";
 
 // --- COLORS PALETTE (PREMIUM UI MATCH) ---
 const COLORS = {
@@ -522,12 +522,12 @@ export const generateFullReportPDF = async (
             pet: item.medpet || '-',
             est: item.medest || '-',
             stock: item.currentStock.toLocaleString(),
-            rawCpm: item.rawCpm.toFixed(1),
-            cpm: item.cpm.toFixed(1),
+            rawCpm: formatOneDecimal(item.rawCpm),
+            cpm: formatOneDecimal(item.cpm),
             // Current actual months
-            currentMonths: isFinite(activeMonths) ? activeMonths.toFixed(1) : '-',
+            currentMonths: formatOneDecimal(activeMonths),
             // Use projected calculated values
-            monthsProvision: isFinite(projectedMonths) ? projectedMonths.toFixed(1) : '-',
+            monthsProvision: formatOneDecimal(projectedMonths),
             status: projectedStatus,
             req: item.quantityToOrder > 0 ? item.quantityToOrder : '-',
             _spikeThreshold: item.spikeThreshold,

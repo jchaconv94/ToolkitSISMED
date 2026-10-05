@@ -3,7 +3,7 @@ import { formatCorteDate } from "./services/requirementMonths";
 import React, { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
 import { InputSection } from './components/InputSection';
 import { MedicationInput, AuraAnalysisResult, StockStatus, AdditionalItem, AppModule, QuickFilterOption, AnalyzedMedication, DashboardViewMode, HealthFacility, Microred } from './types';
-import { classifyStock, computeDmeIndicators } from './services/stockStatus';
+import { analysisFilterValue, classifyStock, computeDmeIndicators } from './services/stockStatus';
 import { api } from './services/api';
 import { analyzeInventoryWithAura } from './services/auraService';
 import { generateFullReportPDF } from './services/pdfService';
@@ -939,11 +939,7 @@ const AnalysisModule: React.FC = () => {
             return Object.entries(activeFilters).every(([key, values]) => {
                 const filterValues = values as string[];
                 if (!filterValues || filterValues.length === 0) return true;
-                let itemValue = String((item as any)[key] || '-');
-                if (key === 'isSporadic') {
-                    itemValue = item.isSporadic ? "Baja Rotación" : "Rotación Normal";
-                }
-                return filterValues.includes(itemValue);
+                return filterValues.includes(analysisFilterValue(item as unknown as Record<string, unknown>, key));
             });
         });
     }
@@ -988,11 +984,7 @@ const AnalysisModule: React.FC = () => {
                 if (key === 'status') return true; // Ignore status filter for dashboard chart calculations
                 const filterValues = values as string[];
                 if (!filterValues || filterValues.length === 0) return true;
-                let itemValue = String((item as any)[key] || '-');
-                if (key === 'isSporadic') {
-                    itemValue = item.isSporadic ? "Baja Rotación" : "Rotación Normal";
-                }
-                return filterValues.includes(itemValue);
+                return filterValues.includes(analysisFilterValue(item as unknown as Record<string, unknown>, key));
             });
         });
     }
