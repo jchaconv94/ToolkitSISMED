@@ -229,7 +229,11 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     setNetworkPending(!cached);
     const load = async () => {
       try {
-        const status = await loadNetworkStockStatus(user);
+        // Cifras parciales solo si no hay nada guardado que mostrar: si lo hay, se queda a la
+        // vista hasta tener el resultado completo, en vez de bajar a medias y volver a subir.
+        const status = await loadNetworkStockStatus(user, Date.now(), (partial) => {
+          if (run === networkRun.current && !readCachedNetworkStatus(username)) setNetwork(partial);
+        });
         if (run !== networkRun.current) return;
         setNetwork(status);
         saveCachedNetworkStatus(username, status);
