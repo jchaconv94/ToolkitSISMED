@@ -19,13 +19,15 @@ describe("resumen de la red", () => {
 });
 
 describe("resumen de farmacia", () => {
-  it("cuenta lotes vencidos y por vencer con saldo, y medicamentos sin stock", () => {
+  it("cuenta lotes vencidos, por vencer (según la ventana) y al día, solo con saldo", () => {
     const rows = [
       { Id_Producto: "1", Nombre: "A", Lote: "L1", Fec_Vencim: "01/09/2026", Saldo: "10" },
       { Id_Producto: "1", Nombre: "A", Lote: "L2", Fec_Vencim: "01/11/2026", Saldo: "5" },
       { Id_Producto: "2", Nombre: "B", Lote: "L3", Fec_Vencim: "01/09/2026", Saldo: "0" },
       { Id_Producto: "3", Nombre: "C", Lote: "L4", Fec_Vencim: "01/12/2027", Saldo: "8" },
     ];
-    expect(buildPharmacySummary(rows as any, 123, 90, now)).toEqual({ expired: 1, expiring: 1, empty: 1, lastUpdateAt: 123 });
+    expect(buildPharmacySummary(rows as any, 123, 90, now)).toEqual({ expired: 1, expiring: 1, ok: 1, lastUpdateAt: 123 });
+    // Con una ventana más corta (Parámetros), el lote del 1 de noviembre ya no está «por vencer».
+    expect(buildPharmacySummary(rows as any, 123, 15, now)).toEqual({ expired: 1, expiring: 0, ok: 2, lastUpdateAt: 123 });
   });
 });

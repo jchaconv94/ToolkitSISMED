@@ -144,7 +144,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
       figures={[
         { value: pharmacySummary.expired, label: "Lotes vencidos", text: "text-red-600", bar: "bg-red-400", module: "IPRESS_STOCK" },
         { value: pharmacySummary.expiring, label: "Por vencer", text: "text-amber-600", bar: "bg-amber-400", module: "IPRESS_STOCK" },
-        { value: pharmacySummary.empty, label: "Sin stock", text: "text-slate-600", bar: "bg-slate-300", module: "IPRESS_STOCK" },
+        { value: pharmacySummary.ok, label: "Al día", text: "text-emerald-600", bar: "bg-emerald-400", module: "IPRESS_STOCK" },
       ]}
     />
   ) : null;

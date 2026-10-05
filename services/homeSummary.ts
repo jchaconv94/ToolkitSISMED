@@ -5,8 +5,9 @@
  *
  *   - Red (permiso Claves de envío): cuántos establecimientos enviaron su stock hoy, con
  *     retraso o llevan más del umbral sin enviar (o nunca enviaron).
- *   - Farmacia (Stock SISMED con establecimiento): lotes vencidos, por vencer y medicamentos
- *     sin stock de su propia hoja, con las mismas reglas que la campanita y Stock SISMED.
+ *   - Farmacia (Stock SISMED con establecimiento): lotes vencidos, por vencer y al día de su
+ *     propia hoja, con la ventana de «por vencer» de Parámetros del Sistema (la misma regla que
+ *     la campanita y Stock SISMED). No hay «sin stock»: la hoja solo trae lotes con saldo.
  */
 
 import type { SendKeyRow } from "./sendKeys";
@@ -41,9 +42,10 @@ export const buildNetworkSummary = (keys: SendKeyRow[], devices: ToolkitDeviceRo
 
 export interface PharmacySummary {
   expired: number;
+  /** Vencen dentro de la ventana configurada (`expiryDays`). */
   expiring: number;
-  /** Medicamentos (no lotes) cuyo saldo total es cero. */
-  empty: number;
+  /** Con saldo y vencimiento más allá de la ventana (o sin fecha legible). */
+  ok: number;
   /** Última actualización de la hoja, en ms (0 si no se sabe). */
   lastUpdateAt: number;
 }
@@ -51,14 +53,13 @@ export interface PharmacySummary {
 export const buildPharmacySummary = (rows: StockRow[], lastUpdateAt: number, expiryDays: number, now: Date = new Date()): PharmacySummary => {
   let expired = 0;
   let expiring = 0;
-  const totals = new Map<string, number>();
+  let ok = 0;
   rows.forEach((row) => {
+    if (parseStockNumber(row.Saldo) <= 0) return;
     const state = getExpirationState(row, expiryDays, now);
     if (state === "EXPIRED") expired += 1;
     else if (state === "EXPIRING") expiring += 1;
-    const key = String(row.Id_Producto || row.Nombre || "").trim();
-    if (key) totals.set(key, (totals.get(key) || 0) + parseStockNumber(row.Saldo));
+    else ok += 1;
   });
-  const empty = Array.from(totals.values()).filter((total) => total <= 0).length;
-  return { expired, expiring, empty, lastUpdateAt };
+  return { expired, expiring, ok, lastUpdateAt };
 };
