@@ -269,6 +269,7 @@ La capa de componentes comunes **ya existe**. Antes existían cinco `HeaderCell`
 | Celda `<th>` de tabla | `TableHeaderCell` (`align?: left \| right \| center`) |
 | Ordenar una tabla tocando sus cabeceras (**toda tabla debe poder hacerlo**, pedido del usuario del 2026-10-05) | `useTableSort(filas, { clave: (fila) => valor }, { firstDir })` → `sorted` (ordenar antes de paginar) y `headSort(clave)` para `<TableHeaderCell sort={headSort("clave")}>`; para `<th>` propios, `SortButton` + `ariaSort`. Reglas puras y probadas en `services/tableSort.ts`: texto en español sin tildes, números naturales, vacíos al final, tercer toque sin orden |
 | Buscador de una tabla (ancho en todo el sistema, pedido del usuario del 2026-10-05) | `TableSearch` (`value`, `onChange`, `placeholder`); si el campo tiene lógica propia, su contenedor con `tableSearchBoxClass` |
+| Filtros de una tabla en el celular (patrón aprobado: buscador + botón de filtros + ⋯ con las acciones; nunca selects apilados bajo el buscador) | `MobileFilterButton` (abre un `BottomSheet`), dentro `SheetGroupTitle` y `SheetOption` (`active`, `label`, `count?`). Ejemplos: Claves de envío, Stock SISMED |
 | Campo de formulario con etiqueta | `FormField` (`label`, `required?`, `hint?`) |
 | Estado vacío | `EmptyState` |
 | Clase de `<input>` de formulario | `inputClass` (h-11) |

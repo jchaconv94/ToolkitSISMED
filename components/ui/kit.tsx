@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Lock, Package, Search, X, XCircle } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Lock, Package, Search, SlidersHorizontal, X, XCircle } from "lucide-react";
 import { SortHeadButton } from "./FloatingTableHead";
 import { SortDir, SortValue, TableSort, nextSort, sortRows } from "../../services/tableSort";
 
@@ -369,6 +369,30 @@ export const TableSearch: React.FC<{
       </button>
     )}
   </div>
+);
+
+/**
+ * Celular: botón cuadrado junto al buscador que abre los filtros en un `BottomSheet`
+ * (AGENTS.md §8). El punto teal avisa que hay algún filtro puesto.
+ */
+export const MobileFilterButton: React.FC<{ onClick: () => void; active?: boolean; className?: string }> = ({ onClick, active = false, className = "md:hidden" }) => (
+  <button type="button" onClick={onClick} aria-label="Filtros" className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 ${className}`}>
+    <SlidersHorizontal className="h-4 w-4" />
+    {active && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />}
+  </button>
+);
+
+/** Título de un grupo de opciones dentro de un `BottomSheet` de filtros. */
+export const SheetGroupTitle: React.FC<{ children: React.ReactNode; first?: boolean }> = ({ children, first = false }) => (
+  <p className={`mb-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400 ${first ? "" : "mt-4"}`}>{children}</p>
+);
+
+/** Opción de un `BottomSheet` de filtros: fila ancha, teal si está elegida, con su conteo. */
+export const SheetOption: React.FC<{ active: boolean; label: React.ReactNode; count?: number; onClick: () => void }> = ({ active, label, count, onClick }) => (
+  <button type="button" onClick={onClick} className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold ${active ? "bg-teal-50 text-teal-800" : "text-slate-700 hover:bg-slate-50"}`}>
+    <span className="min-w-0">{label}</span>
+    {count !== undefined && <span className={`shrink-0 text-[12px] font-bold ${active ? "text-teal-700" : "text-slate-400"}`}>{count}</span>}
+  </button>
 );
 
 /** Campo de formulario con su etiqueta y la marca de obligatorio. */

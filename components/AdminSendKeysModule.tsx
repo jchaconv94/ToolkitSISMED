@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronRight, Clock, Copy, Database, History, KeyRound,
-  Loader2, Monitor, MonitorSmartphone, RefreshCw, ShieldAlert, ShieldCheck, ShieldOff, SlidersHorizontal, Trash2, X,
+  Loader2, Monitor, MonitorSmartphone, RefreshCw, ShieldAlert, ShieldCheck, ShieldOff, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -17,7 +17,7 @@ import {
   mergeEstablishments, pendingAlerts, summarizeEstablishments, toolkitState,
 } from "../services/sendKeyEstablishments";
 import {
-  EmptyState, KpiCard, KpiStrip, TableHeaderCell, TableSearch, formatDate,
+  EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, TableHeaderCell, TableSearch, formatDate,
   filterInputClass, useTableSort,
 } from "./ui/kit";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
@@ -332,10 +332,7 @@ const EstablishmentsPanel: React.FC<{
         <div className="flex items-center gap-2 border-b border-slate-100 p-3 md:px-4">
           <TableSearch value={search} onChange={setSearch} placeholder="Buscar establecimiento, código o PC" />
           {/* Celular: un botón abre los filtros abajo. */}
-          <button type="button" onClick={() => setFiltersOpen(true)} aria-label="Filtros" className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 md:hidden">
-            <SlidersHorizontal className="h-4 w-4" />
-            {(filter !== "all" || sismedFilter !== "all") && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />}
-          </button>
+          <MobileFilterButton onClick={() => setFiltersOpen(true)} active={filter !== "all" || sismedFilter !== "all"} />
           <div className="ml-auto hidden gap-2 md:flex">
             <select value={filter} onChange={(e) => setFilter(e.target.value as EstablishmentFilter)} aria-label="Estado" className={`${filterInputClass} sm:w-60`}>
               {FILTER_ORDER.map((f) => (
@@ -354,13 +351,13 @@ const EstablishmentsPanel: React.FC<{
         </div>
 
         <BottomSheet open={filtersOpen} title="Filtros" onClose={() => setFiltersOpen(false)}>
-          <p className="mb-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400">Estado</p>
+          <SheetGroupTitle first>Estado</SheetGroupTitle>
           <div className="space-y-1">
             {FILTER_ORDER.map((f) => (
               <SheetOption key={f} active={filter === f} label={f === "all" ? "Todos" : ESTABLISHMENT_FILTER_LABEL[f]} count={summary.counts[f]} onClick={() => { setFilter(f); setFiltersOpen(false); }} />
             ))}
           </div>
-          <p className="mb-1.5 mt-4 text-[11px] font-black uppercase tracking-wider text-slate-400">Versión del SISMED</p>
+          <SheetGroupTitle>Versión del SISMED</SheetGroupTitle>
           <div className="space-y-1">
             {([["all", "Todas"], ["outdated", "Desactualizado"], ...sismedVersions.map((v) => [`v:${v}`, `v${v}${v === latestSismed ? " (vigente)" : ""}`]), ["none", "Sin dato"]] as Array<[SismedFilter, string]>).map(([value, label]) => (
               <SheetOption key={value} active={sismedFilter === value} label={label} onClick={() => { setSismedFilter(value); setFiltersOpen(false); }} />
@@ -506,13 +503,6 @@ const EstablishmentsPanel: React.FC<{
 };
 
 /** Una opción de filtro en el panel inferior del celular. */
-const SheetOption: React.FC<{ active: boolean; label: string; count?: number; onClick: () => void }> = ({ active, label, count, onClick }) => (
-  <button type="button" onClick={onClick} className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-[14px] font-semibold ${active ? "bg-teal-50 text-teal-800" : "text-slate-700 hover:bg-slate-50"}`}>
-    <span>{label}</span>
-    {count !== undefined && <span className={`text-[12px] font-bold ${active ? "text-teal-700" : "text-slate-400"}`}>{count}</span>}
-  </button>
-);
-
 const POPOVER_WIDTH = 280;
 
 /**
