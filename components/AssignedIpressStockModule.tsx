@@ -7,6 +7,7 @@ import {
   CalendarClock,
   Clock,
   Download,
+  MoreHorizontal,
   Package,
   RefreshCw,
   Search,
@@ -37,7 +38,8 @@ import {
 import { consolidateStockRows } from "../services/stockConsolidation";
 import { CustomSelect } from "./ui/CustomSelect";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
-import { EmptyState, KpiCard, KpiStrip, TableHeaderCell as HeaderCell, filterInputClass, tableSearchBoxClass, useTableSort } from "./ui/kit";
+import { EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, TableHeaderCell as HeaderCell, filterInputClass, tableSearchBoxClass, useTableSort } from "./ui/kit";
+import { BottomSheet } from "./ui/BottomSheet";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
 import { TablePagination } from "./ui/TablePagination";
@@ -50,6 +52,14 @@ import {
 import { StockAssignment } from "../types";
 
 type ExpirationFilter = "ALL" | "EXPIRED" | "EXPIRING";
+
+/** Las dos formas de exportar una hoja que trae varias farmacias. */
+const EXPORT_OPTIONS = [
+  { modo: "consolidado" as const, title: "Consolidado", detail: "Sumar el stock de todas las farmacias", icon: <Layers className="h-4 w-4" /> },
+  { modo: "detallado" as const, title: "Por farmacia", detail: "Stock de cada farmacia", icon: <Building2 className="h-4 w-4" /> },
+];
+
+const SHEET_ACTION_CLASS = "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40";
 
 const normalizeKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -85,6 +95,9 @@ export const AssignedIpressStockModule: React.FC = () => {
   /** Farmacia elegida cuando la hoja trae varias (la IPRESS y sus farmacias o puestos comunales). */
   const [pharmacyFilter, setPharmacyFilter] = useState("all");
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  /** Celular: panel inferior de filtros y el de acciones (⋯). */
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   /** Ventana de «por vencer» y días sin actualizar: los mismos parámetros que usa la campana. */
   const [thresholds, setThresholds] = useState<NoticeThresholds>(DEFAULT_NOTICE_THRESHOLDS);
   const expiryDays = thresholds.expiryDays;
@@ -167,6 +180,8 @@ export const AssignedIpressStockModule: React.FC = () => {
   const almcodOf = (row: StockRow) => String(row.ALMCOD ?? "");
   const pharmacies = useMemo(() => pharmaciesInRows(rows, almcodOf, facilities), [rows, facilities]);
   const hasPharmacies = pharmacies.length > 1;
+  /** Con todas las farmacias a la vista, Exportar pregunta: consolidado o por farmacia. */
+  const exportByPharmacy = hasPharmacies && pharmacyFilter === "all";
   useEffect(() => {
     if (pharmacyFilter !== "all" && !pharmacies.some(p => p.code === pharmacyFilter)) setPharmacyFilter("all");
   }, [pharmacies, pharmacyFilter]);
@@ -313,10 +328,11 @@ export const AssignedIpressStockModule: React.FC = () => {
             <KpiCard watermark tone={isStale ? "warning" : "neutral"} icon={<CalendarClock />} label="Última actualización" value={updateDate || "—"} hint={lastUpdateAt ? `${updateTime ? `a las ${updateTime.slice(0, 5)} · ` : ""}${noticeWhen(lastUpdateAt)}` : "sin fecha en la hoja"} />
           </KpiStrip>
 
-          {/* En el celular la barra (buscador, establecimiento, acciones) se queda arriba al bajar,
-              como en los demás módulos: por eso la tarjeta no recorta su contenido en el celular. */}
+          {/* En el celular la barra se queda arriba al bajar, como en los demás módulos (por eso
+              la tarjeta no recorta su contenido en el celular), y sigue el patrón aprobado:
+              buscador, botón de filtros que abre el panel inferior y ⋯ con las acciones. */}
           <section className="rounded-2xl border border-slate-200 bg-white shadow-sm md:overflow-hidden">
-            <div className="sticky -top-2.5 z-20 flex flex-wrap items-center gap-2 rounded-t-2xl border-b border-slate-100 bg-white p-3 sm:flex-nowrap sm:p-4 md:static">
+            <div className="sticky -top-2.5 z-20 flex items-center gap-2 rounded-t-2xl border-b border-slate-100 bg-white p-3 sm:p-4 md:static">
               <label className={tableSearchBoxClass}>
                 <span className="sr-only">Buscar en el stock</span>
                 <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
@@ -325,8 +341,12 @@ export const AssignedIpressStockModule: React.FC = () => {
                   <button type="button" onClick={() => setSearch("")} aria-label="Limpiar búsqueda" className="absolute right-2 top-2.5 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>
                 )}
               </label>
+              <MobileFilterButton className="sm:hidden" onClick={() => setFiltersOpen(true)} active={pharmacyFilter !== "all" || expirationFilter !== "ALL"} />
+              <button type="button" onClick={() => setActionsOpen(true)} aria-label="Más acciones" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 sm:hidden">
+                {loading ? <RefreshCw className="h-4 w-4 animate-spin text-teal-600" /> : <MoreHorizontal className="h-5 w-5" />}
+              </button>
               {hasPharmacies && (
-                <div className="order-last w-full sm:order-none sm:w-72 sm:shrink-0">
+                <div className="hidden w-72 shrink-0 sm:block">
                 <CustomSelect
                   value={pharmacyFilter}
                   onChange={value => { setPharmacyFilter(value || "all"); setPage(1); }}
@@ -339,29 +359,26 @@ export const AssignedIpressStockModule: React.FC = () => {
                 />
                 </div>
               )}
-              <span className="ml-auto" />
-              <button type="button" onClick={() => void loadStock(true)} disabled={loading || !facilityCode} aria-label="Actualizar" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
-                <RefreshCw className={`h-4 w-4 text-teal-600 ${loading ? "animate-spin" : ""}`} /><span className="hidden sm:inline">Actualizar</span>
+              <span className="ml-auto hidden sm:block" />
+              <button type="button" onClick={() => void loadStock(true)} disabled={loading || !facilityCode} aria-label="Actualizar" className="hidden h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:inline-flex">
+                <RefreshCw className={`h-4 w-4 text-teal-600 ${loading ? "animate-spin" : ""}`} />Actualizar
               </button>
-              <div className="relative shrink-0">
+              <div className="relative hidden shrink-0 sm:block">
                 <button
                   type="button"
-                  onClick={() => (hasPharmacies && pharmacyFilter === "all" ? setExportMenuOpen(open => !open) : exportStock())}
+                  onClick={() => (exportByPharmacy ? setExportMenuOpen(open => !open) : exportStock())}
                   aria-label="Exportar a Excel"
-                  aria-expanded={hasPharmacies && pharmacyFilter === "all" ? exportMenuOpen : undefined}
+                  aria-expanded={exportByPharmacy ? exportMenuOpen : undefined}
                   className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
                 >
-                  <Download className="h-4 w-4 text-emerald-600" /><span className="hidden sm:inline">Exportar</span>
-                  {hasPharmacies && pharmacyFilter === "all" && <ChevronDown className="h-4 w-4 text-slate-400" />}
+                  <Download className="h-4 w-4 text-emerald-600" />Exportar
+                  {exportByPharmacy && <ChevronDown className="h-4 w-4 text-slate-400" />}
                 </button>
                 {exportMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-20" onClick={() => setExportMenuOpen(false)} />
                     <div className="absolute right-0 z-30 mt-1 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
-                      {[
-                        { modo: "consolidado" as const, title: "Consolidado", detail: "Sumar el stock de todas las farmacias", icon: <Layers className="h-4 w-4" /> },
-                        { modo: "detallado" as const, title: "Por farmacia", detail: "Stock de cada farmacia", icon: <Building2 className="h-4 w-4" /> },
-                      ].map(opcion => (
+                      {EXPORT_OPTIONS.map(opcion => (
                         <button key={opcion.modo} type="button" onClick={() => exportStock(opcion.modo)} className="flex w-full items-start gap-3 px-3 py-2.5 text-left hover:bg-slate-50">
                           <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600">{opcion.icon}</span>
                           <span>
@@ -375,6 +392,51 @@ export const AssignedIpressStockModule: React.FC = () => {
                 )}
               </div>
             </div>
+
+            <BottomSheet open={filtersOpen} title="Filtros" onClose={() => setFiltersOpen(false)}>
+              {hasPharmacies && (
+                <>
+                  <SheetGroupTitle first>Establecimiento</SheetGroupTitle>
+                  <div className="space-y-1">
+                    <SheetOption active={pharmacyFilter === "all"} label="Todos los establecimientos" count={rows.length} onClick={() => { setPharmacyFilter("all"); setPage(1); setFiltersOpen(false); }} />
+                    {pharmacies.map(p => (
+                      <SheetOption
+                        key={p.code}
+                        active={pharmacyFilter === p.code}
+                        label={<><span className="block">{p.name || "Sin registrar"}</span><span className="block font-mono text-[12px] font-bold text-slate-400">{p.code}</span></>}
+                        count={p.rows}
+                        onClick={() => { setPharmacyFilter(p.code); setPage(1); setFiltersOpen(false); }}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+              <SheetGroupTitle first={!hasPharmacies}>Vencimiento</SheetGroupTitle>
+              <div className="space-y-1">
+                <SheetOption active={expirationFilter === "ALL"} label="Todos los lotes" count={metrics.lots} onClick={() => { setExpirationFilter("ALL"); setFiltersOpen(false); }} />
+                <SheetOption active={expirationFilter === "EXPIRING"} label={`Por vencer (${expiryDays} días)`} count={metrics.expiring} onClick={() => { setExpirationFilter("EXPIRING"); setFiltersOpen(false); }} />
+                <SheetOption active={expirationFilter === "EXPIRED"} label="Vencidos" count={metrics.expired} onClick={() => { setExpirationFilter("EXPIRED"); setFiltersOpen(false); }} />
+              </div>
+            </BottomSheet>
+
+            <BottomSheet open={actionsOpen} title="Acciones" onClose={() => setActionsOpen(false)}>
+              <div className="space-y-1">
+                <button type="button" disabled={loading || !facilityCode} onClick={() => { setActionsOpen(false); void loadStock(true); }} className={SHEET_ACTION_CLASS}>
+                  <RefreshCw className="h-5 w-5 text-teal-600" />
+                  {loading ? "Actualizando..." : "Actualizar"}
+                </button>
+                <p className="px-3 pb-1 pt-3 text-[11px] font-black uppercase tracking-wider text-slate-400">Descargar</p>
+                {(exportByPharmacy ? EXPORT_OPTIONS : [{ modo: undefined, title: "Exportar a Excel", detail: "Stock de la hoja", icon: <Download className="h-4 w-4" /> }]).map(opcion => (
+                  <button key={opcion.title} type="button" onClick={() => { setActionsOpen(false); exportStock(opcion.modo); }} className={SHEET_ACTION_CLASS}>
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600">{opcion.icon}</span>
+                    <span className="min-w-0">
+                      <span className="block">{opcion.title}</span>
+                      <span className="block text-xs font-medium text-slate-400">{opcion.detail}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </BottomSheet>
 
             {expirationFilter !== "ALL" && (
               <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2 text-xs font-semibold text-slate-600">

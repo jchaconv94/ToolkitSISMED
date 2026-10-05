@@ -133,7 +133,7 @@ import {
 import { noticeSettingsApi } from "../services/noticeSettings";
 import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
 import { getExpirationState, parseExpiryDate } from "../services/assignedIpressStock";
-import { KpiCard, KpiStrip, SortButton, StatusChip, ariaSort, useTableSort } from "./ui/kit";
+import { KpiCard, KpiStrip, SheetOption, SortButton, StatusChip, ariaSort, useTableSort } from "./ui/kit";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
 import type { StockSearchScope } from "./StockNetworkSearchModal";
 import { TablePagination } from "./ui/TablePagination";
@@ -6021,7 +6021,7 @@ function processSheet(sheet) {
               : "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:static sm:pt-0 sm:pb-4"
         }`}>
           {/* Search & Actions */}
-          <div className="flex flex-wrap gap-3 items-center justify-between w-full flex-row md:flex-nowrap">
+          <div className="flex flex-nowrap gap-3 items-center justify-between w-full flex-row">
             <div className="relative min-w-0 flex-1 w-full group">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
@@ -6292,7 +6292,8 @@ function processSheet(sheet) {
                       {(dataFilterTipsum !== "all" ||
                         dataFilterFFinan !== "all" ||
                         dataFilterStock !== "all" ||
-                        dataFilterExpiration !== "all") && (
+                        dataFilterExpiration !== "all" ||
+                        dataFilterPharmacy !== "all") && (
                         <span className="absolute top-0 right-0 -mr-1 -mt-1 w-2.5 h-2.5 bg-teal-500 rounded-full border-2 border-white animate-pulse" />
                       )}
                     </button>
@@ -6321,7 +6322,7 @@ function processSheet(sheet) {
               </button>
             )}
             {viewLevel === "data" && hojaConPuestosComunales && (
-              <div className="order-last w-full md:order-none md:w-72 shrink-0">
+              <div className="hidden md:block md:w-72 shrink-0">
                 <CustomSelect
                   value={dataFilterPharmacy}
                   onChange={setDataFilterPharmacy}
@@ -7644,6 +7645,27 @@ function processSheet(sheet) {
             <div className="flex-1 p-6 space-y-6">
               {viewLevel === "data" ? (
                 <div className="space-y-6">
+                  {/* Celular: el filtro por establecimiento de las hojas con puestos comunales
+                      va aquí (en escritorio está en la barra, junto al buscador). */}
+                  {hojaConPuestosComunales && (
+                    <div className="space-y-3 md:hidden">
+                      <div className="flex items-center gap-2">
+                        <div className="w-1.5 h-3 bg-teal-500 rounded-full" />
+                        <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-wider">Establecimiento</h4>
+                      </div>
+                      <div className="space-y-1 rounded-2xl border border-slate-200/60 bg-white p-1.5">
+                        <SheetOption active={dataFilterPharmacy === "all"} label="Todos los establecimientos" onClick={() => setDataFilterPharmacy("all")} />
+                        {farmaciasDeLaHoja.map((farmacia) => (
+                          <SheetOption
+                            key={farmacia.code}
+                            active={dataFilterPharmacy === farmacia.code}
+                            label={<><span className="block">{farmacia.name || (farmacia.unregistered ? "Puesto sin registrar" : "Sin registrar")}</span><span className="block font-mono text-[12px] font-bold text-slate-400">{farmacia.code}</span></>}
+                            onClick={() => setDataFilterPharmacy(farmacia.code)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {/* Estado de Vencimiento */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between w-full">
@@ -8760,6 +8782,7 @@ function processSheet(sheet) {
                     setDataFilterExpiration("all");
                     setDataFilterExpMonth("all");
                     setDataFilterExpYear("all");
+                    setDataFilterPharmacy("all");
                   } else {
                     setFilter_CS(true);
                     setFilter_PS(true);
