@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  Building2,
+  ChevronDown,
+  Layers,
   CalendarClock,
   Clock,
   Download,
@@ -26,9 +29,13 @@ import {
 } from "../services/assignedIpressStock";
 import {
   describePharmacyCode,
+  pharmaciesInRows,
+  rowMatchesPharmacy,
   showsPharmacyColumn,
   type FacilitySheetLink,
 } from "../services/facilitySheetLink";
+import { consolidateStockRows } from "../services/stockConsolidation";
+import { CustomSelect } from "./ui/CustomSelect";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import { EmptyState, KpiCard, KpiStrip, TableHeaderCell as HeaderCell, filterInputClass, tableSearchBoxClass, useTableSort } from "./ui/kit";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
@@ -75,6 +82,9 @@ export const AssignedIpressStockModule: React.FC = () => {
   const [lastUpdateAt, setLastUpdateAt] = useState(0);
   /** Puesto comunal cuya hoja llega consolidada: se muestra la de toda su IPRESS, con aviso. */
   const [consolidated, setConsolidated] = useState(false);
+  /** Farmacia elegida cuando la hoja trae varias (la IPRESS y sus farmacias o puestos comunales). */
+  const [pharmacyFilter, setPharmacyFilter] = useState("all");
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   /** Ventana de «por vencer» y días sin actualizar: los mismos parámetros que usa la campana. */
   const [thresholds, setThresholds] = useState<NoticeThresholds>(DEFAULT_NOTICE_THRESHOLDS);
   const expiryDays = thresholds.expiryDays;
@@ -152,20 +162,33 @@ export const AssignedIpressStockModule: React.FC = () => {
     return selected.length > 0 ? selected : STOCK_COLUMNS.filter(column => DEFAULT_STOCK_COLUMN_KEYS.includes(column.key));
   }, [assignment]);
 
+  // La IPRESS ve en su hoja a todas sus farmacias y puestos comunales: se puede elegir una.
+  // Mismas reglas que el filtro por establecimiento de Consulta Stock (facilitySheetLink).
+  const almcodOf = (row: StockRow) => String(row.ALMCOD ?? "");
+  const pharmacies = useMemo(() => pharmaciesInRows(rows, almcodOf, facilities), [rows, facilities]);
+  const hasPharmacies = pharmacies.length > 1;
+  useEffect(() => {
+    if (pharmacyFilter !== "all" && !pharmacies.some(p => p.code === pharmacyFilter)) setPharmacyFilter("all");
+  }, [pharmacies, pharmacyFilter]);
+  const scopedRows = useMemo(
+    () => (pharmacyFilter === "all" ? rows : rows.filter(row => rowMatchesPharmacy(almcodOf(row), pharmacyFilter))),
+    [rows, pharmacyFilter],
+  );
+
   const filteredRows = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("es");
-    return rows.filter(row => {
+    return scopedRows.filter(row => {
       if (expirationFilter !== "ALL" && getExpirationState(row, expiryDays) !== expirationFilter) return false;
       if (!query) return true;
       return visibleColumns.some(column => String(row[column.key] ?? "").toLocaleLowerCase("es").includes(query));
     });
-  }, [rows, search, visibleColumns, expirationFilter, expiryDays]);
+  }, [scopedRows, search, visibleColumns, expirationFilter, expiryDays]);
 
   const metrics = useMemo(() => ({
-    lots: rows.length,
-    expiring: rows.filter(row => getExpirationState(row, expiryDays) === "EXPIRING").length,
-    expired: rows.filter(row => getExpirationState(row, expiryDays) === "EXPIRED").length
-  }), [rows, expiryDays]);
+    lots: scopedRows.length,
+    expiring: scopedRows.filter(row => getExpirationState(row, expiryDays) === "EXPIRING").length,
+    expired: scopedRows.filter(row => getExpirationState(row, expiryDays) === "EXPIRED").length
+  }), [scopedRows, expiryDays]);
 
   const allowedKeys = useMemo(() => new Set(visibleColumns.map(column => column.key)), [visibleColumns]);
   const canShow = (key: string) => allowedKeys.has(key);
@@ -176,19 +199,35 @@ export const AssignedIpressStockModule: React.FC = () => {
    * envío consolidado sería una constante repetida.
    */
   const showsPharmacy = useMemo(
-    () => showsPharmacyColumn(rows, row => String(row.ALMCOD ?? "")),
-    [rows],
+    () => showsPharmacyColumn(scopedRows, row => String(row.ALMCOD ?? "")),
+    [scopedRows],
   );
   const pharmacyLabelOf = (row: StockRow) => describePharmacyCode(String(row.ALMCOD ?? ""), facilities);
 
-  const exportStock = () => {
+  /**
+   * Excel del stock filtrado en pantalla.
+   * - `"detallado"`: una fila por farmacia y lote; con varias farmacias es «Por farmacia» y va
+   *   ordenado por farmacia (la IPRESS primero, luego cada farmacia o puesto).
+   * - `"consolidado"`: las farmacias de la IPRESS sumadas con la regla del ToolKit de
+   *   escritorio (`services/stockConsolidation.ts`), la misma de Consulta Stock.
+   */
+  const exportStock = (modo: "detallado" | "consolidado" = "detallado") => {
+    setExportMenuOpen(false);
     if (filteredRows.length === 0) {
       toast.info("No hay registros para exportar");
       return;
     }
-    const exportRows = filteredRows.map(row => Object.fromEntries([
+    const orden = new Map(pharmacies.map((p, i) => [p.code, i]));
+    const posicion = (row: StockRow) => orden.get(pharmacyLabelOf(row).code) ?? orden.size;
+    const filas = modo === "consolidado"
+      ? consolidateStockRows(filteredRows, almcodOf)
+      : showsPharmacy
+        ? filteredRows.map((row, i) => ({ row, i })).sort((a, b) => posicion(a.row) - posicion(b.row) || a.i - b.i).map(({ row }) => row)
+        : filteredRows;
+    const conFarmacia = modo === "detallado" && showsPharmacy;
+    const exportRows = filas.map(row => Object.fromEntries([
       // Igual que en pantalla: solo cuando hay más de una farmacia en la hoja.
-      ...(showsPharmacy
+      ...(conFarmacia
         ? [["Código IPRESS", pharmacyLabelOf(row).code], ["Farmacia", pharmacyLabelOf(row).name]]
         : []),
       ...visibleColumns.map(column => [column.label, row[column.key] ?? ""])
@@ -197,7 +236,10 @@ export const AssignedIpressStockModule: React.FC = () => {
     worksheet["!cols"] = visibleColumns.map(column => ({ wch: column.key === "Nombre" ? 48 : 18 }));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Stock SISMED");
-    XLSX.writeFile(workbook, `STOCK_SISMED_${facilityCode || "IPRESS"}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const alcance = pharmacyFilter !== "all"
+      ? pharmacyFilter
+      : `${facilityCode || "IPRESS"}${hasPharmacies ? (modo === "consolidado" ? "_CONSOLIDADO" : "_POR_FARMACIA") : ""}`;
+    XLSX.writeFile(workbook, `STOCK_SISMED_${alcance}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const [updateDate, updateTime] = lastUpdate.split(" ");
@@ -272,7 +314,7 @@ export const AssignedIpressStockModule: React.FC = () => {
           </KpiStrip>
 
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center gap-2 border-b border-slate-100 p-3 sm:p-4">
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3 sm:flex-nowrap sm:p-4">
               <label className={tableSearchBoxClass}>
                 <span className="sr-only">Buscar en el stock</span>
                 <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
@@ -281,13 +323,55 @@ export const AssignedIpressStockModule: React.FC = () => {
                   <button type="button" onClick={() => setSearch("")} aria-label="Limpiar búsqueda" className="absolute right-2 top-2.5 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>
                 )}
               </label>
+              {hasPharmacies && (
+                <div className="order-last w-full sm:order-none sm:w-72 sm:shrink-0">
+                <CustomSelect
+                  value={pharmacyFilter}
+                  onChange={value => { setPharmacyFilter(value || "all"); setPage(1); }}
+                  ariaLabel="Establecimiento"
+                  options={[
+                    { value: "all", label: "Todos los establecimientos" },
+                    ...pharmacies.map(p => ({ value: p.code, label: `${p.code} · ${p.name || "Sin registrar"} (${p.rows})` })),
+                  ]}
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700"
+                />
+                </div>
+              )}
               <span className="ml-auto" />
               <button type="button" onClick={() => void loadStock(true)} disabled={loading || !facilityCode} aria-label="Actualizar" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
                 <RefreshCw className={`h-4 w-4 text-teal-600 ${loading ? "animate-spin" : ""}`} /><span className="hidden sm:inline">Actualizar</span>
               </button>
-              <button type="button" onClick={exportStock} aria-label="Exportar a Excel" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50">
-                <Download className="h-4 w-4 text-emerald-600" /><span className="hidden sm:inline">Exportar</span>
-              </button>
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => (hasPharmacies && pharmacyFilter === "all" ? setExportMenuOpen(open => !open) : exportStock())}
+                  aria-label="Exportar a Excel"
+                  aria-expanded={hasPharmacies && pharmacyFilter === "all" ? exportMenuOpen : undefined}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  <Download className="h-4 w-4 text-emerald-600" /><span className="hidden sm:inline">Exportar</span>
+                  {hasPharmacies && pharmacyFilter === "all" && <ChevronDown className="h-4 w-4 text-slate-400" />}
+                </button>
+                {exportMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setExportMenuOpen(false)} />
+                    <div className="absolute right-0 z-30 mt-1 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                      {[
+                        { modo: "consolidado" as const, title: "Consolidado", detail: "Sumar el stock de todas las farmacias", icon: <Layers className="h-4 w-4" /> },
+                        { modo: "detallado" as const, title: "Por farmacia", detail: "Stock de cada farmacia", icon: <Building2 className="h-4 w-4" /> },
+                      ].map(opcion => (
+                        <button key={opcion.modo} type="button" onClick={() => exportStock(opcion.modo)} className="flex w-full items-start gap-3 px-3 py-2.5 text-left hover:bg-slate-50">
+                          <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600">{opcion.icon}</span>
+                          <span>
+                            <span className="block text-[13px] font-black uppercase tracking-wide text-slate-800">{opcion.title}</span>
+                            <span className="block text-[11.5px] text-slate-500">{opcion.detail}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             {expirationFilter !== "ALL" && (
