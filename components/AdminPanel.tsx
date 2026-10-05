@@ -1210,10 +1210,10 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
     <>
     {/* Usuarios (rediseño 2026-10-04): sin el título grande, que repetía la cabecera, ni el
         recuadro alrededor de la lista; las demás pestañas conservan su marco por ahora. */}
-    <div className={(activeTab === 'USERS' || activeTab === 'ROLES' || activeTab === 'PARAMS')
+    <div className={(activeTab === 'USERS' || activeTab === 'ROLES' || activeTab === 'PARAMS' || activeTab === 'CATALOGS')
         ? "max-w-[1700px] mx-auto pb-24 pt-1 md:pb-6 md:pt-4 animate-in fade-in"
         : "max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in slide-in-from-bottom-4"}>
-        {activeTab !== 'USERS' && activeTab !== 'ROLES' && activeTab !== 'PARAMS' && (
+        {activeTab !== 'USERS' && activeTab !== 'ROLES' && activeTab !== 'PARAMS' && activeTab !== 'CATALOGS' && (
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-100 pb-5">
             <div>
                 <h2 className="text-3xl font-black text-gray-900 tracking-tight">{headerInfo.title}</h2>
@@ -1224,7 +1224,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
 
         <div className="flex flex-col lg:flex-row gap-8 items-start">
             {/* Premium Spacious Content Container */}
-            <div className={(activeTab === 'USERS' || activeTab === 'ROLES' || activeTab === 'PARAMS')
+            <div className={(activeTab === 'USERS' || activeTab === 'ROLES' || activeTab === 'PARAMS' || activeTab === 'CATALOGS')
                 ? "flex-1 min-w-0 w-full"
                 : "flex-1 bg-white rounded-2xl shadow-[0_5px_30px_rgba(0,0,0,0.018)] border border-gray-200/80 p-6 sm:p-8 overflow-hidden min-w-0 w-full animate-in fade-in duration-300"}>
                 {activeTab === 'USERS' && (() => {
@@ -2124,7 +2124,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                      <AdminOrganizationModule />
                 )}
                 {activeTab === 'CATALOGS' && (
-                     <AdminCatalogsModule onChanged={refreshCatalogs} />
+                     <AdminCatalogsModule onChanged={refreshCatalogs} users={scopedUsers} />
                 )}
             </div>
         </div>
