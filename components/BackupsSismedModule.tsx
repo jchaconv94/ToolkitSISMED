@@ -8,7 +8,7 @@ import { useBackupManager } from "../contexts/BackupManagerContext";
 import { backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import {
   ActivityItem, ActivityKind, BackupActivityRow, BackupOverviewRow, BackupRowView, SHOW_FILTER_LABEL, ShowFilter,
-  activityFromRequest, buildBackupRows, filterBackupRows, isActive, limaDay, planState, showFilterCounts, summarizeBackups, whoLabel,
+  activityFromRequest, buildBackupRows, lastConnectionLabel, filterBackupRows, isActive, limaDay, planState, showFilterCounts, summarizeBackups, whoLabel,
   BACKUPS_TAB_EVENT, takeRequestedBackupsTab,
 } from "../services/backupModule";
 import { relativeTime } from "../services/sendKeys";
@@ -94,7 +94,11 @@ const Signal: React.FC<{ row: BackupRowView; align?: "left" | "right" }> = ({ ro
     {row.online
       ? <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-500" />En línea</span>
       : <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-slate-400"><WifiOff className="h-3.5 w-3.5" />Desconectada</span>}
-    <div className="text-[11px] text-slate-400">{row.online && row.lastSeen ? relativeTime(new Date(row.lastSeen).toISOString()) : "—"}</div>
+    <div className="text-[11px] text-slate-400">
+      {row.lastSeen
+        ? row.online ? relativeTime(new Date(row.lastSeen).toISOString()) : `Últ. conexión: ${lastConnectionLabel(row.lastSeen)}`
+        : "—"}
+    </div>
   </div>
 );
 
@@ -141,7 +145,10 @@ export const BackupsSismedModule: React.FC = () => {
   useEffect(() => { void load(); }, [load, manager.version]);
 
   const paused = manager.usage?.level === "paused";
-  const rows = useMemo(() => buildBackupRows(overview, manager.online, manager.jobs, paused), [overview, manager.online, manager.jobs, paused]);
+  const rows = useMemo(
+    () => buildBackupRows(overview, manager.online, manager.jobs, paused, Date.now(), manager.seen),
+    [overview, manager.online, manager.jobs, paused, manager.seen],
+  );
   const summary = useMemo(() => summarizeBackups(rows), [rows]);
   const counts = useMemo(() => showFilterCounts(rows), [rows]);
   const filtered = useMemo(() => filterBackupRows(rows, search, filter), [rows, search, filter]);
@@ -307,7 +314,7 @@ export const BackupsSismedModule: React.FC = () => {
                               <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
                             </td>
                             <td className="px-4 py-2">
-                              {row.equipo ? <><div className="font-semibold text-slate-700">{row.equipo}</div><div className="font-mono text-[11px] text-slate-400">Toolkit v{row.version || "?"}</div></> : <span className="text-slate-400">—</span>}
+                              {row.equipo ? <><div className={`font-semibold ${row.online ? "text-slate-700" : "text-slate-500"}`}>{row.equipo}</div><div className="font-mono text-[11px] text-slate-400">Toolkit v{row.version || "?"}</div></> : <span className="text-slate-400">—</span>}
                             </td>
                             <td className="px-4 py-2"><Signal row={row} /></td>
                             <td className="px-4 py-2">{chip ? <StatusChip label={chip.label} tone={chip.tone} /> : <span className="text-slate-300">—</span>}</td>
@@ -335,6 +342,7 @@ export const BackupsSismedModule: React.FC = () => {
                             <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
                             <div className="truncate font-black text-slate-800">{row.name}</div>
                             {row.equipo && <div className="truncate text-[11.5px] text-slate-400">{row.equipo} · Toolkit v{row.version || "?"}</div>}
+                            {!row.online && row.lastSeen && <div className="truncate text-[11.5px] text-slate-400">Últ. conexión: {lastConnectionLabel(row.lastSeen)}</div>}
                           </div>
                           {chip ? <StatusChip label={chip.label} tone={chip.tone} /> : row.online
                             ? <span className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-500" />En línea</span>

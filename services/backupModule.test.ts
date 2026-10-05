@@ -4,10 +4,11 @@ vi.mock("./supabaseClient", () => ({ supabase: null }));
 vi.mock("./api", () => ({ getSessionToken: () => null }));
 
 import {
-  BackupOverviewRow, activityFromRequest, buildBackupRows, filterBackupRows, limaDay, planState, showFilterCounts,
+  BackupOverviewRow, activityFromRequest, buildBackupRows, filterBackupRows, lastConnectionLabel, limaDay, planState, showFilterCounts,
   summarizeBackups, whoLabel,
 } from "./backupModule";
 import type { OnlinePc, UsageReading } from "./backupConnection";
+import { applySeen } from "./backupConnection";
 
 const ahora = Date.parse("2026-10-02T15:00:00Z"); // 10:00 en Perú
 const hace = (dias: number) => new Date(ahora - dias * 86400000).toISOString();
@@ -84,5 +85,30 @@ describe("plan gratuito y actividad", () => {
       .toBe("06519 · BKDA202610021300.zip (8.3 MB) · lo descargó bellavista");
     expect(activityFromRequest({ id: "2", code: "030S05", username: "admin", status: "FAILED", reason: "No hay backups", at: hace(0) }, "admin"))
       .toMatchObject({ kind: "warning", text: "030S05 · falló: No hay backups · lo pediste tú" });
+  });
+});
+
+describe("última conexión de las PC desconectadas", () => {
+  it("se muestra con fecha y hora de Perú", () => {
+    expect(lastConnectionLabel(ahora - 2 * 3600_000, ahora)).toBe("Hoy 08:00");
+    expect(lastConnectionLabel(ahora - 86400000, ahora)).toBe("Ayer 10:00");
+    expect(lastConnectionLabel(Date.parse("2026-09-28T13:15:00Z"), ahora)).toBe("28/09/2026 08:15");
+  });
+
+  it("la fila desconectada toma la última conexión y su equipo; la conectada, los suyos", () => {
+    const seen = { [lista[1].code]: { code: lista[1].code, equipo: "PC-VIEJA", version: "2.2.3", at: ahora - 3600_000 } };
+    const rows = buildBackupRows(lista, [pc(lista[0].code, "PC-NUEVA")], {}, false, ahora, seen);
+    const off = rows.find((r) => r.code === lista[1].code)!;
+    expect(off).toMatchObject({ online: false, equipo: "PC-VIEJA", lastSeen: ahora - 3600_000, canDownload: false });
+    expect(rows.find((r) => r.code === lista[0].code)).toMatchObject({ online: true, equipo: "PC-NUEVA" });
+  });
+
+  it("una desconexión con hora la anota; una conexión no la toca", () => {
+    const antes = { A: { code: "A", equipo: "PC1", version: "2.2.4", at: 1 } };
+    expect(applySeen(antes, { t: "presence", online: true, codes: ["A"] })).toBe(antes);
+    expect(applySeen(antes, { t: "presence", online: false, codes: ["A", "B"], equipo: "PC2", at: 50 })).toEqual({
+      A: { code: "A", equipo: "PC2", version: "2.2.4", at: 50 },
+      B: { code: "B", equipo: "PC2", version: "", at: 50 },
+    });
   });
 });

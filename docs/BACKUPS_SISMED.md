@@ -193,6 +193,12 @@ Diseño aprobado el 2026-10-02 con prototipos. Administración → **Backups SIS
 - **SQL:** `supabase/SUPABASE_BACKUPS_MODULO.sql` (permiso del módulo, lista, actividad y
   resumen del mes).
 - Se retiró la pestaña «Conexión (prueba)» de Claves de envío.
+- **Última conexión (2026-10-05):** debajo de «Desconectada» se ve la fecha y hora en que se
+  supo de la PC por última vez («Hoy 10:31», «Ayer 17:40», «28/09/2026 08:15»), y el equipo
+  que estaba conectado. El servicio la anota en `seen:<código>` del Durable Object cuando la
+  PC se desconecta (su último ping; una escritura por desconexión) y la manda en `list` como
+  `seen` y en `presence` como `at`. Antes de esto solo conocía las PC conectadas: los
+  establecimientos que no se han desconectado desde que se publicó siguen con «—».
 
 Probado en local de punta a punta (web real en el navegador, servicio real, SQL real en
 Postgres y cliente Python del Toolkit): el informático pide, la PC sube, la web descarga y
