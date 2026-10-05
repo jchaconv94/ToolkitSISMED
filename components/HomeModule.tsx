@@ -43,7 +43,19 @@ const daysAgo = (ms: number, now: Date) => {
   return days <= 0 ? "Actualizado hoy" : `Actualizado hace ${days} ${days === 1 ? "día" : "días"}`;
 };
 
-/** Resumen al costado del saludo: título, barra fina y tres números que llevan a su detalle. */
+/**
+ * Barra del resumen: cada tramo con algo dentro ocupa al menos el 12 % del ancho, para que
+ * 3 lotes vencidos se vean junto a 221 al día. Un tramo en cero no se dibuja.
+ */
+const barShares = (values: number[]) => {
+  const total = values.reduce((sum, v) => sum + v, 0);
+  if (!total) return values.map(() => 0);
+  const raw = values.map(v => (v > 0 ? Math.max(v / total, 0.12) : 0));
+  const sum = raw.reduce((a, b) => a + b, 0);
+  return raw.map(r => r / sum);
+};
+
+/** Resumen al costado del saludo: título, barra y tres números con su descripción al lado. */
 const SummaryCard: React.FC<{
   title: string;
   hint?: string | null;
@@ -52,10 +64,10 @@ const SummaryCard: React.FC<{
   watermark: React.ElementType;
   onNavigate: (module: AppModule) => void;
 }> = ({ title, hint, link, figures, watermark: Watermark, onNavigate }) => {
-  const total = figures.reduce((sum, f) => sum + f.value, 0);
+  const shares = barShares(figures.map(f => f.value));
   return (
     <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
-      <Watermark aria-hidden="true" className="pointer-events-none absolute -bottom-6 -right-4 h-28 w-28 text-slate-100" strokeWidth={1.5} />
+      <Watermark aria-hidden="true" className="pointer-events-none absolute -right-6 -top-8 h-32 w-32 rotate-[-12deg] text-slate-100" strokeWidth={1.5} />
       <div className="relative flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-[14px] font-black text-slate-900">{title}</h2>
@@ -65,16 +77,16 @@ const SummaryCard: React.FC<{
           {link.label}<ChevronRight className="h-4 w-4" />
         </button>
       </div>
-      <div className="relative mt-3 flex h-1.5 gap-1" aria-hidden="true">
-        {total > 0
-          ? figures.map(f => (f.value > 0 ? <span key={f.label} className={`rounded-full ${f.bar}`} style={{ flex: f.value / total }} /> : null))
+      <div className="relative mt-3 flex h-2 gap-1" aria-hidden="true">
+        {shares.some(Boolean)
+          ? figures.map((f, i) => (shares[i] > 0 ? <span key={f.label} className={`rounded-full ${f.bar}`} style={{ flex: shares[i] }} /> : null))
           : <span className="flex-1 rounded-full bg-slate-100" />}
       </div>
-      <div className="relative mt-2.5 grid grid-cols-3 gap-2">
+      <div className="relative mt-3 flex flex-wrap items-center gap-x-6 gap-y-1">
         {figures.map(f => (
-          <button key={f.label} type="button" onClick={() => onNavigate(f.module)} className="rounded-lg text-left transition-colors hover:bg-slate-50">
-            <span className={`block text-[24px] font-black leading-none ${f.text}`}>{f.value}</span>
-            <span className="mt-1 block truncate text-[12px] font-semibold text-slate-500">{f.label}</span>
+          <button key={f.label} type="button" onClick={() => onNavigate(f.module)} className={`flex items-baseline gap-1.5 rounded-md transition-opacity hover:opacity-75 ${f.value === 0 ? "opacity-50" : ""}`}>
+            <span className={`text-[22px] font-black leading-none ${f.text}`}>{f.value}</span>
+            <span className="text-[12.5px] font-semibold text-slate-500">{f.label}</span>
           </button>
         ))}
       </div>
@@ -144,7 +156,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
       figures={[
         { value: pharmacySummary.expired, label: "Lotes vencidos", text: "text-red-600", bar: "bg-red-400", module: "IPRESS_STOCK" },
         { value: pharmacySummary.expiring, label: "Por vencer", text: "text-amber-600", bar: "bg-amber-400", module: "IPRESS_STOCK" },
-        { value: pharmacySummary.ok, label: "Al día", text: "text-emerald-600", bar: "bg-emerald-400", module: "IPRESS_STOCK" },
+        { value: pharmacySummary.ok, label: "Lotes al día", text: "text-emerald-600", bar: "bg-emerald-400", module: "IPRESS_STOCK" },
       ]}
     />
   ) : null;
@@ -154,7 +166,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
 
   return (
     <div className="space-y-6 pb-6 pt-3 sm:pt-5 md:space-y-8 lg:px-3">
-      <div className={`grid items-center gap-4 animate-in fade-in slide-in-from-bottom-1 duration-300 ${summary ? "lg:grid-cols-[minmax(0,1fr)_420px] lg:gap-8" : ""}`}>
+      <div className={`grid items-center gap-4 animate-in fade-in slide-in-from-bottom-1 duration-300 ${summary ? "lg:grid-cols-[minmax(0,1fr)_500px] lg:gap-8" : ""}`}>
         <div className="min-w-0">
           <p className="text-[13px] font-medium text-slate-500">{limaLongDate(now)}</p>
           <h1 className="mt-1 text-[26px] font-black leading-tight tracking-tight text-slate-900 sm:text-[34px]">
