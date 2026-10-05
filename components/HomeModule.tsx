@@ -157,7 +157,9 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
   const summary = network ? (
     <SummaryCard
       title={`Stock actualizado · ${network.scope}`}
-      hint={`${network.total} ${network.total === 1 ? "establecimiento" : "establecimientos"} · ${checkedAgo(network.at, now)}`}
+      hint={`${network.total} ${network.total === 1 ? "establecimiento" : "establecimientos"} · ${
+        network.pending ? `faltan ${network.pending} UNGET por responder` : checkedAgo(network.at, now)
+      }`}
       link={{ label: "Ver Consulta Stock", module: "SIG_SEARCH" }}
       watermark={Database}
       onNavigate={onNavigate}

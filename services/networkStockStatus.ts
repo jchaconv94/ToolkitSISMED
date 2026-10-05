@@ -30,6 +30,8 @@ export interface NetworkStockStatus {
   stale: number;
   /** Cuándo se calculó (ms). */
   at: number;
+  /** Mientras se calcula: hojas de UNGET que aún no responden (las cifras ya suman las demás). */
+  pending?: number;
 }
 
 /** Niveles que ven la red; el personal de un establecimiento ve su propio stock. */
@@ -46,11 +48,18 @@ export const summarizeSheetUpdates = (lastUpdates: number[], now: number) => {
   return result;
 };
 
-/** Pestañas que son establecimientos: con código en el nombre o ALMCOD. */
+/**
+ * Pestañas que son establecimientos, con la misma regla que las tarjetas de Consulta Stock
+ * (`isFacilitySheet`: código en el nombre, código o ALMCOD en la cabecera, o filas). Cuando
+ * la lectura no trae el conteo de filas, solo cuentan las que tienen código: así una
+ * pestaña de trabajo vacía no suma un establecimiento.
+ */
 export const facilityLastUpdates = (metadata: GasSheetMetadata[]): number[] =>
   (metadata || [])
-    .filter((meta) => isFacilitySheet(meta) && (meta.codigoIpress || meta.almcod))
+    .filter((meta) => (meta.rowCount === undefined ? isFacilitySheet({ ...meta, rowCount: 0 }) : isFacilitySheet(meta)))
     .map((meta) => parseSheetDateTime(meta.lastUpdate));
+
+const METADATA_TIMEOUT_MS = 25_000;
 
 const loadMetadata = async (config: any): Promise<GasSheetMetadata[]> => {
   const spreadsheetId = String(config?.spreadsheetId || "").trim();
@@ -65,7 +74,12 @@ const loadMetadata = async (config: any): Promise<GasSheetMetadata[]> => {
     // Petición propia, sin la caché compartida de `fetchGasMetadata`: compartir esos mismos
     // objetos con Consulta Stock mientras carga le dejaba el directorio vacío.
     const sep = config.url.includes("?") ? "&" : "?";
-    const result = await fetchGasWithResilience(`${config.url}${sep}action=getMetadata&_t=${Date.now()}`);
+    // Sin reintentos y con un tope corto: una hoja lenta no debe tener a Inicio esperando un
+    // minuto; se vuelve a intentar en la siguiente revisión.
+    const result = await fetchGasWithResilience(`${config.url}${sep}action=getMetadata&_t=${Date.now()}`, {
+      timeoutMs: METADATA_TIMEOUT_MS,
+      retryDelaysMs: [],
+    });
     return Array.isArray(result) ? result.filter((item: any) => item && typeof item === "object" && item.name && !Array.isArray(item.data)) : [];
   }
   throw new Error(`La conexión de ${config?.name || "una UNGET"} no tiene hoja ni Web App.`);
@@ -77,13 +91,28 @@ const idOf = (user: User, field: "diresaId" | "ogessId" | "ungetId") =>
 /**
  * Calcula el estado de la red del usuario. Devuelve `null` si su nivel no ve la red. Las
  * UNGET cuya hoja no responde no cuentan; si no responde ninguna, falla.
+ *
+ * Con `onProgress`, entrega las cifras parciales cada vez que responde una hoja: con una
+ * DIRESA son varias UNGET y no hay por qué esperar a la más lenta para mostrar algo.
  */
-export async function loadNetworkStockStatus(user: User, now = Date.now()): Promise<NetworkStockStatus | null> {
+export async function loadNetworkStockStatus(
+  user: User,
+  now = Date.now(),
+  onProgress?: (partial: NetworkStockStatus) => void,
+): Promise<NetworkStockStatus | null> {
   const level = String(resolveStockLevel(user.role, user.jurisdictionLevel)).toUpperCase();
   if (!NETWORK_LEVELS.includes(level)) return null;
 
-  const [ungets, rawConfigs, users] = await Promise.all([api.getUngets(), api.getAllUngetConfigs(), api.getUsers()]);
   const userUngetId = idOf(user, "ungetId");
+  // Todo lo que se pide a Supabase va junto. Las cuentas solo hacen falta para la regla de
+  // la UNGET (conexión heredada de quien la creó).
+  const [ungets, rawConfigs, users, ogess, diresas] = await Promise.all([
+    api.getUngets(),
+    api.getAllUngetConfigs(),
+    level === "UNGET" ? api.getUsers() : Promise.resolve([]),
+    level === "OGESS" ? api.getOgess() : Promise.resolve([]),
+    level === "DIRESA" ? api.getDiresas() : Promise.resolve([]),
+  ]);
   const configs = selectVisibleStockConnections({
     level,
     username: user.username,
@@ -96,22 +125,36 @@ export async function loadNetworkStockStatus(user: User, now = Date.now()): Prom
     users: users || [],
   });
 
-  const results = await Promise.allSettled(configs.map(loadMetadata));
-  const ok = results.filter((r): r is PromiseFulfilledResult<GasSheetMetadata[]> => r.status === "fulfilled");
-  if (configs.length > 0 && ok.length === 0) throw new Error("Ninguna hoja de stock respondió.");
-  const lastUpdates = ok.flatMap((r) => facilityLastUpdates(r.value));
-
   let scope = "toda la red";
   if (level === "UNGET") scope = (ungets || []).find((u: any) => String(u.id) === String(userUngetId))?.name || "su UNGET";
-  if (level === "OGESS") scope = (await api.getOgess()).find((o: any) => String(o.id) === String(idOf(user, "ogessId")))?.name || "su OGESS";
-  if (level === "DIRESA") scope = (await api.getDiresas()).find((d: any) => String(d.id) === String(idOf(user, "diresaId")))?.name || "su DIRESA";
+  if (level === "OGESS") scope = (ogess || []).find((o: any) => String(o.id) === String(idOf(user, "ogessId")))?.name || "su OGESS";
+  if (level === "DIRESA") scope = (diresas || []).find((d: any) => String(d.id) === String(idOf(user, "diresaId")))?.name || "su DIRESA";
+
+  const lastUpdates: number[] = [];
+  let answered = 0;
+  let pending = configs.length;
+  const results = await Promise.allSettled(
+    configs.map(async (config) => {
+      try {
+        const metadata = await loadMetadata(config);
+        lastUpdates.push(...facilityLastUpdates(metadata));
+        answered += 1;
+      } finally {
+        pending -= 1;
+        if (pending > 0 && answered > 0) onProgress?.({ scope, ...summarizeSheetUpdates(lastUpdates, now), at: now, pending });
+      }
+    }),
+  );
+  if (configs.length > 0 && !results.some((r) => r.status === "fulfilled")) throw new Error("Ninguna hoja de stock respondió.");
 
   return { scope, ...summarizeSheetUpdates(lastUpdates, now), at: now };
 }
 
 // --- Último resultado guardado en el navegador -----------------------------------------
 
-const cacheKey = (username: string) => `toolkit.inicio.red.${username}`;
+// v2: los resultados guardados antes de contar las pestañas con el código en el nombre
+// eran menores; no se muestran.
+const cacheKey = (username: string) => `toolkit.inicio.red.v2.${username}`;
 
 export const readCachedNetworkStatus = (username: string): NetworkStockStatus | null => {
   try {
