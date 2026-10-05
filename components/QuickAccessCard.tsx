@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Fingerprint, KeyRound, Loader2, Monitor, Smartphone, Trash2 } from 'lucide-react';
+import { ChevronRight, Fingerprint, KeyRound, Loader2, Monitor, Smartphone, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -49,6 +49,7 @@ export const QuickAccessCard: React.FC<{ embedded?: boolean }> = ({ embedded = f
   const [devices, setDevices] = useState<DeviceInfo[] | null | undefined>(undefined);
   const [local, setLocal] = useState(() => readStoredDevice());
   const [creating, setCreating] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
   const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
   const [saving, setSaving] = useState(false);
@@ -130,6 +131,7 @@ export const QuickAccessCard: React.FC<{ embedded?: boolean }> = ({ embedded = f
       saveStoredDevice(nuevo);
       setLocal(nuevo);
       setCreating(false);
+      if (embedded) setListOpen(true);
       setPin('');
       setConfirm('');
       toast.success('PIN creado. La próxima vez podrá entrar con él en esta PC.');
@@ -160,101 +162,135 @@ export const QuickAccessCard: React.FC<{ embedded?: boolean }> = ({ embedded = f
     }
   };
 
-  return (
-    <div className={embedded ? 'px-4 py-3.5 md:px-5' : 'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm 2xl:p-6'}>
-      {embedded ? (
-        <p className="text-[13px] font-black text-slate-900">Acceso rápido</p>
-      ) : (
-        <h3 className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-teal-600 2xl:text-xs">
-          <KeyRound className="h-3.5 w-3.5 2xl:h-4 2xl:w-4" />
-          Acceso rápido
-        </h3>
-      )}
-      <p className={`text-xs text-slate-500 ${embedded ? 'mb-3' : 'mb-4'}`}>Entre sin escribir su contraseña en sus equipos de confianza.</p>
+  const openCreate = () => { setFormError(''); setListOpen(false); setCreating(true); };
+  const closeCreate = () => { setCreating(false); if (embedded) setListOpen(true); };
 
+  const body = (
+    <>
       {desktop && (
         pinHere ? (
-          <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3">
-            <Monitor className="h-5 w-5 shrink-0 text-emerald-700" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-emerald-900">PIN activo en esta PC</p>
-              <p className="text-xs text-emerald-800">Al entrar se le pedirá su PIN de 4 dígitos.</p>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => { setCreating(true); setFormError(''); }}
-            className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition-colors ${embedded ? 'mb-3 h-11 border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100' : 'mb-4 bg-teal-600 py-2.5 text-white shadow-sm hover:bg-teal-700'}`}
-          >
-            <KeyRound className="h-4 w-4" />
-            Crear PIN para esta PC
-          </button>
-        )
-      )}
-
-      {!desktop && hasReader && (
-        fingerprintHere ? (
-          <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3">
-            <Fingerprint className="h-5 w-5 shrink-0 text-emerald-700" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-emerald-900">Huella activa en este celular</p>
-              <p className="text-xs text-emerald-800">Al entrar podrá usar su huella.</p>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void activarHuella()}
-            disabled={enrolling}
-            className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition-colors disabled:opacity-60 ${embedded ? 'mb-3 h-11 border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100' : 'mb-4 bg-teal-600 py-2.5 text-white shadow-sm hover:bg-teal-700'}`}
-          >
-            {enrolling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Fingerprint className="h-4 w-4" />}
-            Activar huella en este celular
-          </button>
-        )
-      )}
-
-      {devices.length > 0 ? (
-        <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100">
-          {devices.map((d) => (
-            <li key={d.id} className="flex items-center gap-3 px-3 py-2.5">
-              {d.kind === 'pin' ? <Monitor className="h-4 w-4 shrink-0 text-slate-400" /> : <Smartphone className="h-4 w-4 shrink-0 text-slate-400" />}
+            <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3">
+              <Monitor className="h-5 w-5 shrink-0 text-emerald-700" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-semibold text-slate-800">
-                  {d.deviceName || (d.kind === 'pin' ? 'PC' : 'Celular')}
-                  {local?.id === d.id && <span className="ml-1.5 text-[11px] font-bold text-teal-700">· este equipo</span>}
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  {d.kind === 'pin' ? 'PIN' : 'Huella'}
-                  {d.locked ? ' · bloqueado' : d.lastUsedAt ? ` · usado el ${formatDate(d.lastUsedAt)}` : ` · creado el ${formatDate(d.createdAt)}`}
-                </p>
+                <p className="text-sm font-bold text-emerald-900">PIN activo en esta PC</p>
+                <p className="text-xs text-emerald-800">Al entrar se le pedirá su PIN de 4 dígitos.</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setToRemove(d)}
-                aria-label="Quitar equipo"
-                title="Quitar equipo"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </li>
-          ))}
-        </ul>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={openCreate}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition-colors ${embedded ? 'mb-3 h-11 border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100' : 'mb-4 bg-teal-600 py-2.5 text-white shadow-sm hover:bg-teal-700'}`}
+            >
+              <KeyRound className="h-4 w-4" />
+              Crear PIN para esta PC
+            </button>
+          )
+        )}
+
+        {!desktop && hasReader && (
+          fingerprintHere ? (
+            <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3">
+              <Fingerprint className="h-5 w-5 shrink-0 text-emerald-700" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-emerald-900">Huella activa en este celular</p>
+                <p className="text-xs text-emerald-800">Al entrar podrá usar su huella.</p>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void activarHuella()}
+              disabled={enrolling}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition-colors disabled:opacity-60 ${embedded ? 'mb-3 h-11 border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100' : 'mb-4 bg-teal-600 py-2.5 text-white shadow-sm hover:bg-teal-700'}`}
+            >
+              {enrolling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Fingerprint className="h-4 w-4" />}
+              Activar huella en este celular
+            </button>
+          )
+        )}
+
+        {devices.length > 0 ? (
+          <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100">
+            {devices.map((d) => (
+              <li key={d.id} className="flex items-center gap-3 px-3 py-2.5">
+                {d.kind === 'pin' ? <Monitor className="h-4 w-4 shrink-0 text-slate-400" /> : <Smartphone className="h-4 w-4 shrink-0 text-slate-400" />}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-semibold text-slate-800">
+                    {d.deviceName || (d.kind === 'pin' ? 'PC' : 'Celular')}
+                    {local?.id === d.id && <span className="ml-1.5 text-[11px] font-bold text-teal-700">· este equipo</span>}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    {d.kind === 'pin' ? 'PIN' : 'Huella'}
+                    {d.locked ? ' · bloqueado' : d.lastUsedAt ? ` · usado el ${formatDate(d.lastUsedAt)}` : ` · creado el ${formatDate(d.createdAt)}`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setToRemove(d)}
+                  aria-label="Quitar equipo"
+                  title="Quitar equipo"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs italic text-slate-400">Todavía no activó el acceso rápido en ningún equipo.</p>
+        )}
+    </>
+  );
+
+  // Resumen para la fila del Perfil: qué hay en este equipo y cuántos equipos en total.
+  const here = pinHere ? 'PIN activo en esta PC' : fingerprintHere ? 'Huella activa en este celular' : '';
+  const count = devices.length === 0 ? 'Sin equipos activados' : `${devices.length} ${devices.length === 1 ? 'equipo activado' : 'equipos activados'}`;
+
+  return (
+    <div className={embedded ? '' : 'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm 2xl:p-6'}>
+      {embedded ? (
+        <button type="button" onClick={() => setListOpen(true)} className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 md:px-5">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-500"><KeyRound className="h-4 w-4" /></span>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-slate-500">Acceso rápido (PIN o huella)</p>
+            <p className="truncate text-[14px] font-bold text-teal-700">{here ? `${here} · ${count}` : count}</p>
+          </div>
+          <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+        </button>
       ) : (
-        <p className="text-xs italic text-slate-400">Todavía no activó el acceso rápido en ningún equipo.</p>
+        <>
+          <h3 className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-teal-600 2xl:text-xs">
+            <KeyRound className="h-3.5 w-3.5 2xl:h-4 2xl:w-4" />
+            Acceso rápido
+          </h3>
+          <p className="mb-4 text-xs text-slate-500">Entre sin escribir su contraseña en sus equipos de confianza.</p>
+        </>
+      )}
+
+      {embedded ? null : body}
+
+      {embedded && (
+        <ResponsiveDialog
+          open={listOpen}
+          title="Acceso rápido"
+          onClose={() => setListOpen(false)}
+          footer={<button type="button" onClick={() => setListOpen(false)} className={`${dialogSecondaryButton} md:ml-auto`}>Cerrar</button>}
+        >
+          <p className="mb-3 text-[13px] text-slate-600">Entre sin escribir su contraseña en sus equipos de confianza: PIN en la PC, huella en el celular.</p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">{body}</div>
+        </ResponsiveDialog>
       )}
 
       <ResponsiveDialog
         open={creating}
         title="Crear PIN para esta PC"
-        onClose={() => setCreating(false)}
+        onClose={closeCreate}
         busy={saving}
         onSubmit={(e) => { e.preventDefault(); void crear(); }}
         footer={
           <>
-            <button type="button" onClick={() => setCreating(false)} disabled={saving} className={dialogSecondaryButton}>Cancelar</button>
+            <button type="button" onClick={closeCreate} disabled={saving} className={dialogSecondaryButton}>Cancelar</button>
             <button type="submit" disabled={saving} className={dialogPrimaryButton}>
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               Crear PIN

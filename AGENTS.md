@@ -64,6 +64,8 @@ npm run build
 
 El trabajo se integra en `main` mediante pull requests.
 
+**Unir los PR (pedido del usuario, 2026-10-05: «únelo tú, siempre»):** cuando la verificación de GitHub pasa y no hay conflictos, el agente une el PR sin esperar a que se lo pidan, y avisa.
+
 **Si `main` vuelve a divergir por subir el proyecto desde Google AI Studio** (historias sin ancestro común, un `merge` normal da conflicto en todos los archivos), la receta es una confirmación de unión de dos padres que toma el árbol de la rama de trabajo:
 
 ```bash
@@ -159,7 +161,7 @@ Olvidar cualquiera deja el módulo inaccesible, sin título o sin URL propia. El
 | `ADMIN_STOCK_ASSIGN` | Columnas de Stock | `components/AdminStockAssignmentModule.tsx` |
 | `ADMIN_SEND_KEYS` | Claves de envío | `components/AdminSendKeysModule.tsx` |
 | `ADMIN_BACKUPS` | Backups SISMED | `components/BackupsSismedModule.tsx` |
-| `PROFILE` | Perfil de Usuario | `components/UserProfile.tsx` (todos lo ven desde el 2026-10-04: `hasPermission` siempre lo permite y ya no figura en Roles). Rediseñado el 2026-10-05: en escritorio, banda oscura compacta con avatar, nombre y etiquetas (elegida el 2026-10-05); en el celular, portada con el avatar montado y centrado y «Editar datos» flotante; los tres bloques del mismo alto, bloques Datos personales / Trabajo / Cuenta y seguridad (con `QuickAccessCard embedded`), y dos ventanas `ResponsiveDialog`: «Editar datos» (incluye DNI, usuario y fecha de nacimiento: el propio usuario puede cambiarlos, decisión del usuario del 2026-10-05; se probó restringirlo y se descartó) y «Cambiar contraseña». La fecha de nacimiento necesita `supabase/SUPABASE_PERSONAL_FECHA_NACIMIENTO.sql`; sin él se guarda lo demás y se avisa. |
+| `PROFILE` | Perfil de Usuario | `components/UserProfile.tsx` (todos lo ven desde el 2026-10-04: `hasPermission` siempre lo permite y ya no figura en Roles). Rediseñado el 2026-10-05: en escritorio, banda oscura compacta con avatar, nombre y etiquetas (elegida el 2026-10-05); en el celular, portada con el avatar montado y centrado y «Editar datos» flotante; los tres bloques del mismo alto, bloques Datos personales / Trabajo / Cuenta y seguridad (el acceso rápido es una fila más, `QuickAccessCard embedded`, y sus equipos se ven en una ventana: así los tres bloques quedan parejos), y dos ventanas `ResponsiveDialog`: «Editar datos» (incluye DNI, usuario y fecha de nacimiento: el propio usuario puede cambiarlos, decisión del usuario del 2026-10-05; se probó restringirlo y se descartó) y «Cambiar contraseña». La fecha de nacimiento necesita `supabase/SUPABASE_PERSONAL_FECHA_NACIMIENTO.sql`; sin él se guarda lo demás y se avisa. |
 
 `ANALYSIS` sigue declarado en `AVAILABLE_MODULES` y en las rutas, pero no tiene pantalla propia.
 
