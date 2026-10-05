@@ -250,6 +250,7 @@ justamente porque cuando estaba repetida solo se actualizó uno.
 - **Nunca `window.confirm` / `alert`.** Usar modal propio (`components/ui/ConfirmationDialog.tsx`) para toda acción irreversible.
 - **Móvil:** tablas → tarjetas; filtros → bottom sheet; footer sticky en modales; **el botón principal es flotante** (`FloatingActionButton`, abajo a la derecha sobre la barra de secciones; el módulo deja `pb-24` en el celular).
 - **Barras de desplazamiento ocultas en todo el sistema** (pedido del usuario, 2026-10-04; `index.css`). No añadir `scrollbar-width: thin` ni estilos de barra. Única excepción: la clase `scrollbar-x` (barra horizontal fina) en tablas que no entran a lo ancho, como la Matriz de Requerimiento (pedido del usuario, 2026-10-04).
+- **Nunca el ícono de estrellas/destellos (`Sparkles` de lucide)** (pedido del usuario, 2026-10-05). No usarlo en ningún título, botón ni aviso.
 - **Letra:** Inter en todo; `font-sans` también es Inter (`tailwind.config.js`).
 - **Acentos:** cuidado con mojibake. `Catálogo`, `Código`, `Redistribución` deben renderizarse correctos en pantalla **y en PDF/Excel** (ver `services/pdfUnicodeFont.ts`).
 
