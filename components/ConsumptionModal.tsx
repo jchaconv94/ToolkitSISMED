@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom';
 import { X, AlertTriangle, CheckCircle, Calculator, ArrowRight, ShieldCheck, ChevronLeft, ChevronRight, SkipForward, Timer, Lock, Clock, MousePointerClick, Unlock, ChevronDown, Save } from 'lucide-react';
 import { AnalyzedMedication, StockStatus } from '../types';
+import { classifyStock } from '../services/stockStatus';
 import { useAuth } from '../contexts/AuthContext';
 
 interface ConsumptionModalProps {
@@ -96,24 +97,8 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
               : 0;
       }
       
-      const activeMonths = activeCpm > 0 
-          ? medication.currentStock / activeCpm 
-          : (medication.currentStock > 0 ? Infinity : 0);
-
-      const roundedMonths = isFinite(activeMonths) ? parseFloat(activeMonths.toFixed(1)) : Infinity;
-
-      let activeStatus = StockStatus.NORMOSTOCK;
-      if (medication.currentStock === 0) {
-          activeStatus = StockStatus.DESABASTECIDO;
-      } else if (activeCpm === 0 && medication.currentStock > 0) {
-          activeStatus = StockStatus.SIN_ROTACION;
-      } else if (roundedMonths > 6) {
-          activeStatus = StockStatus.SOBRESTOCK;
-      } else if (roundedMonths >= 2 && roundedMonths <= 6) {
-          activeStatus = StockStatus.NORMOSTOCK;
-      } else {
-          activeStatus = StockStatus.SUBSTOCK;
-      }
+      // Regla única de estado (services/stockStatus.ts).
+      const { months: activeMonths, status: activeStatus } = classifyStock(medication.currentStock, activeCpm);
 
       let suggestedReq = 0;
       const MIN_SAFETY_STOCK = 2;
@@ -662,21 +647,7 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
              {(() => {
                 const realCpm = medication.rawCpm || 0;
                 const realStock = medication.currentStock;
-                const realMonths = realCpm > 0 ? realStock / realCpm : (realStock > 0 ? Infinity : 0);
-                const roundedRealMonths = isFinite(realMonths) ? parseFloat(realMonths.toFixed(1)) : Infinity;
-
-                let realStatus = StockStatus.NORMOSTOCK;
-                if (realStock === 0) {
-                    realStatus = StockStatus.DESABASTECIDO;
-                } else if (realCpm === 0 && realStock > 0) {
-                    realStatus = StockStatus.SIN_ROTACION;
-                } else if (roundedRealMonths > 6) {
-                    realStatus = StockStatus.SOBRESTOCK;
-                } else if (roundedRealMonths >= 2 && roundedRealMonths <= 6) {
-                    realStatus = StockStatus.NORMOSTOCK;
-                } else {
-                    realStatus = StockStatus.SUBSTOCK;
-                }
+                const { status: realStatus } = classifyStock(realStock, realCpm);
 
                 return (
                    <div className={`${statusConfig.bg} px-4 py-2 rounded-lg border ${statusConfig.border} flex flex-col items-center justify-center text-center w-full lg:w-auto transition-colors duration-300`}>

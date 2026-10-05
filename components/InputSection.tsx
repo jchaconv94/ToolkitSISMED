@@ -2,12 +2,13 @@
 import React, { useState, useRef } from 'react';
 import { toast } from 'sonner';
 import { findMesKey, TEMPLATE_MONTH_HEADERS } from '../services/requirementMonths';
+import { DecimalMark, detectCsvDelimiter, parseLocaleNumber } from '../services/localeNumber';
 import { Trash2, Activity, Upload, FileSpreadsheet, Calendar, Check, AlertCircle, AlertTriangle, X, Syringe, Settings2, Play, RefreshCw, Download, ChevronDown, ChevronUp, CheckCircle, Ban, ListFilter, Building2 } from 'lucide-react';
 import { read, utils, writeFile } from 'xlsx';
-import { MedicationInput, HealthFacility, Microred, RequirementExclusionItem } from '../types';
+import { MedicationInput, HealthFacility, Microred, RequirementExclusionItem, AuraAnalysisResult, AdditionalItem } from '../types';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
-import { requirementExclusionService } from '../services/requirementExclusionService';
+import { normalizeExclusionCode, requirementExclusionService } from '../services/requirementExclusionService';
 import { getUserJurisdictionScope } from '../services/jurisdictionService';
 import { SortButton, ariaSort, useTableSort } from './ui/kit';
 
@@ -370,59 +371,23 @@ export const InputSection: React.FC<InputSectionProps> = ({
             throw new Error("Formato de archivo inválido de respaldo.");
           }
 
-          // Restore localStorage keys
-          if (importedData.localStorage.aura_data_v1) {
-            window.localStorage.setItem(currentStorageKey, importedData.localStorage.aura_data_v1);
-          } else {
-            window.localStorage.removeItem(currentStorageKey);
-          }
-
-          if (importedData.localStorage.aura_reviews_v1) {
-            window.localStorage.setItem(currentReviewKey, importedData.localStorage.aura_reviews_v1);
-          } else {
-            window.localStorage.removeItem(currentReviewKey);
-          }
-
-          if (importedData.localStorage.aura_additional_v1) {
-            window.localStorage.setItem(currentAdditionalKey, importedData.localStorage.aura_additional_v1);
-          } else {
-            window.localStorage.removeItem(currentAdditionalKey);
-          }
-
-          if (importedData.localStorage.aura_input_data_v1) {
-            window.localStorage.setItem(currentInputKey, importedData.localStorage.aura_input_data_v1);
-          } else {
-            const rawItems = importedData.rawInputItems || [];
-            if (rawItems.length > 0) {
-              window.localStorage.setItem(currentInputKey, JSON.stringify(rawItems));
-            } else {
-              window.localStorage.removeItem(currentInputKey);
+          // Primero se valida todo y solo después se escribe. Antes se reemplazaba el avance
+          // guardado y luego se revisaba el establecimiento: el usuario veía «El respaldo
+          // pertenece a…», pero su propio análisis ya se había perdido.
+          const saved = importedData.localStorage;
+          const parseSaved = <T,>(value: unknown, label: string): T | null => {
+            if (!value) return null;
+            try {
+              return JSON.parse(String(value)) as T;
+            } catch {
+              throw new Error(`El respaldo está dañado (${label}).`);
             }
-          }
+          };
+          const restoredResult = parseSaved<AuraAnalysisResult>(saved.aura_data_v1, "análisis");
+          const restoredReviews = parseSaved<string[]>(saved.aura_reviews_v1, "validaciones");
+          const restoredAdditional = parseSaved<AdditionalItem[]>(saved.aura_additional_v1, "ítems adicionales");
+          if (saved.aura_input_data_v1) parseSaved<unknown>(saved.aura_input_data_v1, "datos cargados");
 
-          // Restore React States
-          const rawItems = importedData.rawInputItems || [];
-          setItems(rawItems);
-
-          if (importedData.localStorage.aura_data_v1) {
-            onResultChange?.(JSON.parse(importedData.localStorage.aura_data_v1));
-          } else {
-            onResultChange?.(null);
-          }
-
-          if (importedData.localStorage.aura_reviews_v1) {
-            onReviewedIdsChange?.(new Set(JSON.parse(importedData.localStorage.aura_reviews_v1)));
-          } else {
-            onReviewedIdsChange?.(new Set());
-          }
-
-          if (importedData.localStorage.aura_additional_v1) {
-            onAdditionalItemsChange?.(JSON.parse(importedData.localStorage.aura_additional_v1));
-          } else {
-            onAdditionalItemsChange?.([]);
-          }
-
-          // Restore components internal metadata
           if (importedData.metadata) {
             const userScope = getUserJurisdictionScope(user);
             if (userScope.level === 'IPRESS') {
@@ -431,7 +396,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
               const fileCod = importedData.metadata.importedCodEess;
               const fileEst = importedData.metadata.importedEstablishmentName;
 
-              const normalizeCode = (c?: string) => (c || '').trim().replace(/^0+/, '');
+              const normalizeCode = (c?: string) => String(c ?? '').trim().replace(/^0+/, '');
               const activeNorm = normalizeCode(userFacilityCode);
               const fileNorm = normalizeCode(fileCod);
 
@@ -439,7 +404,25 @@ export const InputSection: React.FC<InputSectionProps> = ({
                 throw new Error(`El respaldo pertenece a "${fileEst || fileCod}" (CÓD: ${fileCod}), pero su usuario está asignado a "${userFacilityName || activeNorm}" (CÓD: ${userFacilityCode}). Como personal de Farmacia / IPRESS solo puede importar requerimientos de su propio establecimiento.`);
               }
             }
+          }
 
+          // Todo en orden: ahora sí se reemplaza el avance guardado.
+          const writeKey = (key: string, value: unknown) => {
+            if (value) window.localStorage.setItem(key, String(value));
+            else window.localStorage.removeItem(key);
+          };
+          writeKey(currentStorageKey, saved.aura_data_v1);
+          writeKey(currentReviewKey, saved.aura_reviews_v1);
+          writeKey(currentAdditionalKey, saved.aura_additional_v1);
+          const rawItems = importedData.rawInputItems || [];
+          writeKey(currentInputKey, saved.aura_input_data_v1 || (rawItems.length > 0 ? JSON.stringify(rawItems) : null));
+
+          setItems(rawItems);
+          onResultChange?.(restoredResult);
+          onReviewedIdsChange?.(new Set(restoredReviews || []));
+          onAdditionalItemsChange?.(restoredAdditional || []);
+
+          if (importedData.metadata) {
             setImportedMicrored(importedData.metadata.importedMicrored || '');
             setImportedCodEess(importedData.metadata.importedCodEess || '');
             setImportedEstablishmentName(importedData.metadata.importedEstablishmentName || '');
@@ -503,7 +486,33 @@ export const InputSection: React.FC<InputSectionProps> = ({
     setTimeout(async () => {
         try {
           const data = await file.arrayBuffer();
-          const workbook = read(data, { type: 'array' });
+          // CSV: se lee como texto, sin que `xlsx` interprete los valores. Si no, «0,35» se leía
+          // como 35, «1 234» como NaN y el código «00143» como 143. Los números se leen después
+          // con la regla de su separador (CSV con «;» → coma decimal).
+          const isCsv = /\.csv$/i.test(file.name) || file.type === 'text/csv';
+          let decimalMark: DecimalMark = 'auto';
+          let workbook;
+          if (isCsv) {
+            let text: string;
+            try {
+              text = new TextDecoder('utf-8', { fatal: true }).decode(data);
+            } catch {
+              text = new TextDecoder('windows-1252').decode(data);
+            }
+            const delimiter = detectCsvDelimiter(text);
+            decimalMark = delimiter === ';' ? ',' : '.';
+            workbook = read(text, { type: 'string', raw: true, FS: delimiter });
+          } else {
+            workbook = read(data, { type: 'array' });
+          }
+          let unreadableCells = 0;
+          /** Número de una celda; lo que no se puede leer cuenta para el aviso y vale 0. */
+          const cellNumber = (value: unknown): number => {
+            if (value === undefined || value === null || String(value).trim() === '') return 0;
+            const parsed = parseLocaleNumber(value, decimalMark);
+            if (Number.isNaN(parsed)) { unreadableCells++; return 0; }
+            return parsed;
+          };
           
           if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
             setUploadError("Error al procesar el archivo: El archivo no contiene hojas válidas.");
@@ -709,8 +718,8 @@ export const InputSection: React.FC<InputSectionProps> = ({
             }
 
             const name = nameKey ? row[nameKey] : `Item ${index + 1}`;
-            const stock = stockKey ? Number(row[stockKey]) : 0;
-            const price = priceKey ? Number(row[priceKey]) : 0;
+            const stock = stockKey ? cellNumber(row[stockKey]) : 0;
+            const price = priceKey ? cellNumber(row[priceKey]) : 0;
             const code = codeKey ? String(row[codeKey]).trim() : (Date.now() + index).toString();
             
             let months: number[] = [];
@@ -719,8 +728,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
             if (numKeys.length > 0) {
                 const targetKeys = numKeys.slice(-12);
                 targetKeys.forEach(k => {
-                    const val = Number(row[k]);
-                    months.push(isNaN(val) ? 0 : val);
+                    months.push(cellNumber(row[k]));
                 });
             } else {
                 const monthNames = [
@@ -733,8 +741,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                     // Primero «MES» + número (MES01, MES_1…); si no, por el nombre del mes.
                     const key = findMesKey(rowKeys, i + 1) || findKey(names);
                     if (key) {
-                        const val = Number(row[key]);
-                        months.push(isNaN(val) ? 0 : val);
+                        months.push(cellNumber(row[key]));
                     } else {
                         months.push(0); 
                     }
@@ -756,6 +763,10 @@ export const InputSection: React.FC<InputSectionProps> = ({
               medest: estValue ? String(estValue) : undefined,
             };
           }).filter((item): item is MedicationInput => item !== null);
+
+          if (unreadableCells > 0) {
+            toast.warning(`${unreadableCells} ${unreadableCells === 1 ? 'celda con un número que no se pudo leer' : 'celdas con números que no se pudieron leer'}; se tomaron como 0. Revise el archivo.`);
+          }
 
           if (parsedItems.length === 0) {
             setUploadError("Error al procesar el archivo: No se detectaron filas válidas con información de medicamentos.");
@@ -885,13 +896,11 @@ export const InputSection: React.FC<InputSectionProps> = ({
       }
 
       if (excludeCustom && customExclusionItems.length > 0) {
+          // Sin ceros a la izquierda en los dos lados: «00143» de la lista y 143 del Excel.
           const excludedCodes = new Set(
-              customExclusionItems.map(item => item.sismedCode.trim().toUpperCase())
+              customExclusionItems.map(item => normalizeExclusionCode(item.sismedCode))
           );
-          finalData = finalData.filter(item => {
-              const code = (item.id || '').trim().toUpperCase();
-              return !excludedCodes.has(code);
-          });
+          finalData = finalData.filter(item => !excludedCodes.has(normalizeExclusionCode(item.id)));
       }
 
       const totalExcluded = items.length - finalData.length;

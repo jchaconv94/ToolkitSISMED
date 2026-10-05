@@ -24,6 +24,24 @@ const saveLocalExclusions = (items: RequirementExclusionItem[]) => {
   }
 };
 
+/**
+ * Códigos sin ceros a la izquierda, para comparar. Excel guarda «06528» o «00143» como número y
+ * se pierden los ceros: la consulta por igualdad no encontraba la lista del establecimiento y
+ * «00143» no coincidía con «143», así que las exclusiones dejaban de aplicarse en silencio.
+ */
+export const normalizeExclusionCode = (code?: string | number | null): string =>
+  String(code ?? "").trim().toUpperCase().replace(/^0+(?=.)/, "");
+
+/** Las formas en que puede estar guardado un código de establecimiento (con o sin ceros). */
+export const establishmentCodeVariants = (code?: string | number | null): string[] => {
+  const text = String(code ?? "").trim();
+  if (!text) return [];
+  const stripped = normalizeExclusionCode(text);
+  const variants = new Set([text, stripped]);
+  if (/^\d+$/.test(stripped) && stripped.length < 5) variants.add(stripped.padStart(5, "0"));
+  return [...variants];
+};
+
 export const requirementExclusionService = {
   /**
    * Obtiene la lista de medicamentos excluidos para un establecimiento
@@ -31,13 +49,15 @@ export const requirementExclusionService = {
   async getExclusionsByFacility(facilityCode: string): Promise<RequirementExclusionItem[]> {
     const cleanCode = (facilityCode || "").trim();
     if (!cleanCode) return [];
+    const normalizedCode = normalizeExclusionCode(cleanCode);
+    const sameFacility = (code: string) => normalizeExclusionCode(code) === normalizedCode;
 
     try {
       if (supabase) {
         const { data, error } = await supabase
           .from("requirement_exclusion_lists")
           .select("*")
-          .eq("establishment_code", cleanCode)
+          .in("establishment_code", establishmentCodeVariants(cleanCode))
           .order("description", { ascending: true });
 
         if (!error && data) {
@@ -54,7 +74,7 @@ export const requirementExclusionService = {
           }));
 
           // Sincronizar con almacenamiento local (actualizar solo este establecimiento)
-          const allLocal = getLocalExclusions().filter(i => i.establishmentCode !== cleanCode);
+          const allLocal = getLocalExclusions().filter(i => !sameFacility(i.establishmentCode));
           saveLocalExclusions([...allLocal, ...mapped]);
 
           return mapped;
@@ -65,7 +85,7 @@ export const requirementExclusionService = {
     }
 
     // Fallback a localStorage
-    return getLocalExclusions().filter(i => i.establishmentCode === cleanCode);
+    return getLocalExclusions().filter(i => sameFacility(i.establishmentCode));
   },
 
   /** Alias para getExclusionsByFacility */
@@ -76,7 +96,7 @@ export const requirementExclusionService = {
   /** Obtiene un Set con los códigos SISMED excluidos de un establecimiento */
   async getExclusionCodes(facilityCode: string): Promise<Set<string>> {
     const items = await this.getExclusionsByFacility(facilityCode);
-    return new Set(items.map(i => i.sismedCode.trim().toUpperCase()));
+    return new Set(items.map(i => normalizeExclusionCode(i.sismedCode)));
   },
 
   /**
