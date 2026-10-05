@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import localforage from 'localforage';
-import { Upload, FileSpreadsheet, Search, ArrowRightLeft, Building2, Package, AlertCircle, X, ArrowRight, Merge, Split, CheckCircle2, Circle, Filter, ChevronLeft, ChevronRight, Sparkles, TrendingUp, TrendingDown, AlertTriangle, ClipboardList, Trash2, MousePointerClick, ChevronDown, ChevronUp, Check, Download, Maximize, Minimize, Edit2, RefreshCw, Calendar } from 'lucide-react';
+import { Upload, FileSpreadsheet, Search, ArrowRightLeft, Building2, Package, AlertCircle, X, ArrowRight, Merge, Split, CheckCircle2, Circle, Filter, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, AlertTriangle, ClipboardList, Trash2, MousePointerClick, ChevronDown, ChevronUp, Check, Download, Maximize, Minimize, Edit2, RefreshCw, Calendar } from 'lucide-react';
 
 // Hook para persistir estado en localStorage
 function useLocalStorage<T>(key: string, initialValue: T) {
@@ -2671,10 +2671,10 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
     };
 
     return (
-        <div className={`w-full mx-auto ${isFullscreen ? 'p-0 max-w-none' : 'p-6 max-w-[98%] space-y-6 animate-in fade-in duration-300'}`}>
+        <div className={`w-full mx-auto ${isFullscreen ? 'p-0 max-w-none' : 'p-0 sm:p-6 sm:max-w-[98%] space-y-3 sm:space-y-6 animate-in fade-in duration-300'}`}>
 
-            {/* HEADER */}
-            <div className="flex items-center justify-between">
+            {/* HEADER. En el celular no se muestra: la cabecera de la app ya dice «Redistribución». */}
+            <div className="hidden sm:flex items-center justify-between">
                 <div>
                     <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                         <ArrowRightLeft className="h-6 w-6 text-teal-600" />
@@ -2687,7 +2687,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
             </div>
 
             {/* UPLOAD SECTION */}
-            <div className={`bg-white rounded-2xl shadow-lg border border-gray-100 transition-all hover:shadow-xl relative ${isUploadSectionCollapsed && records.length > 0 ? 'p-4' : 'p-8'}`}>
+            <div className={`bg-white rounded-2xl shadow-lg border border-gray-100 transition-all hover:shadow-xl relative ${isUploadSectionCollapsed && records.length > 0 ? 'p-4' : 'p-3 sm:p-8'}`}>
                 {records.length > 0 && !loading && (
                     <button
                         onClick={() => setIsUploadSectionCollapsed(!isUploadSectionCollapsed)}
@@ -2741,7 +2741,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                         </div>
                     </div>
                 ) : (
-                    <div className="flex flex-col items-center justify-center text-center mt-8 sm:mt-0">
+                    <div className="flex flex-col items-center justify-center text-center">
 
                         {loading ? (
                             <div className="py-12 flex flex-col items-center animate-in fade-in zoom-in duration-500">
@@ -2757,7 +2757,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                         ) : (
                             <>
                                 <div
-                                    className="w-full max-w-2xl mx-auto border-2 border-dashed border-indigo-200 rounded-xl p-10 bg-indigo-50/30 hover:bg-indigo-50 transition-all group cursor-pointer relative"
+                                    className="w-full max-w-2xl mx-auto border-2 border-dashed border-indigo-200 rounded-xl px-4 py-6 sm:p-10 bg-indigo-50/30 hover:bg-indigo-50 transition-all group cursor-pointer relative"
                                     onClick={() => {
                                         if (records.length > 0) {
                                             setIsConfirmUploadModalOpen(true);
@@ -2774,27 +2774,29 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                         onClick={(e) => e.stopPropagation()}
                                         className="hidden"
                                     />
-                                    <div className="flex flex-col items-center gap-4 group-hover:scale-105 transition-transform duration-300">
-                                        <div className="bg-white p-4 rounded-full shadow-md group-hover:shadow-lg transition-shadow">
-                                            <FileSpreadsheet className="h-10 w-10 text-indigo-600" />
+                                    <div className="flex flex-col items-center gap-3 sm:gap-4 sm:group-hover:scale-105 transition-transform duration-300">
+                                        <div className="bg-white p-3 sm:p-4 rounded-full shadow-md group-hover:shadow-lg transition-shadow">
+                                            <FileSpreadsheet className="h-8 w-8 sm:h-10 sm:w-10 text-indigo-600" />
                                         </div>
                                         <div>
-                                            <h3 className="text-lg font-bold text-gray-900">Cargar Archivo de Disponibilidad</h3>
-                                            <p className="text-sm text-gray-500 mt-1">Arrastre su archivo Excel aquí o haga clic para buscar</p>
+                                            <h3 className="text-base sm:text-lg font-bold text-gray-900">Cargar Archivo de Disponibilidad</h3>
+                                            {/* En el celular no se arrastra: se toca. */}
+                                            <p className="text-sm text-gray-500 mt-1 sm:hidden">Toque para elegir su archivo Excel</p>
+                                            <p className="text-sm text-gray-500 mt-1 hidden sm:block">Arrastre su archivo Excel aquí o haga clic para buscar</p>
                                         </div>
-                                        <div className="flex items-center gap-2 text-xs text-indigo-600 font-medium bg-indigo-100 px-3 py-1 rounded-full">
-                                            <Sparkles className="h-3 w-3" />
-                                            <span>Formato .xlsx o .xls requerido</span>
+                                        <div className="flex items-center gap-1.5 whitespace-nowrap text-xs text-indigo-600 font-medium bg-indigo-100 px-3 py-1 rounded-full">
+                                            <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
+                                            <span>Formato .xlsx o .xls</span>
                                         </div>
                                         <button
                                             onClick={(e) => { e.stopPropagation(); downloadTemplate(); }}
-                                            className="text-xs text-slate-500 hover:text-indigo-600 underline mt-2"
+                                            className="text-xs text-slate-500 hover:text-indigo-600 underline py-1 sm:py-0 sm:mt-2"
                                         >
                                             Descargar Plantilla Estándar
                                         </button>
 
                                         {/* Export/Import Session Buttons */}
-                                        <div className="flex flex-row gap-4 mt-6 z-10">
+                                        <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-2.5 sm:gap-4 mt-2 sm:mt-6 z-10">
                                             {records.length > 0 && (
                                                 <button 
                                                     onClick={(e) => { 
@@ -2802,7 +2804,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                                         e.preventDefault();
                                                         handleExportSession(); 
                                                     }}
-                                                    className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 rounded-lg text-sm font-bold transition-all shadow-sm"
+                                                    className="flex w-full sm:w-auto items-center justify-center gap-2 px-4 h-11 sm:h-auto sm:py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 rounded-xl sm:rounded-lg text-sm font-bold transition-all shadow-sm"
                                                     title="Exportar avance actual para continuar en otra PC"
                                                 >
                                                     <Download className="w-4 h-4" />
@@ -2819,7 +2821,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                                         importInputRef.current?.click(); 
                                                     }
                                                 }}
-                                                className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 rounded-lg text-sm font-bold transition-all shadow-sm"
+                                                className="flex w-full sm:w-auto items-center justify-center gap-2 px-4 h-11 sm:h-auto sm:py-2 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 rounded-xl sm:rounded-lg text-sm font-bold transition-all shadow-sm"
                                                 title="Importar avance desde un archivo de respaldo"
                                             >
                                                 <Upload className="w-4 h-4" />
@@ -4477,7 +4479,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                     {/* NEW: ESTIMATION SECTION */}
                                     <div className="bg-indigo-900/10 border border-indigo-500/30 rounded-xl p-4 text-xs">
                                         <div className="flex items-center gap-2 text-indigo-400 font-bold mb-3">
-                                            <Sparkles className="h-3.5 w-3.5" />
+                                            <TrendingUp className="h-3.5 w-3.5" />
                                             <span>Simulador de Abastecimiento</span>
                                         </div>
                                         
