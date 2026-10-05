@@ -151,7 +151,7 @@ Olvidar cualquiera deja el módulo inaccesible, sin título o sin URL propia. El
 
 | `AppModule` | Etiqueta UI | Componente |
 |---|---|---|
-| `HOME` | Inicio | `components/HomeModule.tsx` (todos lo ven; `hasPermission` siempre lo permite) |
+| `HOME` | Inicio | `components/HomeModule.tsx` (todos lo ven; `hasPermission` siempre lo permite). Rediseñado el 2026-10-05 sobre una referencia del usuario: saludo con un resumen compacto en blanco a su costado (envío de stock de la red con Claves de envío, o el propio stock del responsable de farmacia; datos de `useNotifications`, calculados en `services/homeSummary.ts`), «Accesos frecuentes» en recuadros con animación al pasar el mouse (`services/frequentTools.ts`, cuenta en `localStorage` por usuario cada módulo abierto) y «Todas las herramientas» en listas con flecha. Sin aviso debajo del saludo y sin resumen oscuro o llamativo (rechazados). |
 | `DASHBOARD` | Análisis de Requerimiento | `AnalysisModule` en `App.tsx` (+ `InputSection`, `Dashboard`, `AnalysisTable`) |
 | `ANALYSIS_EXCLUSIONS` | Lista de Exclusiones | `components/AnalysisExclusionsModule.tsx` |
 | `SIG_SEARCH` | Consulta Stock | `components/SheetSearchModule.tsx` |

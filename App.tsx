@@ -32,6 +32,7 @@ import { maintenanceMessage, shouldBlockForMaintenance } from './services/mainte
 import { AdminPanel } from './components/AdminPanel';
 import { MODULE_FOOTER_SLOT_ID, MODULE_HEADER_SLOT_ID } from './components/ui/ModuleHeaderSlot';
 import { HomeModule } from './components/HomeModule';
+import { recordToolUse } from './services/frequentTools';
 import { UserMenu } from './components/UserMenu';
 import { ToolSearchDialog, ToolSearchTrigger, useToolSearchShortcut } from './components/ToolSearch';
 import { findNavItem, findNavSection, findVisibleNavSection, NAV_TINT_CLASSES, visibleNavSections } from './components/navigation';
@@ -105,6 +106,11 @@ const AuthenticatedApp: React.FC = () => {
     const openSectionId = nav.module === 'HOME' ? nav.section : null;
     const setCurrentView = useCallback((module: AppModule) => setNav({ module, section: null }), []);
     const openSectionScreen = useCallback((section: string) => setNav({ module: 'HOME', section }), []);
+
+    // Cada herramienta que se abre suma para «Accesos frecuentes» de Inicio (en el navegador).
+    useEffect(() => {
+        if (isAuthenticated && user?.username) recordToolUse(user.username, currentView);
+    }, [currentView, isAuthenticated, user?.username]);
 
     // La direccion del navegador sigue a la vista, sin agregar una entrada por render.
     // Solo con sesion iniciada: sin ella la direccion debe ser la raiz.
