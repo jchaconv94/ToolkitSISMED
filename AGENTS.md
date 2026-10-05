@@ -159,7 +159,7 @@ Olvidar cualquiera deja el módulo inaccesible, sin título o sin URL propia. El
 | `ADMIN_STOCK_ASSIGN` | Columnas de Stock | `components/AdminStockAssignmentModule.tsx` |
 | `ADMIN_SEND_KEYS` | Claves de envío | `components/AdminSendKeysModule.tsx` |
 | `ADMIN_BACKUPS` | Backups SISMED | `components/BackupsSismedModule.tsx` |
-| `PROFILE` | Perfil de Usuario | `components/UserProfile.tsx` (todos lo ven desde el 2026-10-04: `hasPermission` siempre lo permite y ya no figura en Roles). Rediseñado el 2026-10-05: portada oscura con círculos y avatar montado (en el celular centrado y con «Editar datos» flotante), bloques Datos personales / Trabajo / Cuenta y seguridad (con `QuickAccessCard embedded`), y dos ventanas `ResponsiveDialog`: «Editar datos» (incluye usuario y fecha de nacimiento) y «Cambiar contraseña». La fecha de nacimiento necesita `supabase/SUPABASE_PERSONAL_FECHA_NACIMIENTO.sql`; sin él se guarda lo demás y se avisa. |
+| `PROFILE` | Perfil de Usuario | `components/UserProfile.tsx` (todos lo ven desde el 2026-10-04: `hasPermission` siempre lo permite y ya no figura en Roles). Rediseñado el 2026-10-05: portada oscura con círculos y avatar montado (en el celular centrado y con «Editar datos» flotante), bloques Datos personales / Trabajo / Cuenta y seguridad (con `QuickAccessCard embedded`), y dos ventanas `ResponsiveDialog`: «Editar datos» (incluye usuario y fecha de nacimiento; el DNI se ve pero solo lo cambia el administrador) y «Cambiar contraseña». La fecha de nacimiento necesita `supabase/SUPABASE_PERSONAL_FECHA_NACIMIENTO.sql`; sin él se guarda lo demás y se avisa. |
 
 `ANALYSIS` sigue declarado en `AVAILABLE_MODULES` y en las rutas, pero no tiene pantalla propia.
 

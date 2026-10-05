@@ -163,14 +163,13 @@ export const UserProfile: React.FC = () => {
     e.preventDefault();
     if (!form) return;
     setError(null);
-    const clean = { ...form, firstName: form.firstName.trim(), lastName: form.lastName.trim(), dni: form.dni.trim(), username: form.username.trim(), email: form.email.trim(), phone: form.phone.trim() };
+    const clean = { ...form, firstName: form.firstName.trim(), lastName: form.lastName.trim(), username: form.username.trim(), email: form.email.trim(), phone: form.phone.trim() };
     if (!clean.firstName || !clean.lastName) return setError('Nombres y apellidos son obligatorios.');
-    if (clean.dni.length !== 8) return setError('El DNI debe tener 8 dígitos.');
     if (!clean.username) return setError('El nombre de usuario es obligatorio.');
     if (clean.email && !EMAIL_RE.test(clean.email)) return setError('El correo no tiene un formato válido.');
 
     const changed =
-      clean.firstName !== (p.firstName || '') || clean.lastName !== (p.lastName || '') || clean.dni !== (p.dni || '') ||
+      clean.firstName !== (p.firstName || '') || clean.lastName !== (p.lastName || '') ||
       clean.birthDate !== birthDate || clean.username !== user.username || clean.phone !== (p.phone || '') ||
       clean.email !== (p.email || '') || clean.laborRegimeId !== (p.laborRegimeId || '') || clean.professionId !== (p.professionId || '');
     if (!changed) { setEditOpen(false); return; }
@@ -179,7 +178,8 @@ export const UserProfile: React.FC = () => {
     const response: any = await api.updateProfile(user.personnelId, {
       firstName: clean.firstName,
       lastName: clean.lastName,
-      dni: clean.dni,
+      // El DNI no lo cambia el propio usuario (solo el administrador): se reenvía el vigente.
+      dni: p.dni,
       phone: clean.phone,
       email: clean.email,
       birthDate: clean.birthDate,
@@ -191,7 +191,7 @@ export const UserProfile: React.FC = () => {
     if (response.success) {
       updateUserContext({
         username: clean.username,
-        personnelData: { ...p, firstName: clean.firstName, lastName: clean.lastName, dni: clean.dni, phone: clean.phone, email: clean.email, birthDate: clean.birthDate, laborRegimeId: clean.laborRegimeId, professionId: clean.professionId },
+        personnelData: { ...p, firstName: clean.firstName, lastName: clean.lastName, phone: clean.phone, email: clean.email, birthDate: clean.birthDate, laborRegimeId: clean.laborRegimeId, professionId: clean.professionId },
       });
       await refreshUserData(clean.username);
       setEditOpen(false);
@@ -229,7 +229,7 @@ export const UserProfile: React.FC = () => {
   };
 
   const set = (key: keyof ProfileForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((prev) => (prev ? { ...prev, [key]: key === 'dni' ? e.target.value.replace(/\D/g, '').slice(0, 8) : e.target.value } : prev));
+    setForm((prev) => (prev ? { ...prev, [key]: e.target.value } : prev));
 
   const errorBox = error && (
     <div role="alert" className="mb-4 flex gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-[13px] font-semibold text-red-700">
@@ -326,7 +326,7 @@ export const UserProfile: React.FC = () => {
             <Group title="Identidad">
               <FormField label="Nombres" required><input className={inputClass} value={form.firstName} onChange={set('firstName')} autoComplete="given-name" /></FormField>
               <FormField label="Apellidos" required><input className={inputClass} value={form.lastName} onChange={set('lastName')} autoComplete="family-name" /></FormField>
-              <FormField label="DNI" required><input className={`${inputClass} font-mono`} value={form.dni} onChange={set('dni')} inputMode="numeric" maxLength={8} placeholder="8 dígitos" /></FormField>
+              <FormField label="DNI" hint="Solo el administrador puede cambiarlo."><input className={`${inputClass} font-mono`} value={form.dni} disabled readOnly /></FormField>
               <FormField label="Fecha de nacimiento"><input type="date" className={inputClass} value={form.birthDate} onChange={set('birthDate')} max={new Date().toISOString().slice(0, 10)} /></FormField>
             </Group>
             <Group title="Cuenta">
