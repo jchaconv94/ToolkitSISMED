@@ -1,18 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, ChevronRight, Database, LayoutGrid, Pill } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Database, LayoutGrid, Pill, RefreshCw } from "lucide-react";
 import { AppModule } from "../types";
 import { useAuth } from "../contexts/AuthContext";
 import { useNotifications } from "../contexts/NotificationsContext";
 import { greetingFor, limaLongDate, userFirstName } from "../services/sessionDisplay";
 import { SUGGESTED_TOOLS, loadCounts, topTools } from "../services/frequentTools";
+import { networkFiguresAt } from "../services/networkStockStatus";
 import { NAV_TINT_CLASSES, NavItem, NavTint, visibleNavSections } from "./navigation";
 import { EmptyState } from "./ui/kit";
 
 /**
  * Inicio (rediseño del 2026-10-05, sobre la referencia del usuario):
- *   - Saludo, y a su costado un resumen compacto en blanco con marca de agua: el envío de
- *     stock de la red (quien tiene Claves de envío) o su propio stock (responsable de
- *     farmacia). Los datos son los de la campanita (`useNotifications`): Inicio no lee nada.
+ *   - Saludo, y a su costado un resumen compacto en blanco con marca de agua: «Stock
+ *     actualizado» de su jurisdicción (quien ve la red) o su propio stock (responsable de
+ *     farmacia). Los datos llegan por `useNotifications`: Inicio no lee nada por su cuenta.
  *   - Accesos frecuentes en recuadros (los que esa persona más abre, `frequentTools`).
  *   - Todas las herramientas por sección, en listas con flecha.
  * Las secciones y su orden salen de `navigation.ts`, igual que el lateral.
@@ -84,7 +85,9 @@ const SummaryCard: React.FC<{
   figures: Figure[];
   watermark: React.ElementType;
   onNavigate: (module: AppModule) => void;
-}> = ({ title, hint, link, figures, watermark: Watermark, onNavigate }) => {
+  /** Botón para volver a leer ya; gira mientras se lee. */
+  refresh?: { onClick: () => void; busy: boolean };
+}> = ({ title, hint, link, figures, watermark: Watermark, onNavigate, refresh }) => {
   const shares = barShares(figures.map(f => f.value));
   return (
     <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
@@ -94,9 +97,23 @@ const SummaryCard: React.FC<{
           <h2 className="truncate text-[14px] font-black text-slate-900">{title}</h2>
           {hint && <p className="truncate text-[12px] text-slate-500">{hint}</p>}
         </div>
-        <button type="button" onClick={() => onNavigate(link.module)} className="flex shrink-0 items-center gap-0.5 text-[12.5px] font-bold text-teal-700 hover:text-teal-800">
-          {link.label}<ChevronRight className="h-4 w-4" />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {refresh && (
+            <button
+              type="button"
+              onClick={refresh.onClick}
+              disabled={refresh.busy}
+              aria-label={refresh.busy ? "Actualizando" : "Actualizar ahora"}
+              title={refresh.busy ? "Actualizando…" : "Actualizar ahora"}
+              className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-teal-700 disabled:cursor-default disabled:hover:bg-transparent"
+            >
+              <RefreshCw className={`h-4 w-4 ${refresh.busy ? "animate-spin text-teal-600" : ""}`} />
+            </button>
+          )}
+          <button type="button" onClick={() => onNavigate(link.module)} className="flex items-center gap-0.5 text-[12.5px] font-bold text-teal-700 hover:text-teal-800">
+            {link.label}<ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       <div className="relative mt-3 flex h-2 gap-1" aria-hidden="true">
         {shares.some(Boolean)
@@ -142,7 +159,7 @@ const FrequentCard: React.FC<{ item: NavItem; tint: NavTint; onClick: () => void
 
 export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> = ({ onNavigate }) => {
   const { user, hasPermission } = useAuth();
-  const { network, networkPending, pharmacySummary } = useNotifications();
+  const { network, networkPending, networkChecking, refreshNetwork, pharmacySummary } = useNotifications();
   const now = useNow();
   const sections = visibleNavSections(hasPermission);
 
@@ -154,19 +171,22 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
   }, [items, user?.username]);
 
   // La red manda sobre el stock propio: quien ve la red (DIRESA, OGESS, UNGET o global) la ve.
-  const summary = network ? (
+  // Las cifras se reclasifican cada minuto con la hora actual (`useNow`), sin releer las hojas.
+  const figures = network ? networkFiguresAt(network, now.getTime()) : null;
+  const summary = network && figures ? (
     <SummaryCard
       title={`Stock actualizado · ${network.scope}`}
-      hint={`${network.total} ${network.total === 1 ? "establecimiento" : "establecimientos"} · ${
+      hint={`${figures.total} ${figures.total === 1 ? "establecimiento" : "establecimientos"} · ${
         network.pending ? `faltan ${network.pending} UNGET por responder` : checkedAgo(network.at, now)
       }`}
       link={{ label: "Ver Consulta Stock", module: "SIG_SEARCH" }}
       watermark={Database}
       onNavigate={onNavigate}
+      refresh={{ onClick: refreshNetwork, busy: networkChecking }}
       figures={[
-        { value: network.upToDate, label: "Al día", text: "text-emerald-600", bar: "bg-emerald-400", module: "SIG_SEARCH" },
-        { value: network.late, label: "Con retraso", text: "text-amber-600", bar: "bg-amber-400", module: "SIG_SEARCH" },
-        { value: network.stale, label: "Sin actualizar", text: "text-red-600", bar: "bg-red-400", module: "SIG_SEARCH" },
+        { value: figures.upToDate, label: "Al día", text: "text-emerald-600", bar: "bg-emerald-400", module: "SIG_SEARCH" },
+        { value: figures.late, label: "Con retraso", text: "text-amber-600", bar: "bg-amber-400", module: "SIG_SEARCH" },
+        { value: figures.stale, label: "Sin actualizar", text: "text-red-600", bar: "bg-red-400", module: "SIG_SEARCH" },
       ]}
     />
   ) : networkPending ? (

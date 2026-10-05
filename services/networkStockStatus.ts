@@ -32,7 +32,19 @@ export interface NetworkStockStatus {
   at: number;
   /** Mientras se calcula: hojas de UNGET que aún no responden (las cifras ya suman las demás). */
   pending?: number;
+  /**
+   * «Última actualización» de cada establecimiento (ms). Con ellas Inicio vuelve a
+   * clasificar con la hora actual sin leer de nuevo las hojas: una hoja de hace 50 min pasa
+   * sola a «con retraso» a los 61. Los resultados guardados antes no las traen.
+   */
+  updates?: number[];
 }
+
+/** Cifras con la hora actual: reclasifica las fechas si las trae; si no, las calculadas. */
+export const networkFiguresAt = (status: NetworkStockStatus, now: number) =>
+  Array.isArray(status.updates)
+    ? summarizeSheetUpdates(status.updates, now)
+    : { total: status.total, upToDate: status.upToDate, late: status.late, stale: status.stale };
 
 /** Niveles que ven la red; el personal de un establecimiento ve su propio stock. */
 export const NETWORK_LEVELS = ["GLOBAL", "DIRESA", "OGESS", "UNGET"];
@@ -143,13 +155,13 @@ export async function loadNetworkStockStatus(
         answered += 1;
       } finally {
         pending -= 1;
-        if (pending > 0 && answered > 0) onProgress?.({ scope, ...summarizeSheetUpdates(lastUpdates, now), at: now, pending });
+        if (pending > 0 && answered > 0) onProgress?.({ scope, ...summarizeSheetUpdates(lastUpdates, now), at: now, pending, updates: [...lastUpdates] });
       }
     }),
   );
   if (configs.length > 0 && !results.some((r) => r.status === "fulfilled")) throw new Error("Ninguna hoja de stock respondió.");
 
-  return { scope, ...summarizeSheetUpdates(lastUpdates, now), at: now };
+  return { scope, ...summarizeSheetUpdates(lastUpdates, now), at: now, updates: lastUpdates };
 }
 
 // --- Último resultado guardado en el navegador -----------------------------------------
