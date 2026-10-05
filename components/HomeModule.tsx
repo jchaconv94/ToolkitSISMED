@@ -82,11 +82,11 @@ const SummaryCard: React.FC<{
           ? figures.map((f, i) => (shares[i] > 0 ? <span key={f.label} className={`rounded-full ${f.bar}`} style={{ flex: shares[i] }} /> : null))
           : <span className="flex-1 rounded-full bg-slate-100" />}
       </div>
-      <div className="relative mt-3 flex flex-wrap items-center gap-x-6 gap-y-1">
+      <div className="relative mt-3 grid grid-cols-3 gap-3">
         {figures.map(f => (
-          <button key={f.label} type="button" onClick={() => onNavigate(f.module)} className={`flex items-baseline gap-1.5 rounded-md transition-opacity hover:opacity-75 ${f.value === 0 ? "opacity-50" : ""}`}>
+          <button key={f.label} type="button" onClick={() => onNavigate(f.module)} className={`flex min-w-0 items-baseline gap-1.5 rounded-md text-left transition-opacity hover:opacity-75 ${f.value === 0 ? "opacity-50" : ""}`}>
             <span className={`text-[22px] font-black leading-none ${f.text}`}>{f.value}</span>
-            <span className="text-[12.5px] font-semibold text-slate-500">{f.label}</span>
+            <span className="truncate text-[12.5px] font-semibold text-slate-500">{f.label}</span>
           </button>
         ))}
       </div>
