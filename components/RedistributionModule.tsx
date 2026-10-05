@@ -2671,7 +2671,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
     };
 
     return (
-        <div className={`w-full mx-auto ${isFullscreen ? 'p-0 max-w-none' : 'p-0 sm:p-6 sm:max-w-[98%] space-y-3 sm:space-y-6 animate-in fade-in duration-300'}`}>
+        <div className={`w-full mx-auto ${isFullscreen ? 'p-0 max-w-none' : 'p-0 sm:p-6 sm:max-w-[98%] space-y-3 sm:space-y-6 animate-in fade-in duration-300'} ${!isFullscreen && records.length === 0 ? 'max-sm:min-h-full max-sm:flex max-sm:flex-col' : ''}`}>
 
             {/* HEADER. En el celular no se muestra: la cabecera de la app ya dice «Redistribución». */}
             <div className="hidden sm:flex items-center justify-between">
@@ -2687,7 +2687,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
             </div>
 
             {/* UPLOAD SECTION */}
-            <div className={`bg-white rounded-2xl shadow-lg border border-gray-100 transition-all hover:shadow-xl relative ${isUploadSectionCollapsed && records.length > 0 ? 'p-4' : 'p-3 sm:p-8'}`}>
+            <div className={`bg-white rounded-2xl shadow-lg border border-gray-100 transition-all hover:shadow-xl relative ${isUploadSectionCollapsed && records.length > 0 ? 'p-4' : 'p-3 sm:p-8'} ${records.length === 0 ? 'max-sm:flex-1 max-sm:flex max-sm:flex-col' : ''}`}>
                 {records.length > 0 && !loading && (
                     <button
                         onClick={() => setIsUploadSectionCollapsed(!isUploadSectionCollapsed)}
@@ -2741,7 +2741,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                         </div>
                     </div>
                 ) : (
-                    <div className="flex flex-col items-center justify-center text-center">
+                    <div className="flex flex-col items-center justify-center text-center max-sm:flex-1">
 
                         {loading ? (
                             <div className="py-12 flex flex-col items-center animate-in fade-in zoom-in duration-500">
@@ -2757,7 +2757,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                         ) : (
                             <>
                                 <div
-                                    className="w-full max-w-2xl mx-auto border-2 border-dashed border-indigo-200 rounded-xl px-4 py-6 sm:p-10 bg-indigo-50/30 hover:bg-indigo-50 transition-all group cursor-pointer relative"
+                                    className="w-full max-w-2xl mx-auto border-2 border-dashed border-indigo-200 rounded-xl px-4 py-6 sm:p-10 max-sm:flex-1 max-sm:flex max-sm:flex-col max-sm:justify-center bg-indigo-50/30 hover:bg-indigo-50 transition-all group cursor-pointer relative"
                                     onClick={() => {
                                         if (records.length > 0) {
                                             setIsConfirmUploadModalOpen(true);
