@@ -18,7 +18,8 @@ vi.mock("./api", () => ({
 
 const gasCalls: Array<{ url: string; options: any }> = [];
 let releaseSlow: (value: unknown) => void = () => undefined;
-vi.mock("./gasConnectionService", () => ({
+vi.mock("./gasConnectionService", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./gasConnectionService")>()),
   fetchGasWithResilience: (url: string, options: any) => {
     gasCalls.push({ url, options });
     if (url.includes("/b")) return new Promise((resolve) => { releaseSlow = resolve; });
@@ -54,7 +55,7 @@ describe("stock actualizado de la red", () => {
     expect(updates[1]).toBe(0);
   });
 
-  it("con una DIRESA entrega cifras parciales sin esperar a la hoja más lenta, y sin reintentos", async () => {
+  it("con una DIRESA entrega cifras parciales sin esperar a la hoja más lenta, sin reintentos, y lee las Web Apps antiguas", async () => {
     const partials: any[] = [];
     const done = loadNetworkStockStatus(
       { username: "dir", role: "DIRESA", jurisdictionLevel: "DIRESA", personnelData: { diresaId: "d1" } } as any,
@@ -63,11 +64,15 @@ describe("stock actualizado de la red", () => {
     );
     await vi.waitFor(() => expect(partials).toHaveLength(1));
     expect(partials[0]).toMatchObject({ scope: "DIRESA SAN MARTIN", total: 1, upToDate: 1, pending: 1 });
-    expect(gasCalls.every((call) => call.options.retryDelaysMs.length === 0 && call.options.timeoutMs <= 30_000)).toBe(true);
+    expect(gasCalls.every((call) => call.options.retryDelaysMs.length === 0 && call.options.timeoutMs <= 45_000)).toBe(true);
 
-    releaseSlow([{ id: "2", name: "C.S. DOS-00002", codigoIpress: "00002", lastUpdate: "04/10/2026 08:00:00" }]);
+    // La UNGET lenta tiene una Web App antigua: devuelve el libro completo, no la lista.
+    releaseSlow([
+      { id: 2, name: "C.S. DOS-00002", data: [{ ALMCOD: "00002", ULTIMA_ACTUALIZACION: "04/10/2026 08:00:00", CODIGO: "1" }] },
+      { id: 3, name: "P.S. TRES-00003", data: [{ ALMCOD: "00003", ULTIMA_ACTUALIZACION: "05/10/2026 11:00:00", CODIGO: "1" }] },
+    ]);
     const status = await done;
-    expect(status).toMatchObject({ total: 2, upToDate: 1, stale: 1 });
+    expect(status).toMatchObject({ total: 3, upToDate: 2, stale: 1 });
     expect(status?.pending).toBeUndefined();
   });
 });

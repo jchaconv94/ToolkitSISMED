@@ -11,7 +11,7 @@
 
 import type { User } from "../types";
 import { api } from "./api";
-import { fetchGasWithResilience, type GasSheetMetadata } from "./gasConnectionService";
+import { GAS_REQUEST_TIMEOUT_MS, fetchGasWithResilience, parseGasMetadataResponse, type GasSheetMetadata } from "./gasConnectionService";
 import { fetchSheetsMetadataViaApi, hasSheetsApiKey, isFacilitySheet } from "./sheetsApiService";
 import { parseSheetDateTime } from "./stockSyncHistory";
 import { alignConfigsWithOfficialUngets, resolveStockLevel, selectVisibleStockConnections } from "./stockConnectionScope";
@@ -59,8 +59,6 @@ export const facilityLastUpdates = (metadata: GasSheetMetadata[]): number[] =>
     .filter((meta) => (meta.rowCount === undefined ? isFacilitySheet({ ...meta, rowCount: 0 }) : isFacilitySheet(meta)))
     .map((meta) => parseSheetDateTime(meta.lastUpdate));
 
-const METADATA_TIMEOUT_MS = 25_000;
-
 const loadMetadata = async (config: any): Promise<GasSheetMetadata[]> => {
   const spreadsheetId = String(config?.spreadsheetId || "").trim();
   if (spreadsheetId && hasSheetsApiKey()) {
@@ -74,13 +72,17 @@ const loadMetadata = async (config: any): Promise<GasSheetMetadata[]> => {
     // Petición propia, sin la caché compartida de `fetchGasMetadata`: compartir esos mismos
     // objetos con Consulta Stock mientras carga le dejaba el directorio vacío.
     const sep = config.url.includes("?") ? "&" : "?";
-    // Sin reintentos y con un tope corto: una hoja lenta no debe tener a Inicio esperando un
-    // minuto; se vuelve a intentar en la siguiente revisión.
+    // Sin reintentos (se vuelve a intentar en la siguiente revisión) y con el mismo tope que
+    // Consulta Stock: las Web Apps antiguas mandan el libro entero y tardan.
     const result = await fetchGasWithResilience(`${config.url}${sep}action=getMetadata&_t=${Date.now()}`, {
-      timeoutMs: METADATA_TIMEOUT_MS,
+      timeoutMs: GAS_REQUEST_TIMEOUT_MS,
       retryDelaysMs: [],
     });
-    return Array.isArray(result) ? result.filter((item: any) => item && typeof item === "object" && item.name && !Array.isArray(item.data)) : [];
+    // Misma lectura que Consulta Stock: las Web Apps antiguas devuelven el libro completo en
+    // vez de la lista de pestañas, y antes esas UNGET se quedaban fuera de la cuenta.
+    const metadata = parseGasMetadataResponse(result);
+    if (!metadata) throw new Error(`La Web App de ${config?.name || "una UNGET"} no devolvió la lista de hojas.`);
+    return metadata;
   }
   throw new Error(`La conexión de ${config?.name || "una UNGET"} no tiene hoja ni Web App.`);
 };
