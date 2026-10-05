@@ -130,37 +130,9 @@ export const AdminOrganizationModule: React.FC = () => {
         onChange: (val: string) => void,
         id: string
     ) => {
-        const isActive = !!value;
-        return (
-            <div 
-                id={`th-filter-${id}`}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    setActiveFilterTitle(title);
-                    setActiveFilterValue(value);
-                    setActiveFilterOptions(options || []);
-                    setActiveFilterOnChange(() => onChange);
-                    setActiveFilterTriggerRect(rect);
-                    setActiveFilterId(activeFilterId === id ? null : id);
-                    setHeaderFilterSearch('');
-                }}
-                className={`group select-none inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-all duration-200 cursor-pointer ${
-                    isActive 
-                        ? 'bg-teal-50 border-teal-200/80 text-teal-700 font-extrabold shadow-sm shadow-teal-50/20' 
-                        : 'bg-transparent border-transparent hover:bg-slate-100 hover:border-slate-200 text-slate-500 hover:text-slate-800'
-                }`}
-            >
-                <span className="font-extrabold uppercase tracking-wider text-[10px] whitespace-nowrap">{title}</span>
-                <Filter 
-                    className={`h-3 w-3 shrink-0 transition-transform duration-200 ${
-                        isActive 
-                            ? 'text-teal-600 fill-teal-100 scale-110' 
-                            : 'text-slate-400 group-hover:text-slate-600 group-hover:scale-105'
-                    }`} 
-                />
-            </div>
-        );
+        // Los filtros viven en la barra de arriba (y en el panel del celular): el encabezado solo nombra la columna.
+        void value; void options; void onChange; void id;
+        return <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 whitespace-nowrap">{title}</span>;
     };
 
     const [diresas, setDiresas] = useState<Diresa[]>([]);
@@ -692,9 +664,9 @@ export const AdminOrganizationModule: React.FC = () => {
         else if (activeTab === 'IPRESS') extractFrom(visibleFacilities);
 
         return {
-            departments: [{ value: '', label: 'Todos' }, ...Array.from(departments).sort().map(d => ({ value: d, label: d }))],
-            provinces: [{ value: '', label: 'Todas' }, ...Array.from(provinces).sort().map(p => ({ value: p, label: p }))],
-            districts: [{ value: '', label: 'Todos' }, ...Array.from(districts).sort().map(d => ({ value: d, label: d }))]
+            departments: [{ value: '', label: 'Todos los departamentos' }, ...Array.from(departments).sort().map(d => ({ value: d, label: d }))],
+            provinces: [{ value: '', label: 'Todas las provincias' }, ...Array.from(provinces).sort().map(p => ({ value: p, label: p }))],
+            districts: [{ value: '', label: 'Todos los distritos' }, ...Array.from(districts).sort().map(d => ({ value: d, label: d }))]
         };
     }, [activeTab, visibleDiresas, visibleOgess, visibleUngets, visibleMicroredes, visibleFacilities]);
 
@@ -1500,15 +1472,15 @@ export const AdminOrganizationModule: React.FC = () => {
     const mobileOrgList = useIncrementalCount(currentTotal, orgFilterKey);
     const { tableRef: orgTableRef, floating: orgFloatingHead } = useFloatingTableHead([activeTab, orgPage, currentTotal, isDesktop]);
 
-    // Filtros del panel (celular y botón «Filtros»): los mismos de los encabezados de cada tabla.
+    // Filtros de cada nivel: en escritorio van en la barra; en el celular, en el panel inferior.
     type FilterField = { key: string; label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void };
     const panelFilters: FilterField[] = (() => {
         const diresaF: FilterField = { key: 'diresa', label: 'DIRESA', value: filterDiresaId, options: [{ value: '', label: 'Todas las DIRESA' }, ...diresas.map(d => ({ value: d.id, label: d.name }))], onChange: (v) => { setFilterDiresaId(v); setFilterOgessId(''); setFilterUngetId(''); setFilterMicroredId(''); } };
         const ogessF: FilterField = { key: 'ogess', label: 'OGESS', value: filterOgessId, options: [{ value: '', label: 'Todas las OGESS' }, ...ogess.filter(o => !filterDiresaId || o.diresaId === filterDiresaId).map(o => ({ value: o.id, label: o.name }))], onChange: (v) => { setFilterOgessId(v); setFilterUngetId(''); setFilterMicroredId(''); } };
         const ungetF: FilterField = { key: 'unget', label: 'UNGET', value: filterUngetId, options: [{ value: '', label: 'Todas las UNGET' }, ...ungets.filter(u => !filterOgessId || u.ogessId === filterOgessId).map(u => ({ value: u.id, label: u.name }))], onChange: (v) => { setFilterUngetId(v); setFilterMicroredId(''); } };
         const microredF: FilterField = { key: 'microred', label: 'Microred', value: filterMicroredId, options: [{ value: '', label: 'Todas las microredes' }, ...microredes.filter(m => !filterUngetId || m.ungetId === filterUngetId).map(m => ({ value: m.id, label: m.name }))], onChange: setFilterMicroredId };
-        const categoryF: FilterField = { key: 'category', label: 'Categoría', value: filterCategory, options: [{ value: '', label: 'Todas' }, ...['I-1', 'I-2', 'I-3', 'I-4', 'II-1', 'II-2', 'III-1'].map(c => ({ value: c, label: c }))], onChange: setFilterCategory };
-        const typeF: FilterField = { key: 'type', label: 'Tipo', value: filterType, options: [{ value: '', label: 'Todos' }, ...FACILITY_TYPES.map(t => ({ value: t.value, label: t.label }))], onChange: setFilterType };
+        const categoryF: FilterField = { key: 'category', label: 'Categoría', value: filterCategory, options: [{ value: '', label: 'Todas las categorías' }, ...['I-1', 'I-2', 'I-3', 'I-4', 'II-1', 'II-2', 'III-1'].map(c => ({ value: c, label: c }))], onChange: setFilterCategory };
+        const typeF: FilterField = { key: 'type', label: 'Tipo', value: filterType, options: [{ value: '', label: 'Todos los tipos' }, ...FACILITY_TYPES.map(t => ({ value: t.value, label: t.label }))], onChange: setFilterType };
         const departmentF: FilterField = { key: 'department', label: 'Departamento', value: filterDepartment, options: filterOptions.departments, onChange: setFilterDepartment };
         const provinceF: FilterField = { key: 'province', label: 'Provincia', value: filterProvince, options: filterOptions.provinces, onChange: setFilterProvince };
         const districtF: FilterField = { key: 'district', label: 'Distrito', value: filterDistrict, options: filterOptions.districts, onChange: setFilterDistrict };
@@ -1607,14 +1579,23 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         );
                     })}
+                    {canAddActiveTab && isDesktop && (
+                        <button
+                            type="button"
+                            onClick={openCreate}
+                            className="mb-2 ml-auto flex h-10 shrink-0 items-center gap-2 self-center rounded-xl bg-teal-600 px-4 text-sm font-bold text-white transition-colors hover:bg-teal-700"
+                        >
+                            <Plus className="h-4 w-4" /> {TAB_NEW[activeTab]}
+                        </button>
+                    )}
                 </div>
             )}
 
             {availableTabs.length > 0 && (
                 <>
                     {/* Barra: buscador, filtros y nuevo */}
-                    <div className="flex items-center gap-2">
-                        <div className="relative min-w-0 flex-1 md:max-w-md">
+                    <div className="flex items-center gap-2 md:flex-wrap">
+                        <div className="relative min-w-0 flex-1 md:min-w-[200px] md:max-w-xs">
                             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                             <input
                                 type="text"
@@ -1630,30 +1611,35 @@ export const AdminOrganizationModule: React.FC = () => {
                                 </button>
                             )}
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => setIsFilterPaneOpen(true)}
-                            aria-label="Filtros"
-                            className={`flex h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-bold transition-colors md:h-10 md:px-4 ${hasActiveFilters ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
-                        >
-                            <SlidersHorizontal className="h-4 w-4 text-slate-500" />
-                            <span className="hidden md:inline">Filtros</span>
-                            {activeFilterChips.length > 0 && (
-                                <span className="grid h-5 min-w-5 place-items-center rounded-full bg-teal-600 px-1 text-[10px] font-black text-white">{activeFilterChips.length}</span>
-                            )}
-                        </button>
-                        {canAddActiveTab && isDesktop && (
+                        {isDesktop ? (
+                            <>
+                                {panelFilters.map(f => (
+                                    <div key={f.key} className="w-40 shrink-0" title={f.label}>
+                                        <CustomSelect className={`h-10 text-[13px] ${f.value ? '!border-teal-300 !bg-teal-50 !text-teal-800' : ''}`} value={f.value} onChange={f.onChange} options={f.options} />
+                                    </div>
+                                ))}
+                                {hasActiveFilters && (
+                                    <button type="button" onClick={clearAllFilters} className="flex h-10 shrink-0 items-center gap-1 px-2 text-[13px] font-bold text-teal-700 hover:text-teal-900">
+                                        <X className="h-3.5 w-3.5" /> Limpiar
+                                    </button>
+                                )}
+                            </>
+                        ) : (
                             <button
                                 type="button"
-                                onClick={openCreate}
-                                className="ml-auto flex h-10 shrink-0 items-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white transition-colors hover:bg-teal-700"
+                                onClick={() => setIsFilterPaneOpen(true)}
+                                aria-label="Filtros"
+                                className={`flex h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-bold transition-colors ${hasActiveFilters ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-slate-200 bg-white text-slate-700'}`}
                             >
-                                <Plus className="h-4 w-4" /> {TAB_NEW[activeTab]}
+                                <SlidersHorizontal className="h-4 w-4 text-slate-500" />
+                                {activeFilterChips.length > 0 && (
+                                    <span className="grid h-5 min-w-5 place-items-center rounded-full bg-teal-600 px-1 text-[10px] font-black text-white">{activeFilterChips.length}</span>
+                                )}
                             </button>
                         )}
                     </div>
 
-                    {activeFilterChips.length > 0 && (
+                    {!isDesktop && activeFilterChips.length > 0 && (
                         <div className="flex flex-wrap items-center gap-2">
                             {activeFilterChips.map(c => (
                                 <span key={c.key} className="flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 py-1 pl-3 pr-1 text-[12.5px] font-bold text-teal-800">
@@ -1665,7 +1651,7 @@ export const AdminOrganizationModule: React.FC = () => {
                         </div>
                     )}
 
-                    <BottomSheet open={isFilterPaneOpen} title="Filtros" centeredOnDesktop onClose={() => setIsFilterPaneOpen(false)}>
+                    <BottomSheet open={isFilterPaneOpen && !isDesktop} title="Filtros" onClose={() => setIsFilterPaneOpen(false)}>
                         <div className="space-y-4">
                             {panelFilters.map(f => (
                                 <div key={f.key}>
@@ -2097,8 +2083,8 @@ export const AdminOrganizationModule: React.FC = () => {
                 </>
             )}
 
-            {/* Detalle «premium»: panel oscuro con la jurisdicción (a la izquierda en escritorio,
-                arriba en el celular) y los datos del registro en bloques. */}
+            {/* Detalle «premium»: en escritorio, panel oscuro con la jurisdicción a la izquierda; en el
+                celular, cabecera oscura compacta y todo lo demás en bloques claros. */}
             {selectedDetailItem && selectedDetailType && (() => {
                 const item = selectedDetailItem;
                 const tab = selectedDetailType as OrgTab;
@@ -2125,7 +2111,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             </div>
                         )}
 
-                        <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4 md:rounded-none md:border-0 md:bg-transparent md:p-0">
+                        <div className="mt-6">
                             <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Jurisdicción</p>
                             {nodes.map((node, index) => {
                                 const last = index === nodes.length - 1;
@@ -2243,6 +2229,64 @@ export const AdminOrganizationModule: React.FC = () => {
                     </div>
                 );
 
+                // En el celular la cabecera oscura queda compacta (tipo, nombre y chips); la
+                // jurisdicción, lo que depende y la conexión pasan al cuerpo como bloques claros.
+                const parentNodes = nodes.filter(node => !node.isCurrent);
+                const mobileHeader = (
+                    <div className="shrink-0 bg-gradient-to-br from-slate-900 via-slate-900 to-teal-950 px-4 pb-4 pt-3">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="w-fit rounded-full border border-teal-400/30 bg-teal-400/10 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-widest text-teal-300">{TAB_SINGULAR[tab]}</span>
+                            <button type="button" onClick={close} aria-label="Cerrar" className="-mr-2 grid h-10 w-10 place-items-center rounded-full text-slate-300"><X className="h-5 w-5" /></button>
+                        </div>
+                        <h3 className="text-[18px] font-black leading-snug text-white">{item.name}</h3>
+                        {(item.code || item.category || item.type) && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                {item.code && <span className="rounded-md border border-white/15 bg-white/10 px-2 py-0.5 font-mono text-[12px] font-bold text-white">{item.code}</span>}
+                                {item.category && <span className="rounded-md border border-teal-400/30 bg-teal-400/15 px-2 py-0.5 text-[12px] font-bold text-teal-200">{item.category}</span>}
+                                {item.type && <span className="rounded-md border border-white/15 bg-white/10 px-2 py-0.5 text-[12px] font-bold text-slate-200">{facilityTypeLabel(item.type)}</span>}
+                            </div>
+                        )}
+                    </div>
+                );
+                const mobileBlocks = (
+                    <div className="space-y-3">
+                        {parentNodes.length > 0 && (
+                            <Section title="Jurisdicción">
+                                {parentNodes.map((node, index) => <Row key={index} label={nodeLabel(node.label)}>{node.name}</Row>)}
+                            </Section>
+                        )}
+                        {stats && (
+                            <Section title="En su jurisdicción">
+                                {stats.map((stat, i) => (
+                                    <div key={i} className="flex items-center justify-between px-4 py-3 text-[14px]">
+                                        <span className="text-slate-600">{statLabel(stat.label)}</span>
+                                        <span className="rounded-lg bg-teal-50 px-2 py-0.5 text-[13px] font-black text-teal-700">{stat.value}</span>
+                                    </div>
+                                ))}
+                            </Section>
+                        )}
+                        {tab === 'UNGET' && (() => {
+                            const estado = connectionsStatus === 'ready' ? connectionByUnget.get(String(item.id || '')) : undefined;
+                            const ui = getConnectionUi(item.id);
+                            return (
+                                <Section title="Conexión de stock">
+                                    <Row label="Estado"><span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[12px] font-bold ${ui.chip}`}><ui.Icon className="h-3 w-3 shrink-0" />{ui.label}</span></Row>
+                                    <Row label="La mantiene"><span className="font-mono text-[14px]">{estado?.maintainer || '—'}</span></Row>
+                                    <div className="px-4 py-3">
+                                        <p className="text-[13px] leading-snug text-slate-500">{ui.hint}</p>
+                                        {canReachStockConnections && (
+                                            <button type="button" onClick={goToStockConnections} className="mt-3 flex h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 text-[14px] font-bold text-teal-700">
+                                                <Settings2 className="h-4 w-4" /> Configurar conexión
+                                            </button>
+                                        )}
+                                    </div>
+                                </Section>
+                            );
+                        })()}
+                        {dataBlocks}
+                    </div>
+                );
+
                 const footer = (
                     <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                         {isSuperAdmin && !isDesktop && (
@@ -2282,13 +2326,8 @@ export const AdminOrganizationModule: React.FC = () => {
                                 </>
                             ) : (
                                 <>
-                                    <div className="flex-1 overflow-y-auto overscroll-contain bg-slate-50">
-                                        <div className="relative bg-gradient-to-b from-slate-900 via-slate-900 to-teal-950 px-4 pb-5 pt-4">
-                                            <button type="button" onClick={close} aria-label="Cerrar" className="absolute right-2 top-2 grid h-10 w-10 place-items-center rounded-full text-slate-300"><X className="h-5 w-5" /></button>
-                                            {darkPanel}
-                                        </div>
-                                        <div className="p-4">{dataBlocks}</div>
-                                    </div>
+                                    {mobileHeader}
+                                    <div className="flex-1 overflow-y-auto overscroll-contain bg-slate-50 p-4">{mobileBlocks}</div>
                                     {footer}
                                 </>
                             )}
@@ -2322,16 +2361,16 @@ export const AdminOrganizationModule: React.FC = () => {
 
                {/* Modals for Editing */}
             {isDiresaModalOpen && createPortal(
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-[200000] flex bg-white md:items-center md:justify-center md:bg-black/60 md:p-4 md:backdrop-blur-sm">
+                    <div className="flex h-full w-full flex-col overflow-hidden bg-white animate-in fade-in duration-200 md:h-auto md:max-h-[92vh] md:max-w-4xl md:rounded-2xl md:border md:border-gray-100 md:shadow-2xl">
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
                             <div>
-                                <h3 className="font-extrabold text-xl text-gray-900 tracking-tight flex items-center gap-2">
+                                <h3 className="flex items-center gap-2 text-[17px] font-black tracking-tight text-slate-900 md:text-xl">
                                     <Building2 className="h-5 w-5 text-teal-600" />
                                     Mantenimiento de DIRESA
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">Configure los datos de identificación, geografía y contacto de la Dirección Regional de Salud.</p>
+                                <p className="mt-1 hidden text-xs text-gray-500 md:block">Configure los datos de identificación, geografía y contacto de la Dirección Regional de Salud.</p>
                             </div>
                             <button 
                                 type="button"
@@ -2342,38 +2381,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* Premium Stepper Progress */}
-                        <div className="px-6 py-5 border-b border-gray-50 bg-white relative flex items-center justify-between shrink-0">
-                            <div className="absolute left-6 top-8 right-6 h-0.5 bg-gray-100 -z-10">
-                                <div 
-                                    className="h-full bg-teal-600 transition-all duration-300" 
-                                    style={{ width: diresaModalStep === 1 ? '0%' : diresaModalStep === 2 ? '50%' : '100%' }}
-                                />
+                        {/* Avance del asistente */}
+                        <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
+                            <p className="text-[12.5px] font-black text-teal-700">Paso {diresaModalStep} de 3 · {['Identificación', 'Ubicación', 'Contacto'][diresaModalStep - 1]}</p>
+                            <div className="mt-2 grid gap-1.5" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }} aria-hidden="true">
+                                {[1, 2, 3].map(n => <span key={n} className={`h-1.5 rounded-full transition-colors ${n <= diresaModalStep ? 'bg-teal-600' : 'bg-slate-200'}`} />)}
                             </div>
-                            {[
-                                { step: 1, label: 'Identificación', desc: 'Nombre y RUC', icon: Building2 },
-                                { step: 2, label: 'Ubicación', desc: 'Datos Geográficos', icon: Network },
-                                { step: 3, label: 'Contacto', desc: 'Canales y Dirección', icon: Globe }
-                            ].map(s => (
-                                <button
-                                    key={s.step}
-                                    type="button"
-                                    disabled={
-                                        (s.step === 2 && !isDiresaStep1Valid) ||
-                                        (s.step === 3 && (!isDiresaStep1Valid || !isDiresaStep2Valid))
-                                    }
-                                    onClick={() => setDiresaModalStep(s.step)}
-                                    className="flex items-center gap-3 bg-white px-3 disabled:opacity-50 disabled:cursor-not-allowed group text-left outline-none"
-                                >
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${diresaModalStep === s.step ? 'bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100' : 'bg-gray-50 border-gray-200 text-gray-400 group-hover:border-gray-300'}`}>
-                                        <s.icon className="h-4 w-4" />
-                                    </div>
-                                    <div className="hidden sm:block">
-                                        <span className={`block text-[11px] font-bold uppercase tracking-wider ${diresaModalStep === s.step ? 'text-teal-700' : 'text-gray-400'}`}>{s.label}</span>
-                                        <span className="block text-[10px] text-gray-400 font-medium">{s.desc}</span>
-                                    </div>
-                                </button>
-                            ))}
                         </div>
 
                         {/* Form */}
@@ -2386,7 +2399,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             }}
                             className="flex-1 flex flex-col overflow-hidden"
                         >
-                            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                            <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 md:p-6">
                                 {/* STEP 1: IDENTIFICACIÓN */}
                                 {diresaModalStep === 1 && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-200">
@@ -2540,12 +2553,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </div>
 
                             {/* Footer Buttons */}
-                            <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                            <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                                 {diresaModalStep > 1 ? (
                                     <button 
                                         type="button" 
                                         onClick={() => setDiresaModalStep(step => step - 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-900 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition-all flex items-center gap-1"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         <ChevronLeft className="h-4 w-4" /> Atrás
                                     </button>
@@ -2553,7 +2566,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => setIsDiresaModalOpen(false)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         Cancelar
                                     </button>
@@ -2564,7 +2577,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                         type="button" 
                                         disabled={diresaModalStep === 1 ? !isDiresaStep1Valid : !isDiresaStep2Valid}
                                         onClick={() => setDiresaModalStep(step => step + 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all flex items-center gap-1 text-center"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         Siguiente <ChevronRight className="h-4 w-4" />
                                     </button>
@@ -2572,7 +2585,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => handleSaveDiresa()}
-                                        className="px-6 py-2.5 text-sm font-black text-white bg-teal-600 hover:bg-teal-700 rounded-xl transition-all flex items-center gap-2 shadow-lg hover:shadow-teal-100"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         <Save className="h-4 w-4" /> Guardar DIRESA
                                     </button>
@@ -2585,16 +2598,16 @@ export const AdminOrganizationModule: React.FC = () => {
             )}
 
             {isOgessModalOpen && createPortal(
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-[200000] flex bg-white md:items-center md:justify-center md:bg-black/60 md:p-4 md:backdrop-blur-sm">
+                    <div className="flex h-full w-full flex-col overflow-hidden bg-white animate-in fade-in duration-200 md:h-auto md:max-h-[92vh] md:max-w-4xl md:rounded-2xl md:border md:border-gray-100 md:shadow-2xl">
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
                             <div>
-                                <h3 className="font-extrabold text-xl text-gray-900 tracking-tight flex items-center gap-2">
+                                <h3 className="flex items-center gap-2 text-[17px] font-black tracking-tight text-slate-900 md:text-xl">
                                     <Building2 className="h-5 w-5 text-teal-600" />
                                     Mantenimiento de OGESS
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">Configure los datos de identificación, jurisdicción regional y contacto de la OGESS.</p>
+                                <p className="mt-1 hidden text-xs text-gray-500 md:block">Configure los datos de identificación, jurisdicción regional y contacto de la OGESS.</p>
                             </div>
                             <button 
                                 type="button"
@@ -2605,38 +2618,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* Progress Stepper */}
-                        <div className="px-6 py-5 border-b border-gray-50 bg-white relative flex items-center justify-between shrink-0">
-                            <div className="absolute left-6 top-8 right-6 h-0.5 bg-gray-100 -z-10">
-                                <div 
-                                    className="h-full bg-teal-600 transition-all duration-300" 
-                                    style={{ width: ogessModalStep === 1 ? '0%' : ogessModalStep === 2 ? '50%' : '100%' }}
-                                />
+                        {/* Avance del asistente */}
+                        <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
+                            <p className="text-[12.5px] font-black text-teal-700">Paso {ogessModalStep} de 3 · {['Identificación', 'Ubicación', 'Contacto'][ogessModalStep - 1]}</p>
+                            <div className="mt-2 grid gap-1.5" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }} aria-hidden="true">
+                                {[1, 2, 3].map(n => <span key={n} className={`h-1.5 rounded-full transition-colors ${n <= ogessModalStep ? 'bg-teal-600' : 'bg-slate-200'}`} />)}
                             </div>
-                            {[
-                                { step: 1, label: 'Identificación', desc: 'Nombre, DIRESA y Código', icon: Building2 },
-                                { step: 2, label: 'Ubicación', desc: 'Datos Geográficos', icon: Network },
-                                { step: 3, label: 'Contacto', desc: 'Canales y Dirección', icon: Globe }
-                            ].map(s => (
-                                <button
-                                    key={s.step}
-                                    type="button"
-                                    disabled={
-                                        (s.step === 2 && !isOgessStep1Valid) ||
-                                        (s.step === 3 && (!isOgessStep1Valid || !isOgessStep2Valid))
-                                    }
-                                    onClick={() => setOgessModalStep(s.step)}
-                                    className="flex items-center gap-3 bg-white px-3 disabled:opacity-50 disabled:cursor-not-allowed group text-left outline-none"
-                                >
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${ogessModalStep === s.step ? 'bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100' : 'bg-gray-50 border-gray-200 text-gray-400 group-hover:border-gray-300'}`}>
-                                        <s.icon className="h-4 w-4" />
-                                    </div>
-                                    <div className="hidden sm:block">
-                                        <span className={`block text-[11px] font-bold uppercase tracking-wider ${ogessModalStep === s.step ? 'text-teal-700' : 'text-gray-400'}`}>{s.label}</span>
-                                        <span className="block text-[10px] text-gray-400 font-medium">{s.desc}</span>
-                                    </div>
-                                </button>
-                            ))}
                         </div>
 
                         {/* Form */}
@@ -2649,7 +2636,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             }}
                             className="flex-1 flex flex-col overflow-hidden"
                         >
-                            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                            <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 md:p-6">
                                 {/* STEP 1 */}
                                 {ogessModalStep === 1 && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-200">
@@ -2837,12 +2824,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </div>
 
                             {/* Footer Buttons */}
-                            <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                            <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                                 {ogessModalStep > 1 ? (
                                     <button 
                                         type="button" 
                                         onClick={() => setOgessModalStep(step => step - 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-900 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition-all flex items-center gap-1"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         <ChevronLeft className="h-4 w-4" /> Atrás
                                     </button>
@@ -2850,7 +2837,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => setIsOgessModalOpen(false)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         Cancelar
                                     </button>
@@ -2861,7 +2848,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                         type="button" 
                                         disabled={ogessModalStep === 1 ? !isOgessStep1Valid : !isOgessStep2Valid}
                                         onClick={() => setOgessModalStep(step => step + 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all flex items-center gap-1 text-center"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         Siguiente <ChevronRight className="h-4 w-4" />
                                     </button>
@@ -2869,7 +2856,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => handleSaveOgess()}
-                                        className="px-6 py-2.5 text-sm font-black text-white bg-teal-600 hover:bg-teal-700 rounded-xl transition-all flex items-center gap-2 shadow-lg hover:shadow-teal-100"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         <Save className="h-4 w-4" /> Guardar OGESS
                                     </button>
@@ -2882,16 +2869,16 @@ export const AdminOrganizationModule: React.FC = () => {
             )}
 
             {isUngetModalOpen && createPortal(
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-[200000] flex bg-white md:items-center md:justify-center md:bg-black/60 md:p-4 md:backdrop-blur-sm">
+                    <div className="flex h-full w-full flex-col overflow-hidden bg-white animate-in fade-in duration-200 md:h-auto md:max-h-[92vh] md:max-w-4xl md:rounded-2xl md:border md:border-gray-100 md:shadow-2xl">
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
                             <div>
-                                <h3 className="font-extrabold text-xl text-gray-900 tracking-tight flex items-center gap-2">
+                                <h3 className="flex items-center gap-2 text-[17px] font-black tracking-tight text-slate-900 md:text-xl">
                                     <Building2 className="h-5 w-5 text-teal-600" />
                                     Mantenimiento de UNGET
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">Configure los datos de la Unidad de Gestión Territorial (UNGET), su OGESS y canales de contacto.</p>
+                                <p className="mt-1 hidden text-xs text-gray-500 md:block">Configure los datos de la Unidad de Gestión Territorial (UNGET), su OGESS y canales de contacto.</p>
                             </div>
                             <button 
                                 type="button"
@@ -2902,38 +2889,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* Progress Stepper */}
-                        <div className="px-6 py-5 border-b border-gray-50 bg-white relative flex items-center justify-between shrink-0">
-                            <div className="absolute left-6 top-8 right-6 h-0.5 bg-gray-100 -z-10">
-                                <div 
-                                    className="h-full bg-teal-600 transition-all duration-300" 
-                                    style={{ width: ungetModalStep === 1 ? '0%' : ungetModalStep === 2 ? '50%' : '100%' }}
-                                />
+                        {/* Avance del asistente */}
+                        <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
+                            <p className="text-[12.5px] font-black text-teal-700">Paso {ungetModalStep} de 3 · {['Identificación', 'Ubicación', 'Contacto'][ungetModalStep - 1]}</p>
+                            <div className="mt-2 grid gap-1.5" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }} aria-hidden="true">
+                                {[1, 2, 3].map(n => <span key={n} className={`h-1.5 rounded-full transition-colors ${n <= ungetModalStep ? 'bg-teal-600' : 'bg-slate-200'}`} />)}
                             </div>
-                            {[
-                                { step: 1, label: 'Identificación', desc: 'Nombre, OGESS y DIRESA', icon: Building2 },
-                                { step: 2, label: 'Ubicación', desc: 'Ubicación Geográfica', icon: Network },
-                                { step: 3, label: 'Contacto', desc: 'Canales y Dirección', icon: Globe }
-                            ].map(s => (
-                                <button
-                                    key={s.step}
-                                    type="button"
-                                    disabled={
-                                        (s.step === 2 && !isUngetStep1Valid) ||
-                                        (s.step === 3 && (!isUngetStep1Valid || !isUngetStep2Valid))
-                                    }
-                                    onClick={() => setUngetModalStep(s.step)}
-                                    className="flex items-center gap-3 bg-white px-3 disabled:opacity-50 disabled:cursor-not-allowed group text-left outline-none"
-                                >
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${ungetModalStep === s.step ? 'bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100' : 'bg-gray-50 border-gray-200 text-gray-400 group-hover:border-gray-300'}`}>
-                                        <s.icon className="h-4 w-4" />
-                                    </div>
-                                    <div className="hidden sm:block">
-                                        <span className={`block text-[11px] font-bold uppercase tracking-wider ${ungetModalStep === s.step ? 'text-teal-700' : 'text-gray-400'}`}>{s.label}</span>
-                                        <span className="block text-[10px] text-gray-400 font-medium">{s.desc}</span>
-                                    </div>
-                                </button>
-                            ))}
                         </div>
 
                         {/* Form */}
@@ -2946,7 +2907,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             }}
                             className="flex-1 flex flex-col overflow-hidden"
                         >
-                            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                            <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 md:p-6">
                                 {/* STEP 1 */}
                                 {ungetModalStep === 1 && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-200">
@@ -3147,12 +3108,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </div>
 
                             {/* Footer Buttons */}
-                            <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                            <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                                 {ungetModalStep > 1 ? (
                                     <button 
                                         type="button" 
                                         onClick={() => setUngetModalStep(step => step - 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-900 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition-all flex items-center gap-1"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         <ChevronLeft className="h-4 w-4" /> Atrás
                                     </button>
@@ -3160,7 +3121,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => setIsUngetModalOpen(false)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         Cancelar
                                     </button>
@@ -3171,7 +3132,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                         type="button" 
                                         disabled={ungetModalStep === 1 ? !isUngetStep1Valid : !isUngetStep2Valid}
                                         onClick={() => setUngetModalStep(step => step + 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all flex items-center gap-1 text-center"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         Siguiente <ChevronRight className="h-4 w-4" />
                                     </button>
@@ -3179,7 +3140,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => handleSaveUnget()}
-                                        className="px-6 py-2.5 text-sm font-black text-white bg-teal-600 hover:bg-teal-700 rounded-xl transition-all flex items-center gap-2 shadow-lg hover:shadow-teal-100"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         <Save className="h-4 w-4" /> Guardar UNGET
                                     </button>
@@ -3192,16 +3153,16 @@ export const AdminOrganizationModule: React.FC = () => {
             )}
 
             {isMicroredModalOpen && createPortal(
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col border border-gray-100 animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
+                <div className="fixed inset-0 z-[200000] flex bg-white md:items-center md:justify-center md:bg-black/60 md:p-4 md:backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="flex h-full w-full flex-col overflow-hidden bg-white animate-in fade-in duration-200 md:h-auto md:max-h-[92vh] md:max-w-xl md:rounded-2xl md:border md:border-gray-100 md:shadow-2xl">
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
                             <div>
-                                <h3 className="font-extrabold text-xl text-gray-900 tracking-tight flex items-center gap-2">
+                                <h3 className="flex items-center gap-2 text-[17px] font-black tracking-tight text-slate-900 md:text-xl">
                                     <Building2 className="h-5 w-5 text-teal-600" />
                                     Mantenimiento de MICRORED
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">Configure los datos de la Microred de salud.</p>
+                                <p className="mt-1 hidden text-xs text-gray-500 md:block">Configure los datos de la Microred de salud.</p>
                             </div>
                             <button 
                                 type="button"
@@ -3213,8 +3174,8 @@ export const AdminOrganizationModule: React.FC = () => {
                         </div>
 
                         {/* Form */}
-                        <form onSubmit={(e) => e.preventDefault()} className="p-6 space-y-4">
-                            <div className="space-y-4">
+                        <form onSubmit={(e) => e.preventDefault()} className="flex flex-1 flex-col overflow-hidden">
+                            <div className="flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 md:p-6">
                                 <div>
                                     <label className="block text-xs font-bold text-gray-600 mb-1">Nombre de la Microred *</label>
                                     <input 
@@ -3247,18 +3208,18 @@ export const AdminOrganizationModule: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="flex justify-end gap-2 pt-4 border-t border-gray-104 mt-4">
+                            <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                                 <button 
                                     type="button" 
                                     onClick={() => setIsMicroredModalOpen(false)} 
-                                    className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition rounded-xl text-sm font-bold"
+                                    className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                 >
                                     Cancelar
                                 </button>
                                 <button 
                                     type="button" 
                                     onClick={() => handleSaveMicrored()}
-                                    className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white transition rounded-xl text-sm font-bold shadow-md hover:shadow-teal-100"
+                                    className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                 >
                                     Guardar Microred
                                 </button>
@@ -3270,16 +3231,16 @@ export const AdminOrganizationModule: React.FC = () => {
             )}
 
             {isFacilityModalOpen && createPortal(
-                <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-[200000] flex bg-white md:items-center md:justify-center md:bg-black/60 md:p-4 md:backdrop-blur-sm">
+                    <div className="flex h-full w-full flex-col overflow-hidden bg-white animate-in fade-in duration-200 md:h-auto md:max-h-[92vh] md:max-w-4xl md:rounded-2xl md:border md:border-gray-100 md:shadow-2xl">
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
                             <div>
-                                <h3 className="font-extrabold text-xl text-gray-900 tracking-tight flex items-center gap-2">
+                                <h3 className="flex items-center gap-2 text-[17px] font-black tracking-tight text-slate-900 md:text-xl">
                                     <Building2 className="h-5 w-5 text-teal-600" />
                                     {editingFacilityOriginalCode ? 'Editar Establecimiento (IPRESS)' : 'Nuevo Establecimiento (IPRESS)'}
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">
+                                <p className="mt-1 hidden text-xs text-gray-500 md:block">
                                     {editingFacilityOriginalCode 
                                         ? `Actualizando datos de la IPRESS [Código Original: ${editingFacilityOriginalCode}]` 
                                         : 'Configure los datos de identificación, jurisdicción y canales de contacto de la IPRESS.'}
@@ -3294,40 +3255,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* Premium Stepper Progress */}
-                        <div className="px-6 py-5 border-b border-gray-50 bg-white relative flex items-center justify-between shrink-0">
-                            <div className="absolute left-6 top-8 right-6 h-0.5 bg-gray-100 -z-10">
-                                <div 
-                                    className="h-full bg-teal-600 transition-all duration-300" 
-                                    style={{ width: facilityModalStep === 1 ? '0%' : facilityModalStep === 2 ? '33.3%' : facilityModalStep === 3 ? '66.6%' : '100%' }}
-                                />
+                        {/* Avance del asistente */}
+                        <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-2.5 md:px-6">
+                            <p className="text-[12.5px] font-black text-teal-700">Paso {facilityModalStep} de 4 · {['Identificación', 'Jurisdicción', 'Ubicación y Contacto', 'Hoja de stock'][facilityModalStep - 1]}</p>
+                            <div className="mt-2 grid gap-1.5" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }} aria-hidden="true">
+                                {[1, 2, 3, 4].map(n => <span key={n} className={`h-1.5 rounded-full transition-colors ${n <= facilityModalStep ? 'bg-teal-600' : 'bg-slate-200'}`} />)}
                             </div>
-                            {[
-                                { step: 1, label: 'Identificación', desc: 'Códigos y Categoría', icon: Building2 },
-                                { step: 2, label: 'Jurisdicción', desc: 'Asociaciones y UNGET', icon: Network },
-                                { step: 3, label: 'Ubicación y Contacto', desc: 'Geografía y Canales', icon: Globe },
-                                { step: 4, label: 'Vinculación de Hoja (Stock)', desc: 'Conexión y Columnas', icon: FileSpreadsheet }
-                            ].map(s => (
-                                <button
-                                    key={s.step}
-                                    type="button"
-                                    disabled={
-                                        (s.step === 2 && !isFacilityStep1Valid) ||
-                                        (s.step === 3 && (!isFacilityStep1Valid || !isFacilityStep2Valid)) ||
-                                        (s.step === 4 && (!isFacilityStep1Valid || !isFacilityStep2Valid || !isFacilityStep3Valid))
-                                    }
-                                    onClick={() => setFacilityModalStep(s.step)}
-                                    className="flex items-center gap-3 bg-white px-3 disabled:opacity-50 disabled:cursor-not-allowed group text-left outline-none"
-                                >
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${facilityModalStep === s.step ? 'bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100' : 'bg-gray-50 border-gray-200 text-gray-400 group-hover:border-gray-300'}`}>
-                                        <s.icon className="h-4 w-4" />
-                                    </div>
-                                    <div className="hidden sm:block">
-                                        <span className={`block text-[11px] font-bold uppercase tracking-wider ${facilityModalStep === s.step ? 'text-teal-700' : 'text-gray-400'}`}>{s.label}</span>
-                                        <span className="block text-[10px] text-gray-400 font-medium">{s.desc}</span>
-                                    </div>
-                                </button>
-                            ))}
                         </div>
 
                         {/* Form */}
@@ -3340,7 +3273,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             }}
                             className="flex-1 flex flex-col overflow-hidden"
                         >
-                            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                            <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 md:p-6">
                                 {/* STEP 1: IDENTIFICACIÓN Y CATEGORÍA */}
                                 {facilityModalStep === 1 && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-200">
@@ -3690,12 +3623,12 @@ export const AdminOrganizationModule: React.FC = () => {
                             </div>
 
                             {/* Footer Buttons */}
-                            <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                            <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
                                 {facilityModalStep > 1 ? (
                                     <button 
                                         type="button" 
                                         onClick={() => setFacilityModalStep(step => step - 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-900 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition-all flex items-center gap-1"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         <ChevronLeft className="h-4 w-4" /> Atrás
                                     </button>
@@ -3703,7 +3636,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     <button 
                                         type="button" 
                                         onClick={() => setIsFacilityModalOpen(false)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all"
+                                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
                                     >
                                         Cancelar
                                     </button>
@@ -3718,7 +3651,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             !isFacilityStep3Valid
                                         }
                                         onClick={() => setFacilityModalStep(step => step + 1)} 
-                                        className="px-5 py-2.5 text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all flex items-center gap-1 text-center"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         Siguiente <ChevronRight className="h-4 w-4" />
                                     </button>
@@ -3727,7 +3660,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                         type="button" 
                                         disabled={!isFacilityStep4Valid}
                                         onClick={() => handleSaveFacility()}
-                                        className="px-6 py-2.5 text-sm font-black text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all flex items-center gap-2 shadow-lg hover:shadow-teal-100"
+                                        className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:ml-auto md:flex-none"
                                     >
                                         <Save className="h-4 w-4" /> {editingFacilityOriginalCode ? 'Actualizar IPRESS' : 'Guardar IPRESS'}
                                     </button>
