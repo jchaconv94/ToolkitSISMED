@@ -313,8 +313,10 @@ export const AssignedIpressStockModule: React.FC = () => {
             <KpiCard watermark tone={isStale ? "warning" : "neutral"} icon={<CalendarClock />} label="Última actualización" value={updateDate || "—"} hint={lastUpdateAt ? `${updateTime ? `a las ${updateTime.slice(0, 5)} · ` : ""}${noticeWhen(lastUpdateAt)}` : "sin fecha en la hoja"} />
           </KpiStrip>
 
-          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3 sm:flex-nowrap sm:p-4">
+          {/* En el celular la barra (buscador, establecimiento, acciones) se queda arriba al bajar,
+              como en los demás módulos: por eso la tarjeta no recorta su contenido en el celular. */}
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm md:overflow-hidden">
+            <div className="sticky -top-2.5 z-20 flex flex-wrap items-center gap-2 rounded-t-2xl border-b border-slate-100 bg-white p-3 sm:flex-nowrap sm:p-4 md:static">
               <label className={tableSearchBoxClass}>
                 <span className="sr-only">Buscar en el stock</span>
                 <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />

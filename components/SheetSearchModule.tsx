@@ -6013,7 +6013,7 @@ function processSheet(sheet) {
         {/* TOOLBAR */}
         <div className={`sticky z-30 flex flex-col gap-4 ${
           viewLevel === "data"
-            ? "top-0 bg-white p-3 border-b border-slate-100 sm:static sm:bg-transparent sm:p-0 sm:pb-4 sm:border-0"
+            ? "-top-2.5 bg-white p-3 border-b border-slate-100 sm:static sm:bg-transparent sm:p-0 sm:pb-4 sm:border-0"
             : viewLevel === "ungets" || (viewLevel === "sheets" && sheetsViewMode === "grid")
               // En el panel regional y en Tarjetas, la barra se queda arriba al bajar, con el fondo de la página
               // a todo el ancho (la sombra recortada lo extiende a los lados).
@@ -6021,7 +6021,7 @@ function processSheet(sheet) {
               : "-top-2.5 bg-[#f6f7f9] px-0 py-2 sm:static sm:pt-0 sm:pb-4"
         }`}>
           {/* Search & Actions */}
-          <div className="flex gap-3 items-center justify-between w-full flex-row">
+          <div className="flex flex-wrap gap-3 items-center justify-between w-full flex-row md:flex-nowrap">
             <div className="relative min-w-0 flex-1 w-full group">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
@@ -6321,7 +6321,7 @@ function processSheet(sheet) {
               </button>
             )}
             {viewLevel === "data" && hojaConPuestosComunales && (
-              <div className="w-full md:w-72 shrink-0">
+              <div className="order-last w-full md:order-none md:w-72 shrink-0">
                 <CustomSelect
                   value={dataFilterPharmacy}
                   onChange={setDataFilterPharmacy}
