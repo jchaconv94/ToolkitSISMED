@@ -49,6 +49,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navRef = useRef<HTMLElement>(null);
   const pillRef = useRef<HTMLButtonElement>(null);
   const anchorRef = useRef<HTMLElement | null>(null);
+  // Al expandir, los nombres aparecen cuando el lateral terminó de ensancharse: durante la
+  // animación salían cortados con «…» y el logo se montaba sobre el botón de la cabecera.
+  const [labelsShown, setLabelsShown] = useState(!isCollapsed);
+  useEffect(() => {
+    if (isCollapsed) { setLabelsShown(false); return; }
+    const timer = window.setTimeout(() => setLabelsShown(true), 280);
+    return () => window.clearTimeout(timer);
+  }, [isCollapsed]);
+  const labelFade = `transition-opacity duration-200 ${labelsShown ? 'opacity-100' : 'opacity-0'}`;
 
   const showPill = (item: NavItem, el: HTMLElement) => {
     const r = el.getBoundingClientRect();
@@ -149,7 +158,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <Icon className="h-4 w-4" />
         </span>
-        <span className={`truncate transition-transform motion-reduce:transition-none ${active ? '' : 'group-hover:translate-x-0.5'}`}>{item.label}</span>
+        <span className={`truncate whitespace-nowrap ${labelFade} ${active ? '' : 'group-hover:translate-x-0.5'}`}>{item.label}</span>
       </button>
     );
   };
@@ -158,7 +167,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      className={`relative z-[100002] flex h-full shrink-0 flex-col bg-slate-900 transition-[width] duration-300 ${
+      className={`relative z-[100002] flex h-full shrink-0 flex-col overflow-hidden bg-slate-900 transition-[width] duration-300 ${
         isCollapsed ? 'w-[76px]' : 'w-[260px]'
       }`}
     >
@@ -173,7 +182,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             isCollapsed ? 'mx-auto justify-center px-1' : 'mx-3 px-2'
           }`}
         >
-          {isCollapsed ? <BrandMark size={34} tone="dark" animation="hover" /> : <BrandLogo size={16} tone="dark" animation="hover" />}
+          {isCollapsed || !labelsShown ? <BrandMark size={34} tone="dark" animation="hover" /> : <span className={labelFade}><BrandLogo size={16} tone="dark" animation="hover" /></span>}
         </button>
       </div>
 
@@ -195,7 +204,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               }
             >
               {!isCollapsed && (
-                <p className={`flex items-center gap-2 px-2 pb-1.5 text-[11px] font-black uppercase tracking-widest ${DARK_TINT[section.tint].label}`}>
+                <p className={`flex items-center gap-2 whitespace-nowrap px-2 pb-1.5 text-[11px] font-black uppercase tracking-widest ${labelFade} ${DARK_TINT[section.tint].label}`}>
                   <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${DARK_TINT[section.tint].dot}`} />
                   {section.label}
                 </p>

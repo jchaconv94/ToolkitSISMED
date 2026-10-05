@@ -251,7 +251,7 @@ const AuthenticatedApp: React.FC = () => {
     return (
         <ModuleHeaderProvider value={setModuleHeader}>
         <div className="flex h-[100dvh] bg-gray-50/50 overflow-hidden">
-            <div className="hidden md:flex">
+            <div className="hidden shrink-0 md:flex">
                 <Sidebar 
                     currentView={currentView}
                     setCurrentView={setCurrentView}
