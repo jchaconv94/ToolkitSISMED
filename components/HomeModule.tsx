@@ -37,6 +37,27 @@ const SECTION_TITLE: Record<NavTint, { text: string; dot: string }> = {
 
 type Figure = { value: number; label: string; text: string; bar: string; module: AppModule };
 
+/** «revisado hace 10 min»: de cuándo es el resultado que se muestra (puede ser el guardado). */
+const checkedAgo = (at: number, now: Date) => {
+  const minutes = Math.max(0, Math.round((now.getTime() - at) / 60_000));
+  if (minutes < 1) return "revisado recién";
+  if (minutes < 60) return `revisado hace ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `revisado hace ${hours} h` : "revisado hace más de un día";
+};
+
+/** Mientras llega el primer resultado: el recuadro con su forma, en gris. */
+const SummarySkeleton = () => (
+  <section aria-label="Cargando el estado del stock" className="animate-pulse rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+    <div className="h-3.5 w-44 rounded bg-slate-200" />
+    <div className="mt-1.5 h-3 w-28 rounded bg-slate-100" />
+    <div className="mt-3 h-2 rounded-full bg-slate-100" />
+    <div className="mt-3 grid grid-cols-3 gap-3">
+      {[0, 1, 2].map(i => <div key={i} className="h-5 w-20 rounded bg-slate-100" />)}
+    </div>
+  </section>
+);
+
 const daysAgo = (ms: number, now: Date) => {
   if (!ms) return null;
   const days = Math.floor((now.getTime() - ms) / 86_400_000);
@@ -121,7 +142,7 @@ const FrequentCard: React.FC<{ item: NavItem; tint: NavTint; onClick: () => void
 
 export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> = ({ onNavigate }) => {
   const { user, hasPermission } = useAuth();
-  const { network, pharmacySummary } = useNotifications();
+  const { network, networkPending, pharmacySummary } = useNotifications();
   const now = useNow();
   const sections = visibleNavSections(hasPermission);
 
@@ -132,21 +153,22 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
     return modules.map(module => items.find(x => x.item.module === module)!).filter(Boolean);
   }, [items, user?.username]);
 
-  // La red manda sobre el stock propio: quien tiene ambos (el administrador) ve la red.
-  const summary = network && hasPermission("ADMIN_SEND_KEYS") ? (
+  // La red manda sobre el stock propio: quien ve la red (DIRESA, OGESS, UNGET o global) la ve.
+  const summary = network ? (
     <SummaryCard
-      title="Envío de stock de la red"
-      hint={`${network.total} ${network.total === 1 ? "establecimiento" : "establecimientos"}`}
-      link={{ label: "Ver en Claves", module: "ADMIN_SEND_KEYS" }}
+      title={`Stock actualizado · ${network.scope}`}
+      hint={`${network.total} ${network.total === 1 ? "establecimiento" : "establecimientos"} · ${checkedAgo(network.at, now)}`}
+      link={{ label: "Ver Consulta Stock", module: "SIG_SEARCH" }}
       watermark={Database}
       onNavigate={onNavigate}
       figures={[
-        { value: network.upToDate, label: "Al día", text: "text-emerald-600", bar: "bg-emerald-400", module: "ADMIN_SEND_KEYS" },
-        { value: network.late, label: "Con retraso", text: "text-amber-600", bar: "bg-amber-400", module: "ADMIN_SEND_KEYS" },
-        { value: network.stale, label: "Sin actualizar", text: "text-red-600", bar: "bg-red-400", module: "ADMIN_SEND_KEYS" },
+        { value: network.upToDate, label: "Al día", text: "text-emerald-600", bar: "bg-emerald-400", module: "SIG_SEARCH" },
+        { value: network.late, label: "Con retraso", text: "text-amber-600", bar: "bg-amber-400", module: "SIG_SEARCH" },
+        { value: network.stale, label: "Sin actualizar", text: "text-red-600", bar: "bg-red-400", module: "SIG_SEARCH" },
       ]}
     />
-  ) : pharmacySummary && hasPermission("IPRESS_STOCK") ? (
+  ) : networkPending ? (
+    <SummarySkeleton />  ) : pharmacySummary && hasPermission("IPRESS_STOCK") ? (
     <SummaryCard
       title={`Tu stock${user?.facilityData?.name ? ` · ${user.facilityData.name}` : ""}`}
       hint={daysAgo(pharmacySummary.lastUpdateAt, now)}

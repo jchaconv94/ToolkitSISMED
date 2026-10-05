@@ -11,16 +11,9 @@ import { checkDatesMatch, getCardUpdateStatus, type EstablishmentCardData } from
  * lista de tarjetas (`EstablishmentMobileRow`).
  */
 
-export type SyncBucket = "al-dia" | "retraso" | "sin-actualizar";
-
-/** Mismos cortes que el resto del módulo: hasta 1 h al día, hasta 24 h con retraso. */
-export const syncBucketOf = (timestamp?: number | null): SyncBucket => {
-  if (!timestamp) return "sin-actualizar";
-  const hours = (Date.now() - timestamp) / 3_600_000;
-  if (hours <= 1) return "al-dia";
-  if (hours <= 24) return "retraso";
-  return "sin-actualizar";
-};
+// Los cortes viven en `services/syncBuckets.ts`, compartidos con el resumen de Inicio.
+export { syncBucketOf, type SyncBucket } from "../services/syncBuckets";
+import { syncBucketOf, type SyncBucket } from "../services/syncBuckets";
 
 const BUCKET: Record<SyncBucket, { label: string; tone: Tone; weight: number }> = {
   "al-dia": { label: "Al día", tone: "success", weight: 1 },
