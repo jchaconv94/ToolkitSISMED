@@ -1,6 +1,7 @@
 
 import { MedicationInput, AuraAnalysisResult, StockStatus, AnalyzedMedication } from "../types";
 import { classifyStock } from "./stockStatus";
+import { isVaccineProduct } from "./vaccines";
 
 // Helper: Calculate Median
 export const calculateMedian = (values: number[]): number => {
@@ -108,7 +109,7 @@ const analyzeItemLocally = (item: MedicationInput): AnalyzedMedication => {
   
   // Detect special handling items
   const upperName = item.name.toUpperCase();
-  const isVaccineOrDiluent = upperName.includes("VACUNA") || upperName.includes("DILUYENTE");
+  const isVaccineOrDiluent = isVaccineProduct(upperName);
 
   // Suggest Order Quantity
   let quantityToOrder = 0;

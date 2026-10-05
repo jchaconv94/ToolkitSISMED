@@ -1074,16 +1074,11 @@ const AnalysisModule: React.FC = () => {
    * tabla, con sus filtros: si se validaba con «Ver pendientes», al terminar ya no quedaba
    * ninguno y el PDF salía sin filas y con DME 0 %; con texto en el buscador, solo lo buscado.
    */
-  const handleGenerateReport = async (excludeVaccines: boolean, excludeNoSupply: boolean) => {
+  const handleGenerateReport = async (excludeNoSupply: boolean) => {
     if (!result) return;
     const reportResult = { ...result, medications: horizonMedications, indicators: computeDmeIndicators(horizonMedications) };
+    // Las vacunas y la Lista de Exclusiones ya se quitaron al ejecutar el análisis.
     let finalMedications = [...horizonMedications];
-    if (excludeVaccines) {
-        finalMedications = finalMedications.filter(m => {
-            const name = m.name.toUpperCase();
-            return !name.includes("VACUNA") && !name.includes("DILUYENTE");
-        });
-    }
     if (excludeNoSupply) {
         finalMedications = finalMedications.filter(m => m.quantityToOrder > 0);
     }
@@ -1302,7 +1297,7 @@ const AnalysisModule: React.FC = () => {
         )}
 
         <Suspense fallback={null}>
-            <ReportOptionsModal isOpen={isReportModalOpen} onClose={() => setIsReportModalOpen(false)} onConfirm={handleGenerateReport} totalItems={filteredMedications.length} vaccinesAlreadyExcluded={result?.analysisConfig?.vaccinesExcluded ?? false} />
+            <ReportOptionsModal isOpen={isReportModalOpen} onClose={() => setIsReportModalOpen(false)} onConfirm={handleGenerateReport} totalItems={horizonMedications.length} />
             <ReviewWarningModal isOpen={showReviewWarning} onClose={() => setShowReviewWarning(false)} progress={reviewProgress} />
             <SuccessModal isOpen={showSuccessModal} onClose={() => setShowSuccessModal(false)} onDownload={handleDownloadClick} />
             <ManualEntryModal isOpen={isManualEntryModalOpen} onClose={() => setIsManualEntryModalOpen(false)} items={additionalItems} onAdd={handleAddAdditionalItem} onRemove={handleRemoveAdditionalItem} />
