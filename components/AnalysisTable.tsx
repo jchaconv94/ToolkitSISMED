@@ -563,7 +563,7 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
       
       // Export Dynamic Values
       row.CPA_UTILIZADO = activeCpm;
-      row.MESES_DISPONIBLES = isFinite(activeMonths) ? activeMonths : "Infinito";
+      row.MESES_DISPONIBLES = isFinite(activeMonths) ? activeMonths : "-";
       row.ESTADO_CALCULADO = activeStatus;
 
       row.ES_BAJA_ROTACION = m.isSporadic ? "SI" : "NO";
@@ -1104,7 +1104,7 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                         activeMonths < 2 ? 'text-amber-600' : 
                         activeMonths > 12 ? 'text-blue-600' : 'text-gray-600'
                     }`}>
-                        {isFinite(activeMonths || 0) ? (activeMonths || 0).toFixed(1) : '∞'}
+                        {isFinite(activeMonths || 0) ? (activeMonths || 0).toFixed(1) : '-'}
                     </span>
                   </td>
 

@@ -16,7 +16,7 @@ import { ConfirmationDialog } from './ui/ConfirmationDialog';
 import { SortButton, ariaSort, tableSearchBoxClass, useTableSort, type SortDir } from './ui/kit';
 import { buildUngetConnectionStatus, pickOneConnectionPerUnget, type UngetConnectionState } from '../services/ungetConnections';
 import { isLinkedToSheet, resolveFacilitySheet } from '../services/facilitySheetLink';
-import { FACILITY_TYPES, facilityTypeLabel, suggestedFacilityType } from '../services/facilityCodes';
+import { FACILITY_TYPES, allowedFacilityTypes, facilityTypeLabel, suggestedFacilityType } from '../services/facilityCodes';
 import { listUngetSheets, type UngetSheet } from '../services/ungetSheetCatalog';
 import {
     DEFAULT_STOCK_COLUMN_KEYS,
@@ -231,6 +231,8 @@ export const AdminOrganizationModule: React.FC = () => {
         () => suggestedFacilityType(facilityForm.code),
         [facilityForm.code],
     );
+    // Tipos que admite el código (con F02 en adelante: puesto comunal o farmacia del hospital).
+    const tiposDelCodigo = useMemo(() => allowedFacilityTypes(facilityForm.code), [facilityForm.code]);
 
     useEffect(() => {
         // Solo cuando no hay tipo elegido: nunca se pisa lo que alguien puso a mano. Y solo
@@ -1149,6 +1151,8 @@ export const AdminOrganizationModule: React.FC = () => {
         // El puesto comunal no es un establecimiento del mismo orden: es una farmacia de su
         // IPRESS, así que se distingue en vez de confundirse con el puesto de salud.
         if (t === 'PUESTO_COMUNAL') return 'bg-cyan-50 text-cyan-700 border border-cyan-200 font-bold';
+        // Una de las farmacias de un hospital (emergencia, consulta externa…).
+        if (t === 'FARMACIA') return 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold';
         return 'bg-violet-50 text-violet-700 border border-violet-200 font-medium';
     };
 
@@ -3321,11 +3325,11 @@ export const AdminOrganizationModule: React.FC = () => {
                                                         ]}
                                                         className="w-full border border-gray-200 rounded-lg text-sm bg-white text-gray-800"
                                                     />
-                                                    {tipoSugeridoPorCodigo && (
-                                                        <p className={`mt-1 text-[10px] font-bold ${facilityForm.type === tipoSugeridoPorCodigo ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                                            {facilityForm.type === tipoSugeridoPorCodigo
-                                                                ? `El código ${facilityForm.code} corresponde a ${facilityTypeLabel(tipoSugeridoPorCodigo)}.`
-                                                                : `El código ${facilityForm.code} es de un ${facilityTypeLabel(tipoSugeridoPorCodigo)}. Compruebe el tipo antes de guardar.`}
+                                                    {tiposDelCodigo.length > 0 && (
+                                                        <p className={`mt-1 text-[10px] font-bold ${tiposDelCodigo.includes(facilityForm.type || '') ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                                            {tiposDelCodigo.includes(facilityForm.type || '')
+                                                                ? `El código ${facilityForm.code} corresponde a ${facilityTypeLabel(facilityForm.type)}.`
+                                                                : `El código ${facilityForm.code} es de ${tiposDelCodigo.map(t => facilityTypeLabel(t)).join(' o ')}. Compruebe el tipo antes de guardar.`}
                                                         </p>
                                                     )}
                                                 </div>

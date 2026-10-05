@@ -147,24 +147,6 @@ const formatDateToMonthYear = (dateStr?: string) => {
     }
 };
 
-/** Celda de meses con valor infinito (stock sin consumo). */
-const isInfinityCell = (data: any) =>
-  (data.column?.dataKey === 'currentMonths' || data.column?.dataKey === 'monthsProvision') && data.cell?.raw === '∞';
-
-/** Dibuja «∞» con dos óvalos, centrado en la celda y del color de su texto. */
-const drawInfinity = (data: any) => {
-  const doc = data.doc;
-  const { x, y, width, height } = data.cell;
-  const cx = x + width / 2;
-  const cy = y + height / 2;
-  const color = data.cell.styles?.textColor;
-  if (Array.isArray(color)) doc.setDrawColor(color[0], color[1], color[2]);
-  else doc.setDrawColor(17, 24, 39);
-  doc.setLineWidth(0.28);
-  doc.ellipse(cx - 0.75, cy, 0.75, 0.55, 'S');
-  doc.ellipse(cx + 0.75, cy, 0.75, 0.55, 'S');
-};
-
 export const generateFullReportPDF = async (
     result: AuraAnalysisResult, 
     filteredTableItems?: AnalyzedMedication[],
@@ -583,9 +565,9 @@ export const generateFullReportPDF = async (
             rawCpm: item.rawCpm.toFixed(1),
             cpm: item.cpm.toFixed(1),
             // Current actual months
-            currentMonths: isFinite(activeMonths) ? activeMonths.toFixed(1) : '∞',
+            currentMonths: isFinite(activeMonths) ? activeMonths.toFixed(1) : '-',
             // Use projected calculated values
-            monthsProvision: isFinite(projectedMonths) ? projectedMonths.toFixed(1) : '∞',
+            monthsProvision: isFinite(projectedMonths) ? projectedMonths.toFixed(1) : '-',
             status: projectedStatus,
             req: item.quantityToOrder > 0 ? item.quantityToOrder : '-',
             _spikeThreshold: item.spikeThreshold,
@@ -688,10 +670,6 @@ export const generateFullReportPDF = async (
         didParseCell: function(data: any) {
             if (data.section !== 'body') return;
             const row = data.row.raw;
-
-            // Meses infinitos (stock sin consumo): el «∞» no existe en la letra del PDF y salía
-            // como `";`. Se deja la celda vacía y se dibuja el símbolo en `didDrawCell`.
-            if (isInfinityCell(data)) data.cell.text = [''];
             
             // Highlight Months
             if (data.column.dataKey && String(data.column.dataKey).startsWith('m')) {
@@ -786,7 +764,6 @@ export const generateFullReportPDF = async (
         didDrawCell: function(data: any) {
             if (data.section !== 'body') return;
             const row = data.row.raw;
-            if (isInfinityCell(data)) drawInfinity(data);
             // Draw Strikethrough for Excluded Months OR Yellow Spikes (in Adjusted Mode)
             if (data.column.dataKey && String(data.column.dataKey).startsWith('m')) {
                  const idx = parseInt(String(data.column.dataKey).substring(1));

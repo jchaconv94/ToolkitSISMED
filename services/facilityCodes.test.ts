@@ -5,6 +5,7 @@ import {
   parseFacilityCode,
   sheetOwnerCodeOf,
   suggestedFacilityType,
+  allowedFacilityTypes,
 } from "./facilityCodes";
 
 describe("parseFacilityCode", () => {
@@ -113,8 +114,11 @@ describe("sheetOwnerCodeOf", () => {
 
 describe("suggestedFacilityType", () => {
   it("un código con F02 en adelante es un puesto comunal, y el código solo ya lo dice", () => {
-    expect(suggestedFacilityType("06528F02")).toBe("PUESTO_COMUNAL");
-    expect(suggestedFacilityType("06528F1001")).toBe("PUESTO_COMUNAL");
+    // Con F02 en adelante puede ser puesto comunal o farmacia del hospital: no se propone.
+    expect(suggestedFacilityType("06528F02")).toBe("");
+    expect(allowedFacilityTypes("06528F02")).toEqual(["PUESTO_COMUNAL", "FARMACIA"]);
+    expect(allowedFacilityTypes("06528F1001")).toEqual(["PUESTO_COMUNAL", "FARMACIA"]);
+    expect(allowedFacilityTypes("06528")).toEqual([]);
   });
 
   it("seis caracteres son un almacén", () => {
