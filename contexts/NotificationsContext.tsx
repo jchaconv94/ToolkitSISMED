@@ -21,6 +21,7 @@ import { sendKeysApi } from "../services/sendKeys";
 import { toolkitDevicesApi } from "../services/toolkitDevices";
 import { loadAssignedIpressStock } from "../services/assignedIpressStock";
 import { noticeSettingsApi } from "../services/noticeSettings";
+import { type NetworkSummary, type PharmacySummary, buildNetworkSummary, buildPharmacySummary } from "../services/homeSummary";
 import {
   EMPTY_MEMORY, NOTICE_SOURCE_FAILURE, NOTICE_SOURCE_OF, Notice, NoticeId, NoticeMemory, NoticeSource,
   buildBackupNotice, buildPharmacyNotices, buildTechnicalNotices, isUnseen, loadNoticeMemory, markSeen, saveNoticeMemory,
@@ -46,6 +47,9 @@ export interface NotificationsState {
   lastChecked: number | null;
   /** Fuentes que no respondieron en la última revisión, dichas para la persona. */
   failures: string[];
+  /** Resumen para Inicio, de la misma revisión (null si no aplica o no llegó). */
+  network: NetworkSummary | null;
+  pharmacySummary: PharmacySummary | null;
 }
 
 const NotificationsContext = createContext<NotificationsState | null>(null);
@@ -66,6 +70,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const [tech, setTech] = useState<Notice[]>([]);
   const [pharmacy, setPharmacy] = useState<Notice[]>([]);
+  const [network, setNetwork] = useState<NetworkSummary | null>(null);
+  const [pharmacySummary, setPharmacySummary] = useState<PharmacySummary | null>(null);
   const [failed, setFailed] = useState<NoticeSource[]>([]);
   const [checking, setChecking] = useState(false);
   const [lastChecked, setLastChecked] = useState<number | null>(null);
@@ -126,25 +132,28 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
             toolkitDevicesApi.latestRelease(),
           ])
             .then(([keys, devices, latestToolkit]) => {
-              if (gen === generation.current) setTech(buildTechnicalNotices({ keys, devices, latestToolkit, thresholds, now }));
+              if (gen !== generation.current) return;
+              setTech(buildTechnicalNotices({ keys, devices, latestToolkit, thresholds, now }));
+              setNetwork(buildNetworkSummary(keys, devices, thresholds.staleDays, now));
             })
             .catch((error) => {
               console.warn("Avisos: no se pudieron revisar las claves de envío.", error);
               failures.push("claves");
             })
-        : Promise.resolve(setTech([])),
+        : Promise.resolve((setTech([]), setNetwork(null))),
       canPharmacy && thresholds
         ? loadAssignedIpressStock(facilityCode, ungetId)
             .then((result) => {
               if (gen !== generation.current) return;
               // Sin hoja propia no hay nada que revisar: eso ya lo explica el módulo.
               setPharmacy(result.message ? [] : buildPharmacyNotices({ rows: result.rows, lastUpdateAt: result.lastUpdateAt, thresholds, now }));
+              setPharmacySummary(result.message ? null : buildPharmacySummary(result.rows, result.lastUpdateAt, thresholds.expiryDays, now));
             })
             .catch((error) => {
               console.warn("Avisos: no se pudo leer el stock del establecimiento.", error);
               failures.push("farmacia");
             })
-        : Promise.resolve(setPharmacy([])),
+        : Promise.resolve((setPharmacy([]), setPharmacySummary(null))),
     ]);
 
     running.current = false;
@@ -160,6 +169,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     running.current = false;
     setTech([]);
     setPharmacy([]);
+    setNetwork(null);
+    setPharmacySummary(null);
     setFailed([]);
     setLastChecked(null);
     setChecking(false);
@@ -220,6 +231,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     checking,
     lastChecked,
     failures: failed.map((source) => NOTICE_SOURCE_FAILURE[source]),
+    network,
+    pharmacySummary,
   };
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
