@@ -27,7 +27,7 @@ vi.mock("./gasConnectionService", async (importOriginal) => ({
   },
 }));
 
-import { facilityLastUpdates, loadNetworkStockStatus, summarizeSheetUpdates } from "./networkStockStatus";
+import { facilityLastUpdates, loadNetworkStockStatus, networkFiguresAt, summarizeSheetUpdates } from "./networkStockStatus";
 
 const now = new Date(2026, 9, 5, 12, 0, 0).getTime();
 const hoursAgo = (h: number) => now - h * 3600_000;
@@ -74,5 +74,15 @@ describe("stock actualizado de la red", () => {
     const status = await done;
     expect(status).toMatchObject({ total: 3, upToDate: 2, stale: 1 });
     expect(status?.pending).toBeUndefined();
+    expect(status?.updates).toHaveLength(3);
+  });
+
+  it("reclasifica con la hora actual sin releer las hojas, y los guardados sin fechas quedan como estaban", () => {
+    const status = { scope: "x", total: 2, upToDate: 2, late: 0, stale: 0, at: now, updates: [hoursAgo(50 / 60), hoursAgo(0.1)] };
+    expect(networkFiguresAt(status, now)).toEqual({ total: 2, upToDate: 2, late: 0, stale: 0 });
+    // 20 minutos después, la de hace 50 min ya pasó la hora.
+    expect(networkFiguresAt(status, now + 20 * 60_000)).toEqual({ total: 2, upToDate: 1, late: 1, stale: 0 });
+    const { updates: _omit, ...old } = status;
+    expect(networkFiguresAt(old, now + 20 * 60_000)).toEqual({ total: 2, upToDate: 2, late: 0, stale: 0 });
   });
 });

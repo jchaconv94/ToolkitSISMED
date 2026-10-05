@@ -56,6 +56,10 @@ export interface NotificationsState {
   network: NetworkStockStatus | null;
   /** Se ve la red, pero todavía no hay ningún resultado (ni guardado): Inicio muestra un esqueleto. */
   networkPending: boolean;
+  /** Se están leyendo las hojas ahora mismo (al entrar, cada 15 min o con «Actualizar»). */
+  networkChecking: boolean;
+  /** Vuelve a leer las hojas ya, sin esperar a la siguiente revisión. */
+  refreshNetwork: () => void;
   /** Inicio: resumen del stock propio (responsable de farmacia), de la misma revisión. */
   pharmacySummary: PharmacySummary | null;
 }
@@ -97,6 +101,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const [pharmacy, setPharmacy] = useState<Notice[]>([]);
   const [network, setNetwork] = useState<NetworkStockStatus | null>(null);
   const [networkPending, setNetworkPending] = useState(false);
+  const [networkChecking, setNetworkChecking] = useState(false);
   const [pharmacySummary, setPharmacySummary] = useState<PharmacySummary | null>(null);
   const [failed, setFailed] = useState<NoticeSource[]>([]);
   const [checking, setChecking] = useState(false);
@@ -217,17 +222,24 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const canNetwork = Boolean(username) && hasPermission("SIG_SEARCH")
     && NETWORK_LEVELS.includes(String(resolveStockLevel(user?.role, user?.jurisdictionLevel)).toUpperCase());
   const networkRun = useRef(0);
+  const networkLoad = useRef<() => void>(() => undefined);
   useEffect(() => {
     const run = ++networkRun.current;
     if (!canNetwork || !user) {
       setNetwork(null);
       setNetworkPending(false);
+      setNetworkChecking(false);
+      networkLoad.current = () => undefined;
       return;
     }
     const cached = readCachedNetworkStatus(username);
     setNetwork(cached);
     setNetworkPending(!cached);
+    let loading = false;
     const load = async () => {
+      if (loading) return;
+      loading = true;
+      setNetworkChecking(true);
       try {
         // Cifras parciales solo si no hay nada guardado que mostrar: si lo hay, se queda a la
         // vista hasta tener el resultado completo, en vez de bajar a medias y volver a subir.
@@ -240,9 +252,14 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
       } catch (error) {
         console.warn("Inicio: no se pudo calcular el estado de las hojas de stock.", error);
       } finally {
-        if (run === networkRun.current) setNetworkPending(false);
+        loading = false;
+        if (run === networkRun.current) {
+          setNetworkPending(false);
+          setNetworkChecking(false);
+        }
       }
     };
+    networkLoad.current = () => void load();
     void load();
     const timer = window.setInterval(() => void load(), NOTICES_REFRESH_MS);
     return () => window.clearInterval(timer);
@@ -297,6 +314,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     failures: failed.map((source) => NOTICE_SOURCE_FAILURE[source]),
     network,
     networkPending,
+    networkChecking,
+    refreshNetwork: () => networkLoad.current(),
     pharmacySummary,
   };
 
