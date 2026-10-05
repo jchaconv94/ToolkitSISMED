@@ -5,7 +5,7 @@ vi.mock("./api", () => ({ getSessionToken: () => null, api: {} }));
 
 import {
   DEFAULT_NOTICE_THRESHOLDS, EMPTY_MEMORY, Notice, NoticeThresholds, badgeLabel, buildBackupNotice, buildPharmacyNotices,
-  buildTechnicalNotices, isUnseen, loadNoticeMemory, markSeen, normalizeThresholds, noticeWhen, saveNoticeMemory,
+  buildTechnicalNotices, isUnseen, itemsSignature, loadNoticeMemory, markSeen, normalizeThresholds, noticeWhen, saveNoticeMemory,
   trackSince, unseenCount,
 } from "./notifications";
 import { SendKeyRow } from "./sendKeys";
@@ -128,6 +128,24 @@ describe("buildTechnicalNotices", () => {
     expect(byId(build(), "stock-sin-actualizar")!.signature).toBe(a);
     const keys = claves.filter((c) => c.code !== "06541");
     expect(byId(build(keys), "stock-sin-actualizar")!.signature).not.toBe(a);
+  });
+
+  it("revisiones sucesivas: marcado una vez, no vuelve mientras no haya nada nuevo", () => {
+    const vista = markSeen(EMPTY_MEMORY, build());
+    expect(unseenCount(build(), vista)).toBe(0);
+    // Un establecimiento se puso al día y sale de «sin actualizar»: sigue visto.
+    const menos = byId(build(claves.filter((c) => c.code !== "06541")), "stock-sin-actualizar");
+    if (menos) expect(isUnseen(menos, vista)).toBe(false);
+    // Sale una versión nueva del Toolkit: es otra cosa, vuelve a contar.
+    expect(isUnseen(byId(build(claves, equipos, "2.2.5"), "toolkit-desactualizado")!, vista)).toBe(true);
+  });
+
+  it("la misma PC no autorizada que reintenta no reaviva el aviso; otra PC sí", () => {
+    const conAlerta = (id: number, deviceName: string) =>
+      claves.map((c, i) => (i === 0 ? { ...c, alert: { id, at: hace(0), deviceName, result: "OTRO_EQUIPO" } } : c)) as SendKeyRow[];
+    const vista = markSeen(EMPTY_MEMORY, build(conAlerta(7, "FARMACIA-02")));
+    expect(isUnseen(byId(build(conAlerta(8, "FARMACIA-02")), "claves-bloqueadas")!, vista)).toBe(false);
+    expect(isUnseen(byId(build(conAlerta(9, "LAPTOP-X")), "claves-bloqueadas")!, vista)).toBe(true);
   });
 });
 
@@ -275,11 +293,16 @@ describe("visto y distintivo", () => {
     expect(isUnseen(lista[0], vista)).toBe(true);
   });
 
-  it("vuelve a contar si su contenido cambió desde que se vio", () => {
-    const vista = markSeen(EMPTY_MEMORY, [aviso("stock-sin-actualizar", "3:a,b")]);
-    expect(isUnseen(aviso("stock-sin-actualizar", "3:a,b"), vista)).toBe(false);
-    expect(isUnseen(aviso("stock-sin-actualizar", "3:a,b,c"), vista)).toBe(true);
+  it("vuelve a contar solo si aparece algo nuevo, no si se resolvió algo", () => {
+    const firma = (...items: string[]) => itemsSignature(items);
+    const vista = markSeen(EMPTY_MEMORY, [aviso("stock-sin-actualizar", firma("3d:a", "3d:b"))]);
+    expect(isUnseen(aviso("stock-sin-actualizar", firma("3d:b", "3d:a")), vista)).toBe(false);
+    // Uno se puso al día: la lista se acorta y el aviso sigue visto.
+    expect(isUnseen(aviso("stock-sin-actualizar", firma("3d:a")), vista)).toBe(false);
+    // Otro establecimiento se quedó sin actualizar: vuelve a contar.
+    expect(isUnseen(aviso("stock-sin-actualizar", firma("3d:a", "3d:c")), vista)).toBe(true);
   });
+
 
   it("el distintivo se oculta en 0 y muestra 9+ por encima de 9", () => {
     expect(badgeLabel(0)).toBe("");
