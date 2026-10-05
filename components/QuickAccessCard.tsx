@@ -16,7 +16,7 @@ import {
   saveStoredDevice,
   type DeviceInfo,
 } from '../services/deviceAccess';
-import { BottomSheet } from './ui/BottomSheet';
+import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from './ui/ResponsiveDialog';
 import { ConfirmationDialog } from './ui/ConfirmationDialog';
 import { formatDate } from './ui/kit';
 
@@ -42,8 +42,9 @@ const PinField: React.FC<{ id: string; label: string; value: string; onChange: (
 /**
  * «Acceso rápido» del Perfil: crear el PIN de esta PC y ver o quitar los equipos activados.
  * No se muestra si el SQL (`SUPABASE_INGRESO_PIN_HUELLA.sql`) todavía no se ejecutó.
+ * Con `embedded` se dibuja sin tarjeta propia, como una parte del bloque «Cuenta y seguridad».
  */
-export const QuickAccessCard: React.FC = () => {
+export const QuickAccessCard: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const { user } = useAuth();
   const [devices, setDevices] = useState<DeviceInfo[] | null | undefined>(undefined);
   const [local, setLocal] = useState(() => readStoredDevice());
@@ -160,12 +161,16 @@ export const QuickAccessCard: React.FC = () => {
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm 2xl:p-6">
-      <h3 className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-teal-600 2xl:text-xs">
-        <KeyRound className="h-3.5 w-3.5 2xl:h-4 2xl:w-4" />
-        Acceso rápido
-      </h3>
-      <p className="mb-4 text-xs text-slate-500">Entre sin escribir su contraseña en sus equipos de confianza.</p>
+    <div className={embedded ? 'px-4 py-3.5 md:px-5' : 'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm 2xl:p-6'}>
+      {embedded ? (
+        <p className="text-[13px] font-black text-slate-900">Acceso rápido</p>
+      ) : (
+        <h3 className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-teal-600 2xl:text-xs">
+          <KeyRound className="h-3.5 w-3.5 2xl:h-4 2xl:w-4" />
+          Acceso rápido
+        </h3>
+      )}
+      <p className={`text-xs text-slate-500 ${embedded ? 'mb-3' : 'mb-4'}`}>Entre sin escribir su contraseña en sus equipos de confianza.</p>
 
       {desktop && (
         pinHere ? (
@@ -180,7 +185,7 @@ export const QuickAccessCard: React.FC = () => {
           <button
             type="button"
             onClick={() => { setCreating(true); setFormError(''); }}
-            className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700"
+            className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition-colors ${embedded ? 'mb-3 h-11 border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100' : 'mb-4 bg-teal-600 py-2.5 text-white shadow-sm hover:bg-teal-700'}`}
           >
             <KeyRound className="h-4 w-4" />
             Crear PIN para esta PC
@@ -202,7 +207,7 @@ export const QuickAccessCard: React.FC = () => {
             type="button"
             onClick={() => void activarHuella()}
             disabled={enrolling}
-            className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700 disabled:opacity-60"
+            className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition-colors disabled:opacity-60 ${embedded ? 'mb-3 h-11 border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100' : 'mb-4 bg-teal-600 py-2.5 text-white shadow-sm hover:bg-teal-700'}`}
           >
             {enrolling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Fingerprint className="h-4 w-4" />}
             Activar huella en este celular
@@ -230,7 +235,7 @@ export const QuickAccessCard: React.FC = () => {
                 onClick={() => setToRemove(d)}
                 aria-label="Quitar equipo"
                 title="Quitar equipo"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:border-red-200 hover:text-red-600"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
@@ -241,11 +246,23 @@ export const QuickAccessCard: React.FC = () => {
         <p className="text-xs italic text-slate-400">Todavía no activó el acceso rápido en ningún equipo.</p>
       )}
 
-      <BottomSheet open={creating} title="Crear PIN para esta PC" onClose={() => !saving && setCreating(false)} centeredOnDesktop>
-        <form
-          onSubmit={(e) => { e.preventDefault(); void crear(); }}
-          className="flex flex-col gap-4 pb-2"
-        >
+      <ResponsiveDialog
+        open={creating}
+        title="Crear PIN para esta PC"
+        onClose={() => setCreating(false)}
+        busy={saving}
+        onSubmit={(e) => { e.preventDefault(); void crear(); }}
+        footer={
+          <>
+            <button type="button" onClick={() => setCreating(false)} disabled={saving} className={dialogSecondaryButton}>Cancelar</button>
+            <button type="submit" disabled={saving} className={dialogPrimaryButton}>
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Crear PIN
+            </button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4">
           <p className="text-sm text-slate-600">
             Elija 4 dígitos. Solo servirán en esta PC y su contraseña no se guarda en ella.
             Tras 5 intentos fallidos el PIN se bloquea.
@@ -253,16 +270,8 @@ export const QuickAccessCard: React.FC = () => {
           <PinField id="pin-nuevo" label="PIN" value={pin} onChange={setPin} autoFocus />
           <PinField id="pin-confirmar" label="Repita el PIN" value={confirm} onChange={setConfirm} />
           {formError && <p role="alert" className="text-sm font-semibold text-red-700">{formError}</p>}
-          <button
-            type="submit"
-            disabled={saving}
-            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-teal-600 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60"
-          >
-            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-            Crear PIN
-          </button>
-        </form>
-      </BottomSheet>
+        </div>
+      </ResponsiveDialog>
 
       <ConfirmationDialog
         isOpen={Boolean(toRemove)}
