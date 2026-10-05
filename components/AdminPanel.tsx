@@ -17,7 +17,7 @@ import { DEFAULT_NOTICE_THRESHOLDS, NoticeThresholds } from '../services/notific
 import { NoticeSettingsCard } from './NoticeSettingsCard';
 import { SettingsRow, SettingsSection, settingsNumberClass } from './ui/SettingsSection';
 import { CustomSelect } from './ui/CustomSelect';
-import { KpiCard, KpiStrip, StatusChip, FormField, inputClass } from './ui/kit';
+import { KpiCard, KpiStrip, StatusChip, FormField, inputClass, SortButton, ariaSort, tableSearchBoxClass, useTableSort } from './ui/kit';
 import { ResponsiveDialog, DialogSection, DialogRow, dialogPrimaryButton, dialogSecondaryButton } from './ui/ResponsiveDialog';
 import { ConfirmationDialog } from './ui/ConfirmationDialog';
 import { TablePagination } from './ui/TablePagination';
@@ -398,7 +398,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
   ]);
 
   // 5. Filter by Status (los indicadores Usuarios / Activos / Inactivos)
-  const filteredUsers = useMemo(() => {
+  const filteredUsersUnsorted = useMemo(() => {
       if (filterStatus === 'ALL') return usersMatchingFilters;
       return usersMatchingFilters.filter(u => {
           const uActive = u.isActive === true || String(u.isActive).toLowerCase() === 'true';
@@ -411,17 +411,8 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
   const isDesktop = useIsDesktop();
   const usersFilterKey = [searchTerm, filterProfession, filterRole, filterStatus, filterDiresa, filterOgess, filterUnget, filterLaborRegime, filterMicrored].join('|');
   const [usersPage, setUsersPage] = useState(1);
-  useEffect(() => setUsersPage(1), [usersFilterKey]);
-  const usersPageCount = Math.max(1, Math.ceil(filteredUsers.length / USERS_PAGE_SIZE));
-  useEffect(() => {
-      if (usersPage > usersPageCount) setUsersPage(usersPageCount);
-  }, [usersPage, usersPageCount]);
-  const pageUsers = useMemo(
-      () => filteredUsers.slice((usersPage - 1) * USERS_PAGE_SIZE, usersPage * USERS_PAGE_SIZE),
-      [filteredUsers, usersPage]
-  );
-  const mobileUsers = useIncrementalCount(filteredUsers.length, usersFilterKey);
-  const { tableRef: usersTableRef, floating: usersFloatingHead } = useFloatingTableHead([pageUsers, activeTab, isDesktop]);
+  // La paginación, la lista del celular y el orden por cabecera van más abajo, después de
+  // `jurisdictionOf`, que el orden necesita.
   // Menú «⋯» de una tarjeta del celular (por nombre de usuario) y menú de acciones de la barra.
   const [userMenuFor, setUserMenuFor] = useState<string | null>(null);
   const [usersActionsOpen, setUsersActionsOpen] = useState(false);
@@ -521,6 +512,28 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       if (h.facilityCode) return facilityMapLookup.get(h.facilityCode)?.name || '-';
       return '-';
   };
+
+  // Orden por cabecera de la tabla de usuarios: sobre los filtrados y antes de paginar; las
+  // tarjetas del celular usan el mismo orden.
+  const { sorted: filteredUsers, sort: usersSort, toggle: toggleUsersSort, dirOf: usersSortDir } = useTableSort(filteredUsersUnsorted, {
+      usuario: (u: any) => (u.personnel ? `${u.personnel.firstName} ${u.personnel.lastName}` : null),
+      profesion: (u: any) => u.personnel?.professionData?.name || professionMapLookup.get(u.personnel?.professionId)?.name || null,
+      jurisdiccion: (u: any) => { const j = jurisdictionOf(u); return j !== '-' ? j : null; },
+      rol: (u: any) => roleLabelOf(u),
+      estado: (u: any) => (isUserActiveValue(u) ? 'Activo' : 'Inactivo'),
+      telefono: (u: any) => u.personnel?.phone || null,
+  });
+  useEffect(() => setUsersPage(1), [usersFilterKey, usersSort]);
+  const usersPageCount = Math.max(1, Math.ceil(filteredUsers.length / USERS_PAGE_SIZE));
+  useEffect(() => {
+      if (usersPage > usersPageCount) setUsersPage(usersPageCount);
+  }, [usersPage, usersPageCount]);
+  const pageUsers = useMemo(
+      () => filteredUsers.slice((usersPage - 1) * USERS_PAGE_SIZE, usersPage * USERS_PAGE_SIZE),
+      [filteredUsers, usersPage]
+  );
+  const mobileUsers = useIncrementalCount(filteredUsers.length, usersFilterKey);
+  const { tableRef: usersTableRef, floating: usersFloatingHead } = useFloatingTableHead([pageUsers, activeTab, isDesktop]);
 
   const HIERARCHY_WEIGHTS: Record<string, number> = {
       'GLOBAL': 100,
@@ -1470,6 +1483,11 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                         { key: 'telefono', label: 'Teléfono' },
                         { key: 'acciones', label: 'Acciones', align: 'right' as const },
                     ];
+                    // Toda columna con datos ordena; «Acciones» no.
+                    type UserSortKey = 'usuario' | 'profesion' | 'jurisdiccion' | 'rol' | 'estado' | 'telefono';
+                    const userHeadContent = (c: { key: string; label: string }) => c.key === 'acciones'
+                        ? c.label
+                        : <SortButton label={c.label} dir={usersSortDir(c.key as UserSortKey)} onClick={() => toggleUsersSort(c.key as UserSortKey)} />;
                     const headTh = `px-4 py-3 ${tableHeadCellClass} ${tableHeadTextClass}`;
                     const rowIconButton = 'grid h-8 w-8 place-items-center rounded-lg border border-slate-200 text-slate-500 transition-colors cursor-pointer';
 
@@ -1484,7 +1502,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
 
                             {/* Barra: buscador, filtros y acciones */}
                             <div className="flex items-center gap-2">
-                                <div className="relative min-w-0 flex-1 md:max-w-md">
+                                <div className={tableSearchBoxClass}>
                                     <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                                     <input
                                         type="text"
@@ -1658,13 +1676,13 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                             {/* Escritorio: una sola tabla, encabezado que se queda arriba al bajar y paginación */}
                             {isDesktop && filteredUsers.length > 0 && (
                                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                                    <FloatingTableHead state={usersFloatingHead} padding="px-4" cells={userHeadCells.map((c, index) => ({ key: c.key, index, content: c.label, align: c.align }))} />
+                                    <FloatingTableHead state={usersFloatingHead} padding="px-4" cells={userHeadCells.map((c, index) => ({ key: c.key, index, content: userHeadContent(c), align: c.align }))} />
                                     <div className="overflow-x-auto scrollbar-x">
                                         <table ref={usersTableRef} className="w-full min-w-[960px]">
                                             <thead>
                                                 <tr>
                                                     {userHeadCells.map(c => (
-                                                        <th key={c.key} className={`${headTh} ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                                                        <th key={c.key} aria-sort={c.key === 'acciones' ? undefined : ariaSort(usersSortDir(c.key as UserSortKey))} className={`${headTh} ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{userHeadContent(c)}</th>
                                                     ))}
                                                 </tr>
                                             </thead>

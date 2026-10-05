@@ -544,7 +544,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
     <div className="space-y-5 px-0 pb-24 animate-in fade-in duration-300 sm:px-10 sm:pb-6 sm:pt-6 lg:px-14 xl:px-16">
       {sinConexiones ? (
         <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
-          <Sparkles className="mx-auto h-9 w-9 text-amber-600" />
+          <Link2Off className="mx-auto h-9 w-9 text-amber-600" />
           <h3 className="mt-3 font-black text-amber-950">No hay conexiones de stock disponibles</h3>
           <p className="mx-auto mt-1 max-w-xl text-sm leading-6 text-amber-800">
             Primero vaya a “Consulta Stock” y guarde la conexión de su UNGET. En cuanto exista,

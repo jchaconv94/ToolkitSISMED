@@ -133,7 +133,7 @@ import {
 import { noticeSettingsApi } from "../services/noticeSettings";
 import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
 import { getExpirationState, parseExpiryDate } from "../services/assignedIpressStock";
-import { KpiCard, KpiStrip, StatusChip } from "./ui/kit";
+import { KpiCard, KpiStrip, SortButton, StatusChip, ariaSort, useTableSort } from "./ui/kit";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
 import type { StockSearchScope } from "./StockNetworkSearchModal";
 import { TablePagination } from "./ui/TablePagination";
@@ -4162,6 +4162,30 @@ function processSheet(sheet) {
   );
   /** Con «Todos» en una hoja con puestos comunales, cada fila tiene que decir de quién es. */
   const expirationShowsPharmacy = hojaConPuestosComunales && dataFilterPharmacy === "all";
+  // Ventana de vencidos / por vencer: sus filas se ordenan al tocar las cabeceras.
+  const {
+    sorted: sortedExpirationRows,
+    dirOf: expirationSortDir,
+    toggle: toggleExpirationSort,
+  } = useTableSort(
+    expirationModalType === "expired"
+      ? activeSheetExpirationInfo.expired
+      : activeSheetExpirationInfo.expiringThisMonth,
+    {
+      ipress: (row: SIGData) => {
+        const label = pharmacyLabelOf(row);
+        return label.name || label.code;
+      },
+      codigo: (row: SIGData) => String(row.ID_Producto ?? ""),
+      producto: (row: SIGData) => String(row.Nombre ?? ""),
+      saldo: (row: SIGData) => {
+        const n = parseFloat(String(row.Saldo));
+        return isNaN(n) ? null : n;
+      },
+      lote: (row: SIGData) => parseExpiryDate(row.Fec_Vencim)?.getTime() ?? null,
+    },
+    { firstDir: { saldo: "desc" } },
+  );
   const filteredDataExpirationInfo = useMemo(
     () => getExpirationStats(filteredData),
     [filteredData],
@@ -5998,7 +6022,7 @@ function processSheet(sheet) {
         }`}>
           {/* Search & Actions */}
           <div className="flex gap-3 items-center justify-between w-full flex-row">
-            <div className={`relative min-w-0 flex-1 w-full group ${viewLevel === "ungets" ? "md:max-w-[50%]" : ""}`}>
+            <div className="relative min-w-0 flex-1 w-full group">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none z-10">
                 <Search className="h-4 w-4 text-slate-400 group-focus-within:text-teal-600 stroke-[2.5] transition-colors" />
               </div>
@@ -7479,42 +7503,44 @@ function processSheet(sheet) {
                     {expirationShowsPharmacy && (
                       <th
                         scope="col"
+                        aria-sort={ariaSort(expirationSortDir("ipress"))}
                         className="px-4 py-3 text-left text-xs font-black text-gray-500 uppercase tracking-wider whitespace-nowrap"
                       >
-                        Establecimiento
+                        <SortButton label="Establecimiento" dir={expirationSortDir("ipress")} onClick={() => toggleExpirationSort("ipress")} />
                       </th>
                     )}
                     <th
                       scope="col"
+                      aria-sort={ariaSort(expirationSortDir("codigo"))}
                       className="px-4 py-3 text-left text-xs font-black text-gray-500 uppercase tracking-wider whitespace-nowrap"
                     >
-                      Cód. SISMED
+                      <SortButton label="Cód. SISMED" dir={expirationSortDir("codigo")} onClick={() => toggleExpirationSort("codigo")} />
                     </th>
                     <th
                       scope="col"
+                      aria-sort={ariaSort(expirationSortDir("producto"))}
                       className="px-4 py-3 text-left text-xs font-black text-gray-500 uppercase tracking-wider"
                     >
-                      Descripción del Producto
+                      <SortButton label="Descripción del Producto" dir={expirationSortDir("producto")} onClick={() => toggleExpirationSort("producto")} />
                     </th>
                     <th
                       scope="col"
+                      aria-sort={ariaSort(expirationSortDir("saldo"))}
                       className="px-4 py-3 text-right text-xs font-black text-gray-500 uppercase tracking-wider"
                     >
-                      Saldo
+                      <SortButton label="Saldo" dir={expirationSortDir("saldo")} onClick={() => toggleExpirationSort("saldo")} />
                     </th>
                     <th
                       scope="col"
+                      aria-sort={ariaSort(expirationSortDir("lote"))}
                       className="px-4 py-3 text-left text-xs font-black text-gray-500 uppercase tracking-wider"
                     >
-                      Lote / Venc.
+                      <SortButton label="Lote / Venc." dir={expirationSortDir("lote")} onClick={() => toggleExpirationSort("lote")} />
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
-                  {(expirationModalType === "expired"
-                    ? activeSheetExpirationInfo.expired
-                    : activeSheetExpirationInfo.expiringThisMonth
-                  ).map((row, i) => (
+                  {sortedExpirationRows.map((row, i) => (
                     <tr
                       key={i}
                       className="hover:bg-gray-50 transition-colors cursor-pointer"

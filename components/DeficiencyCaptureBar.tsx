@@ -11,7 +11,6 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
-  Sparkles,
 } from "lucide-react";
 
 interface DeficiencyCaptureBarProps {
