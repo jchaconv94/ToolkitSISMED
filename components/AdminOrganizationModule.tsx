@@ -3345,7 +3345,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                             { value: '', label: 'Seleccione tipo...' },
                                                             ...FACILITY_TYPES.map(t => ({ value: t.value, label: t.label }))
                                                         ]}
-                                                        className="w-full border border-gray-200 rounded-lg text-sm bg-white text-gray-800"
+                                                        className="h-[42px] w-full !rounded-lg border border-gray-200 bg-white !text-sm text-gray-800"
                                                     />
                                                     {tiposDelCodigo.length > 0 && (
                                                         <p className={`mt-1 text-[10px] font-bold ${tiposDelCodigo.includes(facilityForm.type || '') ? 'text-emerald-600' : 'text-amber-600'}`}>
