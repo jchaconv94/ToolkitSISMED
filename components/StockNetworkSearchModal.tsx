@@ -19,10 +19,12 @@ import {
   searchNetworkStock,
   searchNetworkStockByProduct,
   suggestProducts,
+  type StockLotDetail,
   type StockNetworkRow,
   type StockProduct,
 } from "../services/stockNetworkSearch";
 import { describePharmacyCode } from "../services/facilitySheetLink";
+import { SortButton, ariaSort, useTableSort } from "./ui/kit";
 
 /** Dónde se busca: la UNGET abierta o todas las UNGET a la vista. */
 export type StockSearchScope = "unget" | "region";
@@ -87,6 +89,72 @@ const proximoVencimiento = (fila: StockNetworkRow) =>
   );
 
 type Orden = "saldo" | "vencimiento" | "nombre";
+
+/**
+ * Lotes de un establecimiento, al desplegarlo: tabla en escritorio y renglones en el celular,
+ * los dos en el mismo orden. Se ordena tocando las cabeceras de la tabla.
+ */
+const LotesDeFila: React.FC<{ lotes: StockLotDetail[]; ahora: number }> = ({ lotes, ahora }) => {
+  const { sorted, dirOf, toggle } = useTableSort(lotes, {
+    lote: (l) => l.lote,
+    vence: (l) => {
+      const t = fechaDeVencimiento(l.vencimiento);
+      return Number.isFinite(t) ? t : null;
+    },
+    tipo: (l) => l.tipoSuministro,
+    fuente: (l) => l.fuenteFinanciamiento,
+    registro: (l) => l.registroSanitario,
+    saldo: (l) => l.saldo,
+  }, { firstDir: { saldo: "desc" } });
+  const cabecera = (clave: "lote" | "vence" | "tipo" | "fuente" | "registro" | "saldo", titulo: string, clase: string) => (
+    <th aria-sort={ariaSort(dirOf(clave))} className={clase}>
+      <SortButton label={titulo} dir={dirOf(clave)} onClick={() => toggle(clave)} />
+    </th>
+  );
+  return (
+    <>
+      {/* Escritorio: tabla de lotes. */}
+      <table className="hidden w-full text-left text-xs sm:table">
+        <thead>
+          <tr className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+            {cabecera("lote", "Lote", "py-1.5 pr-3")}
+            {cabecera("vence", "Vence", "py-1.5 pr-3")}
+            {cabecera("tipo", "Tipo sum.", "py-1.5 pr-3")}
+            {cabecera("fuente", "F. financ.", "py-1.5 pr-3")}
+            {cabecera("registro", "Reg. sanitario", "py-1.5 pr-3")}
+            {cabecera("saldo", "Saldo", "py-1.5 text-right")}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((lote, indiceLote) => (
+            <tr key={`${lote.lote}-${indiceLote}`} className="border-t border-slate-200/70 text-slate-600">
+              <td className="py-2 pr-3 font-mono font-bold text-slate-800">{lote.lote || "—"}</td>
+              <td className={`py-2 pr-3 ${fechaDeVencimiento(lote.vencimiento) < ahora ? "font-semibold text-rose-700" : ""}`}>{lote.vencimiento || "—"}</td>
+              <td className="py-2 pr-3">{lote.tipoSuministro || "—"}</td>
+              <td className="py-2 pr-3">{lote.fuenteFinanciamiento || "—"}</td>
+              <td className="py-2 pr-3 font-mono">{lote.registroSanitario || "—"}</td>
+              <td className="py-2 text-right font-black text-slate-800">{formatearCantidad(lote.saldo)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {/* Celular: un renglón por lote. */}
+      <ul className="divide-y divide-slate-200/70 sm:hidden">
+        {sorted.map((lote, indiceLote) => (
+          <li key={`${lote.lote}-${indiceLote}`} className="flex items-center justify-between gap-3 py-2 text-xs">
+            <span className="min-w-0">
+              <span className="block font-mono font-bold text-slate-800">Lote {lote.lote || "—"}</span>
+              <span className={`block ${fechaDeVencimiento(lote.vencimiento) < ahora ? "font-semibold text-rose-700" : "text-slate-500"}`}>
+                Vence {lote.vencimiento || "—"}
+              </span>
+            </span>
+            <span className="shrink-0 text-sm font-black text-slate-800">{formatearCantidad(lote.saldo)}</span>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+};
 
 const RECIENTES_KEY = "consulta-stock:busquedas-recientes";
 const MAX_RECIENTES = 6;
@@ -579,45 +647,7 @@ export const StockNetworkSearchModal: React.FC<StockNetworkSearchModalProps> = (
 
                           {abierta && (
                             <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-2">
-                              {/* Escritorio: tabla de lotes. */}
-                              <table className="hidden w-full text-left text-xs sm:table">
-                                <thead>
-                                  <tr className="text-[10px] font-black uppercase tracking-wide text-slate-500">
-                                    <th className="py-1.5 pr-3">Lote</th>
-                                    <th className="py-1.5 pr-3">Vence</th>
-                                    <th className="py-1.5 pr-3">Tipo sum.</th>
-                                    <th className="py-1.5 pr-3">F. financ.</th>
-                                    <th className="py-1.5 pr-3">Reg. sanitario</th>
-                                    <th className="py-1.5 text-right">Saldo</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {fila.lotes.map((lote, indiceLote) => (
-                                    <tr key={`${lote.lote}-${indiceLote}`} className="border-t border-slate-200/70 text-slate-600">
-                                      <td className="py-2 pr-3 font-mono font-bold text-slate-800">{lote.lote || "—"}</td>
-                                      <td className={`py-2 pr-3 ${fechaDeVencimiento(lote.vencimiento) < ahora ? "font-semibold text-rose-700" : ""}`}>{lote.vencimiento || "—"}</td>
-                                      <td className="py-2 pr-3">{lote.tipoSuministro || "—"}</td>
-                                      <td className="py-2 pr-3">{lote.fuenteFinanciamiento || "—"}</td>
-                                      <td className="py-2 pr-3 font-mono">{lote.registroSanitario || "—"}</td>
-                                      <td className="py-2 text-right font-black text-slate-800">{formatearCantidad(lote.saldo)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                              {/* Celular: un renglón por lote. */}
-                              <ul className="divide-y divide-slate-200/70 sm:hidden">
-                                {fila.lotes.map((lote, indiceLote) => (
-                                  <li key={`${lote.lote}-${indiceLote}`} className="flex items-center justify-between gap-3 py-2 text-xs">
-                                    <span className="min-w-0">
-                                      <span className="block font-mono font-bold text-slate-800">Lote {lote.lote || "—"}</span>
-                                      <span className={`block ${fechaDeVencimiento(lote.vencimiento) < ahora ? "font-semibold text-rose-700" : "text-slate-500"}`}>
-                                        Vence {lote.vencimiento || "—"}
-                                      </span>
-                                    </span>
-                                    <span className="shrink-0 text-sm font-black text-slate-800">{formatearCantidad(lote.saldo)}</span>
-                                  </li>
-                                ))}
-                              </ul>
+                              <LotesDeFila lotes={fila.lotes} ahora={ahora} />
                             </div>
                           )}
                         </li>

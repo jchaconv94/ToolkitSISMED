@@ -39,7 +39,11 @@ import {
   FormField as Field, 
   inputClass, 
   filterInputClass, 
-  EmptyState
+  EmptyState,
+  TableSearch,
+  SortButton,
+  ariaSort,
+  useTableSort
 } from "./ui/kit";
 
 /** Una acción en el panel inferior del celular. */
@@ -186,6 +190,24 @@ export const AnalysisExclusionsModule: React.FC = () => {
     );
   }, [exclusions, searchTerm]);
 
+  // Orden por cabecera: sobre las filas ya filtradas y antes de paginar.
+  const { sorted: sortedExclusions, sort, headSort } = useTableSort(filteredExclusions, {
+    code: (item) => item.sismedCode,
+    description: (item) => item.description,
+    presentation: (item) => item.presentation,
+    reason: (item) => item.reason,
+    createdAt: (item) => (item.createdAt ? new Date(item.createdAt).getTime() : null),
+  }, { firstDir: { createdAt: "desc" } });
+
+  // Vista previa de la carga masiva: también se ordena por cabecera.
+  const previewItems = useMemo(() => parsedPreview?.items ?? [], [parsedPreview]);
+  const previewSort = useTableSort(previewItems, {
+    code: (it) => it.sismedCode,
+    description: (it) => it.description,
+    presentation: (it) => it.presentation,
+    reason: (it) => it.reason,
+  });
+
   // KPIs
   const totalCount = exclusions.length;
   const withReasonCount = exclusions.filter(e => e.reason && e.reason.trim().length > 0).length;
@@ -199,8 +221,8 @@ export const AnalysisExclusionsModule: React.FC = () => {
   // Escritorio: páginas numeradas. Celular: la lista crece al bajar.
   const PAGE_SIZE = 10;
   const [page, setPage] = useState(1);
-  useEffect(() => { setPage(1); }, [searchTerm, selectedFacilityCode]);
-  const pageRows = filteredExclusions.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => { setPage(1); }, [searchTerm, selectedFacilityCode, sort]);
+  const pageRows = sortedExclusions.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const mobileList = useIncrementalCount(filteredExclusions.length, `${searchTerm}|${selectedFacilityCode}`, 20);
   const [actionsOpen, setActionsOpen] = useState(false);
 
@@ -363,24 +385,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         {/* Barra: buscador, establecimiento (solo quien supervisa varios) y acciones. */}
         <div className="flex items-center gap-2 border-b border-slate-100 p-3 md:px-4">
-          <div className="relative min-w-0 flex-1 md:max-w-xs">
-            <Search className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Buscar por código, descripción o motivo..."
-              className={filterInputClass + " pl-9 pr-8"}
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
+          <TableSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar por código, descripción o motivo..." />
 
           {canChangeFacility && (
             <div className="hidden w-72 md:block">
@@ -661,11 +666,11 @@ export const AnalysisExclusionsModule: React.FC = () => {
             <thead>
               <tr className="border-b border-slate-200 bg-slate-100/75">
                 <HeaderCell align="left">N°</HeaderCell>
-                <HeaderCell align="left">Código SISMED</HeaderCell>
-                <HeaderCell align="left">Descripción del Medicamento</HeaderCell>
-                <HeaderCell align="left">Presentación</HeaderCell>
-                <HeaderCell align="left">Motivo de Exclusión</HeaderCell>
-                <HeaderCell align="left">Fecha Registro</HeaderCell>
+                <HeaderCell align="left" sort={headSort("code")}>Código SISMED</HeaderCell>
+                <HeaderCell align="left" sort={headSort("description")}>Descripción del Medicamento</HeaderCell>
+                <HeaderCell align="left" sort={headSort("presentation")}>Presentación</HeaderCell>
+                <HeaderCell align="left" sort={headSort("reason")}>Motivo de Exclusión</HeaderCell>
+                <HeaderCell align="left" sort={headSort("createdAt")}>Fecha Registro</HeaderCell>
                 <HeaderCell align="right">Acciones</HeaderCell>
               </tr>
             </thead>
@@ -771,7 +776,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
           ) : (
             <>
               <ul className="divide-y divide-slate-100">
-                {filteredExclusions.slice(0, mobileList.count).map(item => (
+                {sortedExclusions.slice(0, mobileList.count).map(item => (
                   <li key={item.id || item.sismedCode} className="flex items-center gap-3 px-4 py-3">
                     {/* Sin fecha de registro: en el celular se confundía con la de vencimiento. */}
                     <div className="min-w-0 flex-1">
@@ -988,14 +993,14 @@ export const AnalysisExclusionsModule: React.FC = () => {
                     <table className="w-full text-left text-xs border-collapse">
                       <thead className="bg-slate-100 sticky top-0 font-bold text-slate-700 border-b border-slate-200">
                         <tr>
-                          <th className="px-3 py-2">Código</th>
-                          <th className="px-3 py-2">Descripción</th>
-                          <th className="px-3 py-2">Presentación</th>
-                          <th className="px-3 py-2">Motivo</th>
+                          <th aria-sort={ariaSort(previewSort.dirOf("code"))} className="px-3 py-2"><SortButton label="Código" dir={previewSort.dirOf("code")} onClick={() => previewSort.toggle("code")} /></th>
+                          <th aria-sort={ariaSort(previewSort.dirOf("description"))} className="px-3 py-2"><SortButton label="Descripción" dir={previewSort.dirOf("description")} onClick={() => previewSort.toggle("description")} /></th>
+                          <th aria-sort={ariaSort(previewSort.dirOf("presentation"))} className="px-3 py-2"><SortButton label="Presentación" dir={previewSort.dirOf("presentation")} onClick={() => previewSort.toggle("presentation")} /></th>
+                          <th aria-sort={ariaSort(previewSort.dirOf("reason"))} className="px-3 py-2"><SortButton label="Motivo" dir={previewSort.dirOf("reason")} onClick={() => previewSort.toggle("reason")} /></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {parsedPreview.items.slice(0, 20).map((it, idx) => (
+                        {previewSort.sorted.slice(0, 20).map((it, idx) => (
                           <tr key={idx} className="hover:bg-slate-50">
                             <td className="px-3 py-1.5 font-mono font-bold text-slate-800">{it.sismedCode}</td>
                             <td className="px-3 py-1.5 text-slate-900 font-semibold truncate max-w-xs">{it.description}</td>

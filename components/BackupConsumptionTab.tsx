@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, CloudUpload, Loader2, PlugZap, Server, Shi
 import { useBackupManager } from "../contexts/BackupManagerContext";
 import { UsageItem, backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import { limaDay } from "../services/backupModule";
-import { StatusChip, TableHeaderCell, Tone } from "./ui/kit";
+import { StatusChip, TableHeaderCell, Tone, useTableSort } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { formatNumber } from "../services/numberFormat";
@@ -130,7 +130,19 @@ export const BackupConsumptionTab: React.FC = () => {
   const [monthError, setMonthError] = useState("");
   const [monthPage, setMonthPage] = useState(1);
   const monthRows = month || [];
-  const monthMobile = useIncrementalCount(monthRows.length, monthRows.length, 10);
+  // Orden por cabecera, antes de paginar; la lista del celular usa el mismo.
+  const { sorted: sortedMonth, sort: monthSort, headSort } = useTableSort(monthRows, {
+    unget: (r) => r.unget,
+    downloaded: (r) => r.downloaded,
+    failed: (r) => r.failed,
+    bytes: (r) => r.bytes,
+    lastAt: (r) => (r.lastAt ? new Date(r.lastAt).getTime() : null),
+  }, { firstDir: { downloaded: "desc", failed: "desc", bytes: "desc", lastAt: "desc" } });
+  const monthMobile = useIncrementalCount(monthRows.length, `${monthRows.length}|${monthSort?.key ?? ""}|${monthSort?.dir ?? ""}`, 10);
+
+  useEffect(() => {
+    setMonthPage(1);
+  }, [monthSort]);
 
   useEffect(() => {
     backupModuleApi.monthByUnget()
@@ -217,15 +229,15 @@ export const BackupConsumptionTab: React.FC = () => {
               <table className="w-full text-[12.5px]">
                 <thead className="bg-slate-50">
                   <tr>
-                    <TableHeaderCell>UNGET</TableHeaderCell>
-                    <TableHeaderCell align="right">Descargados</TableHeaderCell>
-                    <TableHeaderCell align="right">Fallidos</TableHeaderCell>
-                    <TableHeaderCell align="right">Tamaño</TableHeaderCell>
-                    <TableHeaderCell>Último</TableHeaderCell>
+                    <TableHeaderCell sort={headSort("unget")}>UNGET</TableHeaderCell>
+                    <TableHeaderCell align="right" sort={headSort("downloaded")}>Descargados</TableHeaderCell>
+                    <TableHeaderCell align="right" sort={headSort("failed")}>Fallidos</TableHeaderCell>
+                    <TableHeaderCell align="right" sort={headSort("bytes")}>Tamaño</TableHeaderCell>
+                    <TableHeaderCell sort={headSort("lastAt")}>Último</TableHeaderCell>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {month.slice((monthPage - 1) * MONTH_PAGE, monthPage * MONTH_PAGE).map((r) => (
+                  {sortedMonth.slice((monthPage - 1) * MONTH_PAGE, monthPage * MONTH_PAGE).map((r) => (
                     <tr key={r.ungetId} className="h-11">
                       <td className="px-4 font-semibold text-slate-700">{r.unget}</td>
                       <td className="px-4 text-right font-mono font-bold text-slate-800">{r.downloaded}</td>
@@ -240,7 +252,7 @@ export const BackupConsumptionTab: React.FC = () => {
             </div>
             {/* Celular: una tarjeta por UNGET. */}
             <ul className="divide-y divide-slate-100 border-t border-slate-100 md:hidden">
-              {month.slice(0, monthMobile.count).map((r) => (
+              {sortedMonth.slice(0, monthMobile.count).map((r) => (
                 <li key={r.ungetId} className="px-5 py-3">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="truncate text-[14px] font-bold text-slate-800">{r.unget}</span>

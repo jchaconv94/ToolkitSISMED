@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Activity, AlertTriangle, CheckCircle2, Clock3, Download, FolderDown, Gauge, History, Loader2, RefreshCw, Search, SlidersHorizontal, Wifi, WifiOff, X,
+  Activity, AlertTriangle, CheckCircle2, Clock3, Download, FolderDown, Gauge, History, Loader2, RefreshCw, SlidersHorizontal, Wifi, WifiOff, X,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useBackupManager } from "../contexts/BackupManagerContext";
@@ -13,8 +13,8 @@ import {
 } from "../services/backupModule";
 import { relativeTime } from "../services/sendKeys";
 import {
-  EmptyState, KpiCard, KpiStrip, StatusChip, TableHeaderCell, Tone,
-  filterInputClass,
+  EmptyState, KpiCard, KpiStrip, StatusChip, TableHeaderCell, TableSearch, Tone,
+  filterInputClass, useTableSort,
 } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
@@ -151,14 +151,22 @@ export const BackupsSismedModule: React.FC = () => {
   );
   const summary = useMemo(() => summarizeBackups(rows), [rows]);
   const counts = useMemo(() => showFilterCounts(rows), [rows]);
-  const filtered = useMemo(() => filterBackupRows(rows, search, filter), [rows, search, filter]);
+  const filteredRows = useMemo(() => filterBackupRows(rows, search, filter), [rows, search, filter]);
+  // Orden al tocar las cabeceras de la tabla (el mismo en el celular, aunque allí no hay cabeceras).
+  const { sorted: filtered, sort, headSort } = useTableSort(filteredRows, {
+    name: (r) => r.name,
+    equipo: (r) => r.equipo,
+    signal: (r) => (r.online ? Date.now() : r.lastSeen ?? null),
+    estado: (r) => chipFor(r)?.label,
+    lastAt: (r) => (r.lastAt ? new Date(r.lastAt).getTime() : null),
+  }, { firstDir: { signal: "desc", lastAt: "desc" } });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   // En el celular no hay páginas: la lista crece al bajar.
   const mobileList = useIncrementalCount(filtered.length, `${search}|${filter}`, 20);
   const mobileRows = filtered.slice(0, mobileList.count);
-  useEffect(() => { setPage(1); }, [search, filter]);
+  useEffect(() => { setPage(1); }, [search, filter, sort]);
 
   const activityItems = useMemo(
     () => [...activity.map((a) => activityFromRequest(a, manager.username)), ...manager.events].sort((a, b) => b.at - a.at),
@@ -230,10 +238,7 @@ export const BackupsSismedModule: React.FC = () => {
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-slate-100 p-3 sm:px-4">
-              <div className="relative min-w-0 flex-1 md:max-w-xs">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${filterInputClass} pl-9`} />
-              </div>
+              <TableSearch value={search} onChange={setSearch} placeholder="Buscar establecimiento, código o PC" />
               {/* Celular: un solo botón que abre los filtros abajo. */}
               <button type="button" onClick={() => setFiltersOpen(true)} aria-label="Filtros" className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 md:hidden">
                 <SlidersHorizontal className="h-4 w-4" />
@@ -295,12 +300,12 @@ export const BackupsSismedModule: React.FC = () => {
                   <table className="w-full text-[13px]">
                     <thead className="sticky top-0 bg-slate-50">
                       <tr>
-                        <TableHeaderCell>Establecimiento</TableHeaderCell>
-                        <TableHeaderCell>Equipo</TableHeaderCell>
-                        <TableHeaderCell>Señal</TableHeaderCell>
-                        <TableHeaderCell>Estado</TableHeaderCell>
+                        <TableHeaderCell sort={headSort("name")}>Establecimiento</TableHeaderCell>
+                        <TableHeaderCell sort={headSort("equipo")}>Equipo</TableHeaderCell>
+                        <TableHeaderCell sort={headSort("signal")}>Señal</TableHeaderCell>
+                        <TableHeaderCell sort={headSort("estado")}>Estado</TableHeaderCell>
                         <TableHeaderCell>Backup</TableHeaderCell>
-                        <TableHeaderCell>Último descargado</TableHeaderCell>
+                        <TableHeaderCell sort={headSort("lastAt")}>Último descargado</TableHeaderCell>
                         <TableHeaderCell align="right"><span className="sr-only">Acciones</span></TableHeaderCell>
                       </tr>
                     </thead>

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronRight, Clock, Copy, Database, History, KeyRound,
-  Loader2, Monitor, MonitorSmartphone, RefreshCw, Search, ShieldAlert, ShieldCheck, ShieldOff, SlidersHorizontal, Trash2, X,
+  Loader2, Monitor, MonitorSmartphone, RefreshCw, ShieldAlert, ShieldCheck, ShieldOff, SlidersHorizontal, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -17,8 +17,8 @@ import {
   mergeEstablishments, pendingAlerts, summarizeEstablishments, toolkitState,
 } from "../services/sendKeyEstablishments";
 import {
-  EmptyState, KpiCard, KpiStrip, TableHeaderCell, formatDate,
-  filterInputClass,
+  EmptyState, KpiCard, KpiStrip, TableHeaderCell, TableSearch, formatDate,
+  filterInputClass, useTableSort,
 } from "./ui/kit";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
@@ -257,14 +257,27 @@ const EstablishmentsPanel: React.FC<{
 
   const summary = useMemo(() => summarizeEstablishments(rows, latest, undefined, latestSismed), [rows, latest, latestSismed]);
   const sismedVersions = useMemo(() => sismedVersionsInUse(rows), [rows]);
-  const filtered = useMemo(
+  const filteredRows = useMemo(
     () => filterEstablishments(rows, latest, search, filter, sismedFilter, undefined, latestSismed),
     [rows, latest, search, filter, sismedFilter, latestSismed],
+  );
+  // Orden por cabecera: sobre las filas filtradas y antes de paginar; la lista del celular usa el mismo.
+  const { sorted: filtered, sort, headSort } = useTableSort(
+    filteredRows,
+    {
+      name: (r) => r.name,
+      clave: (r) => SEND_KEY_STATE_LABEL[sendKeyState(r)],
+      equipo: (r) => r.deviceName || latestDevice(r)?.deviceName || null,
+      toolkit: (r) => latestDevice(r)?.version || null,
+      sismed: (r) => latestDevice(r)?.sismedVersion || null,
+      lastSend: (r) => { const at = lastSendAt(r); return at ? new Date(at).getTime() : null; },
+    },
+    { firstDir: { toolkit: "desc", sismed: "desc", lastSend: "desc" } },
   );
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [search, filter, sismedFilter]);
+  useEffect(() => { setPage(1); }, [search, filter, sismedFilter, sort]);
   // En el celular no hay páginas: la lista crece al bajar.
   const mobileList = useIncrementalCount(filtered.length, `${search}|${filter}|${sismedFilter}`, 20);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -317,10 +330,7 @@ const EstablishmentsPanel: React.FC<{
           </div>
         )}
         <div className="flex items-center gap-2 border-b border-slate-100 p-3 md:px-4">
-          <div className="relative min-w-0 flex-1 md:max-w-xs">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar establecimiento, código o PC" className={`${filterInputClass} pl-9`} />
-          </div>
+          <TableSearch value={search} onChange={setSearch} placeholder="Buscar establecimiento, código o PC" />
           {/* Celular: un botón abre los filtros abajo. */}
           <button type="button" onClick={() => setFiltersOpen(true)} aria-label="Filtros" className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 md:hidden">
             <SlidersHorizontal className="h-4 w-4" />
@@ -371,12 +381,12 @@ const EstablishmentsPanel: React.FC<{
               <table className="w-full text-[13px]">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr>
-                    <TableHeaderCell>Establecimiento</TableHeaderCell>
-                    <TableHeaderCell>Clave</TableHeaderCell>
-                    <TableHeaderCell>Equipo</TableHeaderCell>
-                    <TableHeaderCell>Toolkit</TableHeaderCell>
-                    <TableHeaderCell>SISMED</TableHeaderCell>
-                    <TableHeaderCell>Último envío</TableHeaderCell>
+                    <TableHeaderCell sort={headSort("name")}>Establecimiento</TableHeaderCell>
+                    <TableHeaderCell sort={headSort("clave")}>Clave</TableHeaderCell>
+                    <TableHeaderCell sort={headSort("equipo")}>Equipo</TableHeaderCell>
+                    <TableHeaderCell sort={headSort("toolkit")}>Toolkit</TableHeaderCell>
+                    <TableHeaderCell sort={headSort("sismed")}>SISMED</TableHeaderCell>
+                    <TableHeaderCell sort={headSort("lastSend")}>Último envío</TableHeaderCell>
                     <TableHeaderCell align="right"><span className="sr-only">Acciones</span></TableHeaderCell>
                   </tr>
                 </thead>

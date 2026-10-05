@@ -15,7 +15,6 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import {

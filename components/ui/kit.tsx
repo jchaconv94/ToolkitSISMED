@@ -1,5 +1,9 @@
-import React from "react";
-import { Activity, AlertTriangle, CheckCircle2, Lock, Package, XCircle } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { Activity, AlertTriangle, CheckCircle2, Lock, Package, Search, X, XCircle } from "lucide-react";
+import { SortHeadButton } from "./FloatingTableHead";
+import { SortDir, SortValue, TableSort, nextSort, sortRows } from "../../services/tableSort";
+
+export type { SortDir, SortValue, TableSort };
 
 /**
  * Kit visual compartido: tarjetas KPI, chips, celdas de tabla, campos y formateadores.
@@ -293,14 +297,78 @@ export const StatusChip: React.FC<{
 export const TableHeaderCell: React.FC<{
   children: React.ReactNode;
   align?: "left" | "right" | "center";
-}> = ({ children, align = "left" }) => (
+  /** Columna ordenable: el título pasa a ser un botón con su flecha (ver `useTableSort`). */
+  sort?: { dir: SortDir | null; onSort: () => void };
+  className?: string;
+}> = ({ children, align = "left", sort, className = "" }) => (
   <th
+    aria-sort={sort ? ariaSort(sort.dir) : undefined}
     className={`px-4 py-3 text-[10px] font-black uppercase tracking-wide text-slate-500 ${
       align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"
-    }`}
+    } ${className}`}
   >
-    {children}
+    {sort && typeof children === "string" ? <SortButton label={children} dir={sort.dir} onClick={sort.onSort} /> : children}
   </th>
+);
+
+/** Valor de `aria-sort` de una cabecera. */
+export const ariaSort = (dir: SortDir | null | undefined) => (dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none");
+
+/**
+ * Título de columna que ordena al tocarlo, con su flecha. Para cabeceras que no usan
+ * `TableHeaderCell` (con clases propias o en `FloatingTableHead`). Pon `aria-sort` en el
+ * `<th>` con `ariaSort(dir)`.
+ */
+export const SortButton = SortHeadButton;
+
+/**
+ * Orden de una tabla al tocar sus cabeceras, el mismo en todo el sistema: primer toque en el
+ * sentido natural de la columna (`firstDir`, por omisión A→Z o de menor a mayor), segundo el
+ * contrario y tercero sin orden (el de siempre). Los vacíos van al final. Ordena todas las
+ * filas filtradas, antes de paginar.
+ *
+ *   const { sorted, headSort } = useTableSort(filtrados, { nombre: (r) => r.name, saldo: (r) => r.saldo }, { firstDir: { saldo: "desc" } });
+ *   <TableHeaderCell sort={headSort("nombre")}>Nombre</TableHeaderCell>
+ */
+export const useTableSort = <T, K extends string>(
+  rows: T[],
+  getters: Record<K, (row: T) => SortValue>,
+  options: { initial?: TableSort<K>; firstDir?: Partial<Record<K, SortDir>> } = {},
+) => {
+  const [sort, setSort] = useState<TableSort<K>>(options.initial ?? null);
+  // Los getters suelen escribirse en línea: se usan por clave y no forman parte de las dependencias.
+  const sorted = useMemo(() => sortRows(rows, sort, getters), [rows, sort]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggle = (key: K) => setSort((current) => nextSort(current, key, options.firstDir?.[key] ?? "asc"));
+  const dirOf = (key: K): SortDir | null => (sort?.key === key ? sort.dir : null);
+  const headSort = (key: K) => ({ dir: dirOf(key), onSort: () => toggle(key) });
+  return { sorted, sort, setSort, toggle, dirOf, headSort };
+};
+
+/** Contenedor del buscador de una tabla: ancho, el mismo en todos los módulos. */
+export const tableSearchBoxClass = "relative min-w-0 flex-1 md:max-w-xl";
+
+/** Buscador de tabla: ícono, campo ancho y botón para borrar. */
+export const TableSearch: React.FC<{
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  className?: string;
+}> = ({ value, onChange, placeholder, className = "" }) => (
+  <div className={`${tableSearchBoxClass} ${className}`}>
+    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+    <input
+      type="search"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className={`${filterInputClass} pl-9 pr-9 [&::-webkit-search-cancel-button]:hidden`}
+    />
+    {value && (
+      <button type="button" onClick={() => onChange("")} aria-label="Borrar búsqueda" className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+        <X className="h-4 w-4" />
+      </button>
+    )}
+  </div>
 );
 
 /** Campo de formulario con su etiqueta y la marca de obligatorio. */

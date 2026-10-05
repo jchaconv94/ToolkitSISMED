@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import type { SortDir } from "../../services/tableSort";
 
 /**
  * Encabezado de tabla que se queda arriba al bajar.
@@ -142,7 +143,7 @@ export const FloatingTableHead: React.FC<{
   );
 };
 
-export type SortDir = "asc" | "desc";
+export type { SortDir };
 
 /** Título de columna que ordena al tocarlo, con la flecha del sentido actual. */
 export const SortHeadButton: React.FC<{ label: string; dir: SortDir | null; onClick: () => void }> = ({ label, dir, onClick }) => (
@@ -162,12 +163,5 @@ export const SortHeadButton: React.FC<{ label: string; dir: SortDir | null; onCl
   </button>
 );
 
-/**
- * Siguiente orden al tocar una columna: primero en su sentido natural (`firstDir`), luego el
- * contrario y, al tercer toque, sin orden (vuelve al de siempre).
- */
-export const nextSort = <K extends string>(current: { key: K; dir: SortDir } | null, key: K, firstDir: SortDir): { key: K; dir: SortDir } | null => {
-  if (!current || current.key !== key) return { key, dir: firstDir };
-  if (current.dir === firstDir) return { key, dir: firstDir === "asc" ? "desc" : "asc" };
-  return null;
-};
+// La regla vive en services/tableSort.ts (con pruebas); se reexporta para quien ya la usaba aquí.
+export { nextSort } from "../../services/tableSort";
