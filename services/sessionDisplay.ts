@@ -31,6 +31,14 @@ export const userFullName = (user: User | null | undefined): string => {
 export const userInitial = (user: User | null | undefined): string =>
   (userFirstName(user).charAt(0) || "?").toLocaleUpperCase("es-PE");
 
+/** Dos iniciales (nombre y apellido) para el avatar grande del Perfil: «Rene Estrella» → «RE». */
+export const userInitials = (user: User | null | undefined): string => {
+  const first = user?.personnelData?.firstName?.trim().charAt(0) || "";
+  const last = user?.personnelData?.lastName?.trim().charAt(0) || "";
+  const initials = `${first}${last}`.toLocaleUpperCase("es-PE");
+  return initials || userInitial(user);
+};
+
 const LIMA = "America/Lima";
 
 /** Hora (0–23) en Lima, sea cual sea el huso del equipo. */

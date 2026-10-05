@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { User } from "../types";
-import { greetingFor, limaHour, limaLongDate, userFirstName, userFullName, userInitial } from "./sessionDisplay";
+import { greetingFor, limaHour, limaLongDate, userFirstName, userFullName, userInitial, userInitials } from "./sessionDisplay";
 
 const base: User = { username: "jchacon", role: "ADMIN", personnelId: "", isActive: true, permissions: [] };
 
@@ -10,6 +10,7 @@ describe("presentación del usuario", () => {
     expect(userFirstName(user)).toBe("Jorge");
     expect(userFullName(user)).toBe("Jorge Luis Chacón Villacís");
     expect(userInitial(user)).toBe("J");
+    expect(userInitials(user)).toBe("JC");
   });
 
   it("cae en el usuario si la cuenta no tiene personal", () => {
@@ -17,6 +18,7 @@ describe("presentación del usuario", () => {
     expect(userFullName(base)).toBe("jchacon");
     expect(userInitial(base)).toBe("J");
     expect(userInitial(null)).toBe("?");
+    expect(userInitials(base)).toBe("J");
   });
 });
 

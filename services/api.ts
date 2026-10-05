@@ -53,6 +53,10 @@ let usersCache: any[] | null = null;
  * Ver `supabase/SUPABASE_SEGURIDAD_APLICAR_ESTO.sql`.
  */
 import { deviceLoginMessage, type DeviceInfo, type DeviceKind, type DeviceLoginResult } from "./deviceAccess";
+/** La columna pedida no existe todavía (falta aplicar un SQL). */
+const isMissingColumnError = (error: { code?: string; message?: string }) =>
+    error.code === '42703' || error.code === 'PGRST204' || /column .* does not exist|Could not find the .* column/i.test(error.message || '');
+
 const USER_SELECT = "username, role, personnel_id, is_active, created_at, personnel:personnel_id(*, facilities:facility_code(*), labor_regimes:labor_regime_id(*), professions:profession_id(*)), roles_config:role(*)";
 
 /**
@@ -233,6 +237,7 @@ export const api = {
                             dni: personnelData.dni,
                             phone: personnelData.phone,
                             email: personnelData.email,
+                            birthDate: personnelData.birth_date || undefined,
                             laborRegime: personnelData.labor_regime,
                             laborRegimeId: personnelData.labor_regime_id,
                             professionId: personnelData.profession_id,
@@ -317,6 +322,7 @@ export const api = {
                             dni: personnelData.dni,
                             phone: personnelData.phone,
                             email: personnelData.email,
+                            birthDate: personnelData.birth_date || undefined,
                             laborRegime: personnelData.labor_regime,
                             laborRegimeId: personnelData.labor_regime_id,
                             professionId: personnelData.profession_id,
@@ -353,7 +359,7 @@ export const api = {
         try {
             usersCache = null;
             if (supabase) {
-                const { error: pError } = await supabase.from('personnel').update({
+                const personnelRow: Record<string, unknown> = {
                     first_name: data.firstName,
                     last_name: data.lastName,
                     dni: data.dni,
@@ -361,7 +367,17 @@ export const api = {
                     email: data.email,
                     labor_regime_id: data.laborRegimeId || null,
                     profession_id: data.professionId || null
-                }).eq('id', personnelId);
+                };
+                if (data.birthDate !== undefined) personnelRow.birth_date = data.birthDate || null;
+                let { error: pError } = await supabase.from('personnel').update(personnelRow).eq('id', personnelId);
+                // Sin `SUPABASE_PERSONAL_FECHA_NACIMIENTO.sql` la columna no existe: se guarda
+                // todo lo demás y se avisa, en vez de perder el cambio entero.
+                let birthDateSkipped = false;
+                if (pError && 'birth_date' in personnelRow && isMissingColumnError(pError)) {
+                    delete personnelRow.birth_date;
+                    birthDateSkipped = true;
+                    ({ error: pError } = await supabase.from('personnel').update(personnelRow).eq('id', personnelId));
+                }
                 
                 // Usuario y contraseña se cambian en el servidor, que comprueba que la
                 // sesión sea la dueña de esa cuenta (o un ADMIN).
@@ -375,7 +391,7 @@ export const api = {
                     if (uError) throw uError;
                 }
                 
-                if (!pError) return { success: true };
+                if (!pError) return { success: true, birthDateSkipped };
             }
             return { success: false, message: "Error al actualizar." };
         } catch(e) {
@@ -411,6 +427,7 @@ export const api = {
                                 dni: p.dni,
                                 phone: p.phone,
                                 email: p.email,
+                                birthDate: p.birth_date || undefined,
                                 laborRegime: p.labor_regime || undefined,
                                 laborRegimeId: p.labor_regime_id || undefined,
                                 professionId: p.profession_id || undefined,

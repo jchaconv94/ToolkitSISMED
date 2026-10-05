@@ -27,7 +27,7 @@ export const UserAvatar: React.FC<{ user: User | null; size?: "sm" | "lg" }> = (
 );
 
 /** Nombre del rol tal como se configuró en Administración → Roles; si no llega, el código. */
-const useRoleLabel = (user: User | null): string => {
+export const useRoleLabel = (user: User | null): string => {
   const [label, setLabel] = useState<string>(user?.role || "");
   useEffect(() => {
     if (!user) return;
