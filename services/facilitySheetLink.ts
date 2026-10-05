@@ -75,7 +75,7 @@ const mensaje = (status: FacilitySheetLinkStatus, ownerCode: string, sheet: Unge
     case "vinculada":
       return `Vinculada automáticamente por código a la hoja «${sheet?.name}».`;
     case "dentro-de-su-ipress":
-      return `Es un puesto comunal: su stock viaja dentro de la hoja «${sheet?.name}», la de su IPRESS ${ownerCode}, separado por su ALMCOD.`;
+      return `Es un puesto comunal: su usuario ve en Stock SISMED la hoja «${sheet?.name}», la de su IPRESS ${ownerCode}, solo las filas de su ALMCOD. Si la hoja llega consolidada, ve la hoja completa.`;
     case "sin-hoja":
       return `Su UNGET todavía no publica ninguna hoja con el código ${ownerCode}. Mientras tanto este establecimiento no verá stock.`;
     case "ambigua":

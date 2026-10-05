@@ -9,6 +9,7 @@ import {
   Search,
   X
 } from "lucide-react";
+import { parentIpressCode } from "../services/facilityHierarchy";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
@@ -72,6 +73,8 @@ export const AssignedIpressStockModule: React.FC = () => {
   /** Lote abierto en el detalle (al tocar una fila o una tarjeta). */
   const [detail, setDetail] = useState<StockRow | null>(null);
   const [lastUpdateAt, setLastUpdateAt] = useState(0);
+  /** Puesto comunal cuya hoja llega consolidada: se muestra la de toda su IPRESS, con aviso. */
+  const [consolidated, setConsolidated] = useState(false);
   /** Ventana de «por vencer» y días sin actualizar: los mismos parámetros que usa la campana. */
   const [thresholds, setThresholds] = useState<NoticeThresholds>(DEFAULT_NOTICE_THRESHOLDS);
   const expiryDays = thresholds.expiryDays;
@@ -110,6 +113,7 @@ export const AssignedIpressStockModule: React.FC = () => {
       setAssignment(result.assignment);
       setLink(result.link);
       setRows(result.rows);
+      setConsolidated(!!result.consolidated);
       setLoadedSheet(result.sheetName);
       setLastUpdate(result.lastUpdate);
       setLastUpdateAt(result.lastUpdateAt);
@@ -246,6 +250,18 @@ export const AssignedIpressStockModule: React.FC = () => {
         </section>
       ) : (
         <>
+          {consolidated && (
+            <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-[13px] text-amber-900">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+              <div>
+                <p className="font-black">Esta hoja llega consolidada</p>
+                <p className="mt-0.5">
+                  El Toolkit de la IPRESS {parentIpressCode(facilityCode)} envía todas sus farmacias juntas, así que no se puede
+                  separar el stock de {facilityName} ({facilityCode}). Se muestra el stock de toda la IPRESS {parentIpressCode(facilityCode)}.
+                </p>
+              </div>
+            </div>
+          )}
           {/* Los indicadores son también el filtro: tocar uno muestra solo esos lotes. */}
           <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
             <KpiCard watermark tone="info" icon={<Package />} label="Lotes" value={metrics.lots.toLocaleString("es-PE")} hint="en la hoja del establecimiento" onClick={() => setExpirationFilter("ALL")} active={expirationFilter === "ALL"} />

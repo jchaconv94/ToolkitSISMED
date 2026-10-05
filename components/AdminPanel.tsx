@@ -17,6 +17,7 @@ import { DEFAULT_NOTICE_THRESHOLDS, NoticeThresholds } from '../services/notific
 import { NoticeSettingsCard } from './NoticeSettingsCard';
 import { SettingsRow, SettingsSection, settingsNumberClass } from './ui/SettingsSection';
 import { CustomSelect } from './ui/CustomSelect';
+import { isPharmacyType } from '../services/facilityHierarchy';
 import { KpiCard, KpiStrip, StatusChip, FormField, inputClass, SortButton, ariaSort, tableSearchBoxClass, useTableSort } from './ui/kit';
 import { ResponsiveDialog, DialogSection, DialogRow, dialogPrimaryButton, dialogSecondaryButton } from './ui/ResponsiveDialog';
 import { ConfirmationDialog } from './ui/ConfirmationDialog';
@@ -2514,6 +2515,9 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                 options={[
                                                     { value: '', label: 'Seleccione IPRESS...' },
                                                     ...facilities.filter(f => {
+                                                        // A una farmacia de hospital no se le asignan usuarios: su personal usa el del hospital.
+                                                        // Se sigue mostrando si ya era la del usuario editado, para no borrar su dato sin aviso.
+                                                        if (isPharmacyType(f.type) && f.code !== userForm.facilityCode) return false;
                                                         if (isSuperAdmin) return true;
                                                         if (userFacilityCode && f.code !== userFacilityCode) return false;
                                                         if (userMicroredId && f.microredId !== userMicroredId) return false;
