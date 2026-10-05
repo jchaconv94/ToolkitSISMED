@@ -90,8 +90,9 @@ export interface Notice {
   detail: string;
   action: { label: string; module: AppModule; tab?: "consumo" };
   /**
-   * Resumen del contenido. Si cambia (otro número, otros establecimientos), el aviso
-   * vuelve a contar como no visto.
+   * Lo que contiene el aviso, una clave por elemento (establecimiento, lote, PC), armada
+   * con `itemsSignature`. Vuelve a contar como no visto solo si aparece un elemento que
+   * no estaba cuando se marcó: que salga uno (se resolvió) no lo reaviva.
    */
   signature: string;
   /** Cuándo ocurrió la causa, si se sabe (p. ej. el intento bloqueado). */
@@ -102,7 +103,15 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 const andMore = (shown: string[], total: number) =>
   total > shown.length ? `${shown.join(", ")} y ${total - shown.length} más` : shown.join(" y ");
 
-/** Huella corta de una lista larga (lotes): basta para notar que cambió. */
+/** Separador de las claves de `signature` (no aparece en códigos, nombres ni lotes). */
+const ITEM_SEP = "\u001f";
+
+/** Firma de un aviso: sus elementos, sin repetir y en orden. */
+export const itemsSignature = (items: string[]): string => Array.from(new Set(items)).sort().join(ITEM_SEP);
+
+const signatureItems = (signature: string | undefined): string[] => (signature ? signature.split(ITEM_SEP) : []);
+
+/** Huella corta de una clave larga (lotes): basta para distinguirlas. */
 export const hashText = (text: string): string => {
   let h = 5381;
   for (let i = 0; i < text.length; i += 1) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
@@ -138,7 +147,9 @@ export const buildTechnicalNotices = ({ keys, devices, latestToolkit, thresholds
       title: plural(alerts.length, "PC no autorizada intentó enviar stock", `${alerts.length} PC no autorizadas intentaron enviar stock`),
       detail: `${first.name} (${first.code})${device}${alerts.length > 1 ? ` y ${alerts.length - 1} más` : ""}`,
       action: { label: "Revisar", module: "ADMIN_SEND_KEYS" },
-      signature: alerts.map((row) => `${row.code}:${row.alert?.id}`).sort().join(","),
+      // Por establecimiento y equipo: la misma PC que reintenta no reaviva el aviso; otra
+      // PC u otro establecimiento, sí. (Antes contaba cada intento.)
+      signature: itemsSignature(alerts.map((row) => `${row.code}:${row.alert?.deviceName || row.alert?.id}`)),
       at: first.alert?.at || null,
     });
   }
@@ -159,7 +170,7 @@ export const buildTechnicalNotices = ({ keys, devices, latestToolkit, thresholds
       title: `${stale.length} ${plural(stale.length, "establecimiento", "establecimientos")} sin actualizar su stock`,
       detail: `${andMore(stale.slice(0, 2).map(({ row }) => row.name), stale.length)} · hace más de ${thresholds.staleDays} ${plural(thresholds.staleDays, "día", "días")}`,
       action: { label: "Ver", module: "ADMIN_SEND_KEYS" },
-      signature: `${thresholds.staleDays}:${stale.map(({ row }) => row.code).sort().join(",")}`,
+      signature: itemsSignature(stale.map(({ row }) => `${thresholds.staleDays}d:${row.code}`)),
     });
   }
 
@@ -179,7 +190,7 @@ export const buildTechnicalNotices = ({ keys, devices, latestToolkit, thresholds
           ? `${plural(outdated.length, "Tiene", "Tienen")} ${versions.slice(0, 3).join(", ")}; la vigente es ${latestToolkit}`
           : `La vigente es ${latestToolkit}`,
         action: { label: "Ver", module: "ADMIN_SEND_KEYS" },
-        signature: `${latestToolkit}:${outdated.map((row) => row.code).sort().join(",")}`,
+        signature: itemsSignature(outdated.map((row) => `${latestToolkit}:${row.code}`)),
       });
     }
   }
@@ -198,7 +209,7 @@ export const buildTechnicalNotices = ({ keys, devices, latestToolkit, thresholds
       title: `${oldSismed.length} PC con una versión antigua del SISMED`,
       detail: `${first.name} usa v${firstVersion}${oldSismed.length > 1 ? ` y ${oldSismed.length - 1} más` : ""} · la vigente es v${latestSismed}`,
       action: { label: "Ver", module: "ADMIN_SEND_KEYS" },
-      signature: `${latestSismed}:${oldSismed.map((row) => row.code).sort().join(",")}`,
+      signature: itemsSignature(oldSismed.map((row) => `${latestSismed}:${row.code}`)),
     });
   }
 
@@ -228,7 +239,7 @@ export const buildBackupNotice = (usage: UsageReading | null | undefined): Notic
       ? `${worst.label}. Las descargas están en pausa hasta que baje el consumo`
       : `${worst.label}. Al 80 % se pausan las descargas`,
     action: { label: "Ver consumo", module: "ADMIN_BACKUPS", tab: "consumo" },
-    signature: `${paused ? "pausa" : "aviso"}:${worst.key}`,
+    signature: itemsSignature([`${paused ? "pausa" : "aviso"}:${worst.key}`]),
   };
 };
 
@@ -267,7 +278,7 @@ export const buildPharmacyNotices = ({ rows, lastUpdateAt, thresholds, now = new
       title: `${expired.length} ${plural(expired.length, "lote vencido", "lotes vencidos")} todavía en stock`,
       detail: `${productName(first)}${lot ? ` (${lot})` : ""}${expired.length > 1 ? ` y ${expired.length - 1} más` : ""}`,
       action: { label: "Ver", module: "IPRESS_STOCK" },
-      signature: `${expired.length}:${hashText(expired.map(({ row }) => lotKey(row)).sort().join(","))}`,
+      signature: itemsSignature(expired.map(({ row }) => hashText(lotKey(row)))),
     });
   }
 
@@ -285,7 +296,7 @@ export const buildPharmacyNotices = ({ rows, lastUpdateAt, thresholds, now = new
       title: `${expiring.length} ${plural(expiring.length, "lote vence", "lotes vencen")} en los próximos ${thresholds.expiryDays} días`,
       detail: `El primero: ${productName(first.row)}, ${monthYear(first.expiry!)}`,
       action: { label: "Ver", module: "IPRESS_STOCK" },
-      signature: `${thresholds.expiryDays}:${expiring.length}:${hashText(expiring.map(({ row }) => lotKey(row)).sort().join(","))}`,
+      signature: itemsSignature(expiring.map(({ row }) => `${thresholds.expiryDays}d:${hashText(lotKey(row))}`)),
     });
   }
 
@@ -310,7 +321,7 @@ export const buildPharmacyNotices = ({ rows, lastUpdateAt, thresholds, now = new
       title: `${empty.length} ${plural(empty.length, "medicamento", "medicamentos")} sin stock`,
       detail: `${empty[0][1].name}${empty.length > 1 ? ` y ${empty.length - 1} más` : ""}`,
       action: { label: "Ver", module: "IPRESS_STOCK" },
-      signature: `${empty.length}:${hashText(empty.map(([key]) => key).sort().join(","))}`,
+      signature: itemsSignature(empty.map(([key]) => hashText(key))),
     });
   }
 
@@ -327,7 +338,7 @@ export const buildPharmacyNotices = ({ rows, lastUpdateAt, thresholds, now = new
         detail: "Revisa que el Sync SISMED esté encendido en la PC de farmacia",
         action: { label: "Ver", module: "IPRESS_STOCK" },
         // La misma actualización vieja no vuelve a avisar cada día que pasa.
-        signature: `${thresholds.staleDays}:${lastUpdateAt}`,
+        signature: itemsSignature([`${thresholds.staleDays}d:${lastUpdateAt}`]),
       });
     }
   }
@@ -340,7 +351,7 @@ export const buildPharmacyNotices = ({ rows, lastUpdateAt, thresholds, now = new
 // ---------------------------------------------------------------------------
 
 export interface NoticeMemory {
-  /** id → firma con la que se marcó como visto. */
+  /** id → firma (sus elementos) con la que se marcó como visto. */
   seen: Record<string, string>;
   /** id → desde cuándo está a la vista (ms). Se olvida cuando el aviso desaparece. */
   since: Record<string, number>;
@@ -348,8 +359,18 @@ export interface NoticeMemory {
 
 export const EMPTY_MEMORY: NoticeMemory = { seen: {}, since: {} };
 
-/** Sin ver: nunca se marcó, o su contenido cambió desde que se marcó. */
-export const isUnseen = (notice: Notice, memory: NoticeMemory): boolean => memory.seen[notice.id] !== notice.signature;
+/**
+ * Sin ver: nunca se marcó, o trae algún elemento que no estaba cuando se marcó. Que se
+ * hayan resuelto algunos (la lista se acortó) no lo vuelve a encender: antes cualquier
+ * cambio contaba, y los avisos de la red, que cambian en cada revisión, volvían siempre.
+ */
+export const isUnseen = (notice: Notice, memory: NoticeMemory): boolean => {
+  const seen = memory.seen[notice.id];
+  if (seen === undefined) return true;
+  if (seen === notice.signature) return false;
+  const seenItems = new Set(signatureItems(seen));
+  return signatureItems(notice.signature).some((item) => !seenItems.has(item));
+};
 
 export const unseenCount = (notices: Notice[], memory: NoticeMemory): number =>
   notices.filter((notice) => isUnseen(notice, memory)).length;
