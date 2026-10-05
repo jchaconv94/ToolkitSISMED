@@ -29,6 +29,7 @@ import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { BottomSheet } from "./ui/BottomSheet";
+import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { FloatingActionButton } from "./ui/FloatingActionButton";
 import { noticeWhen } from "../services/notifications";
 import { 
@@ -73,6 +74,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
   const [exclusions, setExclusions] = useState<RequirementExclusionItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const searchBar = useStickyBar<HTMLDivElement>();
 
   // Modal manual item
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -382,9 +384,9 @@ export const AnalysisExclusionsModule: React.FC = () => {
       </KpiStrip>
 
       {/* Main Table Card */}
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm md:overflow-hidden">
         {/* Barra: buscador, establecimiento (solo quien supervisa varios) y acciones. */}
-        <div className="flex items-center gap-2 border-b border-slate-100 p-3 md:px-4">
+        <div ref={searchBar.ref} style={searchBar.style} className={`${stickyBarClass} flex items-center gap-2 rounded-t-2xl border-b border-slate-100 bg-white p-3 md:static md:px-4`}>
           <TableSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar por código, descripción o motivo..." />
 
           {canChangeFacility && (

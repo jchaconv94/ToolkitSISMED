@@ -27,6 +27,7 @@ import { BottomSheet } from './ui/BottomSheet';
 import { LoadMoreSentinel, useIncrementalCount } from './ui/IncrementalList';
 import { FloatingTableHead, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead } from './ui/FloatingTableHead';
 import { useIsDesktop } from './ui/useIsDesktop';
+import { stickyBarClass, useStickyBar } from './ui/useStickyBar';
 import { ModuleFooterPortal } from './ui/ModuleHeaderSlot';
 import { NAV_SECTIONS } from './navigation';
 import { useModuleHeaderOverride } from '../contexts/ModuleHeaderContext';
@@ -97,6 +98,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
 
   // --- USER DIRECTORY SEARCH & FILTERS STATE ---
   const [searchTerm, setSearchTerm] = useState('');
+  const searchBar = useStickyBar<HTMLDivElement>();
   const [filterProfession, setFilterProfession] = useState('ALL');
   const [filterRole, setFilterRole] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
@@ -1501,8 +1503,8 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                 <KpiCard watermark label="Inactivos" value={inactiveUsersCount} hint="sin acceso" icon={<UserX />} tone="neutral" onClick={() => setFilterStatus('INACTIVE')} active={filterStatus === 'INACTIVE'} />
                             </KpiStrip>
 
-                            {/* Barra: buscador, filtros y acciones */}
-                            <div className="flex items-center gap-2">
+                            {/* Barra: buscador, filtros y acciones (en el celular, fija arriba al bajar) */}
+                            <div ref={searchBar.ref} style={searchBar.style} className={`${stickyBarClass} flex items-center gap-2 md:static`}>
                                 <div className={tableSearchBoxClass}>
                                     <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                                     <input

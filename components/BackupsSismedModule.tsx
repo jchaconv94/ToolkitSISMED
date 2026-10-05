@@ -19,6 +19,7 @@ import {
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { BottomSheet } from "./ui/BottomSheet";
+import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { BackupConsumptionTab } from "./BackupConsumptionTab";
 
 const PAGE_SIZE = 10;
@@ -125,6 +126,7 @@ export const BackupsSismedModule: React.FC = () => {
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<BackupActivityRow[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const searchBar = useStickyBar<HTMLDivElement>();
 
   useEffect(() => manager.attach(), [manager.attach]);
 
@@ -236,8 +238,8 @@ export const BackupsSismedModule: React.FC = () => {
             <KpiCard watermark tone={plan.tone} icon={<Gauge />} label="Plan gratuito" value={plan.value} progress={plan.ratio} progressMarks={[0.7, 0.8]} hint={plan.hint} />
           </KpiStrip>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center gap-2 border-b border-slate-100 p-3 sm:px-4">
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm md:overflow-hidden">
+            <div ref={searchBar.ref} style={searchBar.style} className={`${stickyBarClass} flex items-center gap-2 rounded-t-2xl border-b border-slate-100 bg-white p-3 sm:px-4 md:static`}>
               <TableSearch value={search} onChange={setSearch} placeholder="Buscar establecimiento, código o PC" />
               {/* Celular: un solo botón que abre los filtros abajo. */}
               <button type="button" onClick={() => setFiltersOpen(true)} aria-label="Filtros" className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 md:hidden">

@@ -40,6 +40,7 @@ import { CustomSelect } from "./ui/CustomSelect";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
 import { EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, TableHeaderCell as HeaderCell, filterInputClass, tableSearchBoxClass, useTableSort } from "./ui/kit";
 import { BottomSheet } from "./ui/BottomSheet";
+import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
 import { TablePagination } from "./ui/TablePagination";
@@ -98,6 +99,7 @@ export const AssignedIpressStockModule: React.FC = () => {
   /** Celular: panel inferior de filtros y el de acciones (⋯). */
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const toolbar = useStickyBar<HTMLDivElement>();
   /** Ventana de «por vencer» y días sin actualizar: los mismos parámetros que usa la campana. */
   const [thresholds, setThresholds] = useState<NoticeThresholds>(DEFAULT_NOTICE_THRESHOLDS);
   const expiryDays = thresholds.expiryDays;
@@ -332,7 +334,7 @@ export const AssignedIpressStockModule: React.FC = () => {
               la tarjeta no recorta su contenido en el celular), y sigue el patrón aprobado:
               buscador, botón de filtros que abre el panel inferior y ⋯ con las acciones. */}
           <section className="rounded-2xl border border-slate-200 bg-white shadow-sm md:overflow-hidden">
-            <div className="sticky -top-2.5 z-20 flex items-center gap-2 rounded-t-2xl border-b border-slate-100 bg-white p-3 sm:p-4 md:static">
+            <div ref={toolbar.ref} style={toolbar.style} className={`${stickyBarClass} flex items-center gap-2 rounded-t-2xl border-b border-slate-100 bg-white p-3 sm:static sm:p-4`}>
               <label className={tableSearchBoxClass}>
                 <span className="sr-only">Buscar en el stock</span>
                 <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
