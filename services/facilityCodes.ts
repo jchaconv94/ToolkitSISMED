@@ -133,12 +133,19 @@ export const sheetOwnerCodeOf = (raw?: string | null): string => {
  * `PUESTO_COMUNAL` se agregó el 2026-09-21. Antes esos establecimientos se registraban como
  * `PUESTO` y se marcaban a mano con la categoría `P.C.`, que era un apaño para poder
  * localizarlos después; ver `supabase/SUPABASE_MIGRACION_TIPO_PUESTO_COMUNAL.sql`.
+ *
+ * `FARMACIA` se agregó el 2026-10-05 (pedido del usuario): un hospital suele estar dividido
+ * en varias farmacias (emergencia, consulta externa…), que SISMED numera igual que los
+ * puestos comunales (`06502F02`). El código no distingue una de otra, así que con `F02` en
+ * adelante valen los dos tipos y decide quien registra. `facilities.type` es texto libre:
+ * no hace falta SQL.
  */
 export const FACILITY_TYPES = [
   { value: "HOSPITAL", label: "HOSPITAL" },
   { value: "CENTRO", label: "CENTRO DE SALUD" },
   { value: "PUESTO", label: "PUESTO DE SALUD" },
   { value: "PUESTO_COMUNAL", label: "PUESTO COMUNAL" },
+  { value: "FARMACIA", label: "FARMACIA" },
   { value: "ALM", label: "ALMACÉN" },
 ] as const;
 
@@ -150,15 +157,23 @@ export const facilityTypeLabel = (type?: string | null): string => {
 };
 
 /**
- * Tipo que le corresponde a un código, cuando el propio código lo dice.
- *
- * Solo se pronuncia sobre lo que es inequívoco: `06528F02` es un puesto comunal y `030S05`
- * un almacén. Un código de IPRESS a secas no distingue entre hospital, centro y puesto de
- * salud, así que devuelve `""` y decide quien registra.
+ * Tipos que admite un código, cuando el propio código lo dice: `030S05` es un almacén, y
+ * `06528F02` (farmacia `F02` en adelante) puede ser un puesto comunal o una farmacia del
+ * hospital. Un código de IPRESS a secas no distingue entre hospital, centro y puesto de
+ * salud, así que devuelve `[]` y decide quien registra.
+ */
+export const allowedFacilityTypes = (code?: string | null): string[] => {
+  const { kind } = parseFacilityCode(code);
+  if (kind === "puesto-comunal") return ["PUESTO_COMUNAL", "FARMACIA"];
+  if (kind === "almacen") return ["ALM"];
+  return [];
+};
+
+/**
+ * Tipo que se propone al escribir el código, solo cuando es inequívoco (un almacén). Con
+ * `F02` en adelante hay dos posibles y se deja elegir.
  */
 export const suggestedFacilityType = (code?: string | null): string => {
-  const { kind } = parseFacilityCode(code);
-  if (kind === "puesto-comunal") return "PUESTO_COMUNAL";
-  if (kind === "almacen") return "ALM";
-  return "";
+  const allowed = allowedFacilityTypes(code);
+  return allowed.length === 1 ? allowed[0] : "";
 };
