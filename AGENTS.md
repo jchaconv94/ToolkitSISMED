@@ -64,6 +64,8 @@ npm run build
 
 El trabajo se integra en `main` mediante pull requests.
 
+**Unir los PR (pedido del usuario, 2026-10-05: «únelo tú, siempre»):** cuando la verificación de GitHub pasa y no hay conflictos, el agente une el PR sin esperar a que se lo pidan, y avisa.
+
 **Si `main` vuelve a divergir por subir el proyecto desde Google AI Studio** (historias sin ancestro común, un `merge` normal da conflicto en todos los archivos), la receta es una confirmación de unión de dos padres que toma el árbol de la rama de trabajo:
 
 ```bash
