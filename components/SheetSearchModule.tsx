@@ -144,6 +144,7 @@ import { BottomSheet } from "./ui/BottomSheet";
 import { DeficiencyCaptureBar } from "./DeficiencyCaptureBar";
 import { EstablishmentCard, EstablishmentMobileRow, type EstablishmentCardData } from "./EstablishmentCard";
 import { EstablishmentSyncPanel, EstablishmentTable, type SyncFilter } from "./EstablishmentTable";
+import { alignConfigsWithOfficialUngets, resolveStockLevel, selectVisibleStockConnections } from "../services/stockConnectionScope";
 
 /** Lista vacía compartida: evita crear un array nuevo por tarjeta sin datos. */
 const EMPTY_SOURCE_ROWS: SIGData[] = [];
@@ -217,26 +218,6 @@ const getHistoryKeysForSource = (source: SheetSource): string[] =>
         .filter(Boolean),
     ),
   );
-
-const alignConfigsWithOfficialUngets = (configs: any[], ungs: any[]): any[] => {
-  if (!ungs || ungs.length === 0) return configs;
-  return configs.map(config => {
-    const configNorm = normalizeName(config.name);
-    const matching = ungs.find(u => 
-      (config.ungetId && String(u.id) === String(config.ungetId)) ||
-      u.name === config.name || 
-      normalizeName(u.name) === configNorm
-    );
-    if (matching) {
-      return {
-        ...config,
-        ungetId: matching.id,
-        name: matching.name
-      };
-    }
-    return config;
-  });
-};
 
 const parseDataDate = (str?: string): number => {
   if (!str) return 0;
@@ -1705,31 +1686,9 @@ const SheetSearchModuleContent: React.FC = () => {
         }
 
         let remoteConfigs: any[] = [];
-        const role = user.role;
-        let level = user.jurisdictionLevel || "";
-        const r = (role || "").toUpperCase();
-        if (!level) {
-          if (
-            r === "ADMIN" ||
-            r === "GLOBAL" ||
-            r.includes("SUPER") ||
-            r.includes("GENERAL") ||
-            r === "ADMINISTRADOR"
-          )
-            level = "GLOBAL";
-          else if (r.includes("DIRESA")) level = "DIRESA";
-          else if (r.includes("OGESS")) level = "OGESS";
-          else if (r.includes("UNGET") || r.includes("RED")) level = "UNGET";
-          else if (r.includes("MICRORED")) level = "MICRORED";
-          else if (
-            r.includes("FARMACIA") ||
-            r.includes("IPRESS") ||
-            r.includes("PERSONAL")
-          )
-            level = "IPRESS";
-          else
-            level = "IPRESS";
-        }
+        // La regla de jurisdicción vive en `services/stockConnectionScope.ts`: Inicio la usa
+        // para contar los mismos establecimientos que esta pantalla.
+        const level = resolveStockLevel(user.role, user.jurisdictionLevel);
 
         const userDiresaId =
           user.personnelData?.diresaId ||
@@ -1797,58 +1756,17 @@ const SheetSearchModuleContent: React.FC = () => {
 
           setAllJurisdictionConfigs(jurisdictionConfigs);
 
-          if (level === "GLOBAL") {
-            remoteConfigs = allConfigs.filter((config) => {
-              if (config.username === user.username) return true;
-              return false;
-            });
-            // Un usuario global ve todas las UNGET registradas, sin depender de a quién esté
-            // suscrito: la visibilidad sale de la jerarquía de Establecimientos.
-            remoteConfigs = allConfigs;
-          } else if (level === "DIRESA") {
-            remoteConfigs = allConfigs.filter((config) => {
-              if (config.username === user.username) return true;
-              const ungetObj = ungs.find(u => (config.ungetId && String(u.id) === String(config.ungetId)) || normalizeName(u.name) === normalizeName(config.name));
-              if (ungetObj && userDiresaId && String(ungetObj.diresaId) === String(userDiresaId)) return true;
-              return false;
-            });
-          } else if (level === "OGESS") {
-            remoteConfigs = allConfigs.filter((config) => {
-              if (config.username === user.username) return true;
-              const ungetObj = ungs.find(u => (config.ungetId && String(u.id) === String(config.ungetId)) || normalizeName(u.name) === normalizeName(config.name));
-              if (ungetObj && userOgessId && String(ungetObj.ogessId) === String(userOgessId)) return true;
-              return false;
-            });
-          } else {
-            // Nivel UNGET, MICRORED o IPRESS: Herencia automática de la URL de su UNGET
-            const myOwn = allConfigs.filter((config) => config.username === user.username);
-
-            // Buscar en todas las configuraciones la que corresponda a la UNGET del usuario
-            const inheritedUngetConfigs = allConfigs.filter((config) => {
-              // 1. Coincidencia por ID de UNGET
-              if (config.ungetId && userUngetId && String(config.ungetId) === String(userUngetId)) return true;
-              // 2. Coincidencia por objeto myUnget
-              if (myUnget) {
-                if (config.ungetId && String(config.ungetId) === String(myUnget.id)) return true;
-                if (normalizeName(config.name) === normalizeName(myUnget.name) || config.name.toUpperCase().includes(myUnget.name.toUpperCase())) return true;
-              }
-              // 3. Coincidencia por creador de la misma UNGET
-              const creator = allUsers.find((u) => u.username === config.username);
-              const creatorUngetId =
-                creator?.personnelData?.ungetId ||
-                creator?.facilityData?.ungetId ||
-                (creator as any)?.ungetId ||
-                (creator as any)?.personnel?.ungetId;
-              if (creatorUngetId && userUngetId && String(creatorUngetId) === String(userUngetId)) return true;
-              return false;
-            });
-
-            // Si el usuario ya tiene su propia configuración la usa; si no, hereda la de su UNGET
-            remoteConfigs = myOwn.length > 0 ? myOwn : inheritedUngetConfigs;
-
-            // La visibilidad sale de la jerarquía de Establecimientos: un usuario de una
-            // UNGET ve la conexión de su UNGET, y nada más.
-          }
+          remoteConfigs = selectVisibleStockConnections({
+            level,
+            username: user.username,
+            userDiresaId,
+            userOgessId,
+            userUngetId,
+            myUnget,
+            allConfigs,
+            ungets: ungs,
+            users: allUsers,
+          });
         } catch (fetchErr) {
           console.error(
             "Error loading segmented unget configs from server:",

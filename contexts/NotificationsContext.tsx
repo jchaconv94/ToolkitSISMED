@@ -21,7 +21,9 @@ import { sendKeysApi } from "../services/sendKeys";
 import { toolkitDevicesApi } from "../services/toolkitDevices";
 import { loadAssignedIpressStock } from "../services/assignedIpressStock";
 import { noticeSettingsApi } from "../services/noticeSettings";
-import { type NetworkSummary, type PharmacySummary, buildNetworkSummary, buildPharmacySummary } from "../services/homeSummary";
+import { type PharmacySummary, buildPharmacySummary } from "../services/homeSummary";
+import { NETWORK_LEVELS, type NetworkStockStatus, loadNetworkStockStatus, readCachedNetworkStatus, saveCachedNetworkStatus } from "../services/networkStockStatus";
+import { resolveStockLevel } from "../services/stockConnectionScope";
 import {
   EMPTY_MEMORY, NOTICE_SOURCE_FAILURE, NOTICE_SOURCE_OF, Notice, NoticeId, NoticeMemory, NoticeSource,
   buildBackupNotice, buildPharmacyNotices, buildTechnicalNotices, isUnseen, loadNoticeMemory, markSeen, saveNoticeMemory,
@@ -47,10 +49,33 @@ export interface NotificationsState {
   lastChecked: number | null;
   /** Fuentes que no respondieron en la última revisión, dichas para la persona. */
   failures: string[];
-  /** Resumen para Inicio, de la misma revisión (null si no aplica o no llegó). */
-  network: NetworkSummary | null;
+  /**
+   * Inicio: estado de las hojas de stock de su jurisdicción (niveles DIRESA, OGESS, UNGET o
+   * global con Consulta Stock). Arranca con el último resultado guardado en el navegador.
+   */
+  network: NetworkStockStatus | null;
+  /** Se ve la red, pero todavía no hay ningún resultado (ni guardado): Inicio muestra un esqueleto. */
+  networkPending: boolean;
+  /** Inicio: resumen del stock propio (responsable de farmacia), de la misma revisión. */
   pharmacySummary: PharmacySummary | null;
 }
+
+// Último resumen del stock propio, por usuario, para que Inicio no espere a la hoja.
+const pharmacyKey = (username: string) => `toolkit.inicio.farmacia.${username}`;
+const readPharmacySummary = (username: string): PharmacySummary | null => {
+  try {
+    const value = JSON.parse(localStorage.getItem(pharmacyKey(username)) || "null");
+    return value && typeof value.expired === "number" && typeof value.ok === "number" ? value : null;
+  } catch {
+    return null;
+  }
+};
+const savePharmacySummary = (username: string, summary: PharmacySummary | null) => {
+  try {
+    if (summary) localStorage.setItem(pharmacyKey(username), JSON.stringify(summary));
+    else localStorage.removeItem(pharmacyKey(username));
+  } catch { /* Sin almacenamiento: se espera la revisión. */ }
+};
 
 const NotificationsContext = createContext<NotificationsState | null>(null);
 
@@ -70,7 +95,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const [tech, setTech] = useState<Notice[]>([]);
   const [pharmacy, setPharmacy] = useState<Notice[]>([]);
-  const [network, setNetwork] = useState<NetworkSummary | null>(null);
+  const [network, setNetwork] = useState<NetworkStockStatus | null>(null);
+  const [networkPending, setNetworkPending] = useState(false);
   const [pharmacySummary, setPharmacySummary] = useState<PharmacySummary | null>(null);
   const [failed, setFailed] = useState<NoticeSource[]>([]);
   const [checking, setChecking] = useState(false);
@@ -132,22 +158,22 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
             toolkitDevicesApi.latestRelease(),
           ])
             .then(([keys, devices, latestToolkit]) => {
-              if (gen !== generation.current) return;
-              setTech(buildTechnicalNotices({ keys, devices, latestToolkit, thresholds, now }));
-              setNetwork(buildNetworkSummary(keys, devices, thresholds.staleDays, now));
+              if (gen === generation.current) setTech(buildTechnicalNotices({ keys, devices, latestToolkit, thresholds, now }));
             })
             .catch((error) => {
               console.warn("Avisos: no se pudieron revisar las claves de envío.", error);
               failures.push("claves");
             })
-        : Promise.resolve((setTech([]), setNetwork(null))),
+        : Promise.resolve(setTech([])),
       canPharmacy && thresholds
         ? loadAssignedIpressStock(facilityCode, ungetId)
             .then((result) => {
               if (gen !== generation.current) return;
               // Sin hoja propia no hay nada que revisar: eso ya lo explica el módulo.
               setPharmacy(result.message ? [] : buildPharmacyNotices({ rows: result.rows, lastUpdateAt: result.lastUpdateAt, thresholds, now }));
-              setPharmacySummary(result.message ? null : buildPharmacySummary(result.rows, result.lastUpdateAt, thresholds.expiryDays, now));
+              const summary = result.message ? null : buildPharmacySummary(result.rows, result.lastUpdateAt, thresholds.expiryDays, now);
+              setPharmacySummary(summary);
+              savePharmacySummary(username, summary);
             })
             .catch((error) => {
               console.warn("Avisos: no se pudo leer el stock del establecimiento.", error);
@@ -161,7 +187,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     setFailed(failures);
     setLastChecked(Date.now());
     setChecking(false);
-  }, [enabled, canTech, canPharmacy, canBackups, facilityCode, ungetId, requestUsage]);
+  }, [enabled, canTech, canPharmacy, canBackups, facilityCode, ungetId, requestUsage, username]);
 
   // Al iniciar sesión (o cambiar de cuenta) se empieza de cero.
   useEffect(() => {
@@ -169,8 +195,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     running.current = false;
     setTech([]);
     setPharmacy([]);
-    setNetwork(null);
-    setPharmacySummary(null);
+    // Inicio muestra al instante el último resumen guardado; la revisión lo reemplaza.
+    setPharmacySummary(username ? readPharmacySummary(username) : null);
     setFailed([]);
     setLastChecked(null);
     setChecking(false);
@@ -184,6 +210,40 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     const timer = window.setInterval(() => void refresh(), NOTICES_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [enabled, refresh]);
+
+  // --- Estado de la red para Inicio ------------------------------------------------------
+  // Va aparte de los avisos: no enciende la campanita. Se muestra al instante lo último
+  // guardado y se recalcula al entrar y cada 15 minutos.
+  const canNetwork = Boolean(username) && hasPermission("SIG_SEARCH")
+    && NETWORK_LEVELS.includes(String(resolveStockLevel(user?.role, user?.jurisdictionLevel)).toUpperCase());
+  const networkRun = useRef(0);
+  useEffect(() => {
+    const run = ++networkRun.current;
+    if (!canNetwork || !user) {
+      setNetwork(null);
+      setNetworkPending(false);
+      return;
+    }
+    const cached = readCachedNetworkStatus(username);
+    setNetwork(cached);
+    setNetworkPending(!cached);
+    const load = async () => {
+      try {
+        const status = await loadNetworkStockStatus(user);
+        if (run !== networkRun.current) return;
+        setNetwork(status);
+        saveCachedNetworkStatus(username, status);
+      } catch (error) {
+        console.warn("Inicio: no se pudo calcular el estado de las hojas de stock.", error);
+      } finally {
+        if (run === networkRun.current) setNetworkPending(false);
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), NOTICES_REFRESH_MS);
+    return () => window.clearInterval(timer);
+    // `user` cambia de identidad al refrescar sus datos; basta con la cuenta y el permiso.
+  }, [canNetwork, username]);
 
   const backupNotice = useMemo(() => (canBackups ? buildBackupNotice(backups.usage) : null), [canBackups, backups.usage]);
   const notices = useMemo(
@@ -232,6 +292,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     lastChecked,
     failures: failed.map((source) => NOTICE_SOURCE_FAILURE[source]),
     network,
+    networkPending,
     pharmacySummary,
   };
 
