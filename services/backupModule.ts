@@ -6,7 +6,7 @@
  * Cloudflare) y el pedido en curso de esa persona, si hay.
  */
 
-import type { BackupQuota, OnlinePc, UsageItem, UsageReading } from "./backupConnection";
+import type { BackupQuota, OnlinePc, SeenPc, UsageItem, UsageReading } from "./backupConnection";
 import type { Tone } from "../components/ui/kit";
 
 export interface BackupOverviewRow {
@@ -53,10 +53,24 @@ export const isActive = (job?: BackupJobView | null) => Boolean(job && ACTIVE_PH
 export const limaDay = (value: string | number | Date) =>
   new Date(value).toLocaleDateString("en-CA", { timeZone: "America/Lima" });
 
+const limaClock = (value: number) =>
+  new Date(value).toLocaleTimeString("es-PE", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hour12: false });
+
+/** Última conexión de una PC desconectada: «Hoy 10:31», «Ayer 17:40» o «02/10/2026 08:15». */
+export const lastConnectionLabel = (at: number, now: number = Date.now()): string => {
+  const day = limaDay(at);
+  if (day === limaDay(now)) return `Hoy ${limaClock(at)}`;
+  if (day === limaDay(now - 86400000)) return `Ayer ${limaClock(at)}`;
+  const date = new Date(at).toLocaleDateString("es-PE", { timeZone: "America/Lima", day: "2-digit", month: "2-digit", year: "numeric" });
+  return `${date} ${limaClock(at)}`;
+};
+
 export interface BackupRowView extends BackupOverviewRow {
   online: boolean;
+  /** En línea: la PC conectada. Desconectada: la última que se conectó, si se sabe. */
   equipo?: string;
   version?: string;
+  /** En línea: su último ping. Desconectada: su última conexión, si el servicio la anotó. */
   lastSeen?: number;
   job?: BackupJobView;
   downloadedToday: boolean;
@@ -70,19 +84,21 @@ export const buildBackupRows = (
   jobs: Record<string, BackupJobView>,
   paused: boolean,
   now: number = Date.now(),
+  seen: Record<string, SeenPc> = {},
 ): BackupRowView[] => {
   const pcs = new Map(online.map((pc) => [pc.code, pc]));
   const today = limaDay(now);
   return overview.map((row) => {
     const pc = pcs.get(row.code);
+    const last = pc ? undefined : seen[row.code];
     const job = jobs[row.code];
     const quotaUsed = (row.mine ?? row.today) >= row.limit;
     return {
       ...row,
       online: Boolean(pc),
-      equipo: pc?.equipo,
-      version: pc?.version,
-      lastSeen: pc?.lastSeen,
+      equipo: pc?.equipo ?? (last?.equipo || undefined),
+      version: pc?.version ?? (last?.version || undefined),
+      lastSeen: pc?.lastSeen ?? last?.at,
       job,
       downloadedToday: Boolean(row.lastAt && limaDay(row.lastAt) === today),
       quotaUsed,

@@ -13,7 +13,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "./AuthContext";
-import { OnlinePc, ServerMessage, UsageReading, applyPresence, connectionUrl, parseServerMessage } from "../services/backupConnection";
+import { OnlinePc, SeenPc, ServerMessage, UsageReading, applyPresence, applySeen, connectionUrl, parseServerMessage } from "../services/backupConnection";
 import { ActivityItem, BackupJobView, isActive } from "../services/backupModule";
 import {
   chooseSaveFolder, downloadWithResume, folderPickerSupported, getSaveFolder, grantSaveFolder, saveBackup, savedFileName, verifyBackup,
@@ -28,6 +28,8 @@ export interface BackupManager {
   username: string | null;
   isAdmin: boolean;
   online: OnlinePc[];
+  /** Última conexión de los establecimientos que no están en línea, por código. */
+  seen: Record<string, SeenPc>;
   usage: UsageReading | null;
   jobs: Record<string, BackupJobView>;
   /** Conexiones y desconexiones de esta sesión (para el panel Actividad). */
@@ -69,6 +71,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
   const [username, setUsername] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [online, setOnline] = useState<OnlinePc[]>([]);
+  const [seen, setSeen] = useState<Record<string, SeenPc>>({});
   const [usage, setUsage] = useState<UsageReading | null>(null);
   const [jobs, setJobs] = useState<Record<string, BackupJobView>>({});
   const [events, setEvents] = useState<ActivityItem[]>([]);
@@ -153,10 +156,13 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
         break;
       case "list":
         setOnline(message.rows);
+        // Un servicio anterior no manda `seen`: se conserva lo que ya se sabía.
+        if (message.seen) setSeen(Object.fromEntries(message.seen.map((row) => [row.code, row])));
         break;
       case "presence":
         addEvent(`${message.codes.join(", ")} ${message.online ? "se conectó" : "se desconectó"}${message.equipo ? ` (${message.equipo})` : ""}`, message.online ? "info" : "warn");
         setOnline((prev) => applyPresence(prev, message));
+        setSeen((prev) => applySeen(prev, message));
         if (message.online) send({ t: "list" });
         break;
       case "usage":
@@ -269,6 +275,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
     username,
     isAdmin,
     online,
+    seen,
     usage,
     jobs,
     events,

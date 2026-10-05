@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, PC_SILENCE_MS, PcInfo, backupKey, buildUsage, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, jobMessages, parseBackupMeta, quotaMessage, usageFor, r2OperationClass, usageBlocks, usageMessage, utcDayStart, utcMonthStart } from "./logic";
+import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, PC_SILENCE_MS, PcInfo, backupKey, buildUsage, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, jobMessages, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, usageFor, r2OperationClass, usageBlocks, usageMessage, utcDayStart, utcMonthStart } from "./logic";
 
 const now = 1_000_000_000;
 const pc = (codes: Array<[string, string | null]>, since = now - 1000, equipo = "PC"): PcInfo => ({
@@ -158,5 +158,23 @@ describe("etapa 4", () => {
     const ready = jobMessages({ ...base, status: "ready", name: "BKDA202610021300.zip", size: 100, downloadUrl: "https://x/backup/j1/download?token=t" });
     expect(ready.map((m: any) => m.t)).toEqual(["backup_requested", "backup_meta", "backup_ready"]);
     expect((ready[2] as any).downloadUrl).toContain("/backup/j1/download");
+  });
+});
+
+describe("última conexión", () => {
+  const pc: PcInfo = {
+    role: "pc", device: "d1", equipo: "FARMACIA-01", version: "2.2.4", since: 1_000,
+    codes: [{ code: "06519", name: "C.S. Bellavista", ungetId: "u1" }, { code: "06525", name: "P.S. Cuzco", ungetId: "u2" }],
+  };
+
+  it("anota la hora del último ping, o la de conexión si nunca respondió", () => {
+    expect(seenRowsFor(pc, pc.codes, 5_000).map((r) => r.at)).toEqual([5_000, 5_000]);
+    expect(seenRowsFor(pc, pc.codes, null)[0]).toMatchObject({ code: "06519", equipo: "FARMACIA-01", version: "2.2.4", at: 1_000 });
+  });
+
+  it("cada usuario solo ve la de su jurisdicción; el admin, todas", () => {
+    const seen = seenRowsFor(pc, pc.codes, 5_000);
+    expect(seenFor({ isAdmin: false, ungetIds: ["u1"] }, seen).map((r) => r.code)).toEqual(["06519"]);
+    expect(seenFor({ isAdmin: true, ungetIds: [] }, seen)).toHaveLength(2);
   });
 });

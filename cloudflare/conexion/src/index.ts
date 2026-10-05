@@ -13,14 +13,14 @@
  *         solo ve las PC de su jurisdicción.
  *
  * Mensajes (JSON) por la conexión abierta:
- *   web → {t:"list"}                          → {t:"list", rows}
+ *   web → {t:"list"}                          → {t:"list", rows, seen} (seen: última conexión de las que no están)
  *   web → {t:"ping", id, code}                → la PC responde {t:"pong", ...} → {t:"ping_result"}
  *   web → {t:"backup_request", code}          → la PC recibe {t:"backup", job, token, partSize, uploadUrl}
  *   pc  → {t:"backup_meta"|"backup_progress"|"backup_error", job, ...} → se reenvía a esa web
  *   servicio → web {t:"backup_ready", job, downloadUrl, name, size, sha256}
  *   web → {t:"backup_done", job}              → se borra de R2
  *   web → {t:"usage"}                         → {t:"usage", usage} consumo del plan gratuito
- *   servicio → web {t:"presence", online, codes} cuando una PC se conecta o se va
+ *   servicio → web {t:"presence", online, codes, at?} cuando una PC se conecta o se va (at: su última conexión)
  * El texto «ping» recibe «pong» sin despertar al servicio (mantiene viva la conexión).
  *
  * Backups (el archivo no pasa por la conexión abierta, va por HTTPS directo a R2):
@@ -40,7 +40,8 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   BACKUP_MAX_BYTES, BACKUP_PART_SIZE, BackupJob, PcCode, PcInfo, USAGE_REFRESH_MS, UsageReading, WebInfo, backupKey,
-  canSee, isExpired, jobMessages, keysByCode, onlineFor, parseBackupMeta, quotaMessage, usageBlocks, usageFor, usageMessage,
+  canSee, isExpired, jobMessages, keysByCode, onlineFor, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, SeenRow,
+  usageBlocks, usageFor, usageMessage,
 } from "./logic";
 import { UsageEnv, readUsage } from "./usage";
 
@@ -219,6 +220,8 @@ export default {
 
 const JOB_PREFIX = "job:";
 const USAGE_KEY = "usage";
+/** Última conexión de cada establecimiento: `seen:<código>`. Una escritura por desconexión. */
+const SEEN_PREFIX = "seen:";
 const CLEANUP_EVERY_MS = 10 * 60 * 1000;
 
 export class Region extends DurableObject<Env> {
@@ -250,7 +253,7 @@ export class Region extends DurableObject<Env> {
       this.ctx.acceptWebSocket(server, ["web", `w:${info.id}`]);
       server.serializeAttachment(info);
       server.send(JSON.stringify({ t: "hello", username: info.username, isAdmin: info.isAdmin }));
-      server.send(JSON.stringify({ t: "list", rows: this.rowsFor(info) }));
+      server.send(JSON.stringify({ t: "list", rows: this.rowsFor(info), seen: await this.seenFor(info) }));
       this.ctx.waitUntil(this.resumeJobs(server, info).catch(() => undefined));
       this.ctx.waitUntil(this.usage().then((usage) => this.sendUsage(server, info, usage)).catch(() => undefined));
     }
@@ -266,7 +269,7 @@ export class Region extends DurableObject<Env> {
 
     if (info.role === "web") {
       if (data.t === "list") {
-        ws.send(JSON.stringify({ t: "list", rows: this.rowsFor(info) }));
+        ws.send(JSON.stringify({ t: "list", rows: this.rowsFor(info), seen: await this.seenFor(info) }));
       } else if (data.t === "ping") {
         const code = String(data.code || "").toUpperCase();
         const pc = this.pcFor(info, code);
@@ -320,12 +323,12 @@ export class Region extends DurableObject<Env> {
   }
 
   async webSocketClose(ws: WebSocket, code: number) {
-    this.forget(ws);
+    await this.forget(ws);
     try { ws.close(code === 1005 ? 1000 : code, "Cerrada"); } catch { /* ya cerrada */ }
   }
 
   async webSocketError(ws: WebSocket) {
-    this.forget(ws);
+    await this.forget(ws);
   }
 
   // --- Backups ---------------------------------------------------------------------
@@ -496,11 +499,26 @@ export class Region extends DurableObject<Env> {
     return this.rowsFor(web).some((r) => r.code === code) ? this.ctx.getWebSockets(`pc:${code}`)[0] : undefined;
   }
 
-  private forget(ws: WebSocket) {
+  private async forget(ws: WebSocket) {
     const info = ws.deserializeAttachment() as PcInfo | WebInfo | null;
     if (info?.role !== "pc") return;
     const gone = info.codes.filter((c) => this.ctx.getWebSockets(`pc:${c.code}`).every((s) => s === ws));
-    if (gone.length) this.announce({ ...info, codes: gone }, false);
+    if (!gone.length) return;
+    const lastPing = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null;
+    const seen = seenRowsFor(info, gone, lastPing);
+    try {
+      await this.ctx.storage.put(Object.fromEntries(seen.map((row) => [SEEN_PREFIX + row.code, row])));
+    } catch { /* sin almacenamiento, la web sigue mostrando «Desconectada» sin hora */ }
+    this.announce({ ...info, codes: gone }, false, seen[0]?.at);
+  }
+
+  private async seenFor(web: WebInfo): Promise<SeenRow[]> {
+    try {
+      const stored = await this.ctx.storage.list<SeenRow>({ prefix: SEEN_PREFIX });
+      return seenFor(web, Array.from(stored.values()));
+    } catch {
+      return [];
+    }
   }
 
   private pcs() {
@@ -514,13 +532,13 @@ export class Region extends DurableObject<Env> {
     return onlineFor(web, this.pcs(), Date.now());
   }
 
-  private announce(pc: PcInfo, online: boolean) {
+  private announce(pc: PcInfo, online: boolean, at?: number) {
     this.ctx.getWebSockets("web").forEach((ws) => {
       const web = ws.deserializeAttachment() as WebInfo | null;
       if (!web) return;
       const codes = pc.codes.filter((c) => canSee(web, c)).map((c) => c.code);
       if (codes.length) {
-        try { ws.send(JSON.stringify({ t: "presence", online, codes, equipo: pc.equipo })); } catch { /* cerrada */ }
+        try { ws.send(JSON.stringify({ t: "presence", online, codes, equipo: pc.equipo, ...(at ? { at } : {}) })); } catch { /* cerrada */ }
       }
     });
   }

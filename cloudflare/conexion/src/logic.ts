@@ -85,6 +85,32 @@ export const onlineFor = (
   return Array.from(rows.values()).sort((a, b) => a.name.localeCompare(b.name, "es"));
 };
 
+/**
+ * Última conexión de un establecimiento que ya no está en línea. Se anota cuando su PC se
+ * desconecta: el servicio solo conoce las conectadas, y sin esto la web no podía decir
+ * desde cuándo falta una PC.
+ */
+export interface SeenRow {
+  code: string;
+  name: string;
+  ungetId: string | null;
+  equipo: string;
+  version: string;
+  /** Último momento en que se supo de la PC (ms). */
+  at: number;
+}
+
+/** La última conexión que dejó cada código de una PC que se va. */
+export const seenRowsFor = (info: PcInfo, codes: PcCode[], lastPing: number | null): SeenRow[] =>
+  codes.map((c) => ({
+    code: c.code, name: c.name, ungetId: c.ungetId ?? null, equipo: info.equipo, version: info.version,
+    at: Math.max(info.since, lastPing ?? 0),
+  }));
+
+/** Las últimas conexiones que puede ver un usuario (su jurisdicción, o todas si es admin). */
+export const seenFor = (web: Pick<WebInfo, "isAdmin" | "ungetIds">, seen: SeenRow[]): SeenRow[] =>
+  seen.filter((row) => canSee(web, row));
+
 // ---------------------------------------------------------------------------------------
 //  Backups (etapa 2)
 // ---------------------------------------------------------------------------------------

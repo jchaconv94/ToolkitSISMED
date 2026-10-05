@@ -24,6 +24,14 @@ export interface OnlinePc {
   lastSeen: number;
 }
 
+/** Última conexión de un establecimiento que ya no está en línea (la anota el servicio). */
+export interface SeenPc {
+  code: string;
+  equipo: string;
+  version: string;
+  at: number;
+}
+
 /** Un dato del plan gratuito de Cloudflare (lo mide el servicio cada 10 minutos). */
 export interface UsageItem {
   key: string;
@@ -53,8 +61,8 @@ export interface BackupQuota {
 
 export type ServerMessage =
   | { t: "hello"; username: string; isAdmin: boolean }
-  | { t: "list"; rows: OnlinePc[] }
-  | { t: "presence"; online: boolean; codes: string[]; equipo?: string }
+  | { t: "list"; rows: OnlinePc[]; seen?: SeenPc[] }
+  | { t: "presence"; online: boolean; codes: string[]; equipo?: string; at?: number }
   | { t: "ping_result"; id: string; code: string; ok: boolean; rtt?: number; reason?: string; equipo?: string }
   | { t: "backup_requested"; job: string; code: string; quota?: BackupQuota }
   | { t: "backup_meta"; job: string; code: string; name: string; size: number; sha256: string; modified: string }
@@ -78,6 +86,17 @@ export const parseServerMessage = (raw: unknown): ServerMessage | null => {
 };
 
 /** Aplica un aviso de presencia a la lista: una PC que se va sale de la lista al instante. */
+/** Anota la última conexión de las PC que se fueron (el servicio la manda con la desconexión). */
+export const applySeen = (
+  seen: Record<string, SeenPc>,
+  message: Extract<ServerMessage, { t: "presence" }>,
+): Record<string, SeenPc> => {
+  if (message.online || !message.at) return seen;
+  const next = { ...seen };
+  message.codes.forEach((code) => { next[code] = { code, equipo: message.equipo || seen[code]?.equipo || "", version: seen[code]?.version || "", at: message.at! }; });
+  return next;
+};
+
 export const applyPresence = (rows: OnlinePc[], message: Extract<ServerMessage, { t: "presence" }>): OnlinePc[] =>
   message.online ? rows : rows.filter((row) => !message.codes.includes(row.code));
 
