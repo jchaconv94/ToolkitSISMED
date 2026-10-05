@@ -644,13 +644,13 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
                   <div className="bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 flex flex-col items-center justify-center text-center transition-all duration-300">
                       <span className="text-blue-600 block text-[10px] uppercase font-bold">Meses Disp.</span>
                       <span className="font-bold text-blue-800 text-lg sm:text-2xl text-center w-full">
-                      {isFinite(dynamicData.months || 0) ? (dynamicData.months || 0).toFixed(1) : '∞'}
+                      {isFinite(dynamicData.months || 0) ? (dynamicData.months || 0).toFixed(1) : '-'}
                       </span>
                       {cpaMode === 'ADJUSTED' && (
                           <div className="text-[10px] font-bold text-slate-600 bg-white/80 px-2 py-0.5 rounded border border-slate-200 mt-1 flex items-center gap-1 shadow-xs">
                              <span className="text-slate-400 font-bold uppercase text-[9px]">Real:</span>
                              <span className="text-slate-800 font-extrabold">
-                                {isFinite(realMonths) ? realMonths.toFixed(1) : '∞'}
+                                {isFinite(realMonths) ? realMonths.toFixed(1) : '-'}
                              </span>
                           </div>
                       )}
@@ -775,7 +775,7 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
                     <div className={`border-t pt-3 mt-auto flex justify-between items-baseline ${isReviewed ? 'border-teal-800' : 'border-gray-700'}`}>
                         <span className="text-xs uppercase text-gray-400">Total Proyectado</span>
                         <span className="font-bold text-white text-xl leading-tight">
-                             {isFinite(totalProjectedCoverage) ? (totalProjectedCoverage || 0).toFixed(1) : '∞'} Meses
+                             {isFinite(totalProjectedCoverage) ? (totalProjectedCoverage || 0).toFixed(1) : '-'} Meses
                         </span>
                     </div>
                 </div>
