@@ -25,21 +25,21 @@ const saveLocalExclusions = (items: RequirementExclusionItem[]) => {
 };
 
 /**
- * Códigos sin ceros a la izquierda, para comparar. Excel guarda «06528» o «00143» como número y
- * se pierden los ceros: la consulta por igualdad no encontraba la lista del establecimiento y
- * «00143» no coincidía con «143», así que las exclusiones dejaban de aplicarse en silencio.
+ * Código completo, para comparar: los códigos SISMED y de establecimiento son de 5 dígitos con
+ * sus ceros a la izquierda («00200», «06528»). Cuando Excel guarda el código como número borra
+ * esos ceros y llega «200»; aquí se completa a «00200». Antes se comparaba tal cual, «00200»
+ * no coincidía con «200» y el producto no se excluía, sin ningún aviso.
  */
-export const normalizeExclusionCode = (code?: string | number | null): string =>
-  String(code ?? "").trim().toUpperCase().replace(/^0+(?=.)/, "");
+export const normalizeExclusionCode = (code?: string | number | null): string => {
+  const text = String(code ?? "").trim().toUpperCase();
+  return /^\d+$/.test(text) && text.length < 5 ? text.padStart(5, "0") : text;
+};
 
-/** Las formas en que puede estar guardado un código de establecimiento (con o sin ceros). */
+/** Cómo buscar el establecimiento: tal como llegó y completado con sus ceros. */
 export const establishmentCodeVariants = (code?: string | number | null): string[] => {
   const text = String(code ?? "").trim();
   if (!text) return [];
-  const stripped = normalizeExclusionCode(text);
-  const variants = new Set([text, stripped]);
-  if (/^\d+$/.test(stripped) && stripped.length < 5) variants.add(stripped.padStart(5, "0"));
-  return [...variants];
+  return [...new Set([text, normalizeExclusionCode(text)])];
 };
 
 export const requirementExclusionService = {

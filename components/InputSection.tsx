@@ -3,6 +3,7 @@ import React, { useState, useRef } from 'react';
 import { toast } from 'sonner';
 import { findMesKey, TEMPLATE_MONTH_HEADERS } from '../services/requirementMonths';
 import { DecimalMark, detectCsvDelimiter, parseLocaleNumber } from '../services/localeNumber';
+import { isVaccineProduct } from '../services/vaccines';
 import { Trash2, Activity, Upload, FileSpreadsheet, Calendar, Check, AlertCircle, AlertTriangle, X, Syringe, Settings2, Play, RefreshCw, Download, ChevronDown, ChevronUp, CheckCircle, Ban, ListFilter, Building2 } from 'lucide-react';
 import { read, utils, writeFile } from 'xlsx';
 import { MedicationInput, HealthFacility, Microred, RequirementExclusionItem, AuraAnalysisResult, AdditionalItem } from '../types';
@@ -889,14 +890,11 @@ export const InputSection: React.FC<InputSectionProps> = ({
       const excludeCustom = excludeCustomListSelection;
       
       if (excludeVaccines) {
-          finalData = finalData.filter(item => {
-              const name = (item.name || '').toUpperCase();
-              return !name.includes("VACUNA") && !name.includes("DILUYENTE");
-          });
+          finalData = finalData.filter(item => !isVaccineProduct(item.name));
       }
 
       if (excludeCustom && customExclusionItems.length > 0) {
-          // Sin ceros a la izquierda en los dos lados: «00143» de la lista y 143 del Excel.
+          // Códigos completados con sus ceros en los dos lados: «00143» de la lista y 143 del Excel.
           const excludedCodes = new Set(
               customExclusionItems.map(item => normalizeExclusionCode(item.sismedCode))
           );
@@ -1240,14 +1238,14 @@ export const InputSection: React.FC<InputSectionProps> = ({
                                 <div className="text-left">
                                     <div className="flex items-center gap-2">
                                         <span className={`font-bold text-sm ${excludeVaccinesSelection ? 'text-teal-950' : 'text-gray-700'}`}>
-                                            Excluir Vacunas y Diluyentes
+                                            Excluir vacunas, toxoides y diluyentes
                                         </span>
                                         <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200">
                                             Recomendado
                                         </span>
                                     </div>
                                     <p className="text-xs text-gray-500 mt-1">
-                                        Omite productos de cadena de frío para el análisis de farmacia.
+                                        Omite los productos cuyo nombre dice VACUNA, VAC., TOXOIDE o DILUYENTE.
                                     </p>
                                 </div>
                             </div>
