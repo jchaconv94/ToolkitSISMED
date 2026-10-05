@@ -196,6 +196,7 @@ import { AvailabilityRecord, RedistributionItem } from '../types';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { NumberFilter, NumberFilterState } from './NumberFilter';
+import { SortButton, ariaSort, tableSearchBoxClass, useTableSort } from './ui/kit';
 
 interface RedistributionModuleProps {
     onBack?: () => void;
@@ -1174,6 +1175,20 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
         return result;
     }, [productOptions, productSearch, statusFilter, reviewFilter, reviewedProducts, tipoFilter, petFilter, estFilter, stockFilter, cpaFilter, monthsFilter]);
 
+    // Orden por cabecera de la lista de productos (también lo siguen «anterior / siguiente»).
+    const productSort = useTableSort(filteredProductOptions, {
+        code: (p) => p.code,
+        name: (p) => p.name,
+        type: (p) => p.type,
+        pet: (p) => p.pet,
+        est: (p) => p.est,
+        stock: (p) => p.totalStock,
+        cpa: (p) => p.cpa,
+        months: (p) => p.months,
+        status: (p) => p.status,
+    }, { firstDir: { stock: "desc", cpa: "desc", months: "desc" } });
+    const sortedProductOptions = productSort.sorted;
+
     const microredStats = useMemo(() => {
         if (selectedMicrored.length === 0) return null;
         const mrRecords = selectedMicrored.includes('ALL') ? records : records.filter(r => selectedMicrored.includes(r.microred));
@@ -1719,6 +1734,60 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
         }).map(s => ({ value: s, label: s }));
     }, [redistributionData]);
 
+    // Orden por cabecera de la matriz de redistribución. «N. Stock», «N. Meses» y «Balance»
+    // se calculan igual que en la fila que se muestra.
+    const matrixNewStock = (item: typeof filteredRedistributionData[number]) => item.stock - (item.transferQty || 0) + (item.receivedQty || 0) + (item.simulationQty || 0);
+    const matrixSort = useTableSort(filteredRedistributionData, {
+        name: (item) => item.establishmentName,
+        stock: (item) => item.stock,
+        consumptionSum: (item) => item.consumptionSum || 0,
+        consumptionMonths: (item) => item.consumptionMonths || 0,
+        cpa: (item) => item.cpa,
+        months: (item) => item.monthsProvision,
+        status: (item) => item.status,
+        balance: (item) => calculateNeed(matrixNewStock(item), item.cpa, item.status, Number(item.consumptionMonths || 0)) || 0,
+        sale: (item) => item.transferQty || 0,
+        entra: (item) => item.receivedQty || 0,
+        newStock: (item) => matrixNewStock(item),
+        newMonths: (item) => {
+            const newStock = matrixNewStock(item);
+            return item.cpa > 0 ? (newStock / item.cpa) : (newStock > 0 ? 999 : 0);
+        },
+    }, { firstDir: { stock: "desc", consumptionSum: "desc", consumptionMonths: "desc", cpa: "desc", months: "desc", balance: "desc", sale: "desc", entra: "desc", newStock: "desc", newMonths: "desc" } });
+    const sortedRedistributionData = matrixSort.sorted;
+
+    // Buscador de destino en toda la red, con su orden por cabecera.
+    const globalSearchResults = useMemo(() => globalNetworkData.filter(item =>
+        item.establishmentName.toLowerCase().includes(globalSearchTerm.toLowerCase()) ||
+        item.codEess.toLowerCase().includes(globalSearchTerm.toLowerCase())
+    ), [globalNetworkData, globalSearchTerm]);
+    const globalNewStock = (item: typeof globalSearchResults[number]) => item.stock + (item.simulationInput !== undefined ? (Number(item.simulationInput) || 0) : (item.simulationQty || 0)) - (item.transferQty || 0) + (item.receivedQty || 0);
+    const globalSort = useTableSort(globalSearchResults, {
+        name: (item) => item.establishmentName,
+        stock: (item) => item.stock,
+        consumptionSum: (item) => item.consumptionSum || 0,
+        consumptionMonths: (item) => item.consumptionMonths || 0,
+        cpa: (item) => item.cpa,
+        months: (item) => item.monthsProvision,
+        status: (item) => item.status,
+        balance: (item) => item.need || 0,
+        sale: (item) => item.transferQty || 0,
+        entra: (item) => item.receivedQty || 0,
+        newStock: (item) => globalNewStock(item),
+        newMonths: (item) => {
+            const nStock = globalNewStock(item);
+            return item.cpa > 0 ? nStock / item.cpa : (nStock > 0 ? 999 : 0);
+        },
+    }, { firstDir: { stock: "desc", consumptionSum: "desc", consumptionMonths: "desc", cpa: "desc", months: "desc", balance: "desc", sale: "desc", entra: "desc", newStock: "desc", newMonths: "desc" } });
+
+    // Orden por cabecera de la lista de distribución.
+    const transferSort = useTableSort(transferList, {
+        product: (t) => t.productName,
+        quantity: (t) => t.quantity,
+        origin: (t) => t.originName,
+        destination: (t) => t.destinationName,
+    }, { firstDir: { quantity: "desc" } });
+
     const prevSituacionOptions = React.useRef<string[]>([]);
     const prevEstablecimientoOptions = React.useRef<string[]>([]);
 
@@ -1867,13 +1936,13 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
     const handleNavigateProduct = (direction: 'prev' | 'next') => {
         if (!selectedProductCode) return;
 
-        const currentIndex = filteredProductOptions.findIndex(p => p.code === selectedProductCode);
+        const currentIndex = sortedProductOptions.findIndex(p => p.code === selectedProductCode);
         if (currentIndex === -1) return;
 
         const newIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1;
 
-        if (newIndex >= 0 && newIndex < filteredProductOptions.length) {
-            const nextProductCode = filteredProductOptions[newIndex].code;
+        if (newIndex >= 0 && newIndex < sortedProductOptions.length) {
+            const nextProductCode = sortedProductOptions[newIndex].code;
 
             // Logic for NEXT direction
             if (direction === 'next') {
@@ -2091,7 +2160,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
             return;
         }
 
-        const exportData = filteredProductOptions.map(p => ({
+        const exportData = sortedProductOptions.map(p => ({
             'Código': p.code,
             'Descripción': p.name,
             'TIPO': p.type || '',
@@ -2486,7 +2555,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                 </div>
 
                 {/* Search Input */}
-                <div className="flex-1 max-w-xs relative group">
+                <div className={`${tableSearchBoxClass} group`}>
                     <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
                     <input
                         type="text"
@@ -2532,76 +2601,97 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                         portalTarget={portalTarget}
                                     />
                                 </th>
-                                <th className="p-2 w-20 text-left align-middle">Código</th>
-                                <th className="p-2 text-left align-middle max-w-[350px]">Descripción</th>
-                                <th className="p-0 align-middle w-16 text-center">
-                                    <MultiSelectFilter
-                                        title="TIPO"
-                                        options={Array.from(new Set(productOptions.map(p => String(p.type || '').toUpperCase()).filter(Boolean))).sort().map(val => ({ value: val, label: val }))}
-                                        selectedValues={tipoFilter}
-                                        onChange={setTipoFilter}
-                                        portalTarget={portalTarget}
-                                    />
+                                <th aria-sort={ariaSort(productSort.dirOf("code"))} className="p-2 w-20 text-left align-middle"><SortButton label="Código" dir={productSort.dirOf("code")} onClick={() => productSort.toggle("code")} /></th>
+                                <th aria-sort={ariaSort(productSort.dirOf("name"))} className="p-2 text-left align-middle max-w-[350px]"><SortButton label="Descripción" dir={productSort.dirOf("name")} onClick={() => productSort.toggle("name")} /></th>
+                                <th aria-sort={ariaSort(productSort.dirOf("type"))} className="p-0 align-middle w-16 text-center">
+                                    <div className="flex items-center justify-center gap-1 pl-2">
+                                        <SortButton label="TIPO" dir={productSort.dirOf("type")} onClick={() => productSort.toggle("type")} />
+                                        <MultiSelectFilter
+                                            title=""
+                                            options={Array.from(new Set(productOptions.map(p => String(p.type || '').toUpperCase()).filter(Boolean))).sort().map(val => ({ value: val, label: val }))}
+                                            selectedValues={tipoFilter}
+                                            onChange={setTipoFilter}
+                                            portalTarget={portalTarget}
+                                        />
+                                    </div>
                                 </th>
-                                <th className="p-0 align-middle w-14 text-center">
-                                    <MultiSelectFilter
-                                        title="PET"
-                                        options={Array.from(new Set(productOptions.map(p => String(p.pet || '').toUpperCase()).filter(Boolean))).sort().map(val => ({ value: val, label: val }))}
-                                        selectedValues={petFilter}
-                                        onChange={setPetFilter}
-                                        portalTarget={portalTarget}
-                                    />
+                                <th aria-sort={ariaSort(productSort.dirOf("pet"))} className="p-0 align-middle w-14 text-center">
+                                    <div className="flex items-center justify-center gap-1 pl-2">
+                                        <SortButton label="PET" dir={productSort.dirOf("pet")} onClick={() => productSort.toggle("pet")} />
+                                        <MultiSelectFilter
+                                            title=""
+                                            options={Array.from(new Set(productOptions.map(p => String(p.pet || '').toUpperCase()).filter(Boolean))).sort().map(val => ({ value: val, label: val }))}
+                                            selectedValues={petFilter}
+                                            onChange={setPetFilter}
+                                            portalTarget={portalTarget}
+                                        />
+                                    </div>
                                 </th>
-                                <th className="p-0 align-middle w-14 text-center">
-                                    <MultiSelectFilter
-                                        title="EST"
-                                        options={Array.from(new Set(productOptions.map(p => String(p.est || '').toUpperCase()).filter(Boolean))).sort().map(val => ({ value: val, label: val }))}
-                                        selectedValues={estFilter}
-                                        onChange={setEstFilter}
-                                        portalTarget={portalTarget}
-                                    />
+                                <th aria-sort={ariaSort(productSort.dirOf("est"))} className="p-0 align-middle w-14 text-center">
+                                    <div className="flex items-center justify-center gap-1 pl-2">
+                                        <SortButton label="EST" dir={productSort.dirOf("est")} onClick={() => productSort.toggle("est")} />
+                                        <MultiSelectFilter
+                                            title=""
+                                            options={Array.from(new Set(productOptions.map(p => String(p.est || '').toUpperCase()).filter(Boolean))).sort().map(val => ({ value: val, label: val }))}
+                                            selectedValues={estFilter}
+                                            onChange={setEstFilter}
+                                            portalTarget={portalTarget}
+                                        />
+                                    </div>
                                 </th>
-                                <th className="p-0 align-middle w-16 text-center text-blue-700 bg-blue-50/50">
-                                    <NumberFilter
-                                        title="STOCK"
-                                        options={Array.from(new Set(productOptions.map(p => String(p.totalStock)))).sort((a, b) => Number(a) - Number(b)).map(val => ({ value: val, label: val }))}
-                                        filterState={stockFilter}
-                                        onChange={setStockFilter}
-                                        portalTarget={portalTarget}
-                                    />
+                                <th aria-sort={ariaSort(productSort.dirOf("stock"))} className="p-0 align-middle w-16 text-center text-blue-700 bg-blue-50/50">
+                                    <div className="flex items-center justify-center gap-1 pl-2">
+                                        <SortButton label="STOCK" dir={productSort.dirOf("stock")} onClick={() => productSort.toggle("stock")} />
+                                        <NumberFilter
+                                            title=""
+                                            options={Array.from(new Set(productOptions.map(p => String(p.totalStock)))).sort((a, b) => Number(a) - Number(b)).map(val => ({ value: val, label: val }))}
+                                            filterState={stockFilter}
+                                            onChange={setStockFilter}
+                                            portalTarget={portalTarget}
+                                        />
+                                    </div>
                                 </th>
-                                <th className="p-0 align-middle w-16 text-center">
-                                    <NumberFilter
-                                        title="CPA"
-                                        options={Array.from(new Set(productOptions.map(p => p.cpa.toFixed(1)))).sort((a, b) => Number(a) - Number(b)).map(val => ({ value: val, label: val }))}
-                                        filterState={cpaFilter}
-                                        onChange={setCpaFilter}
-                                        portalTarget={portalTarget}
-                                    />
+                                <th aria-sort={ariaSort(productSort.dirOf("cpa"))} className="p-0 align-middle w-16 text-center">
+                                    <div className="flex items-center justify-center gap-1 pl-2">
+                                        <SortButton label="CPA" dir={productSort.dirOf("cpa")} onClick={() => productSort.toggle("cpa")} />
+                                        <NumberFilter
+                                            title=""
+                                            options={Array.from(new Set(productOptions.map(p => p.cpa.toFixed(1)))).sort((a, b) => Number(a) - Number(b)).map(val => ({ value: val, label: val }))}
+                                            filterState={cpaFilter}
+                                            onChange={setCpaFilter}
+                                            portalTarget={portalTarget}
+                                        />
+                                    </div>
                                 </th>
-                                <th className="p-0 align-middle w-16 text-center">
-                                    <NumberFilter
-                                        title="MESES"
-                                        options={Array.from(new Set(productOptions.map(p => p.months === 999 ? '∞' : p.months.toFixed(1)))).sort((a, b) => a === '∞' ? 1 : b === '∞' ? -1 : Number(a) - Number(b)).map(val => ({ value: val, label: val }))}
-                                        filterState={monthsFilter}
-                                        onChange={setMonthsFilter}
-                                        portalTarget={portalTarget}
-                                    />
+                                <th aria-sort={ariaSort(productSort.dirOf("months"))} className="p-0 align-middle w-16 text-center">
+                                    <div className="flex items-center justify-center gap-1 pl-2">
+                                        <SortButton label="MESES" dir={productSort.dirOf("months")} onClick={() => productSort.toggle("months")} />
+                                        <NumberFilter
+                                            title=""
+                                            options={Array.from(new Set(productOptions.map(p => p.months === 999 ? '∞' : p.months.toFixed(1)))).sort((a, b) => a === '∞' ? 1 : b === '∞' ? -1 : Number(a) - Number(b)).map(val => ({ value: val, label: val }))}
+                                            filterState={monthsFilter}
+                                            onChange={setMonthsFilter}
+                                            portalTarget={portalTarget}
+                                        />
+                                    </div>
                                 </th>
-                                <th className="p-0 align-middle w-32 text-center">
-                                    <MultiSelectFilter
-                                        title="Situación"
-                                        options={[
-                                            { value: 'NormoStock', label: 'NormoStock' },
-                                            { value: 'SobreStock', label: 'SobreStock' },
-                                            { value: 'SubStock', label: 'SubStock' },
-                                            { value: 'Desabastecido', label: 'Desabastecido' },
-                                            { value: 'Sin Rotación', label: 'Sin Rotación' }
-                                        ]}
-                                        selectedValues={statusFilter}
-                                        onChange={setStatusFilter}
-                                        portalTarget={portalTarget}
-                                    />
+                                <th aria-sort={ariaSort(productSort.dirOf("status"))} className="p-0 align-middle w-32 text-center">
+                                    <div className="flex items-center justify-center gap-1 pl-2">
+                                        <SortButton label="Situación" dir={productSort.dirOf("status")} onClick={() => productSort.toggle("status")} />
+                                        <MultiSelectFilter
+                                            title=""
+                                            options={[
+                                                { value: 'NormoStock', label: 'NormoStock' },
+                                                { value: 'SobreStock', label: 'SobreStock' },
+                                                { value: 'SubStock', label: 'SubStock' },
+                                                { value: 'Desabastecido', label: 'Desabastecido' },
+                                                { value: 'Sin Rotación', label: 'Sin Rotación' }
+                                            ]}
+                                            selectedValues={statusFilter}
+                                            onChange={setStatusFilter}
+                                            portalTarget={portalTarget}
+                                        />
+                                    </div>
                                 </th>
                             </tr>
                         </thead>
@@ -2613,7 +2703,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                     </td>
                                 </tr>
                             ) : (
-                                filteredProductOptions.map((prod) => {
+                                sortedProductOptions.map((prod) => {
                                     const isSelected = selectedProductCode === prod.code;
                                     const isReviewed = reviewedProducts.has(prod.code);
 
@@ -3059,7 +3149,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                 <div className="flex items-center bg-white rounded-full p-1 border border-gray-200 shadow-sm mr-2 ring-1 ring-black/5">
                                     <button
                                         onClick={() => handleNavigateProduct('prev')}
-                                        disabled={filteredProductOptions.findIndex(p => p.code === selectedProductCode) <= 0}
+                                        disabled={sortedProductOptions.findIndex(p => p.code === selectedProductCode) <= 0}
                                         className="flex items-center justify-center w-8 h-8 rounded-full text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-600 transition-all"
                                         title="Producto Anterior"
                                     >
@@ -3068,7 +3158,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                     <div className="w-px h-4 bg-gray-200 mx-1"></div>
                                     <button
                                         onClick={() => handleNavigateProduct('next')}
-                                        disabled={filteredProductOptions.findIndex(p => p.code === selectedProductCode) >= filteredProductOptions.length - 1}
+                                        disabled={sortedProductOptions.findIndex(p => p.code === selectedProductCode) >= sortedProductOptions.length - 1}
                                         className="flex items-center justify-center w-8 h-8 rounded-full text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-600 transition-all"
                                         title="Siguiente Producto"
                                     >
@@ -3142,9 +3232,9 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                             <thead className="bg-gray-100 text-gray-700 font-bold uppercase text-xs sticky top-0 z-10 shadow-sm">
                                 <tr>
 
-                                    <th className="p-3 border-b text-left">
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("name"))} className="p-3 border-b text-left">
                                         <div className="flex items-center gap-1">
-                                            Establecimiento
+                                            <SortButton label="Establecimiento" dir={matrixSort.dirOf("name")} onClick={() => matrixSort.toggle("name")} />
                                             <MultiSelectFilter
                                                 title=""
                                                 options={establecimientoOptions}
@@ -3154,9 +3244,9 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                             />
                                         </div>
                                     </th>
-                                    <th className="p-3 border-b text-center text-blue-700 bg-blue-50/50">
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("stock"))} className="p-3 border-b text-center text-blue-700 bg-blue-50/50">
                                         <div className="flex items-center justify-center gap-1">
-                                            Stock
+                                            <SortButton label="Stock" dir={matrixSort.dirOf("stock")} onClick={() => matrixSort.toggle("stock")} />
                                             <NumberFilter
                                                 title=""
                                                 options={Array.from(new Set(redistributionData.map(item => String(item.stock)))).sort((a, b) => Number(a) - Number(b)).map(val => ({ value: val, label: val }))}
@@ -3166,9 +3256,9 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                             />
                                         </div>
                                     </th>
-                                    <th className="p-3 border-b text-center bg-gray-50 text-gray-600 font-semibold text-[10px] uppercase tracking-wider">
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("consumptionSum"))} className="p-3 border-b text-center bg-gray-50 text-gray-600 font-semibold text-[10px] uppercase tracking-wider">
                                         <div className="flex items-center justify-center gap-1">
-                                            Suma Cons.
+                                            <SortButton label="Suma Cons." dir={matrixSort.dirOf("consumptionSum")} onClick={() => matrixSort.toggle("consumptionSum")} />
                                             <NumberFilter
                                                 title=""
                                                 options={Array.from(new Set(redistributionData.map(item => String(item.consumptionSum || 0)))).sort((a, b) => Number(a) - Number(b)).map(val => ({ value: val, label: val }))}
@@ -3178,9 +3268,9 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                             />
                                         </div>
                                     </th>
-                                    <th className="p-3 border-b text-center bg-gray-50 text-gray-600 font-semibold text-[10px] uppercase tracking-wider">
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("consumptionMonths"))} className="p-3 border-b text-center bg-gray-50 text-gray-600 font-semibold text-[10px] uppercase tracking-wider">
                                         <div className="flex items-center justify-center gap-1">
-                                            Meses Cons.
+                                            <SortButton label="Meses Cons." dir={matrixSort.dirOf("consumptionMonths")} onClick={() => matrixSort.toggle("consumptionMonths")} />
                                             <NumberFilter
                                                 title=""
                                                 options={Array.from(new Set(redistributionData.map(item => String(item.consumptionMonths || 0)))).sort((a, b) => Number(a) - Number(b)).map(val => ({ value: val, label: val }))}
@@ -3190,9 +3280,9 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                             />
                                         </div>
                                     </th>
-                                    <th className="p-3 border-b text-center">
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("cpa"))} className="p-3 border-b text-center">
                                         <div className="flex items-center justify-center gap-1">
-                                            CPA
+                                            <SortButton label="CPA" dir={matrixSort.dirOf("cpa")} onClick={() => matrixSort.toggle("cpa")} />
                                             <NumberFilter
                                                 title=""
                                                 options={Array.from(new Set(redistributionData.map(item => item.cpa.toFixed(1)))).sort((a, b) => Number(a) - Number(b)).map(val => ({ value: val, label: val }))}
@@ -3202,9 +3292,9 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                             />
                                         </div>
                                     </th>
-                                    <th className="p-3 border-b text-center">
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("months"))} className="p-3 border-b text-center">
                                         <div className="flex items-center justify-center gap-1">
-                                            Meses
+                                            <SortButton label="Meses" dir={matrixSort.dirOf("months")} onClick={() => matrixSort.toggle("months")} />
                                             <NumberFilter
                                                 title=""
                                                 options={mesesOptions}
@@ -3214,9 +3304,9 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                             />
                                         </div>
                                     </th>
-                                    <th className="p-3 border-b text-center">
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("status"))} className="p-3 border-b text-center">
                                         <div className="flex items-center justify-center gap-1">
-                                            Situación
+                                            <SortButton label="Situación" dir={matrixSort.dirOf("status")} onClick={() => matrixSort.toggle("status")} />
                                             <MultiSelectFilter
                                                 title=""
                                                 options={situacionOptions}
@@ -3226,21 +3316,22 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                             />
                                         </div>
                                     </th>
-                                    <th className="p-3 border-b text-center bg-gray-200 text-gray-800">Balance</th>
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("balance"))} className="p-3 border-b text-center bg-gray-200 text-gray-800"><SortButton label="Balance" dir={matrixSort.dirOf("balance")} onClick={() => matrixSort.toggle("balance")} /></th>
                                     <th className="p-3 border-b text-center bg-purple-50 text-purple-800 border-l border-purple-200 w-20">Estimar</th>
-                                    <th className="p-3 border-b text-center bg-yellow-50 text-yellow-800 border-l border-yellow-200 w-16">Sale</th>
-                                    <th className="p-3 border-b text-center bg-green-50 text-green-800 border-l border-green-200 w-16">Entra</th>
-                                    <th className="p-3 border-b text-center bg-blue-50 text-blue-800 border-l border-blue-200">N. Stock</th>
-                                    <th className="p-3 border-b text-center bg-blue-50 text-blue-800">N. Meses</th>
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("sale"))} className="p-3 border-b text-center bg-yellow-50 text-yellow-800 border-l border-yellow-200 w-16"><SortButton label="Sale" dir={matrixSort.dirOf("sale")} onClick={() => matrixSort.toggle("sale")} /></th>
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("entra"))} className="p-3 border-b text-center bg-green-50 text-green-800 border-l border-green-200 w-16"><SortButton label="Entra" dir={matrixSort.dirOf("entra")} onClick={() => matrixSort.toggle("entra")} /></th>
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("newStock"))} className="p-3 border-b text-center bg-blue-50 text-blue-800 border-l border-blue-200"><SortButton label="N. Stock" dir={matrixSort.dirOf("newStock")} onClick={() => matrixSort.toggle("newStock")} /></th>
+                                    <th aria-sort={ariaSort(matrixSort.dirOf("newMonths"))} className="p-3 border-b text-center bg-blue-50 text-blue-800"><SortButton label="N. Meses" dir={matrixSort.dirOf("newMonths")} onClick={() => matrixSort.toggle("newMonths")} /></th>
                                     <th className="p-3 border-b text-center text-gray-500 w-10"></th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
-                                {filteredRedistributionData.length > 0 ? (
-                                    filteredRedistributionData.map((item, index) => {
-                                    const showMicroredHeader = selectedMicrored.includes('ALL') &&
+                                {sortedRedistributionData.length > 0 ? (
+                                    sortedRedistributionData.map((item, index) => {
+                                    // Con un orden por cabecera las filas ya no van agrupadas por microred.
+                                    const showMicroredHeader = !matrixSort.sort && selectedMicrored.includes('ALL') &&
                                         !item.isWarehouse &&
-                                        (index === 0 || filteredRedistributionData[index - 1].microred !== item.microred || filteredRedistributionData[index - 1].isWarehouse);
+                                        (index === 0 || sortedRedistributionData[index - 1].microred !== item.microred || sortedRedistributionData[index - 1].isWarehouse);
 
                                     const newStock = item.stock - (item.transferQty || 0) + (item.receivedQty || 0) + (item.simulationQty || 0);
                                     const newMonths = item.cpa > 0 ? (newStock / item.cpa) : (newStock > 0 ? 999 : 0);
@@ -3635,15 +3726,15 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                 <table className="w-full text-sm text-left">
                                     <thead className="bg-gray-100 text-gray-700 font-bold uppercase text-xs sticky top-0 z-10">
                                         <tr>
-                                            <th className="p-3 border-b">Producto</th>
-                                            <th className="p-3 border-b text-center">Cant.</th>
-                                            <th className="p-3 border-b">Origen</th>
-                                            <th className="p-3 border-b">Destino</th>
+                                            <th aria-sort={ariaSort(transferSort.dirOf("product"))} className="p-3 border-b"><SortButton label="Producto" dir={transferSort.dirOf("product")} onClick={() => transferSort.toggle("product")} /></th>
+                                            <th aria-sort={ariaSort(transferSort.dirOf("quantity"))} className="p-3 border-b text-center"><SortButton label="Cant." dir={transferSort.dirOf("quantity")} onClick={() => transferSort.toggle("quantity")} /></th>
+                                            <th aria-sort={ariaSort(transferSort.dirOf("origin"))} className="p-3 border-b"><SortButton label="Origen" dir={transferSort.dirOf("origin")} onClick={() => transferSort.toggle("origin")} /></th>
+                                            <th aria-sort={ariaSort(transferSort.dirOf("destination"))} className="p-3 border-b"><SortButton label="Destino" dir={transferSort.dirOf("destination")} onClick={() => transferSort.toggle("destination")} /></th>
                                             <th className="p-3 border-b text-center">Acción</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
-                                        {transferList.map((t) => (
+                                        {transferSort.sorted.map((t) => (
                                             <tr key={t.id} className="hover:bg-gray-50">
                                                 <td className="p-3">
                                                     <div className="font-bold text-gray-800">{t.productName}</div>
@@ -3985,10 +4076,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-0 custom-scrollbar">
-                            {globalNetworkData.filter(item =>
-                                item.establishmentName.toLowerCase().includes(globalSearchTerm.toLowerCase()) ||
-                                item.codEess.toLowerCase().includes(globalSearchTerm.toLowerCase())
-                            ).length === 0 ? (
+                            {globalSearchResults.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center h-64 text-gray-400">
                                     <Search className="h-12 w-12 mb-3 opacity-20" />
                                     <p className="font-medium">No se encontraron establecimientos con stock</p>
@@ -3998,28 +4086,24 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                 <table className="w-full text-sm text-left">
                                     <thead className="bg-gray-100 text-gray-600 font-bold uppercase text-[10px] tracking-wider sticky top-0 z-10 border-b border-gray-200">
                                         <tr>
-                                            <th className="p-4">Establecimiento</th>
-                                            <th className="p-4 text-center">Stock</th>
-                                            <th className="p-4 text-center border-l bg-gray-50/50">Suma Cons.</th>
-                                            <th className="p-4 text-center bg-gray-50/50">Meses Cons.</th>
-                                            <th className="p-4 text-center border-l">CPA</th>
-                                            <th className="p-4 text-center">Meses</th>
-                                            <th className="p-4 text-center">Situación</th>
-                                            <th className="p-4 text-center bg-gray-200/50 border-x">Balance</th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("name"))} className="p-4"><SortButton label="Establecimiento" dir={globalSort.dirOf("name")} onClick={() => globalSort.toggle("name")} /></th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("stock"))} className="p-4 text-center"><SortButton label="Stock" dir={globalSort.dirOf("stock")} onClick={() => globalSort.toggle("stock")} /></th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("consumptionSum"))} className="p-4 text-center border-l bg-gray-50/50"><SortButton label="Suma Cons." dir={globalSort.dirOf("consumptionSum")} onClick={() => globalSort.toggle("consumptionSum")} /></th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("consumptionMonths"))} className="p-4 text-center bg-gray-50/50"><SortButton label="Meses Cons." dir={globalSort.dirOf("consumptionMonths")} onClick={() => globalSort.toggle("consumptionMonths")} /></th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("cpa"))} className="p-4 text-center border-l"><SortButton label="CPA" dir={globalSort.dirOf("cpa")} onClick={() => globalSort.toggle("cpa")} /></th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("months"))} className="p-4 text-center"><SortButton label="Meses" dir={globalSort.dirOf("months")} onClick={() => globalSort.toggle("months")} /></th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("status"))} className="p-4 text-center"><SortButton label="Situación" dir={globalSort.dirOf("status")} onClick={() => globalSort.toggle("status")} /></th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("balance"))} className="p-4 text-center bg-gray-200/50 border-x"><SortButton label="Balance" dir={globalSort.dirOf("balance")} onClick={() => globalSort.toggle("balance")} /></th>
                                             <th className="p-4 text-center text-purple-700 bg-purple-50/50">Estimar</th>
-                                            <th className="p-4 text-center text-yellow-700 bg-yellow-50/50 border-l border-yellow-100/50">Sale</th>
-                                            <th className="p-4 text-center text-green-700 bg-green-50/50 border-l border-green-100/50">Entra</th>
-                                            <th className="p-4 text-center text-blue-800 bg-blue-50/50 border-l border-blue-100/50">N. Stock</th>
-                                            <th className="p-4 text-center text-blue-800 bg-blue-50/50">N. Meses</th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("sale"))} className="p-4 text-center text-yellow-700 bg-yellow-50/50 border-l border-yellow-100/50"><SortButton label="Sale" dir={globalSort.dirOf("sale")} onClick={() => globalSort.toggle("sale")} /></th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("entra"))} className="p-4 text-center text-green-700 bg-green-50/50 border-l border-green-100/50"><SortButton label="Entra" dir={globalSort.dirOf("entra")} onClick={() => globalSort.toggle("entra")} /></th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("newStock"))} className="p-4 text-center text-blue-800 bg-blue-50/50 border-l border-blue-100/50"><SortButton label="N. Stock" dir={globalSort.dirOf("newStock")} onClick={() => globalSort.toggle("newStock")} /></th>
+                                            <th aria-sort={ariaSort(globalSort.dirOf("newMonths"))} className="p-4 text-center text-blue-800 bg-blue-50/50"><SortButton label="N. Meses" dir={globalSort.dirOf("newMonths")} onClick={() => globalSort.toggle("newMonths")} /></th>
                                             <th className="p-4 text-center border-l">Acción</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
-                                        {globalNetworkData
-                                            .filter(item =>
-                                                item.establishmentName.toLowerCase().includes(globalSearchTerm.toLowerCase()) ||
-                                                item.codEess.toLowerCase().includes(globalSearchTerm.toLowerCase())
-                                            )
+                                        {globalSort.sorted
                                             .map((item) => (
                                                 <tr
                                                     key={item.codEess}

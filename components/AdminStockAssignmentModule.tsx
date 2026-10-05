@@ -8,7 +8,6 @@ import {
   RotateCcw,
   Save,
   Search,
-  Sparkles,
 } from "lucide-react";
 import { api } from "../services/api";
 import { FloatingActionButton } from "./ui/FloatingActionButton";
