@@ -47,9 +47,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [pill, setPill] = useState<Pill | null>(null);
   const [pillOpen, setPillOpen] = useState(false);
   const navRef = useRef<HTMLElement>(null);
+  const pillRef = useRef<HTMLButtonElement>(null);
+  const anchorRef = useRef<HTMLElement | null>(null);
 
   const showPill = (item: NavItem, el: HTMLElement) => {
     const r = el.getBoundingClientRect();
+    anchorRef.current = el;
     setPill({ item, top: r.top, left: r.left, size: r.height });
   };
   const hidePill = () => {
@@ -77,6 +80,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [pill]);
   useEffect(hidePill, [isCollapsed, currentView]);
 
+  // La pastilla se quedaba pegada: si el mouse salía del ícono antes de que se dibujara,
+  // nunca entraba en ella y su `onMouseLeave` no llegaba; y al volver a la ventana, el
+  // ícono recuperaba el foco y la mostraba otra vez. Mientras está abierta se vigila el
+  // puntero: si no está sobre la pastilla ni sobre su ícono, se cierra. También al salir
+  // el mouse de la ventana o al perder la ventana el foco.
+  useEffect(() => {
+    if (!pill) return;
+    const onMove = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (target && (pillRef.current?.contains(target) || anchorRef.current?.contains(target))) return;
+      hidePill();
+    };
+    const onOut = (e: MouseEvent) => { if (!e.relatedTarget) hidePill(); };
+    document.addEventListener('pointermove', onMove, { passive: true });
+    document.addEventListener('mouseout', onOut);
+    window.addEventListener('blur', hidePill);
+    return () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('mouseout', onOut);
+      window.removeEventListener('blur', hidePill);
+    };
+  }, [pill]);
+
   const go = (module: AppModule) => {
     hidePill();
     setCurrentView(module);
@@ -92,7 +118,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           type="button"
           onClick={() => go(item.module)}
           onMouseEnter={(e) => showPill(item, e.currentTarget)}
-          onFocus={(e) => showPill(item, e.currentTarget)}
+          // Solo con el teclado: tras un clic el ícono conserva el foco y, al volver a la
+          // ventana, lo recuperaba y mostraba la pastilla con el mouse en otra parte.
+          onFocus={(e) => { if (e.currentTarget.matches(':focus-visible')) showPill(item, e.currentTarget); }}
           onBlur={hidePill}
           aria-current={active ? 'page' : undefined}
           aria-label={item.label}
@@ -180,6 +208,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {isCollapsed && pill && PillIcon && createPortal(
         <button
+          ref={pillRef}
           type="button"
           tabIndex={-1}
           aria-hidden="true"
