@@ -2,7 +2,7 @@
 import React, { useState, useRef } from 'react';
 import { toast } from 'sonner';
 import { findMesKey, TEMPLATE_MONTH_HEADERS } from '../services/requirementMonths';
-import { Trash2, Activity, Upload, FileSpreadsheet, Calendar, Check, AlertCircle, AlertTriangle, X, Syringe, Settings2, Play, RefreshCw, Sparkles, Download, ChevronDown, ChevronUp, CheckCircle, Ban, ListFilter, Building2 } from 'lucide-react';
+import { Trash2, Activity, Upload, FileSpreadsheet, Calendar, Check, AlertCircle, AlertTriangle, X, Syringe, Settings2, Play, RefreshCw, Download, ChevronDown, ChevronUp, CheckCircle, Ban, ListFilter, Building2 } from 'lucide-react';
 import { read, utils, writeFile } from 'xlsx';
 import { MedicationInput, HealthFacility, Microred, RequirementExclusionItem } from '../types';
 import { api } from '../services/api';
@@ -921,7 +921,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
         accept=".json"
     />
 
-    <div className={`bg-white rounded-xl shadow-sm border border-gray-200 transition-all relative ${isUploadSectionCollapsed && items.length > 0 ? 'p-4' : 'p-4 sm:p-6'} mb-6`}>
+    <div className={`bg-white rounded-xl shadow-sm border border-gray-200 transition-all relative ${isUploadSectionCollapsed && items.length > 0 ? 'p-4' : 'p-3 sm:p-6'} mb-4 sm:mb-6`}>
       
       {items.length > 0 && !isProcessingFile && (
           <button
@@ -1027,7 +1027,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                 </div>
             ) : (
                 <div 
-                    className={`w-full max-w-2xl mx-auto border-2 border-dashed rounded-xl p-10 text-center transition-all cursor-pointer relative overflow-hidden group 
+                    className={`w-full max-w-2xl mx-auto border-2 border-dashed rounded-xl px-4 py-6 sm:p-10 text-center transition-all cursor-pointer relative overflow-hidden group 
                         ${isDragging 
                             ? 'border-teal-500 bg-teal-50 scale-[1.02]' 
                             : 'border-teal-200 hover:border-teal-400 hover:bg-slate-50'}`}
@@ -1044,35 +1044,37 @@ export const InputSection: React.FC<InputSectionProps> = ({
                     }}
                     onClick={triggerFileUpload}
                 >
-                    <div className="flex flex-col items-center gap-4 group-hover:scale-105 transition-transform duration-300">
-                        <div className="bg-white p-4 rounded-full shadow-md group-hover:shadow-lg transition-shadow">
-                            <FileSpreadsheet className="h-10 w-10 text-teal-600" />
+                    <div className="flex flex-col items-center gap-3 sm:gap-4 sm:group-hover:scale-105 transition-transform duration-300">
+                        <div className="bg-white p-3 sm:p-4 rounded-full shadow-md group-hover:shadow-lg transition-shadow">
+                            <FileSpreadsheet className="h-8 w-8 sm:h-10 sm:w-10 text-teal-600" />
                         </div>
                         
                         <div className="text-center">
-                            <h3 className="text-lg font-bold text-gray-900">Cargar Requerimiento IPRESS</h3>
-                            <p className="text-sm text-gray-500 mt-1">Arrastre su archivo Excel aquí o haga clic para buscar</p>
+                            <h3 className="text-base sm:text-lg font-bold text-gray-900">Cargar Requerimiento IPRESS</h3>
+                            {/* En el celular no se arrastra: se toca. */}
+                            <p className="text-sm text-gray-500 mt-1 sm:hidden">Toque para elegir su archivo Excel</p>
+                            <p className="text-sm text-gray-500 mt-1 hidden sm:block">Arrastre su archivo Excel aquí o haga clic para buscar</p>
                         </div>
     
-                        <div className="flex items-center gap-2 text-xs text-teal-600 font-medium bg-teal-100 px-3 py-1 rounded-full">
-                            <Sparkles className="h-3 w-3" />
-                            <span>Formato .xlsx o .xls requerido</span>
+                        <div className="flex items-center gap-1.5 whitespace-nowrap text-xs text-teal-700 font-medium bg-teal-100 px-3 py-1 rounded-full">
+                            <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
+                            <span>Formato .xlsx o .xls</span>
                         </div>
     
                         <button
                             onClick={(e) => { e.stopPropagation(); downloadTemplate(); }}
-                            className="text-xs text-slate-500 hover:text-teal-600 underline mt-2"
+                            className="text-xs text-slate-500 hover:text-teal-600 underline py-1 sm:py-0 sm:mt-2"
                         >
                             Descargar Plantilla Estándar
                         </button>
     
-                        <div className="mt-4 w-full flex flex-wrap gap-4 justify-center items-center z-10">
+                        <div className="mt-2 sm:mt-4 w-full flex flex-col sm:flex-row sm:flex-wrap gap-2.5 sm:gap-4 justify-center items-stretch sm:items-center z-10">
                             <button 
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     triggerFileUpload();
                                 }}
-                                className="bg-white border border-teal-200 text-teal-700 hover:bg-teal-50 hover:border-teal-300 w-full sm:w-auto justify-center px-4 py-2 font-bold text-sm rounded-lg transition-all flex items-center gap-2 shadow-sm"
+                                className="bg-white border border-teal-200 text-teal-700 hover:bg-teal-50 hover:border-teal-300 w-full sm:w-auto justify-center px-4 h-11 sm:h-auto sm:py-2 font-bold text-sm rounded-xl sm:rounded-lg transition-all flex items-center gap-2 shadow-sm"
                             >
                                 <Upload className="h-4 w-4" />
                                 Subir Archivo
@@ -1081,7 +1083,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                             {hasAnalyzedData && (
                                 <button 
                                     onClick={handleExportSession}
-                                    className="bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 w-full sm:w-auto justify-center px-4 py-2 font-bold text-sm rounded-lg transition-all flex items-center gap-2 shadow-sm"
+                                    className="bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 w-full sm:w-auto justify-center px-4 h-11 sm:h-auto sm:py-2 font-bold text-sm rounded-xl sm:rounded-lg transition-all flex items-center gap-2 shadow-sm"
                                     title="Exportar avance actual para continuar en otra PC"
                                 >
                                     <Download className="h-4 w-4 text-indigo-650" />
@@ -1094,7 +1096,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                                     e.stopPropagation();
                                     importInputRef.current?.click();
                                 }}
-                                className="bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 w-full sm:w-auto justify-center px-4 py-2 font-bold text-sm rounded-lg transition-all flex items-center gap-2 shadow-sm"
+                                className="bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 w-full sm:w-auto justify-center px-4 h-11 sm:h-auto sm:py-2 font-bold text-sm rounded-xl sm:rounded-lg transition-all flex items-center gap-2 shadow-sm"
                                 title="Importar avance guardado en archivo JSON"
                             >
                                 <Upload className="h-4 w-4 text-emerald-600" />

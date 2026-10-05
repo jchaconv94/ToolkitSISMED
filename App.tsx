@@ -1139,15 +1139,15 @@ const AnalysisModule: React.FC = () => {
   };
 
   return (
-    <div className={`pb-12 ${isFullScreen ? 'max-w-none px-0' : 'max-w-[95%] mx-auto px-4 sm:px-6 lg:px-8 py-4 2xl:py-8 space-y-4 2xl:space-y-8'}`}>
+    <div className={`pb-12 ${isFullScreen ? 'max-w-none px-0' : 'w-full sm:max-w-[95%] mx-auto px-0 sm:px-6 lg:px-8 py-1 sm:py-4 2xl:py-8 space-y-3 sm:space-y-4 2xl:space-y-8'}`}>
         {!isFullScreen && !result && !loading && (
-          <div className="bg-white border border-teal-100 rounded-2xl p-6 2xl:p-8 flex gap-6 shadow-sm animate-in fade-in slide-in-from-top-4">
-            <div className="bg-teal-50 p-4 rounded-full h-fit shrink-0">
-              <Info className="h-8 w-8 text-teal-600" />
+          <div className="bg-white border border-teal-100 rounded-2xl p-4 sm:p-6 2xl:p-8 flex items-start gap-3 sm:gap-6 shadow-sm animate-in fade-in slide-in-from-top-4">
+            <div className="bg-teal-50 p-2.5 sm:p-4 rounded-full h-fit shrink-0">
+              <Info className="h-6 w-6 sm:h-8 sm:w-8 text-teal-600" />
             </div>
-            <div>
-              <h2 className="text-xl 2xl:text-2xl font-bold text-gray-900">Módulo de Análisis Inteligente</h2>
-              <p className="text-gray-600 mt-2 max-w-3xl leading-relaxed text-sm 2xl:text-base">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-xl 2xl:text-2xl font-bold text-gray-900">Módulo de Análisis Inteligente</h2>
+              <p className="text-gray-600 mt-1 sm:mt-2 max-w-3xl leading-relaxed text-sm 2xl:text-base">
                 Cargue su archivo Excel de requerimiento descargado del SISMED, para que el sistema lo analice.
               </p>
             </div>
