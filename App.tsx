@@ -1138,8 +1138,13 @@ const AnalysisModule: React.FC = () => {
     setIsReportModalOpen(false);
   };
 
+  // En el celular, mientras no hay archivo, el recuadro de carga llena el alto de la pantalla.
+  const fillMobile = !isFullScreen && !result && !loading && inputData.length === 0
+    ? 'max-sm:min-h-full max-sm:flex max-sm:flex-col max-sm:pb-0'
+    : '';
+
   return (
-    <div className={`pb-12 ${isFullScreen ? 'max-w-none px-0' : 'w-full sm:max-w-[95%] mx-auto px-0 sm:px-6 lg:px-8 py-1 sm:py-4 2xl:py-8 space-y-3 sm:space-y-4 2xl:space-y-8'}`}>
+    <div className={`pb-12 ${fillMobile} ${isFullScreen ? 'max-w-none px-0' : 'w-full sm:max-w-[95%] mx-auto px-0 sm:px-6 lg:px-8 py-1 sm:py-4 2xl:py-8 space-y-3 sm:space-y-4 2xl:space-y-8'}`}>
         {!isFullScreen && !result && !loading && (
           <div className="bg-white border border-teal-100 rounded-2xl p-4 sm:p-6 2xl:p-8 flex items-start gap-3 sm:gap-6 shadow-sm animate-in fade-in slide-in-from-top-4">
             <div className="bg-teal-50 p-2.5 sm:p-4 rounded-full h-fit shrink-0">
@@ -1154,7 +1159,7 @@ const AnalysisModule: React.FC = () => {
           </div>
         )}
 
-        <div className={isFullScreen ? 'hidden' : 'block'}>
+        <div className={isFullScreen ? 'hidden' : `block ${fillMobile ? 'max-sm:flex-1 max-sm:flex max-sm:flex-col' : ''}`}>
             <InputSection 
                 onAnalyze={handleAnalyze} 
                 isAnalyzing={loading} 

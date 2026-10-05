@@ -921,7 +921,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
         accept=".json"
     />
 
-    <div className={`bg-white rounded-xl shadow-sm border border-gray-200 transition-all relative ${isUploadSectionCollapsed && items.length > 0 ? 'p-4' : 'p-3 sm:p-6'} mb-4 sm:mb-6`}>
+    <div className={`bg-white rounded-xl shadow-sm border border-gray-200 transition-all relative ${isUploadSectionCollapsed && items.length > 0 ? 'p-4' : 'p-3 sm:p-6'} mb-4 sm:mb-6 ${items.length === 0 && !hasAnalyzedData ? 'max-sm:flex-1 max-sm:flex max-sm:flex-col max-sm:mb-0' : ''}`}>
       
       {items.length > 0 && !isProcessingFile && (
           <button
@@ -1012,7 +1012,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
               </div>
           </div>
       ) : (
-          <div className="mb-0 flex flex-col items-center">
+          <div className="mb-0 flex flex-col items-center max-sm:flex-1">
             {isProcessingFile ? (
                 <div className="w-full max-w-2xl bg-white border border-gray-200 rounded-xl p-12 text-center shadow-sm flex flex-col items-center justify-center min-h-[300px] animate-in fade-in duration-300">
                     <div className="relative mb-6">
@@ -1027,7 +1027,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                 </div>
             ) : (
                 <div 
-                    className={`w-full max-w-2xl mx-auto border-2 border-dashed rounded-xl px-4 py-6 sm:p-10 text-center transition-all cursor-pointer relative overflow-hidden group 
+                    className={`w-full max-w-2xl mx-auto border-2 border-dashed rounded-xl px-4 py-6 sm:p-10 text-center max-sm:flex-1 max-sm:flex max-sm:flex-col max-sm:justify-center transition-all cursor-pointer relative overflow-hidden group 
                         ${isDragging 
                             ? 'border-teal-500 bg-teal-50 scale-[1.02]' 
                             : 'border-teal-200 hover:border-teal-400 hover:bg-slate-50'}`}
