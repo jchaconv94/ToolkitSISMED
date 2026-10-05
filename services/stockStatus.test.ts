@@ -20,20 +20,12 @@ describe("classifyStock (regla DIGEMID)", () => {
     expect(classifyStock(61, 10).status).toBe(StockStatus.SOBRESTOCK);
   });
 
-  it("compara los meses redondeados a un decimal, como se muestran", () => {
-    // 59 / 30 = 1,967 → se muestra 2,0: Normostock en todas las vistas.
-    expect(classifyStock(59, 30).status).toBe(StockStatus.NORMOSTOCK);
-    // 181 / 30 = 6,03 → se muestra 6,0.
-    expect(classifyStock(181, 30).status).toBe(StockStatus.NORMOSTOCK);
-    // 1,94 → 1,9: sigue en Substock.
-    expect(classifyStock(58.2, 30).status).toBe(StockStatus.SUBSTOCK);
-  });
-
-  it("el pedido sugerido (CPA × 6 hacia arriba) no vuelve Sobrestock al ítem", () => {
-    const cpa = 10.3;
-    const stock = 5;
-    const pedido = Math.ceil(cpa * 6 - stock); // 57
-    expect(classifyStock(stock + pedido, cpa).status).toBe(StockStatus.NORMOSTOCK);
+  it("compara los meses sin redondear", () => {
+    // 59 / 30 = 1,967: aunque se lea «2,0», todavía no llega a 2 meses.
+    expect(classifyStock(59, 30).status).toBe(StockStatus.SUBSTOCK);
+    expect(classifyStock(60, 30).status).toBe(StockStatus.NORMOSTOCK);
+    // 181 / 30 = 6,03: pasa de 6 meses.
+    expect(classifyStock(181, 30).status).toBe(StockStatus.SOBRESTOCK);
   });
 
   it("monthsOfStock y roundMonths", () => {

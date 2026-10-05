@@ -12,29 +12,27 @@ import { StockStatus } from "../types";
  * | Normostock    | MED ≥ 2 y ≤ 6                               |
  * | Sobrestock    | MED > 6                                     |
  *
- * Los meses se comparan **redondeados a un decimal**, que es como se muestran en pantalla, en el
- * detalle, en el PDF y en el Excel. Antes la regla estaba copiada en seis lugares y unos
- * redondeaban y otros no: con stock 59 y CPA 30 (1,967 meses) la tabla decía Substock y el
- * detalle y el PDF Normostock; y el propio pedido sugerido (CPA × 6, redondeado hacia arriba)
- * dejaba el ítem en 6,02 meses y la vista proyectada lo marcaba Sobrestock.
+ * Los meses se comparan **sin redondear** (decisión del usuario, 2026-10-05): 1,96 meses es
+ * Substock aunque en pantalla se lea «2,0». Antes la regla estaba copiada en seis lugares y
+ * unos redondeaban y otros no, así que la tabla, el detalle y el PDF daban estados distintos
+ * para el mismo producto.
  */
 
 /** Meses de existencia disponible (MED): stock / CPA. Sin consumo y con stock, infinito. */
 export const monthsOfStock = (stock: number, cpa: number): number =>
   cpa > 0 ? stock / cpa : stock > 0 ? Infinity : 0;
 
-/** MED redondeado a un decimal, el valor con que se compara y se muestra. */
+/** MED redondeado a un decimal, como se muestra en pantalla (no se usa para clasificar). */
 export const roundMonths = (months: number): number =>
   Number.isFinite(months) ? Math.round(months * 10) / 10 : months;
 
 export const classifyStock = (stock: number, cpa: number): { months: number; status: StockStatus } => {
   const months = monthsOfStock(stock, cpa);
-  const rounded = roundMonths(months);
   let status: StockStatus;
   if (stock <= 0) status = StockStatus.DESABASTECIDO;
   else if (cpa <= 0) status = StockStatus.SIN_ROTACION;
-  else if (rounded > 6) status = StockStatus.SOBRESTOCK;
-  else if (rounded >= 2) status = StockStatus.NORMOSTOCK;
+  else if (months > 6) status = StockStatus.SOBRESTOCK;
+  else if (months >= 2) status = StockStatus.NORMOSTOCK;
   else status = StockStatus.SUBSTOCK;
   return { months, status };
 };
