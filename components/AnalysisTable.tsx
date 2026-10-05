@@ -27,6 +27,7 @@ import { utils, writeFile } from 'xlsx';
 import { ConsumptionModal } from './ConsumptionModal';
 import { TablePagination } from './ui/TablePagination';
 import { FloatingTableHead, useFloatingTableHead } from './ui/FloatingTableHead';
+import { SortButton, SortDir, ariaSort, tableSearchBoxClass, useTableSort } from './ui/kit';
 
 interface AnalysisTableProps {
   medications: AnalyzedMedication[]; // The FILTERED list to display
@@ -101,16 +102,22 @@ const valueLabel = (field: string, value: string) => (field === 'status' ? STATU
 
 type OpenFilter = { field: FilterKey; anchor: HTMLElement } | null;
 
-/** Título de columna con su botón de filtro. Se usa en la tabla y en el encabezado fijo. */
+/**
+ * Título de columna con su botón de filtro. Se usa en la tabla y en el encabezado fijo.
+ * Si la columna se ordena, el título es el botón que ordena (con su flecha).
+ */
 const HeaderLabel: React.FC<{
   label: string;
   field?: FilterKey;
   activeCount: number;
   isOpen: boolean;
   onOpen: (field: FilterKey, anchor: HTMLElement) => void;
-}> = ({ label, field, activeCount, isOpen, onOpen }) => (
+  sort?: { dir: SortDir | null; onSort: () => void };
+}> = ({ label, field, activeCount, isOpen, onOpen, sort }) => (
   <span className="inline-flex items-center gap-1">
-    <span className="whitespace-nowrap">{label}</span>
+    <span className="whitespace-nowrap">
+      {sort ? <SortButton label={label} dir={sort.dir} onClick={sort.onSort} /> : label}
+    </span>
     {field && (
       <button
         type="button"
@@ -343,8 +350,26 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
   const mainFilterRef = useRef<HTMLDivElement>(null); // Ref for main header filter
   const mainFilterDropdownRef = useRef<HTMLDivElement>(null); // Ref for main header filter dropdown
 
-  // 'medications' prop is already filtered. We just handle pagination here.
-  const filteredItems = medications;
+  // 'medications' prop is already filtered. Aquí se ordena por cabecera y se pagina.
+  const isSimpleCpa = viewMode === 'INITIAL' || viewMode === 'PROJECTED_SIMPLE';
+  const { sorted: filteredItems, sort, headSort } = useTableSort(medications, {
+    code: (m) => m.id,
+    name: (m) => m.name,
+    ff: (m) => m.ff,
+    medtip: (m) => m.medtip,
+    medpet: (m) => m.medpet,
+    medest: (m) => m.medest,
+    stock: (m) => m.currentStock || 0,
+    // El CPA que se ve en la columna, según la vista y el modo elegido.
+    cpa: (m) => isSimpleCpa
+      ? (m.displayCpm ?? m.rawCpm ?? 0)
+      : m.selectedCpaMode === 'SIMPLE' ? (m.rawCpm || 0) : (m.displayCpm ?? m.cpm ?? 0),
+    months: (m) => m.monthsOfProvision ?? 0,
+    status: (m) => STATUS_LOOK[m.status]?.label || m.status,
+    detail: (m) => (m.hasSpikes ? m.anomalyDetails : 'Estable'),
+    requirement: (m) => m.quantityToOrder,
+  }, { firstDir: { stock: 'desc', cpa: 'desc', requirement: 'desc' } });
+  useEffect(() => { setCurrentPage(1); }, [sort]);
 
   // Pagination logic
   const totalPages = Math.ceil(filteredItems.length / itemsPerPage) || 1;
@@ -512,7 +537,8 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
   };
 
   const handleExportExcel = () => {
-    const exportData = filteredItems.map(m => {
+    // El Excel sale en el orden de siempre, no en el de la cabecera.
+    const exportData = medications.map(m => {
       const activeCpm = m.displayCpm ?? m.cpm;
       const activeMonths = m.monthsOfProvision;
       const activeStatus = m.status;
@@ -597,26 +623,27 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
 
   // Columnas de la tabla: las mismas de siempre, en el mismo orden. Se definen una vez para
   // dibujarlas en la tabla y en el encabezado que se queda arriba al bajar.
-  const isSimpleCpa = viewMode === 'INITIAL' || viewMode === 'PROJECTED_SIMPLE';
-  const columns: Array<{ label: string; field?: FilterKey; align?: 'left' | 'right' | 'center'; className?: string; textColor?: string }> = [
-    { label: 'Código' },
-    { label: 'Medicamento', field: 'isSporadic' },
-    { label: 'F.F.', field: 'ff' },
-    { label: 'Tipo', field: 'medtip' },
-    { label: 'Pet', field: 'medpet' },
-    { label: 'Est', field: 'medest' },
-    { label: 'Stock', field: 'currentStock', align: 'right' },
+  type SortKey = Parameters<typeof headSort>[0];
+  const columns: Array<{ label: string; field?: FilterKey; sortKey: SortKey; align?: 'left' | 'right' | 'center'; className?: string; textColor?: string }> = [
+    { label: 'Código', sortKey: 'code' },
+    { label: 'Medicamento', field: 'isSporadic', sortKey: 'name' },
+    { label: 'F.F.', field: 'ff', sortKey: 'ff' },
+    { label: 'Tipo', field: 'medtip', sortKey: 'medtip' },
+    { label: 'Pet', field: 'medpet', sortKey: 'medpet' },
+    { label: 'Est', field: 'medest', sortKey: 'medest' },
+    { label: 'Stock', field: 'currentStock', sortKey: 'stock', align: 'right' },
     {
       label: isSimpleCpa ? 'CPA (Simple)' : 'CPA (Ajust.)',
       field: isSimpleCpa ? 'rawCpm' : 'cpm',
+      sortKey: 'cpa',
       align: 'right',
       className: `border-b-2 whitespace-nowrap ${isSimpleCpa ? 'border-blue-500' : 'border-teal-500'}`,
       textColor: isSimpleCpa ? 'text-blue-600' : 'text-teal-600',
     },
-    { label: 'Meses Prov.', field: 'monthsOfProvision', align: 'right' },
-    { label: 'Estado', field: 'status', align: 'center' },
-    { label: 'Detalle Ajuste', field: 'anomalyDetails' },
-    { label: 'Requerimiento', field: 'quantityToOrder', align: 'right' },
+    { label: 'Meses Prov.', field: 'monthsOfProvision', sortKey: 'months', align: 'right' },
+    { label: 'Estado', field: 'status', sortKey: 'status', align: 'center' },
+    { label: 'Detalle Ajuste', field: 'anomalyDetails', sortKey: 'detail' },
+    { label: 'Requerimiento', field: 'quantityToOrder', sortKey: 'requirement', align: 'right' },
   ];
 
   const headerContent = (col: (typeof columns)[number]) => (
@@ -626,10 +653,11 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
       activeCount={col.field ? (activeFilters[col.field] || []).length : 0}
       isOpen={Boolean(col.field && openFilter?.field === col.field)}
       onOpen={openFilterFor}
+      sort={headSort(col.sortKey)}
     />
   );
 
-  const { tableRef, floating } = useFloatingTableHead([currentPage, currentItems.length, isFullScreen, viewMode, activeFilterKeys.length]);
+  const { tableRef, floating } = useFloatingTableHead([currentPage, currentItems.length, isFullScreen, viewMode, activeFilterKeys.length, sort]);
 
   const containerClasses = isFullScreen 
     ? "fixed inset-0 z-[105000] bg-white flex flex-col h-screen w-screen animate-in fade-in duration-200"
@@ -659,7 +687,7 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                   </div>
 
                   {/* Search Bar - Responsive Flex Width */}
-                  <div className="relative flex-1 max-w-[140px] sm:max-w-[200px] md:max-w-xs lg:max-w-md ml-0 sm:ml-2">
+                  <div className={`${tableSearchBoxClass} ml-0 sm:ml-2`}>
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500" />
                       <input 
                         type="text" 
@@ -832,7 +860,7 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                 
                 {/* Search Bar & Primary Actions */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
-                    <div className="relative w-full lg:w-96">
+                    <div className={`${tableSearchBoxClass} w-full lg:w-[36rem]`}>
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-6 text-gray-400" />
                         <input 
                             type="text" 
@@ -955,6 +983,7 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                 <th
                   key={col.label}
                   scope="col"
+                  aria-sort={ariaSort(headSort(col.sortKey).dir)}
                   className={`px-2 py-2 2xl:px-3 2xl:py-3 text-xs font-bold uppercase tracking-wider ${col.textColor || 'text-gray-500'} ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'} ${col.className || ''}`}
                 >
                   {headerContent(col)}

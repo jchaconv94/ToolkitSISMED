@@ -9,6 +9,7 @@ import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { requirementExclusionService } from '../services/requirementExclusionService';
 import { getUserJurisdictionScope } from '../services/jurisdictionService';
+import { SortButton, ariaSort, useTableSort } from './ui/kit';
 
 interface InputSectionProps {
   onAnalyze: (
@@ -153,6 +154,14 @@ export const InputSection: React.FC<InputSectionProps> = ({
   // Use Props instead of Local State
   const items = currentItems;
   const setItems = onItemsChange;
+
+  // Vista previa de lo cargado: se ordena tocando sus cabeceras.
+  const previewSort = useTableSort(items, {
+    code: (item) => item.id,
+    name: (item) => item.name,
+    stock: (item) => item.currentStock,
+    months: (item) => item.monthlyConsumption.filter(v => v > 0).length,
+  }, { firstDir: { stock: 'desc', months: 'desc' } });
 
   const [isUploadSectionCollapsed, setIsUploadSectionCollapsed] = useState(() => hasAnalyzedData);
   const [tempItems, setTempItems] = useState<MedicationInput[]>([]); // Store items temporarily while asking for date
@@ -1127,14 +1136,14 @@ export const InputSection: React.FC<InputSectionProps> = ({
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-100 sticky top-0 z-10">
                 <tr>
-                  <th className="px-3 py-2 text-left font-bold text-gray-600 text-xs uppercase tracking-wider whitespace-nowrap">Código</th>
-                  <th className="px-3 py-2 text-left font-bold text-gray-600 text-xs uppercase tracking-wider min-w-[150px]">Descripción</th>
-                  <th className="px-3 py-2 text-right font-bold text-gray-600 text-xs uppercase tracking-wider whitespace-nowrap">Stock</th>
-                  <th className="px-3 py-2 text-center font-bold text-gray-600 text-xs uppercase tracking-wider whitespace-nowrap">Meses</th>
+                  <th aria-sort={ariaSort(previewSort.dirOf('code'))} className="px-3 py-2 text-left font-bold text-gray-600 text-xs uppercase tracking-wider whitespace-nowrap"><SortButton label="Código" dir={previewSort.dirOf('code')} onClick={() => previewSort.toggle('code')} /></th>
+                  <th aria-sort={ariaSort(previewSort.dirOf('name'))} className="px-3 py-2 text-left font-bold text-gray-600 text-xs uppercase tracking-wider min-w-[150px]"><SortButton label="Descripción" dir={previewSort.dirOf('name')} onClick={() => previewSort.toggle('name')} /></th>
+                  <th aria-sort={ariaSort(previewSort.dirOf('stock'))} className="px-3 py-2 text-right font-bold text-gray-600 text-xs uppercase tracking-wider whitespace-nowrap"><SortButton label="Stock" dir={previewSort.dirOf('stock')} onClick={() => previewSort.toggle('stock')} /></th>
+                  <th aria-sort={ariaSort(previewSort.dirOf('months'))} className="px-3 py-2 text-center font-bold text-gray-600 text-xs uppercase tracking-wider whitespace-nowrap"><SortButton label="Meses" dir={previewSort.dirOf('months')} onClick={() => previewSort.toggle('months')} /></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white">
-                {items.map((item, index) => (
+                {previewSort.sorted.map((item, index) => (
                   <tr key={`${item.id}-${index}`} className="hover:bg-gray-50">
                     <td className="px-3 py-1.5 text-xs font-mono text-gray-500 font-medium w-24 whitespace-nowrap">{item.id}</td>
                     <td className="px-3 py-1.5 text-gray-900 truncate max-w-[150px] sm:max-w-[300px] text-xs font-medium" title={item.name}>{item.name}</td>
