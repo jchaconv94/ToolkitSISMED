@@ -133,7 +133,8 @@ import {
 import { noticeSettingsApi } from "../services/noticeSettings";
 import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
 import { getExpirationState, parseExpiryDate } from "../services/assignedIpressStock";
-import { KpiCard, KpiStrip, SheetOption, SortButton, StatusChip, ariaSort, useTableSort } from "./ui/kit";
+import { KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, SortButton, StatusChip, ariaSort, useTableSort } from "./ui/kit";
+import { useStickyBar } from "./ui/useStickyBar";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
 import type { StockSearchScope } from "./StockNetworkSearchModal";
 import { TablePagination } from "./ui/TablePagination";
@@ -1249,6 +1250,9 @@ const SheetSearchModuleContent: React.FC = () => {
     useState<string>("all");
   const [dataFilterExpMonth, setDataFilterExpMonth] = useState<string>("all");
   const [dataFilterExpYear, setDataFilterExpYear] = useState<string>("all");
+  /** Celular: panel inferior con los filtros de la hoja. */
+  const [dataFiltersSheetOpen, setDataFiltersSheetOpen] = useState(false);
+  const toolbarBar = useStickyBar<HTMLDivElement>();
   /**
    * Farmacia elegida dentro de la hoja abierta: `"all"` o el código del establecimiento
    * (`06519`, `06519F02`). Solo se ofrece en las hojas que traen puestos comunales.
@@ -4134,6 +4138,10 @@ function processSheet(sheet) {
     [activeSheetData, allFacilities],
   );
   const hojaConPuestosComunales = farmaciasDeLaHoja.length > 1;
+  /** ¿Hay algún filtro de la hoja puesto? (el establecimiento va aparte, en sus pastillas). */
+  const dataFiltersActive =
+    dataFilterTipsum !== "all" || dataFilterFFinan !== "all" || dataFilterStock !== "all" ||
+    dataFilterExpiration !== "all" || dataFilterExpMonth !== "all" || dataFilterExpYear !== "all";
 
   // Otra hoja, otras farmacias: la elección de la anterior no significa nada aquí.
   useEffect(() => {
@@ -6010,8 +6018,8 @@ function processSheet(sheet) {
             : ""
         }`}
       >
-        {/* TOOLBAR */}
-        <div className={`sticky z-30 flex flex-col gap-4 ${
+        {/* TOOLBAR: en el celular se queda arriba al bajar y, pegada, ocupa todo el ancho (useStickyBar). */}
+        <div ref={toolbarBar.ref} style={toolbarBar.style} className={`sticky z-30 flex flex-col gap-4 ${
           viewLevel === "data"
             ? "-top-2.5 bg-white p-3 border-b border-slate-100 sm:static sm:bg-transparent sm:p-0 sm:pb-4 sm:border-0"
             : viewLevel === "ungets" || (viewLevel === "sheets" && sheetsViewMode === "grid")
@@ -6268,7 +6276,7 @@ function processSheet(sheet) {
                     placeholder="Buscar medicamento en esta hoja..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-32 sm:pr-48 md:pr-10 py-2.5 bg-slate-50/85 md:bg-white border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
+                    className="w-full pl-10 pr-10 py-2.5 bg-slate-50/85 md:bg-white border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-teal-500 rounded-xl text-sm transition-all focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-450 shadow-2xs font-medium text-slate-800"
                   />
                   <div className="absolute inset-y-0 right-0 pr-1.5 flex items-center gap-1.5">
                     {searchTerm && (
@@ -6281,26 +6289,16 @@ function processSheet(sheet) {
                         <X className="h-3.5 w-3.5 stroke-[2.5]" />
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setIsAdvancedFiltersSidebarOpen(true)}
-                      className="flex items-center gap-1.5 bg-white hover:bg-slate-50 active:scale-95 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200/85 text-xs font-black transition-all shrink-0 relative shadow-sm cursor-pointer hover:border-slate-300 active:bg-slate-100 md:hidden"
-                    >
-                      <Filter className="h-3.5 w-3.5 text-teal-600" />
-                      <span className="hidden sm:inline">Filtros avanzados</span>
-                      <span className="sm:hidden">Filtros</span>
-                      {(dataFilterTipsum !== "all" ||
-                        dataFilterFFinan !== "all" ||
-                        dataFilterStock !== "all" ||
-                        dataFilterExpiration !== "all" ||
-                        dataFilterPharmacy !== "all") && (
-                        <span className="absolute top-0 right-0 -mr-1 -mt-1 w-2.5 h-2.5 bg-teal-500 rounded-full border-2 border-white animate-pulse" />
-                      )}
-                    </button>
+
                   </div>
                 </div>
               )}
             </div>
+
+            {/* Celular: filtros de la hoja en el panel inferior (patrón aprobado). */}
+            {viewLevel === "data" && (
+              <MobileFilterButton onClick={() => setDataFiltersSheetOpen(true)} active={dataFiltersActive} />
+            )}
 
             {/* Filtro por establecimiento dentro de la hoja. Solo en las hojas que traen
                 puestos comunales —una IPRESS que envía sin consolidar—: en las demás hay una
@@ -6523,6 +6521,116 @@ function processSheet(sheet) {
               </BottomSheet>
             </div>
           </div>
+
+          {/* Celular: el establecimiento de las hojas con puestos comunales, en pastillas bajo el
+              buscador (opción A, aprobada el 2026-10-05). No va dentro de Filtros. */}
+          {viewLevel === "data" && hojaConPuestosComunales && (
+            <div className="-mx-3 -mt-1 flex gap-2 overflow-x-auto px-3 hide-scrollbar md:hidden" role="tablist" aria-label="Establecimiento">
+              {[
+                { code: "all", name: "Todos", rows: activeSheetData.length },
+                ...farmaciasDeLaHoja.map((farmacia) => ({
+                  code: farmacia.code,
+                  name: farmacia.name || (farmacia.unregistered ? "Puesto sin registrar" : "Sin registrar"),
+                  rows: farmacia.rows,
+                })),
+              ].map((opcion) => {
+                const activa = dataFilterPharmacy === opcion.code;
+                return (
+                  <button
+                    key={opcion.code}
+                    type="button"
+                    role="tab"
+                    aria-selected={activa}
+                    onClick={() => setDataFilterPharmacy(opcion.code)}
+                    className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] font-bold transition-colors ${activa ? "border-teal-600 bg-teal-600 text-white" : "border-slate-200 bg-white text-slate-700"}`}
+                  >
+                    {opcion.name}
+                    <span className={activa ? "text-teal-100" : "text-slate-400"}>{opcion.rows.toLocaleString("es-PE")}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <BottomSheet open={dataFiltersSheetOpen && viewLevel === "data"} title="Filtros" onClose={() => setDataFiltersSheetOpen(false)}>
+            {(() => {
+              const pills = (opciones: { value: string; label: string }[], actual: string, elegir: (value: string) => void) => (
+                <div className="flex flex-wrap gap-2 px-1">
+                  {opciones.map((opcion) => (
+                    <button
+                      key={opcion.value}
+                      type="button"
+                      onClick={() => elegir(opcion.value)}
+                      className={`rounded-full border px-3 py-1.5 text-[12.5px] font-bold ${actual === opcion.value ? "border-teal-600 bg-teal-50 text-teal-800" : "border-slate-200 text-slate-600"}`}
+                    >
+                      {opcion.label}
+                    </button>
+                  ))}
+                </div>
+              );
+              const lotes = activeSheetData.filter((row) => rowMatchesPharmacy(readAlmCode(row), dataFilterPharmacy)).length;
+              const selectClass = "h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700";
+              return (
+                <>
+                  <SheetGroupTitle first>Vencimiento</SheetGroupTitle>
+                  <div className="space-y-1">
+                    <SheetOption active={dataFilterExpiration === "all"} label="Todos los lotes" count={lotes} onClick={() => setDataFilterExpiration("all")} />
+                    <SheetOption active={dataFilterExpiration === "expired"} label="Vencidos" count={activeSheetExpirationInfo.expiredCount} onClick={() => setDataFilterExpiration("expired")} />
+                    <SheetOption active={dataFilterExpiration === "expiring"} label={`Por vencer (${expiryWindowDays} días)`} count={activeSheetExpirationInfo.expiringThisMonthCount} onClick={() => setDataFilterExpiration("expiring")} />
+                    <SheetOption active={dataFilterExpiration === "ok"} label="Vigentes" onClick={() => setDataFilterExpiration("ok")} />
+                  </div>
+                  <SheetGroupTitle>Mes y año de vencimiento</SheetGroupTitle>
+                  <div className="grid grid-cols-2 gap-2 px-1">
+                    <select aria-label="Mes de vencimiento" value={dataFilterExpMonth} onChange={(e) => setDataFilterExpMonth(e.target.value)} className={selectClass}>
+                      <option value="all">Todos los meses</option>
+                      {["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"].map((mes, i) => (
+                        <option key={mes} value={String(i + 1)}>{mes}</option>
+                      ))}
+                    </select>
+                    <select aria-label="Año de vencimiento" value={dataFilterExpYear} onChange={(e) => setDataFilterExpYear(e.target.value)} className={selectClass}>
+                      <option value="all">Todos los años</option>
+                      {availableYears.map((year) => (
+                        <option key={year} value={String(year)}>{year}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <SheetGroupTitle>Stock</SheetGroupTitle>
+                  {pills([{ value: "all", label: "Todos" }, { value: "with_stock", label: "Con stock" }, { value: "no_stock", label: "Sin stock" }], dataFilterStock, setDataFilterStock)}
+                  {availableTipsums.length > 0 && (
+                    <>
+                      <SheetGroupTitle>Tipo de suministro</SheetGroupTitle>
+                      {pills([{ value: "all", label: "Todos" }, ...availableTipsums.map((value) => ({ value, label: value }))], dataFilterTipsum, setDataFilterTipsum)}
+                    </>
+                  )}
+                  {availableFFinans.length > 0 && (
+                    <>
+                      <SheetGroupTitle>Financiamiento</SheetGroupTitle>
+                      {pills([{ value: "all", label: "Todos" }, ...availableFFinans.map((value) => ({ value, label: value }))], dataFilterFFinan, setDataFilterFFinan)}
+                    </>
+                  )}
+                  <div className="sticky bottom-0 -mx-4 mt-5 flex gap-2 border-t border-slate-100 bg-white px-4 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDataFilterExpiration("all");
+                        setDataFilterExpMonth("all");
+                        setDataFilterExpYear("all");
+                        setDataFilterStock("all");
+                        setDataFilterTipsum("all");
+                        setDataFilterFFinan("all");
+                      }}
+                      className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-bold text-slate-700"
+                    >
+                      Restablecer
+                    </button>
+                    <button type="button" onClick={() => setDataFiltersSheetOpen(false)} className="h-11 flex-[2] rounded-xl bg-teal-600 text-sm font-bold text-white hover:bg-teal-700">
+                      Ver {filteredData.length.toLocaleString("es-PE")} lotes
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
+          </BottomSheet>
         </div>
 
         <div
@@ -7645,27 +7753,6 @@ function processSheet(sheet) {
             <div className="flex-1 p-6 space-y-6">
               {viewLevel === "data" ? (
                 <div className="space-y-6">
-                  {/* Celular: el filtro por establecimiento de las hojas con puestos comunales
-                      va aquí (en escritorio está en la barra, junto al buscador). */}
-                  {hojaConPuestosComunales && (
-                    <div className="space-y-3 md:hidden">
-                      <div className="flex items-center gap-2">
-                        <div className="w-1.5 h-3 bg-teal-500 rounded-full" />
-                        <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-wider">Establecimiento</h4>
-                      </div>
-                      <div className="space-y-1 rounded-2xl border border-slate-200/60 bg-white p-1.5">
-                        <SheetOption active={dataFilterPharmacy === "all"} label="Todos los establecimientos" onClick={() => setDataFilterPharmacy("all")} />
-                        {farmaciasDeLaHoja.map((farmacia) => (
-                          <SheetOption
-                            key={farmacia.code}
-                            active={dataFilterPharmacy === farmacia.code}
-                            label={<><span className="block">{farmacia.name || (farmacia.unregistered ? "Puesto sin registrar" : "Sin registrar")}</span><span className="block font-mono text-[12px] font-bold text-slate-400">{farmacia.code}</span></>}
-                            onClick={() => setDataFilterPharmacy(farmacia.code)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
                   {/* Estado de Vencimiento */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between w-full">

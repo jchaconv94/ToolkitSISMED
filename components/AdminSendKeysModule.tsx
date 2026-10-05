@@ -23,6 +23,7 @@ import {
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
 import { BottomSheet } from "./ui/BottomSheet";
+import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useDropdownPosition } from "../hooks/useDropdownPosition";
 
@@ -281,6 +282,7 @@ const EstablishmentsPanel: React.FC<{
   // En el celular no hay páginas: la lista crece al bajar.
   const mobileList = useIncrementalCount(filtered.length, `${search}|${filter}|${sismedFilter}`, 20);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const searchBar = useStickyBar<HTMLDivElement>();
 
   const showUnget = useMemo(() => new Set(rows.map((r) => r.ungetId || "")).size > 1, [rows]);
   const selected = useMemo(() => rows.find((r) => r.code === selectedCode) || null, [rows, selectedCode]);
@@ -314,7 +316,7 @@ const EstablishmentsPanel: React.FC<{
         <KpiCard watermark tone="warning" icon={<Database />} label="SISMED desactualizado" value={summary.sismedOutdated} hint={latestSismed ? `vigente: v${latestSismed}` : "aún sin reportes"} onClick={() => setSismedFilter(sismedFilter === "outdated" ? "all" : "outdated")} active={sismedFilter === "outdated"} />
       </KpiStrip>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm md:overflow-hidden">
         {/* Intentos bloqueados: solo aparece si hay alguno sin revisar. Cada uno se resuelve en su detalle. */}
         {alerts.length > 0 && (
           <div className="flex items-start gap-3 border-b border-red-100 bg-red-50/70 px-4 py-2.5 text-[12.5px] text-red-800 md:items-center">
@@ -329,7 +331,7 @@ const EstablishmentsPanel: React.FC<{
             </div>
           </div>
         )}
-        <div className="flex items-center gap-2 border-b border-slate-100 p-3 md:px-4">
+        <div ref={searchBar.ref} style={searchBar.style} className={`${stickyBarClass} flex items-center gap-2 border-b border-slate-100 bg-white p-3 md:static md:px-4`}>
           <TableSearch value={search} onChange={setSearch} placeholder="Buscar establecimiento, código o PC" />
           {/* Celular: un botón abre los filtros abajo. */}
           <MobileFilterButton onClick={() => setFiltersOpen(true)} active={filter !== "all" || sismedFilter !== "all"} />

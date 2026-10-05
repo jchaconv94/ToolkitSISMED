@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { CustomSelect } from './ui/CustomSelect';
 import { useIsDesktop } from './ui/useIsDesktop';
+import { stickyBarClass, useStickyBar } from './ui/useStickyBar';
 import { BottomSheet } from './ui/BottomSheet';
 import { FloatingActionButton } from './ui/FloatingActionButton';
 import { TablePagination } from './ui/TablePagination';
@@ -163,6 +164,7 @@ export const AdminOrganizationModule: React.FC = () => {
     }, [availableTabs, activeTab]);
 
     const [searchQuery, setSearchQuery] = useState('');
+    const searchBar = useStickyBar<HTMLDivElement>();
 
     // New Advanced Filters States
     const [filterDiresaId, setFilterDiresaId] = useState('');
@@ -1667,8 +1669,8 @@ export const AdminOrganizationModule: React.FC = () => {
 
             {availableTabs.length > 0 && (
                 <>
-                    {/* Barra: buscador, filtros y nuevo */}
-                    <div className="flex items-center gap-2 md:flex-wrap">
+                    {/* Barra: buscador, filtros y nuevo (en el celular, fija arriba al bajar) */}
+                    <div ref={searchBar.ref} style={searchBar.style} className={`${stickyBarClass} flex items-center gap-2 md:static md:flex-wrap`}>
                         <div className={`${tableSearchBoxClass} md:min-w-[200px]`}>
                             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                             <input
