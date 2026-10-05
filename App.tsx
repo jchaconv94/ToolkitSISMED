@@ -3,6 +3,7 @@ import { formatCorteDate } from "./services/requirementMonths";
 import React, { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
 import { InputSection } from './components/InputSection';
 import { MedicationInput, AuraAnalysisResult, StockStatus, AdditionalItem, AppModule, QuickFilterOption, AnalyzedMedication, DashboardViewMode, HealthFacility, Microred } from './types';
+import { analysisFilterValue, classifyStock, computeDmeIndicators } from './services/stockStatus';
 import { api } from './services/api';
 import { analyzeInventoryWithAura } from './services/auraService';
 import { generateFullReportPDF } from './services/pdfService';
@@ -861,23 +862,28 @@ const AnalysisModule: React.FC = () => {
       evalStock += reqVal;
     }
 
-    const months = activeCpm > 0 ? evalStock / activeCpm : (evalStock > 0 ? Infinity : 0);
-
-    let status = StockStatus.NORMOSTOCK;
-    if (evalStock === 0) {
-      status = StockStatus.DESABASTECIDO;
-    } else if (activeCpm === 0 && evalStock > 0) {
-      status = StockStatus.SIN_ROTACION;
-    } else if (months > 6) {
-      status = StockStatus.SOBRESTOCK;
-    } else if (months >= 2 && months <= 6) {
-      status = StockStatus.NORMOSTOCK;
-    } else {
-      status = StockStatus.SUBSTOCK;
-    }
+    // Regla única de estado (services/stockStatus.ts): antes esta copia no redondeaba los meses
+    // y la tabla no coincidía con el detalle ni con el PDF.
+    const { months, status } = classifyStock(evalStock, activeCpm);
 
     return { activeCpm, evalStock, months, status };
   }, [reviewedIds]);
+
+  /**
+   * Ítems que el responsable debe validar: los que no están en Sobrestock ni Sin rotación con su
+   * **stock inicial**. Se calcula siempre sobre el stock inicial, no sobre la vista elegida: en
+   * la vista proyectada el propio pedido validado cambia el estado y el ítem salía de la lista,
+   * así que el contador «X de Y validados» cambiaba al cambiar de vista.
+   */
+  const idsToReview = useMemo(() => {
+    const ids = new Set<string>();
+    if (!result) return ids;
+    for (const m of result.medications) {
+      const { status } = calculateHorizonMetrics(m, 'INITIAL');
+      if (status !== StockStatus.SOBRESTOCK && status !== StockStatus.SIN_ROTACION) ids.add(m.id);
+    }
+    return ids;
+  }, [result, calculateHorizonMetrics]);
 
   // Todos los ítems con el estado, los meses y el CPA del modo elegido (Stock inicial o
   // Proyectado). La tabla los muestra así, y los filtros por columna sacan de aquí sus
@@ -912,11 +918,7 @@ const AnalysisModule: React.FC = () => {
 
     // QUICK FILTER LOGIC
     if (quickFilter === 'PENDING') {
-        items = items.filter(m => 
-            m.status !== StockStatus.SOBRESTOCK && 
-            m.status !== StockStatus.SIN_ROTACION &&
-            !reviewedIds.has(m.id)
-        );
+        items = items.filter(m => idsToReview.has(m.id) && !reviewedIds.has(m.id));
     } else if (quickFilter === 'REQ_POSITIVE') {
         items = items.filter(m => m.quantityToOrder > 0);
     } else if (quickFilter === 'REQ_ZERO') {
@@ -937,18 +939,14 @@ const AnalysisModule: React.FC = () => {
             return Object.entries(activeFilters).every(([key, values]) => {
                 const filterValues = values as string[];
                 if (!filterValues || filterValues.length === 0) return true;
-                let itemValue = String((item as any)[key] || '-');
-                if (key === 'isSporadic') {
-                    itemValue = item.isSporadic ? "Baja Rotación" : "Rotación Normal";
-                }
-                return filterValues.includes(itemValue);
+                return filterValues.includes(analysisFilterValue(item as unknown as Record<string, unknown>, key));
             });
         });
     }
     
     // Sort items alphabetically by name
     return [...items].sort((a, b) => (a.name || '').trim().localeCompare((b.name || '').trim(), 'es', { sensitivity: 'base' }));
-  }, [result, horizonMedications, searchTerm, activeFilters, quickFilter, reviewedIds, dashboardScopeFilter]);
+  }, [result, horizonMedications, searchTerm, activeFilters, quickFilter, reviewedIds, idsToReview, dashboardScopeFilter]);
 
   const dashboardMedications = useMemo(() => {
     if (!result) return [];
@@ -964,11 +962,7 @@ const AnalysisModule: React.FC = () => {
     });
 
     if (quickFilter === 'PENDING') {
-        items = items.filter(m => 
-            m.status !== StockStatus.SOBRESTOCK && 
-            m.status !== StockStatus.SIN_ROTACION &&
-            !reviewedIds.has(m.id)
-        );
+        items = items.filter(m => idsToReview.has(m.id) && !reviewedIds.has(m.id));
     } else if (quickFilter === 'REQ_POSITIVE') {
         items = items.filter(m => m.quantityToOrder > 0);
     } else if (quickFilter === 'REQ_ZERO') {
@@ -990,17 +984,13 @@ const AnalysisModule: React.FC = () => {
                 if (key === 'status') return true; // Ignore status filter for dashboard chart calculations
                 const filterValues = values as string[];
                 if (!filterValues || filterValues.length === 0) return true;
-                let itemValue = String((item as any)[key] || '-');
-                if (key === 'isSporadic') {
-                    itemValue = item.isSporadic ? "Baja Rotación" : "Rotación Normal";
-                }
-                return filterValues.includes(itemValue);
+                return filterValues.includes(analysisFilterValue(item as unknown as Record<string, unknown>, key));
             });
         });
     }
 
     return items;
-  }, [result, searchTerm, activeFilters, quickFilter, reviewedIds, dashboardViewMode, calculateHorizonMetrics]);
+  }, [result, searchTerm, activeFilters, quickFilter, reviewedIds, idsToReview, dashboardViewMode, calculateHorizonMetrics]);
 
   // UPDATE: Calculates dashboard metrics according to horizon (INITIAL vs PROJECTED) and scope (ALL vs DME)
   const dashboardResult = useMemo(() => {
@@ -1019,55 +1009,16 @@ const AnalysisModule: React.FC = () => {
       });
     }
     
-    // Filter essential medications for DME indicator in UI
-    const essentialMedications = currentItems.filter(m => {
-        const isMed = (m.medtip || '').toUpperCase().trim() === 'M';
-        const isPet = (m.medpet || '').toUpperCase().trim() === 'P';
-        const est = (m.medest || '').toUpperCase().trim();
-        const isEst = est === '_' || est === 'S';
-        return isMed && isPet && isEst;
-    });
-
-    const totalEssentialItems = essentialMedications.length;
-    
-    const availableEssentialItems = essentialMedications.filter(m => 
-        m.status === StockStatus.NORMOSTOCK || 
-        m.status === StockStatus.SOBRESTOCK
-    ).length;
-    
-    const dmeScore = totalEssentialItems > 0 ? (availableEssentialItems / totalEssentialItems) * 100 : 0;
-    
-    let indicatorStatus: 'OPTIMO' | 'ALTO' | 'REGULAR' | 'BAJO' = 'BAJO';
-    if (dmeScore >= 90) indicatorStatus = 'OPTIMO';
-    else if (dmeScore >= 80) indicatorStatus = 'ALTO';
-    else if (dmeScore >= 70) indicatorStatus = 'REGULAR';
-
     return {
         ...result,
         medications: currentItems,
-        indicators: {
-            dmeScore,
-            status: indicatorStatus,
-            totalItems: totalEssentialItems,
-            availableItems: availableEssentialItems
-        }
+        indicators: computeDmeIndicators(currentItems)
     };
   }, [result, dashboardMedications, dashboardScopeFilter]);
 
   const { reviewProgress, isReviewComplete, reviewedCount, totalToReview } = useMemo(() => {
       if (!result) return { reviewProgress: 0, isReviewComplete: false, reviewedCount: 0, totalToReview: 0 };
-      const itemsWithStatus = result.medications.map(m => {
-          const { months, status } = calculateHorizonMetrics(m, dashboardViewMode);
-          return {
-              ...m,
-              status,
-              monthsOfProvision: months
-          };
-      });
-      const itemsRequiringReview = itemsWithStatus.filter(m => 
-          m.status !== StockStatus.SOBRESTOCK && 
-          m.status !== StockStatus.SIN_ROTACION
-      );
+      const itemsRequiringReview = result.medications.filter(m => idsToReview.has(m.id));
       const totalCount = itemsRequiringReview.length;
       if (totalCount === 0) {
           return { reviewProgress: 100, isReviewComplete: true, reviewedCount: 0, totalToReview: 0 };
@@ -1080,7 +1031,7 @@ const AnalysisModule: React.FC = () => {
           reviewedCount: revCount,
           totalToReview: totalCount
       };
-  }, [result, reviewedIds, dashboardViewMode, calculateHorizonMetrics]);
+  }, [result, reviewedIds, idsToReview]);
 
   /**
    * La felicitación se da **una vez por análisis**, al terminar de validarlo.
@@ -1092,6 +1043,12 @@ const AnalysisModule: React.FC = () => {
    * —`handleAnalyze` y `handleReset`—, que es lo que el usuario entiende por «terminar el
    * análisis».
    */
+  // Al terminar la validación, «Ver pendientes» ya no muestra nada y su botón se oculta:
+  // se vuelve a la lista completa para no dejar la tabla vacía.
+  useEffect(() => {
+    if (isReviewComplete) setQuickFilter(prev => (prev === 'PENDING' ? 'ALL' : prev));
+  }, [isReviewComplete]);
+
   useEffect(() => {
     if (!isReviewComplete || totalToReview === 0) return;
     try {
@@ -1111,9 +1068,16 @@ const AnalysisModule: React.FC = () => {
       }
   };
 
+  /**
+   * El informe sale siempre del análisis **completo** en la vista elegida (Stock inicial o
+   * Proyectado), con solo las opciones de su propia ventana. Antes salía de lo que mostraba la
+   * tabla, con sus filtros: si se validaba con «Ver pendientes», al terminar ya no quedaba
+   * ninguno y el PDF salía sin filas y con DME 0 %; con texto en el buscador, solo lo buscado.
+   */
   const handleGenerateReport = async (excludeVaccines: boolean, excludeNoSupply: boolean) => {
-    if (!dashboardResult) return;
-    let finalMedications = [...dashboardResult.medications];
+    if (!result) return;
+    const reportResult = { ...result, medications: horizonMedications, indicators: computeDmeIndicators(horizonMedications) };
+    let finalMedications = [...horizonMedications];
     if (excludeVaccines) {
         finalMedications = finalMedications.filter(m => {
             const name = m.name.toUpperCase();
@@ -1133,7 +1097,7 @@ const AnalysisModule: React.FC = () => {
     
     const establishmentName = user?.facilityData?.name || 'ESTABLECIMIENTO DE SALUD';
     const responsibleName = user?.personnelData ? `${user.personnelData.firstName} ${user.personnelData.lastName}` : (user?.username || '');
-    await generateFullReportPDF(dashboardResult, finalMedications, additionalItems, establishmentName, responsibleName, dashboardViewMode);
+    await generateFullReportPDF(reportResult, finalMedications, additionalItems, establishmentName, responsibleName, dashboardViewMode);
     
     setIsReportModalOpen(false);
   };

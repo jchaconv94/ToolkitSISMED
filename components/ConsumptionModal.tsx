@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom';
 import { X, AlertTriangle, CheckCircle, Calculator, ArrowRight, ShieldCheck, ChevronLeft, ChevronRight, SkipForward, Timer, Lock, Clock, MousePointerClick, Unlock, ChevronDown, Save } from 'lucide-react';
 import { AnalyzedMedication, StockStatus } from '../types';
+import { classifyStock, formatOneDecimal } from '../services/stockStatus';
 import { useAuth } from '../contexts/AuthContext';
 
 interface ConsumptionModalProps {
@@ -96,24 +97,8 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
               : 0;
       }
       
-      const activeMonths = activeCpm > 0 
-          ? medication.currentStock / activeCpm 
-          : (medication.currentStock > 0 ? Infinity : 0);
-
-      const roundedMonths = isFinite(activeMonths) ? parseFloat(activeMonths.toFixed(1)) : Infinity;
-
-      let activeStatus = StockStatus.NORMOSTOCK;
-      if (medication.currentStock === 0) {
-          activeStatus = StockStatus.DESABASTECIDO;
-      } else if (activeCpm === 0 && medication.currentStock > 0) {
-          activeStatus = StockStatus.SIN_ROTACION;
-      } else if (roundedMonths > 6) {
-          activeStatus = StockStatus.SOBRESTOCK;
-      } else if (roundedMonths >= 2 && roundedMonths <= 6) {
-          activeStatus = StockStatus.NORMOSTOCK;
-      } else {
-          activeStatus = StockStatus.SUBSTOCK;
-      }
+      // Regla única de estado (services/stockStatus.ts).
+      const { months: activeMonths, status: activeStatus } = classifyStock(medication.currentStock, activeCpm);
 
       let suggestedReq = 0;
       const MIN_SAFETY_STOCK = 2;
@@ -157,8 +142,8 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
 
   const isAdjustedEqualSimple = useMemo(() => {
     if (!medication) return false;
-    const cpmStr = (medication.cpm || 0).toFixed(1);
-    const rawCpmStr = (medication.rawCpm || 0).toFixed(1);
+    const cpmStr = formatOneDecimal(medication.cpm);
+    const rawCpmStr = formatOneDecimal(medication.rawCpm);
     return cpmStr === rawCpmStr || !medication.hasSpikes;
   }, [medication?.cpm, medication?.rawCpm, medication?.hasSpikes]);
 
@@ -591,7 +576,7 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
                         {isAdjustedEqualSimple && !isReviewed && <Lock className="h-3 w-3 text-gray-400 shrink-0" />}
                     </div>
                     <span className={`font-bold text-lg sm:text-2xl text-center w-full ${cpaMode === 'ADJUSTED' ? 'text-teal-800' : 'text-gray-400'}`}>
-                        {(medication.cpm || 0).toFixed(1)}
+                        {formatOneDecimal(medication.cpm)}
                     </span>
                     {isAdjustedEqualSimple && (
                         <span className="text-[8px] text-gray-400 uppercase font-bold mt-1 text-center w-full">Sin atípicos</span>
@@ -627,7 +612,7 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
                     </div>
                     <div className="flex items-center justify-center gap-2 w-full">
                         <span className={`font-bold text-lg sm:text-2xl text-center ${cpaMode === 'SIMPLE' ? 'text-blue-800' : 'text-gray-400'} ${medication.hasSpikes && cpaMode !== 'SIMPLE' ? 'line-through decoration-red-400' : ''}`}>
-                            {(medication.rawCpm || 0).toFixed(1)}
+                            {formatOneDecimal(medication.rawCpm)}
                         </span>
                         {medication.hasSpikes && cpaMode !== 'SIMPLE' && (
                             <MousePointerClick className="h-4 w-4 text-gray-400 opacity-50 shrink-0" />
@@ -644,13 +629,13 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
                   <div className="bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 flex flex-col items-center justify-center text-center transition-all duration-300">
                       <span className="text-blue-600 block text-[10px] uppercase font-bold">Meses Disp.</span>
                       <span className="font-bold text-blue-800 text-lg sm:text-2xl text-center w-full">
-                      {isFinite(dynamicData.months || 0) ? (dynamicData.months || 0).toFixed(1) : '-'}
+                      {formatOneDecimal(dynamicData.months)}
                       </span>
                       {cpaMode === 'ADJUSTED' && (
                           <div className="text-[10px] font-bold text-slate-600 bg-white/80 px-2 py-0.5 rounded border border-slate-200 mt-1 flex items-center gap-1 shadow-xs">
                              <span className="text-slate-400 font-bold uppercase text-[9px]">Real:</span>
                              <span className="text-slate-800 font-extrabold">
-                                {isFinite(realMonths) ? realMonths.toFixed(1) : '-'}
+                                {formatOneDecimal(realMonths)}
                              </span>
                           </div>
                       )}
@@ -662,21 +647,7 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
              {(() => {
                 const realCpm = medication.rawCpm || 0;
                 const realStock = medication.currentStock;
-                const realMonths = realCpm > 0 ? realStock / realCpm : (realStock > 0 ? Infinity : 0);
-                const roundedRealMonths = isFinite(realMonths) ? parseFloat(realMonths.toFixed(1)) : Infinity;
-
-                let realStatus = StockStatus.NORMOSTOCK;
-                if (realStock === 0) {
-                    realStatus = StockStatus.DESABASTECIDO;
-                } else if (realCpm === 0 && realStock > 0) {
-                    realStatus = StockStatus.SIN_ROTACION;
-                } else if (roundedRealMonths > 6) {
-                    realStatus = StockStatus.SOBRESTOCK;
-                } else if (roundedRealMonths >= 2 && roundedRealMonths <= 6) {
-                    realStatus = StockStatus.NORMOSTOCK;
-                } else {
-                    realStatus = StockStatus.SUBSTOCK;
-                }
+                const { status: realStatus } = classifyStock(realStock, realCpm);
 
                 return (
                    <div className={`${statusConfig.bg} px-4 py-2 rounded-lg border ${statusConfig.border} flex flex-col items-center justify-center text-center w-full lg:w-auto transition-colors duration-300`}>
@@ -768,14 +739,14 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
                     <div className="flex justify-between items-baseline mb-1 sm:mb-2">
                         <span className="text-xs uppercase text-gray-400">Cobertura Pedido</span>
                         <span className="font-bold text-teal-300 text-xl leading-tight">
-                            +{(coverageFromOrder || 0).toFixed(1)} Meses
+                            +{formatOneDecimal(coverageFromOrder)} Meses
                         </span>
                     </div>
                     
                     <div className={`border-t pt-3 mt-auto flex justify-between items-baseline ${isReviewed ? 'border-teal-800' : 'border-gray-700'}`}>
                         <span className="text-xs uppercase text-gray-400">Total Proyectado</span>
                         <span className="font-bold text-white text-xl leading-tight">
-                             {isFinite(totalProjectedCoverage) ? (totalProjectedCoverage || 0).toFixed(1) : '-'} Meses
+                             {formatOneDecimal(totalProjectedCoverage)} Meses
                         </span>
                     </div>
                 </div>

@@ -28,6 +28,7 @@ import { ConsumptionModal } from './ConsumptionModal';
 import { TablePagination } from './ui/TablePagination';
 import { FloatingTableHead, useFloatingTableHead } from './ui/FloatingTableHead';
 import { SortButton, SortDir, ariaSort, tableSearchBoxClass, useTableSort } from './ui/kit';
+import { analysisFilterValue, formatOneDecimal, truncateOneDecimal } from '../services/stockStatus';
 
 interface AnalysisTableProps {
   medications: AnalyzedMedication[]; // The FILTERED list to display
@@ -251,70 +252,6 @@ const FilterMenu: React.FC<{
 };
 
 // --- HELPER: Recalculate Status Dynamically ---
-const calculateDynamicMetrics = (item: AnalyzedMedication) => {
-    let activeCpm = 0;
-    const excludedIndices = item.excludedIndices || [];
-    let mode = item.selectedCpaMode || 'ADJUSTED';
-
-    if (excludedIndices.length === 0) {
-        activeCpm = mode === 'SIMPLE' ? item.rawCpm : item.cpm;
-    } else {
-        // Manual Recalculation
-        const history = item.originalHistory;
-        const threshold = item.spikeThreshold || 0;
-        const isSporadic = item.isSporadic;
-        
-        const valuesToAverage: number[] = [];
-
-        history.forEach((val, idx) => {
-            if (val === 0) return; // Ignore zeros
-            if (excludedIndices.includes(idx)) return; // User excluded
-
-            if (mode === 'SIMPLE') {
-                valuesToAverage.push(val);
-            } else {
-                // ADJUSTED MODE
-                if (isSporadic) {
-                    // Sporadic: No spike exclusion, just average active months
-                    valuesToAverage.push(val);
-                } else {
-                    // Normal: Exclude spikes
-                    if (val <= threshold) {
-                        valuesToAverage.push(val);
-                    }
-                }
-            }
-        });
-
-        activeCpm = valuesToAverage.length > 0
-            ? valuesToAverage.reduce((a, b) => a + b, 0) / valuesToAverage.length
-            : 0;
-    }
-    
-    // Calculate Months
-    const activeMonths = activeCpm > 0 
-        ? item.currentStock / activeCpm 
-        : (item.currentStock > 0 ? Infinity : 0);
-
-    const roundedMonths = isFinite(activeMonths) ? parseFloat(activeMonths.toFixed(1)) : Infinity;
-
-    // Calculate Status
-    let activeStatus = StockStatus.NORMOSTOCK;
-    if (item.currentStock === 0) {
-        activeStatus = StockStatus.DESABASTECIDO;
-    } else if (activeCpm === 0 && item.currentStock > 0) {
-        activeStatus = StockStatus.SIN_ROTACION;
-    } else if (roundedMonths > 6) {
-        activeStatus = StockStatus.SOBRESTOCK;
-    } else if (roundedMonths >= 2 && roundedMonths <= 6) {
-        activeStatus = StockStatus.NORMOSTOCK;
-    } else {
-        activeStatus = StockStatus.SUBSTOCK;
-    }
-
-    return { activeCpm, activeMonths, activeStatus };
-};
-
 export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({ 
   medications, 
   allMedications, 
@@ -421,14 +358,10 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
 
   // Get Unique Values for Filters (Using ALL medications to show all options)
   const getUniqueValues = (key: FilterKey): { value: string; count: number }[] => {
-    const values = allMedications.map(m => {
-        if (key === 'isSporadic') {
-             return m.isSporadic ? "Baja Rotación" : "Rotación Normal";
-        }
-        return String((m as any)[key] || '-');
-    });
+    // Meses y CPA agrupados por su valor cortado a un decimal (services/stockStatus.ts).
+    const values = allMedications.map(m => analysisFilterValue(m as unknown as Record<string, unknown>, key));
     
-    const unique = Array.from(new Set(values)).sort();
+    const unique = Array.from(new Set(values)).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
     // Count occurrences in the FULL list
     return unique.map((val: string) => ({
       value: val,
@@ -562,8 +495,8 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
       row.SUMA_CONSUMO = totalConsumption;
       
       // Export Dynamic Values
-      row.CPA_UTILIZADO = activeCpm;
-      row.MESES_DISPONIBLES = isFinite(activeMonths) ? activeMonths : "-";
+      row.CPA_UTILIZADO = truncateOneDecimal(activeCpm || 0);
+      row.MESES_DISPONIBLES = isFinite(activeMonths) ? truncateOneDecimal(activeMonths) : "-";
       row.ESTADO_CALCULADO = activeStatus;
 
       row.ES_BAJA_ROTACION = m.isSporadic ? "SI" : "NO";
@@ -1067,31 +1000,31 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                         {(viewMode === 'INITIAL' || viewMode === 'PROJECTED_SIMPLE') ? (
                              <>
                                 <span className="text-base font-bold text-blue-700 font-mono">
-                                    {(item.displayCpm ?? item.rawCpm ?? 0).toFixed(1)}
+                                    {formatOneDecimal(item.displayCpm ?? item.rawCpm ?? 0)}
                                 </span>
                                 {item.hasSpikes && (
                                      <span className="text-xs text-gray-400" title="CPA Ajustado (Automático)">
-                                        Ajust: {(item.cpm || 0).toFixed(1)}
+                                        Ajust: {formatOneDecimal(item.cpm)}
                                      </span>
                                 )}
                              </>
                         ) : item.selectedCpaMode === 'SIMPLE' ? (
                              <>
                                 <span className="text-base font-bold text-blue-700 font-mono">
-                                    {(item.rawCpm || 0).toFixed(1)}
+                                    {formatOneDecimal(item.rawCpm)}
                                 </span>
                                 <span className="text-xs text-gray-400" title="CPA Ajustado (Automático)">
-                                    Ajust: {(item.cpm || 0).toFixed(1)}
+                                    Ajust: {formatOneDecimal(item.cpm)}
                                 </span>
                              </>
                         ) : (
                              <>
                                 <span className="text-base font-bold text-teal-700 font-mono">
-                                    {(item.displayCpm ?? item.cpm ?? 0).toFixed(1)}
+                                    {formatOneDecimal(item.displayCpm ?? item.cpm ?? 0)}
                                 </span>
                                 {item.hasSpikes && (
-                                     <span className="text-xs text-gray-400 line-through decoration-red-400" title={`Promedio Simple (con picos): ${(item.rawCpm || 0).toFixed(1)}`}>
-                                        {(item.rawCpm || 0).toFixed(1)}
+                                     <span className="text-xs text-gray-400 line-through decoration-red-400" title={`Promedio Simple (con picos): ${formatOneDecimal(item.rawCpm)}`}>
+                                        {formatOneDecimal(item.rawCpm)}
                                      </span>
                                 )}
                              </>
@@ -1104,7 +1037,7 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                         activeMonths < 2 ? 'text-amber-600' : 
                         activeMonths > 12 ? 'text-blue-600' : 'text-gray-600'
                     }`}>
-                        {isFinite(activeMonths || 0) ? (activeMonths || 0).toFixed(1) : '-'}
+                        {formatOneDecimal(activeMonths)}
                     </span>
                   </td>
 

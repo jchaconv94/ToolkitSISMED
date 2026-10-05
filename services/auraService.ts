@@ -1,5 +1,6 @@
 
 import { MedicationInput, AuraAnalysisResult, StockStatus, AnalyzedMedication } from "../types";
+import { classifyStock } from "./stockStatus";
 
 // Helper: Calculate Median
 export const calculateMedian = (values: number[]): number => {
@@ -99,23 +100,8 @@ const analyzeItemLocally = (item: MedicationInput): AnalyzedMedication => {
   const history = item.monthlyConsumption;
   const { adjusted: cpm, adjustedNoLows: cpmExcludingLows, raw: rawCpm, spikes, details, threshold, lowThreshold, lows, isSporadic } = calculateAdjustedCPM(history);
   
-  const monthsOfProvision = cpm > 0 ? item.currentStock / cpm : (item.currentStock > 0 ? Infinity : 0);
-  const roundedMonths = isFinite(monthsOfProvision) ? parseFloat(monthsOfProvision.toFixed(1)) : Infinity;
-
-  // 1. Initial Status Calculation
-  let status = StockStatus.NORMOSTOCK;
-  if (item.currentStock === 0) {
-    status = StockStatus.DESABASTECIDO; 
-  } else if (cpm === 0 && item.currentStock > 0) {
-    status = StockStatus.SIN_ROTACION; 
-  } else if (roundedMonths > 6) {
-    status = StockStatus.SOBRESTOCK; 
-  } else if (roundedMonths >= 2 && roundedMonths <= 6) {
-    status = StockStatus.NORMOSTOCK; 
-  } else {
-    // Covers monthsOfProvision < 2
-    status = StockStatus.SUBSTOCK;
-  }
+  // 1. Estado inicial: regla única de DIGEMID (services/stockStatus.ts).
+  const { months: monthsOfProvision, status } = classifyStock(item.currentStock, cpm);
 
   // 2. Anomaly Details Appending
   let finalAnomalyDetails = details;

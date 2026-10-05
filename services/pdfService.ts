@@ -3,6 +3,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { ensurePdfUnicodeFont, PDF_UNICODE_FONT } from "./pdfUnicodeFont";
 import { AuraAnalysisResult, StockStatus, AnalyzedMedication, AdditionalItem, DashboardViewMode } from "../types";
+import { classifyStock, formatOneDecimal } from "./stockStatus";
 
 // --- COLORS PALETTE (PREMIUM UI MATCH) ---
 const COLORS = {
@@ -109,25 +110,8 @@ const calculateDynamicMetricsPDF = (item: AnalyzedMedication) => {
     }
     
     // Calculate Months
-    const activeMonths = activeCpm > 0 
-        ? item.currentStock / activeCpm 
-        : (item.currentStock > 0 ? Infinity : 0);
-
-    const roundedMonths = isFinite(activeMonths) ? parseFloat(activeMonths.toFixed(1)) : Infinity;
-
-    // Calculate Status
-    let activeStatus = StockStatus.NORMOSTOCK;
-    if (item.currentStock === 0) {
-        activeStatus = StockStatus.DESABASTECIDO;
-    } else if (activeCpm === 0 && item.currentStock > 0) {
-        activeStatus = StockStatus.SIN_ROTACION;
-    } else if (roundedMonths > 6) {
-        activeStatus = StockStatus.SOBRESTOCK;
-    } else if (roundedMonths >= 2 && roundedMonths <= 6) {
-        activeStatus = StockStatus.NORMOSTOCK;
-    } else {
-        activeStatus = StockStatus.SUBSTOCK;
-    }
+    // Regla única de estado (services/stockStatus.ts).
+    const { months: activeMonths, status: activeStatus } = classifyStock(item.currentStock, activeCpm);
 
     return { activeCpm, activeMonths, activeStatus };
 };
@@ -245,14 +229,7 @@ export const generateFullReportPDF = async (
           .map(m => {
               const rawCpm = m.rawCpm || 0;
               const stock = m.currentStock || 0;
-              const months = rawCpm > 0 ? stock / rawCpm : (stock > 0 ? Infinity : 0);
-              const roundedMonths = isFinite(months) ? parseFloat(months.toFixed(1)) : Infinity;
-              let status = StockStatus.NORMOSTOCK;
-              if (stock === 0) status = StockStatus.DESABASTECIDO;
-              else if (rawCpm === 0 && stock > 0) status = StockStatus.SIN_ROTACION;
-              else if (roundedMonths > 6) status = StockStatus.SOBRESTOCK;
-              else if (roundedMonths >= 2 && roundedMonths <= 6) status = StockStatus.NORMOSTOCK;
-              else status = StockStatus.SUBSTOCK;
+              const { status } = classifyStock(stock, rawCpm);
 
               return { ...m, status };
           });
@@ -535,24 +512,7 @@ export const generateFullReportPDF = async (
         const reqQty = item.quantityToOrder > 0 ? item.quantityToOrder : 0;
         const projectedStock = item.currentStock + reqQty;
 
-        const projectedMonths = activeCpm > 0 
-            ? projectedStock / activeCpm 
-            : (projectedStock > 0 ? Infinity : 0);
-
-        const roundedProjectedMonths = isFinite(projectedMonths) ? parseFloat(projectedMonths.toFixed(1)) : Infinity;
-
-        let projectedStatus = StockStatus.NORMOSTOCK;
-        if (projectedStock === 0) {
-            projectedStatus = StockStatus.DESABASTECIDO;
-        } else if (activeCpm === 0 && projectedStock > 0) {
-            projectedStatus = StockStatus.SIN_ROTACION;
-        } else if (roundedProjectedMonths > 6) {
-            projectedStatus = StockStatus.SOBRESTOCK;
-        } else if (roundedProjectedMonths >= 2 && roundedProjectedMonths <= 6) {
-            projectedStatus = StockStatus.NORMOSTOCK;
-        } else {
-            projectedStatus = StockStatus.SUBSTOCK;
-        }
+        const { months: projectedMonths, status: projectedStatus } = classifyStock(projectedStock, activeCpm);
 
         const row: any = {
             id: item.id,
@@ -562,12 +522,12 @@ export const generateFullReportPDF = async (
             pet: item.medpet || '-',
             est: item.medest || '-',
             stock: item.currentStock.toLocaleString(),
-            rawCpm: item.rawCpm.toFixed(1),
-            cpm: item.cpm.toFixed(1),
+            rawCpm: formatOneDecimal(item.rawCpm),
+            cpm: formatOneDecimal(item.cpm),
             // Current actual months
-            currentMonths: isFinite(activeMonths) ? activeMonths.toFixed(1) : '-',
+            currentMonths: formatOneDecimal(activeMonths),
             // Use projected calculated values
-            monthsProvision: isFinite(projectedMonths) ? projectedMonths.toFixed(1) : '-',
+            monthsProvision: formatOneDecimal(projectedMonths),
             status: projectedStatus,
             req: item.quantityToOrder > 0 ? item.quantityToOrder : '-',
             _spikeThreshold: item.spikeThreshold,
