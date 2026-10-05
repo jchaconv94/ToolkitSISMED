@@ -18,7 +18,9 @@ import {
   getExpirationState,
   loadAssignedIpressStock,
   type ExpirationState,
+  parseExpiryDate,
   parseStockNumber,
+  parseUpdateTimestamp,
   type StockRow,
 } from "../services/assignedIpressStock";
 import {
@@ -27,7 +29,7 @@ import {
   type FacilitySheetLink,
 } from "../services/facilitySheetLink";
 import { PharmacyCodeCell } from "./ui/PharmacyCodeCell";
-import { EmptyState, KpiCard, KpiStrip, TableHeaderCell as HeaderCell, filterInputClass } from "./ui/kit";
+import { EmptyState, KpiCard, KpiStrip, TableHeaderCell as HeaderCell, filterInputClass, tableSearchBoxClass, useTableSort } from "./ui/kit";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
 import { TablePagination } from "./ui/TablePagination";
@@ -155,10 +157,6 @@ export const AssignedIpressStockModule: React.FC = () => {
     });
   }, [rows, search, visibleColumns, expirationFilter, expiryDays]);
 
-  const visibleRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
-  // En el celular no hay páginas: la lista crece al bajar.
-  const mobileList = useIncrementalCount(filteredRows.length, `${search}|${expirationFilter}|${loadedSheet}`);
-  const mobileRows = filteredRows.slice(0, mobileList.count);
   const metrics = useMemo(() => ({
     lots: rows.length,
     expiring: rows.filter(row => getExpirationState(row, expiryDays) === "EXPIRING").length,
@@ -206,6 +204,29 @@ export const AssignedIpressStockModule: React.FC = () => {
     return values.map(value => String(value ?? "").trim()).find(Boolean) || "";
   };
 
+  // Orden por cabecera: sobre las filas ya filtradas y antes de paginar; la lista del celular usa el mismo.
+  const timestampOrNull = (value: unknown) => parseUpdateTimestamp(String(value ?? "")) || null;
+  const { sorted: sortedRows, sort, headSort } = useTableSort(filteredRows, {
+    pharmacy: row => pharmacyLabelOf(row).code,
+    code: row => (canShow("Id_Producto") ? String(row.Id_Producto ?? "") : ""),
+    name: row => (canShow("Nombre") ? String(row.Nombre ?? "") : ""),
+    saldo: row => (canShow("Saldo") ? parseStockNumber(row.Saldo) : null),
+    expiry: row => (canShow("Fec_Vencim") ? parseExpiryDate(row.Fec_Vencim)?.getTime() ?? null : null),
+    tipo: row => textOrDash("DESC_TIPSUM", row.TIPSUM, row.DESC_TIPSUM),
+    fuente: row => textOrDash("DESC_FFINAN", row.FFINAN, row.DESC_FFINAN),
+    equipo: row => timestampOrNull(row.FECHA_DEL_EQUIPO),
+    updated: row => timestampOrNull(row.ULTIMA_ACTUALIZACION),
+  }, { firstDir: { saldo: "desc", equipo: "desc", updated: "desc" } });
+
+  useEffect(() => {
+    setPage(1);
+  }, [sort]);
+
+  const visibleRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
+  // En el celular no hay páginas: la lista crece al bajar.
+  const mobileList = useIncrementalCount(sortedRows.length, `${search}|${expirationFilter}|${loadedSheet}|${sort?.key ?? ""}|${sort?.dir ?? ""}`);
+  const mobileRows = sortedRows.slice(0, mobileList.count);
+
   return (
     <div className="space-y-4 animate-in fade-in duration-300">
       {loading ? (
@@ -236,7 +257,7 @@ export const AssignedIpressStockModule: React.FC = () => {
 
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-slate-100 p-3 sm:p-4">
-              <label className="relative min-w-0 flex-1 sm:max-w-xl">
+              <label className={tableSearchBoxClass}>
                 <span className="sr-only">Buscar en el stock</span>
                 <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
                 <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar producto, código o lote" className={`${filterInputClass} bg-slate-50 pl-10 pr-9 focus:bg-white`} />
@@ -286,15 +307,15 @@ export const AssignedIpressStockModule: React.FC = () => {
                   <table className="min-w-full text-left">
                     <thead className="sticky top-0 z-20 bg-slate-50 shadow-[0_1px_0_0_rgb(226_232_240)]">
                       <tr>
-                        {showsPharmacy && <HeaderCell>Código IPRESS</HeaderCell>}
-                        <HeaderCell>Cód. SISMED / SIGA</HeaderCell>
-                        <HeaderCell>Descripción del producto</HeaderCell>
-                        <HeaderCell align="right">Saldo</HeaderCell>
-                        <HeaderCell>Lote / Vencimiento</HeaderCell>
-                        <HeaderCell>Tipo sum.</HeaderCell>
-                        <HeaderCell>F. finan.</HeaderCell>
-                        {canShow("FECHA_DEL_EQUIPO") && <HeaderCell>Fecha del equipo</HeaderCell>}
-                        {canShow("ULTIMA_ACTUALIZACION") && <HeaderCell>Última actualización</HeaderCell>}
+                        {showsPharmacy && <HeaderCell sort={headSort("pharmacy")}>Código IPRESS</HeaderCell>}
+                        <HeaderCell sort={headSort("code")}>Cód. SISMED / SIGA</HeaderCell>
+                        <HeaderCell sort={headSort("name")}>Descripción del producto</HeaderCell>
+                        <HeaderCell align="right" sort={headSort("saldo")}>Saldo</HeaderCell>
+                        <HeaderCell sort={headSort("expiry")}>Lote / Vencimiento</HeaderCell>
+                        <HeaderCell sort={headSort("tipo")}>Tipo sum.</HeaderCell>
+                        <HeaderCell sort={headSort("fuente")}>F. finan.</HeaderCell>
+                        {canShow("FECHA_DEL_EQUIPO") && <HeaderCell sort={headSort("equipo")}>Fecha del equipo</HeaderCell>}
+                        {canShow("ULTIMA_ACTUALIZACION") && <HeaderCell sort={headSort("updated")}>Última actualización</HeaderCell>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
