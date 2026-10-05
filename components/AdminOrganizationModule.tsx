@@ -13,6 +13,7 @@ import { TablePagination } from './ui/TablePagination';
 import { LoadMoreSentinel, useIncrementalCount } from './ui/IncrementalList';
 import { FloatingTableHead, useFloatingTableHead } from './ui/FloatingTableHead';
 import { ConfirmationDialog } from './ui/ConfirmationDialog';
+import { SortButton, ariaSort, tableSearchBoxClass, useTableSort, type SortDir } from './ui/kit';
 import { buildUngetConnectionStatus, pickOneConnectionPerUnget, type UngetConnectionState } from '../services/ungetConnections';
 import { isLinkedToSheet, resolveFacilitySheet } from '../services/facilitySheetLink';
 import { FACILITY_TYPES, facilityTypeLabel, suggestedFacilityType } from '../services/facilityCodes';
@@ -95,6 +96,14 @@ const TAB_HEADS: Record<OrgTab, string[]> = {
     MICRORED: ['Microred', 'UNGET', 'OGESS', 'Acciones'],
     IPRESS: ['Establecimiento', 'Categoría', 'Tipo', 'Microred', 'UNGET', 'OGESS', 'Acciones'],
 };
+/** Clave de orden de cada columna (en el mismo orden que TAB_HEADS); null = no se ordena. */
+const TAB_SORT_KEYS: Record<OrgTab, (string | null)[]> = {
+    DIRESA: ['name', 'ruc', 'district', 'province', 'department', null],
+    OGESS: ['name', 'code', 'district', 'province', 'diresa', null],
+    UNGET: ['name', 'district', 'province', 'ogess', 'diresa', 'connection', null],
+    MICRORED: ['name', 'unget', 'ogess', null],
+    IPRESS: ['name', 'category', 'type', 'microred', 'unget', 'ogess', null],
+};
 const ORG_PAGE_SIZE = 10;
 
 export const AdminOrganizationModule: React.FC = () => {
@@ -122,18 +131,6 @@ export const AdminOrganizationModule: React.FC = () => {
             document.removeEventListener('scroll', handleCloseOnEvents, true);
         };
     }, []);
-
-    const renderHeaderFilter = (
-        title: string,
-        value: string,
-        options: { value: string; label: string }[],
-        onChange: (val: string) => void,
-        id: string
-    ) => {
-        // Los filtros viven en la barra de arriba (y en el panel del celular): el encabezado solo nombra la columna.
-        void value; void options; void onChange; void id;
-        return <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 whitespace-nowrap">{title}</span>;
-    };
 
     const [diresas, setDiresas] = useState<Diresa[]>([]);
     const [ogess, setOgess] = useState<Ogess[]>([]);
@@ -1460,9 +1457,49 @@ export const AdminOrganizationModule: React.FC = () => {
 
     // --- Lista: tabla paginada en escritorio, tarjetas que cargan al bajar en el celular ---
     const isDesktop = useIsDesktop();
+    // Orden al tocar las cabeceras: sobre las filas ya filtradas y antes de paginar.
+    const diresaSort = useTableSort(finalFilteredDiresas, {
+        name: (d) => d.name, ruc: (d) => d.ruc, district: (d) => d.district, province: (d) => d.province, department: (d) => d.department,
+    });
+    const ogessSort = useTableSort(finalFilteredOgess, {
+        name: (o) => o.name, code: (o) => o.code, district: (o) => o.district, province: (o) => o.province,
+        diresa: (o) => (o.diresaId ? getDiresaName(o.diresaId) : null),
+    });
+    const ungetSort = useTableSort(finalFilteredUngets, {
+        name: (u) => u.name, district: (u) => u.district, province: (u) => u.province,
+        ogess: (u) => (u.ogessId ? getOgessName(u.ogessId) : null),
+        diresa: (u) => (u.diresaId ? getDiresaName(u.diresaId) : null),
+        connection: (u) => getConnectionUi(u.id).label,
+    });
+    const microredSort = useTableSort(finalFilteredMicroredes, {
+        name: (m) => m.name,
+        unget: (m) => (m.ungetId ? getUngetName(m.ungetId) : null),
+        ogess: (m) => { const pUnget = ungets.find(u => u.id === m.ungetId); return pUnget?.ogessId ? getOgessName(pUnget.ogessId) : null; },
+    });
+    const facilitySort = useTableSort(finalFilteredFacilities, {
+        name: (f) => f.name, category: (f) => f.category, type: (f) => facilityTypeLabel(f.type) || null,
+        microred: (f) => (f.microredId ? getMicroredName(f.microredId) : null),
+        unget: (f) => (f.ungetId ? getUngetName(f.ungetId) : null),
+        ogess: (f) => (f.ogessId ? getOgessName(f.ogessId) : null),
+    });
+    const orgSorts: Record<OrgTab, { dirOf: (key: never) => SortDir | null; toggle: (key: never) => void }> = {
+        DIRESA: diresaSort, OGESS: ogessSort, UNGET: ungetSort, MICRORED: microredSort, IPRESS: facilitySort,
+    };
+    const orgSortDir = (index: number): SortDir | null => {
+        const key = TAB_SORT_KEYS[activeTab][index];
+        return key ? (orgSorts[activeTab].dirOf as (k: string) => SortDir | null)(key) : null;
+    };
+    /** Título de la columna `index` de la tabla activa: botón que ordena, o texto si no se ordena. */
+    const orgSortHead = (index: number) => {
+        const key = TAB_SORT_KEYS[activeTab][index];
+        const label = TAB_HEADS[activeTab][index];
+        if (!key) return label;
+        return <SortButton label={label} dir={orgSortDir(index)} onClick={() => (orgSorts[activeTab].toggle as (k: string) => void)(key)} />;
+    };
+    const orgAriaSort = (index: number) => (TAB_SORT_KEYS[activeTab][index] ? ariaSort(orgSortDir(index)) : undefined);
     const [orgPage, setOrgPage] = useState(1);
     const orgFilterKey = [activeTab, searchQuery, filterDiresaId, filterOgessId, filterUngetId, filterMicroredId, filterType, filterCategory, filterDepartment, filterProvince, filterDistrict].join('|');
-    useEffect(() => setOrgPage(1), [orgFilterKey]);
+    useEffect(() => setOrgPage(1), [orgFilterKey, diresaSort.sort, ogessSort.sort, ungetSort.sort, microredSort.sort, facilitySort.sort]);
     const currentTotal = countCurrentItems(activeTab);
     useEffect(() => {
         const pages = Math.max(1, Math.ceil(currentTotal / ORG_PAGE_SIZE));
@@ -1595,7 +1632,7 @@ export const AdminOrganizationModule: React.FC = () => {
                 <>
                     {/* Barra: buscador, filtros y nuevo */}
                     <div className="flex items-center gap-2 md:flex-wrap">
-                        <div className="relative min-w-0 flex-1 md:min-w-[200px] md:max-w-xs">
+                        <div className={`${tableSearchBoxClass} md:min-w-[200px]`}>
                             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                             <input
                                 type="text"
@@ -1671,7 +1708,7 @@ export const AdminOrganizationModule: React.FC = () => {
                     {canAddActiveTab && !isDesktop && <FloatingActionButton icon={<Plus />} label={TAB_NEW[activeTab]} onClick={openCreate} />}
 
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm max-md:border-0 max-md:bg-transparent max-md:shadow-none">
-                    <FloatingTableHead state={orgFloatingHead} padding="px-4" cells={TAB_HEADS[activeTab].map((label, index) => ({ key: label + index, index, content: label, align: label === 'Acciones' ? 'right' as const : 'left' as const }))} />
+                    <FloatingTableHead state={orgFloatingHead} padding="px-4" cells={TAB_HEADS[activeTab].map((label, index) => ({ key: label + index, index, content: orgSortHead(index), align: label === 'Acciones' ? 'right' as const : 'left' as const }))} />
                     {/* Interactive Registry tables & list representations */}
                     <div className="w-full">
                         {/* Empty state conditional */}
@@ -1707,22 +1744,16 @@ export const AdminOrganizationModule: React.FC = () => {
                                             <table ref={orgTableRef} className="w-full text-left text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
-                                                        <th className="p-4 px-6">DIRESA</th>
-                                                        <th className="p-4">RUC</th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("Distrito", filterDistrict, filterOptions.districts, setFilterDistrict, "diresa-district")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("Provincia", filterProvince, filterOptions.provinces, setFilterProvince, "diresa-province")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("Departamento", filterDepartment, filterOptions.departments, setFilterDepartment, "diresa-department")}
-                                                        </th>
-                                                        <th className="p-4 text-right pr-6">Acciones</th>
+                                                        <th aria-sort={orgAriaSort(0)} className="p-4 px-6">{orgSortHead(0)}</th>
+                                                        <th aria-sort={orgAriaSort(1)} className="p-4">{orgSortHead(1)}</th>
+                                                        <th aria-sort={orgAriaSort(2)} className="p-4">{orgSortHead(2)}</th>
+                                                        <th aria-sort={orgAriaSort(3)} className="p-4">{orgSortHead(3)}</th>
+                                                        <th aria-sort={orgAriaSort(4)} className="p-4">{orgSortHead(4)}</th>
+                                                        <th aria-sort={orgAriaSort(5)} className="p-4 text-right pr-6">{orgSortHead(5)}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {pageItems(finalFilteredDiresas).map(d => (
+                                                    {pageItems(diresaSort.sorted).map(d => (
                                                         <tr 
                                                             key={d.id} 
                                                             onClick={() => { setSelectedDetailItem(d); setSelectedDetailType('DIRESA'); }}
@@ -1759,7 +1790,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             </table>
                                         </div>
 
-                                        {renderMobileCards('DIRESA', finalFilteredDiresas)}
+                                        {renderMobileCards('DIRESA', diresaSort.sorted)}
                                     </>
                                 )}
                                 
@@ -1771,22 +1802,16 @@ export const AdminOrganizationModule: React.FC = () => {
                                             <table ref={orgTableRef} className="w-full text-left text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
-                                                        <th className="p-4 px-6">OGESS</th>
-                                                        <th className="p-4">Código / RUC</th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("Distrito", filterDistrict, filterOptions.districts, setFilterDistrict, "ogess-district")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("Provincia", filterProvince, filterOptions.provinces, setFilterProvince, "ogess-province")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("DIRESA", filterDiresaId, [{ value: '', label: 'Todas las DIRESA' }, ...diresas.map(d => ({ value: d.id, label: d.name }))], setFilterDiresaId, "ogess-diresa")}
-                                                        </th>
-                                                        <th className="p-4 text-right pr-6">Acciones</th>
+                                                        <th aria-sort={orgAriaSort(0)} className="p-4 px-6">{orgSortHead(0)}</th>
+                                                        <th aria-sort={orgAriaSort(1)} className="p-4">{orgSortHead(1)}</th>
+                                                        <th aria-sort={orgAriaSort(2)} className="p-4">{orgSortHead(2)}</th>
+                                                        <th aria-sort={orgAriaSort(3)} className="p-4">{orgSortHead(3)}</th>
+                                                        <th aria-sort={orgAriaSort(4)} className="p-4">{orgSortHead(4)}</th>
+                                                        <th aria-sort={orgAriaSort(5)} className="p-4 text-right pr-6">{orgSortHead(5)}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {pageItems(finalFilteredOgess).map(o => (
+                                                    {pageItems(ogessSort.sorted).map(o => (
                                                         <tr 
                                                             key={o.id} 
                                                             onClick={() => { setSelectedDetailItem(o); setSelectedDetailType('OGESS'); }}
@@ -1825,7 +1850,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             </table>
                                         </div>
 
-                                        {renderMobileCards('OGESS', finalFilteredOgess)}
+                                        {renderMobileCards('OGESS', ogessSort.sorted)}
                                     </>
                                 )}
 
@@ -1837,32 +1862,17 @@ export const AdminOrganizationModule: React.FC = () => {
                                             <table ref={orgTableRef} className="w-full text-left text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
-                                                        <th className="p-4 px-6">UNGET</th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("Distrito", filterDistrict, filterOptions.districts, setFilterDistrict, "unget-district")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("Provincia", filterProvince, filterOptions.provinces, setFilterProvince, "unget-province")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("OGESS", filterOgessId, [{ value: '', label: 'Todas las OGESS' }, ...ogess.filter(o => !filterDiresaId || o.diresaId === filterDiresaId).map(o => ({ value: o.id, label: o.name }))], (val) => {
-                                                                setFilterOgessId(val);
-                                                                setFilterUngetId('');
-                                                            }, "unget-ogess")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("DIRESA", filterDiresaId, [{ value: '', label: 'Todas las DIRESA' }, ...diresas.map(d => ({ value: d.id, label: d.name }))], (val) => {
-                                                                setFilterDiresaId(val);
-                                                                setFilterOgessId('');
-                                                                setFilterUngetId('');
-                                                            }, "unget-diresa")}
-                                                        </th>
-                                                        <th className="p-4">Conexión</th>
-                                                        <th className="p-4 text-right pr-6">Acciones</th>
+                                                        <th aria-sort={orgAriaSort(0)} className="p-4 px-6">{orgSortHead(0)}</th>
+                                                        <th aria-sort={orgAriaSort(1)} className="p-4">{orgSortHead(1)}</th>
+                                                        <th aria-sort={orgAriaSort(2)} className="p-4">{orgSortHead(2)}</th>
+                                                        <th aria-sort={orgAriaSort(3)} className="p-4">{orgSortHead(3)}</th>
+                                                        <th aria-sort={orgAriaSort(4)} className="p-4">{orgSortHead(4)}</th>
+                                                        <th aria-sort={orgAriaSort(5)} className="p-4">{orgSortHead(5)}</th>
+                                                        <th aria-sort={orgAriaSort(6)} className="p-4 text-right pr-6">{orgSortHead(6)}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {pageItems(finalFilteredUngets).map(u => (
+                                                    {pageItems(ungetSort.sorted).map(u => (
                                                         <tr 
                                                             key={u.id} 
                                                             onClick={() => { setSelectedDetailItem(u); setSelectedDetailType('UNGET'); }}
@@ -1915,7 +1925,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             </table>
                                         </div>
 
-                                        {renderMobileCards('UNGET', finalFilteredUngets)}
+                                        {renderMobileCards('UNGET', ungetSort.sorted)}
                                     </>
                                 )}
 
@@ -1927,21 +1937,14 @@ export const AdminOrganizationModule: React.FC = () => {
                                             <table ref={orgTableRef} className="w-full text-left text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
-                                                        <th className="p-4 px-6">Microred</th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("UNGET", filterUngetId, [{ value: '', label: 'Todas las UNGET' }, ...ungets.filter(u => !filterOgessId || u.ogessId === filterOgessId).map(u => ({ value: u.id, label: u.name }))], setFilterUngetId, "microred-unget")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("OGESS", filterOgessId, [{ value: '', label: 'Todas las OGESS' }, ...ogess.filter(o => !filterDiresaId || o.diresaId === filterDiresaId).map(o => ({ value: o.id, label: o.name }))], (val) => {
-                                                                setFilterOgessId(val);
-                                                                setFilterUngetId('');
-                                                            }, "microred-ogess")}
-                                                        </th>
-                                                        <th className="p-4 text-right pr-6">Acciones</th>
+                                                        <th aria-sort={orgAriaSort(0)} className="p-4 px-6">{orgSortHead(0)}</th>
+                                                        <th aria-sort={orgAriaSort(1)} className="p-4">{orgSortHead(1)}</th>
+                                                        <th aria-sort={orgAriaSort(2)} className="p-4">{orgSortHead(2)}</th>
+                                                        <th aria-sort={orgAriaSort(3)} className="p-4 text-right pr-6">{orgSortHead(3)}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {pageItems(finalFilteredMicroredes).map(m => {
+                                                    {pageItems(microredSort.sorted).map(m => {
                                                         const pUnget = ungets.find(u => u.id === m.ungetId);
                                                         return (
                                                             <tr 
@@ -1981,7 +1984,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             </table>
                                         </div>
 
-                                        {renderMobileCards('MICRORED', finalFilteredMicroredes)}
+                                        {renderMobileCards('MICRORED', microredSort.sorted)}
                                     </>
                                 )}
 
@@ -1993,37 +1996,17 @@ export const AdminOrganizationModule: React.FC = () => {
                                             <table ref={orgTableRef} className="w-full text-left text-sm border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
-                                                        <th className="p-4 px-6">Establecimiento</th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("Categoría", filterCategory, [{ value: '', label: 'Todas' }, ...['I-1', 'I-2', 'I-3', 'I-4', 'II-1', 'II-2', 'III-1'].map(cat => ({ value: cat, label: cat }))], setFilterCategory, "ipress-category")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("Tipo", filterType, [
-                                                                { value: '', label: 'Todos' },
-                                                                ...FACILITY_TYPES.map(t => ({ value: t.value, label: t.label }))
-                                                            ], setFilterType, "ipress-type")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("Microred", filterMicroredId, [{ value: '', label: 'Todas' }, ...microredes.filter(m => !filterUngetId || m.ungetId === filterUngetId).map(m => ({ value: m.id, label: m.name }))], setFilterMicroredId, "ipress-microred")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("UNGET", filterUngetId, [{ value: '', label: 'Todas' }, ...ungets.filter(u => !filterOgessId || u.ogessId === filterOgessId).map(u => ({ value: u.id, label: u.name }))], (val) => {
-                                                                setFilterUngetId(val);
-                                                                setFilterMicroredId('');
-                                                            }, "ipress-unget")}
-                                                        </th>
-                                                        <th className="p-4">
-                                                            {renderHeaderFilter("OGESS", filterOgessId, [{ value: '', label: 'Todas' }, ...ogess.filter(o => !filterDiresaId || o.diresaId === filterDiresaId).map(o => ({ value: o.id, label: o.name }))], (val) => {
-                                                                setFilterOgessId(val);
-                                                                setFilterUngetId('');
-                                                                setFilterMicroredId('');
-                                                            }, "ipress-ogess")}
-                                                        </th>
-                                                        <th className="p-4 text-right pr-6">Acciones</th>
+                                                        <th aria-sort={orgAriaSort(0)} className="p-4 px-6">{orgSortHead(0)}</th>
+                                                        <th aria-sort={orgAriaSort(1)} className="p-4">{orgSortHead(1)}</th>
+                                                        <th aria-sort={orgAriaSort(2)} className="p-4">{orgSortHead(2)}</th>
+                                                        <th aria-sort={orgAriaSort(3)} className="p-4">{orgSortHead(3)}</th>
+                                                        <th aria-sort={orgAriaSort(4)} className="p-4">{orgSortHead(4)}</th>
+                                                        <th aria-sort={orgAriaSort(5)} className="p-4">{orgSortHead(5)}</th>
+                                                        <th aria-sort={orgAriaSort(6)} className="p-4 text-right pr-6">{orgSortHead(6)}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {pageItems(finalFilteredFacilities).map(f => (
+                                                    {pageItems(facilitySort.sorted).map(f => (
                                                         <tr 
                                                             key={f.code} 
                                                             onClick={() => { setSelectedDetailItem(f); setSelectedDetailType('IPRESS'); }}
@@ -2072,7 +2055,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                             </table>
                                         </div>
 
-                                        {renderMobileCards('IPRESS', finalFilteredFacilities)}
+                                        {renderMobileCards('IPRESS', facilitySort.sorted)}
                                     </>
                                 )}
                             </>
