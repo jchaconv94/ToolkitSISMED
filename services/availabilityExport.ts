@@ -1,5 +1,4 @@
 import ExcelJS from "exceljs";
-import { saveAs } from "file-saver";
 import { StockStatus } from "../types";
 import { DME_LEVEL_LABEL, ipressCodeOf, type AvailabilityItem, type AvailabilityReport, type TformdetMonthSheet } from "./availabilityReport";
 import type { DmeLevel } from "./stockStatus";
@@ -88,17 +87,21 @@ const writeTable = (ws: ExcelJS.Worksheet, startRow: number, cols: Col[], rows: 
     cell.border = border;
   });
   head.height = 32;
+  // Estilos compartidos (mismo objeto para todas las celdas de una columna): ExcelJS
+  // serializa mucho más rápido que con un objeto nuevo por celda.
+  const font = { name: FONT, size: 10, color: { argb: C.ink } };
+  const band = fill(C.band);
+  const styleFor = cols.map((c) => ({
+    plain: { font, border, numFmt: c.fmt, alignment: { vertical: "middle" as const, horizontal: c.align } },
+    banded: { font, border, numFmt: c.fmt, fill: band, alignment: { vertical: "middle" as const, horizontal: c.align } },
+  }));
   rows.forEach((values, r) => {
     const row = ws.getRow(startRow + 1 + r);
     values.forEach((v, i) => {
       const cell = row.getCell(i + 1);
       cell.value = v as ExcelJS.CellValue;
-      const c = cols[i];
-      cell.font = { name: FONT, size: 10, color: { argb: C.ink } };
-      if (c?.fmt) cell.numFmt = c.fmt;
-      cell.alignment = { vertical: "middle", horizontal: c?.align || (typeof v === "number" ? "right" : "left") };
-      cell.border = border;
-      if (r % 2 === 1) cell.fill = fill(C.band);
+      const st = styleFor[i] ?? styleFor[0];
+      cell.style = (r % 2 === 1 ? st.banded : st.plain) as Partial<ExcelJS.Style>;
     });
     row.height = 18;
   });
@@ -108,17 +111,20 @@ const writeTable = (ws: ExcelJS.Worksheet, startRow: number, cols: Col[], rows: 
   return { head: startRow, last };
 };
 
+/**
+ * Cambia el estilo de una celda sin tocar a las demás. Las celdas de `writeTable` comparten el
+ * objeto de estilo de su columna; `cell.fill = …` lo modificaría para toda la columna.
+ */
+const restyle = (cell: ExcelJS.Cell, patch: Partial<ExcelJS.Style>) => {
+  cell.style = { ...cell.style, ...patch } as Partial<ExcelJS.Style>;
+};
 const paintLevel = (cell: ExcelJS.Cell, level: DmeLevel) => {
   const [bg, fg] = LEVEL_FILL[level];
-  cell.fill = fill(bg);
-  cell.font = { name: FONT, size: 10, bold: true, color: { argb: fg } };
-  cell.alignment = { horizontal: "center", vertical: "middle" };
+  restyle(cell, { fill: fill(bg), font: { name: FONT, size: 10, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
 };
 const paintStatus = (cell: ExcelJS.Cell, status: StockStatus) => {
   const [bg, fg] = STATUS_FILL[status];
-  cell.fill = fill(bg);
-  cell.font = { name: FONT, size: 10, bold: true, color: { argb: fg } };
-  cell.alignment = { horizontal: "center", vertical: "middle" };
+  restyle(cell, { fill: fill(bg), font: { name: FONT, size: 10, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
 };
 const dataBar = (ws: ExcelJS.Worksheet, ref: string) => {
   ws.addConditionalFormatting({
@@ -321,7 +327,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   // Línea que separa las dos tablas.
   for (let r = 21; r <= endBest; r++) {
     const cell = rs.getCell(r, 6);
-    cell.border = { ...(cell.border || {}), right: { style: "medium", color: { argb: C.ink } } };
+    cell.border = { ...(cell.border || {}), right: { style: "medium", color: { argb: C.teal } } };
   }
 
   // Microredes
@@ -368,7 +374,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
     { header: "Total ítems", width: 10, fmt: FMT.int }, { header: "Disponibilidad", width: 14, fmt: FMT.pct }, { header: "Nivel", width: 11, align: "center" },
   ], ranked.map((e, i) => [i + 1, e.microred, e.code, e.name, e.category, e.desabastecido, e.substock, e.normostock, e.sobrestock, e.sinRotacion, e.total, e.pct / 100, DME_LEVEL_LABEL[e.level]]), { freezeCols: 4 });
   ranked.forEach((e, i) => paintLevel(es.getCell(te.head + 1 + i, 13), e.level));
-  for (let i = 0; i < ranked.length; i++) es.getCell(te.head + 1 + i, 6).font = { name: FONT, size: 10, color: { argb: "FFB91C1C" } };
+  for (let i = 0; i < ranked.length; i++) restyle(es.getCell(te.head + 1 + i, 6), { font: { name: FONT, size: 10, color: { argb: "FFB91C1C" } } });
   dataBar(es, `L${te.head + 1}:L${te.last}`);
 
   /* ---------------- Microredes ---------------- */
@@ -441,8 +447,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
       paintStatus(ws.getCell(t.head + 1 + n, statusCol), i.status);
       if (i.expiryRisk) {
         const cell = ws.getCell(t.head + 1 + n, riskCol);
-        cell.fill = fill("FFFEE2E2");
-        cell.font = { name: FONT, size: 10, bold: true, color: { argb: "FF991B1B" } };
+        restyle(cell, { fill: fill("FFFEE2E2"), font: { name: FONT, size: 10, bold: true, color: { argb: "FF991B1B" } } });
       }
     });
     // El consumo mensual se puede plegar para leer solo el resultado.
@@ -509,13 +514,17 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   return wb;
 };
 
-export const exportAvailabilityExcel = async (params: AvailabilityExportParams) => {
-  const wb = buildAvailabilityWorkbook(params);
-  const buffer = await wb.xlsx.writeBuffer();
+/** El libro ya serializado (.xlsx). Lo usan el Worker y, si no hay Worker, la propia página. */
+export const availabilityWorkbookBuffer = async (params: AvailabilityExportParams): Promise<ArrayBuffer> => {
+  // ExcelJS devuelve un Uint8Array (Buffer); el Worker necesita un ArrayBuffer para transferirlo.
+  const out = (await buildAvailabilityWorkbook(params).xlsx.writeBuffer()) as ArrayBuffer | Uint8Array;
+  if (out instanceof ArrayBuffer) return out;
+  return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
+};
+
+/** Nombre del archivo: `DISPONIBILIDAD_PRODUCTOS_UNGET_BELLAVISTA_202609.xlsx`. */
+export const availabilityFileName = (params: Pick<AvailabilityExportParams, "months" | "title" | "scope">) => {
   const cut = params.months[params.months.length - 1] || "";
   const slug = params.title.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "");
-  saveAs(
-    new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-    `DISPONIBILIDAD_${params.scope === "essential" ? "DME" : "PRODUCTOS"}_${slug}_${cut}.xlsx`,
-  );
+  return `DISPONIBILIDAD_${params.scope === "essential" ? "DME" : "PRODUCTOS"}_${slug}_${cut}.xlsx`;
 };
