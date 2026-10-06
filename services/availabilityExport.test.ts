@@ -24,9 +24,30 @@ describe("Excel de disponibilidad", () => {
     expect(fills[0]).not.toBe(fills[1]);
     // La columna del producto conserva el fondo propio de cada fila (alternado), no el de la situación.
     expect((ws.getCell(6, 7).fill as { fgColor?: { argb?: string } } | undefined)?.fgColor?.argb).not.toBe(fills[0]);
+    // Sin almacén no hay hoja «Almacén».
+    expect(wb.getWorksheet("Almacén")).toBeUndefined();
     // Portada: nombre y profesión del responsable.
     const cover = wb.getWorksheet("Resumen")!;
     expect(cover.getCell(3, 9).value).toBe("Ana Pérez");
     expect(cover.getCell(4, 9).value).toBe("Químico Farmacéutico");
+  });
+
+  it("muestra el stock del almacén en «Atención» y en su hoja", () => {
+    const { rows } = parseAvailabilitySheet([HEADER,
+      ["R", "MR", "06503", "P.S. A", "I-1", "00002", "DOS", "TAB", 1, "M", "P", "S", 10, 10, 0]]);
+    const report = summarize(buildItems(rows));
+    const wb = buildAvailabilityWorkbook({
+      report, pharmacyItems: null, months: ["202608", "202609"], scope: "all", title: "UNGET X", formulaText: "f",
+      levels: { optimo: 90, alto: 80, regular: 70 }, source: "s",
+      warehouse: [{ code: "030S05", name: "ALMACEN", medCode: "00002", description: "DOS", price: 2, stock: 120, lots: [] }],
+    });
+    const at = wb.getWorksheet("Atención")!;
+    const head = (at.getRow(5).values as unknown[]).map(String);
+    expect(at.getCell(6, head.indexOf("Stock en almacén")).value).toBe(120);
+    const wh = wb.getWorksheet("Almacén")!;
+    const whHead = (wh.getRow(5).values as unknown[]).map(String);
+    expect(wh.getCell(6, whHead.indexOf("Stock")).value).toBe(120);
+    expect(wh.getCell(6, whHead.indexOf("EESS desabastecidos")).value).toBe(1);
+    expect(wh.getCell(6, whHead.indexOf("Faltan para 2 meses (unid.)")).value).toBe(20);
   });
 });
