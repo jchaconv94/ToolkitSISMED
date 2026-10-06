@@ -28,8 +28,8 @@ describe("Excel de disponibilidad", () => {
     expect(wb.getWorksheet("Almacén")).toBeUndefined();
     // Portada: nombre y profesión del responsable.
     const cover = wb.getWorksheet("Resumen")!;
-    expect(cover.getCell(3, 9).value).toBe("Ana Pérez");
-    expect(cover.getCell(4, 9).value).toBe("Químico Farmacéutico");
+    expect(cover.getCell(4, 9).value).toBe("Ana Pérez");
+    expect(cover.getCell(5, 9).value).toBe("Químico Farmacéutico");
   });
 
   it("muestra el stock del almacén en «Atención» y en su hoja", () => {
