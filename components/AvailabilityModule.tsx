@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import {
   Activity, AlertTriangle, Building2, CalendarClock, CheckCircle2, ChevronRight, Download, FileSpreadsheet, Loader2, MoreVertical, RefreshCw, Settings2, Upload, X,
@@ -9,7 +8,7 @@ import { userFullName } from "../services/sessionDisplay";
 import { api } from "../services/api";
 import { StockStatus } from "../types";
 import {
-  DME_LEVEL_LABEL, buildItems, essentialRows, groupByIpress, parseAvailabilitySheet, parseLotsSheet, parseTformdetHistory, summarize, tformdetLastMonth,
+  DME_LEVEL_LABEL, buildItems, essentialRows, groupByIpress, summarize,
   type EstablishmentInfo,
   type AvailabilityItem, type AvailabilityScope, type EstablishmentSummary, type Lot, type TformdetMonthSheet, type MicroredSummary, type ParsedAvailability,
 } from "../services/availabilityReport";
@@ -18,6 +17,7 @@ import { formatOneDecimal, type DmeLevel } from "../services/stockStatus";
 import { availabilityConfigApi, classifyOptionsOf, describeFormula, factoryConfig, summaryOptionsOf, vitalCodeSet, type AvailabilityConfig } from "../services/availabilityConfig";
 import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
 import { formatNumber } from "../services/numberFormat";
+import { tformdetFromSheet, type TformdetFileResult } from "../services/tformdetFile";
 import {
   EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, SortButton, TableSearch, ariaSort, filterInputClass, useTableSort, type Tone,
 } from "./ui/kit";
@@ -78,10 +78,33 @@ const CodeChip: React.FC<{ code: string }> = ({ code }) => (
 );
 
 /** Lee la primera hoja de un Excel como filas. */
+/** Lectura con SheetJS: respaldo si el lector rápido o el Worker fallan. */
 const readSheet = async (file: File): Promise<unknown[][]> => {
-  const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true, dense: true });
-  const preferred = wb.SheetNames.find((n) => /dispo.*farm/i.test(n)) || wb.SheetNames[0];
-  return XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[preferred], { header: 1, raw: true, defval: null });
+  const XLSX = await import("xlsx");
+  const wb = XLSX.read(await file.arrayBuffer(), { dense: true, cellDates: true, cellNF: false, cellHTML: false, cellText: false, cellStyles: false });
+  return XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+};
+
+/** Lee la consulta TFORMDET en segundo plano con el lector rápido; si no se puede, con SheetJS. */
+const readTformdetFile = async (file: File): Promise<TformdetFileResult> => {
+  if (typeof Worker !== "undefined") {
+    const buffer = await file.arrayBuffer();
+    const reply = await new Promise<{ ok: boolean; retry?: boolean; message?: string; result?: TformdetFileResult }>((resolve) => {
+      let worker: Worker;
+      try {
+        worker = new Worker(new URL("../services/tformdetReader.worker.ts", import.meta.url), { type: "module" });
+      } catch {
+        resolve({ ok: false, retry: true });
+        return;
+      }
+      worker.onmessage = (e) => { resolve(e.data); worker.terminate(); };
+      worker.onerror = () => { resolve({ ok: false, retry: true }); worker.terminate(); };
+      worker.postMessage({ buffer, name: file.name }, [buffer]);
+    });
+    if (reply.ok && reply.result) return reply.result;
+    if (!reply.retry) throw new Error(reply.message || "No se pudo leer el archivo.");
+  }
+  return tformdetFromSheet(await readSheet(file), file.name);
 };
 
 /* ---------------------------------------------------------------- Tabla de escritorio */
@@ -245,43 +268,16 @@ export const AvailabilityModule: React.FC = () => {
   const handleDispFile = async (file: File) => {
     setReading("disp");
     try {
-      const sheet = await readSheet(file);
-      // El archivo principal puede ser el de disponibilidad o la consulta TFORMDET (uno o varios meses).
-      const isTformdet = sheet.slice(0, 15).some((row) => (row || []).some((c) => /^ANN?OMES$|^CODIGO_PRE$/i.test(String(c ?? "").trim())));
-      if (isTformdet) {
-        const fallbackMonth = (file.name.match(/(20\d{2})(0[1-9]|1[0-2])/g) || []).pop();
-        const data = parseTformdetHistory(sheet, { fallbackMonth });
-        setDispFile({ name: file.name, data });
-        setLotsFile({ name: "Del mismo TFORMDET", data: data.lots });
-        setTformdetSheet(tformdetLastMonth(sheet));
-        setSource({ kind: "tformdet", classified: data.hasClassification, skipped: data.skippedCodes });
-        if (!data.hasClassification) setScope("all");
-      } else {
-        const data = parseAvailabilitySheet(sheet);
-        if (data.rows.length === 0) throw new Error("El archivo no tiene productos.");
-        setDispFile({ name: file.name, data });
-        if (source?.kind === "tformdet") { setLotsFile(null); setTformdetSheet(null); }
-        setSource({ kind: "disponibilidad", classified: true, skipped: [] });
-      }
+      // Solo la consulta TFORMDET del Toolkit (uno o varios meses): trae consumo, stock y lotes.
+      const { data, last } = await readTformdetFile(file);
+      setDispFile({ name: file.name, data });
+      setLotsFile({ name: file.name, data: data.lots });
+      setTformdetSheet(last);
+      setSource({ kind: "tformdet", classified: data.hasClassification, skipped: data.skippedCodes });
+      if (!data.hasClassification) setScope("all");
       setCalculated(false);
     } catch (e: any) {
       toast.error(e?.message || "No se pudo leer el archivo.");
-    } finally {
-      setReading(null);
-    }
-  };
-
-  const handleLotsFile = async (file: File) => {
-    // Si aún no hay archivo principal, el TFORMDET puesto aquí ya basta para calcular: va arriba.
-    if (!dispFile) return handleDispFile(file);
-    setReading("lots");
-    try {
-      const sheet = await readSheet(file);
-      const data = parseLotsSheet(sheet);
-      setLotsFile({ name: file.name, data });
-      setTformdetSheet(tformdetLastMonth(sheet));
-    } catch (e: any) {
-      toast.error(e?.message || "No se pudo leer el TFORMDET.");
     } finally {
       setReading(null);
     }
@@ -416,35 +412,17 @@ export const AvailabilityModule: React.FC = () => {
               </button>
             )}
           </div>
-          <p className="mt-1 text-[13px] text-slate-500">Suba los archivos del mes de corte. Se calcula por producto, establecimiento, microred y UNGET; los medicamentos esenciales salen del mismo cálculo.</p>
-          <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
+          <p className="mt-1 text-[13px] text-slate-500">Suba la consulta TFORMDET del Toolkit. Se calcula por producto, establecimiento, microred y UNGET; los medicamentos esenciales salen del mismo cálculo.</p>
+          <div className="mt-5">
             <DropZone
-              title="TFORMDET o disponibilidad"
-              hint="Consulta TFORMDET del Toolkit con los meses que quiera (se calcula con todos), o el Excel de disponibilidad por farmacia o IPRESS."
+              title="Consulta TFORMDET"
+              hint="Descárguela del Toolkit de escritorio con los meses que quiera: se calcula con todos. Los lotes y vencimientos salen del último mes."
               fileName={dispFile?.name}
               detail={d ? `${formatNumber(d.rows.length)} filas` : undefined}
               onFile={handleDispFile}
-              onClear={() => { setDispFile(null); setCalculated(false); if (source?.kind === "tformdet") { setLotsFile(null); setTformdetSheet(null); } setSource(null); }}
+              onClear={() => { setDispFile(null); setCalculated(false); setLotsFile(null); setTformdetSheet(null); setSource(null); }}
               busy={reading === "disp"}
             />
-            {source?.kind === "tformdet" ? (
-              <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-5 text-center md:p-6">
-                <CheckCircle2 className="mb-2 h-6 w-6 text-emerald-600" />
-                <p className="text-[14px] font-bold text-slate-800">Lotes y vencimientos incluidos</p>
-                <p className="mt-1 max-w-xs text-[12.5px] text-slate-500">Salen del mismo TFORMDET (los lotes con saldo del último mes).</p>
-              </div>
-            ) : (
-            <DropZone
-              title="TFORMDET"
-              optional
-              hint="Lotes, saldos y vencimientos del mes de corte: agrega el vencimiento más próximo y el riesgo de vencimiento."
-              fileName={lotsFile?.name}
-              detail={lotsFile ? `${formatNumber(lotsFile.data.size)} productos con lote` : undefined}
-              onFile={handleLotsFile}
-              onClear={() => { setLotsFile(null); setTformdetSheet(null); }}
-              busy={reading === "lots"}
-            />
-            )}
           </div>
           {reading === "disp" && (
             <p className="mt-3 flex items-center gap-2 text-[12.5px] text-slate-500"><Loader2 className="h-4 w-4 animate-spin text-teal-600" />Leyendo el archivo… un TFORMDET de 12 meses puede tardar medio minuto.</p>
