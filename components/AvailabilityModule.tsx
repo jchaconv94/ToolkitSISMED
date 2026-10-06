@@ -5,6 +5,7 @@ import {
   Activity, AlertTriangle, Building2, CalendarClock, CheckCircle2, ChevronRight, Download, FileSpreadsheet, Loader2, MoreVertical, RefreshCw, Settings2, Upload, X,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { userFullName } from "../services/sessionDisplay";
 import { api } from "../services/api";
 import { StockStatus } from "../types";
 import {
@@ -361,7 +362,18 @@ export const AvailabilityModule: React.FC = () => {
   const handleExport = async () => {
     setExporting(true);
     try {
-      await exportAvailabilityExcel({ report, pharmacyItems, months, scopeLabel: scope === "essential" ? "Esenciales" : "Todos", title });
+      // El porcentaje del otro alcance va como referencia en el resumen.
+      const otherScope: AvailabilityScope = scope === "all" ? "essential" : "all";
+      const otherItems = computed && (otherScope === "all" || source?.classified !== false) ? (otherScope === "all" ? computed.all : computed.essential) : null;
+      const otherScopePct = otherItems && otherItems.length ? summarize(otherItems, summaryOptionsOf(config.formula, otherScope, vitalCodes)).pct : null;
+      await exportAvailabilityExcel({
+        report, otherScopePct, pharmacyItems, months, scope, title,
+        formulaText: describeFormula(config.formula, scope),
+        levels: config.formula.levels,
+        fusedVersion: config.fused.version,
+        source: `${dispFile?.name || ""} (${source?.kind === "tformdet" ? "TFORMDET" : "archivo de disponibilidad"})`,
+        preparedBy: user ? userFullName(user) : undefined,
+      });
     } catch (e: any) {
       toast.error(e?.message || "No se pudo generar el Excel.");
     } finally {
