@@ -142,6 +142,7 @@ import { FloatingTableHead, SortHeadButton, headAlignClass, nextSort, tableHeadC
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
 import { BottomSheet } from "./ui/BottomSheet";
+import { StockConnectionsDialog, type StockConnectionRow } from "./StockConnectionsDialog";
 import { DeficiencyCaptureBar } from "./DeficiencyCaptureBar";
 import { EstablishmentCard, EstablishmentMobileRow, type EstablishmentCardData } from "./EstablishmentCard";
 import { EstablishmentSyncPanel, EstablishmentTable, type SyncFilter } from "./EstablishmentTable";
@@ -2740,8 +2741,8 @@ const SheetSearchModuleContent: React.FC = () => {
     }
   };
 
-  const handleAddUrl = () => {
-    if (!user) return;
+  const handleAddUrl = (): boolean => {
+    if (!user) return false;
     const webAppUrl = newUrlInput.trim();
     const val = newNameInput.trim();
 
@@ -2750,17 +2751,17 @@ const SheetSearchModuleContent: React.FC = () => {
     const spreadsheetId = sheetInput ? extractSpreadsheetId(sheetInput) : "";
     if (sheetInput && !spreadsheetId) {
       toast.error("El enlace de la hoja de cálculo no es válido. Pegue la dirección completa de Google Sheets.");
-      return;
+      return false;
     }
     if (!webAppUrl && !spreadsheetId) {
       toast.error("Indique el enlace de la hoja de cálculo o la URL de la Web App.");
-      return;
+      return false;
     }
     // Sin Web App, la conexión se identifica por su hoja.
     const url = webAppUrl || `${VIRTUAL_SHEET_URL_PREFIX}${spreadsheetId}`;
     if (!val || val === "" || val.includes("-- Seleccionar")) {
       toast.error("Por favor, seleccione una UNGET válida de la lista.");
-      return;
+      return false;
     }
 
     const matching = allUngets.find(u => String(u.id) === val || u.name === val);
@@ -2771,7 +2772,7 @@ const SheetSearchModuleContent: React.FC = () => {
       toast.error(
         `No se pudo identificar la UNGET "${val}" entre las registradas en Establecimientos. Actualice la página; si el problema sigue, regístrela antes de configurar su conexión.`,
       );
-      return;
+      return false;
     }
     const name = matching.name;
     const ungetId = matching.id;
@@ -2788,11 +2789,11 @@ const SheetSearchModuleContent: React.FC = () => {
         toast.error(
           `Ha alcanzado el límite máximo de ${maxUrlsAllowed} URLs para su rol.`,
         );
-        return;
+        return false;
       }
       if (tempUrls.find((u) => u.url === url)) {
         toast.error("Esta URL ya está registrada.");
-        return;
+        return false;
       }
       setTempUrls([...tempUrls, { url, name, ungetId, username: user.username, spreadsheetId: spreadsheetId || undefined }]);
     }
@@ -2801,6 +2802,7 @@ const SheetSearchModuleContent: React.FC = () => {
     setNewNameInput("");
     setNewSpreadsheetInput("");
     setSpreadsheetCheck(null);
+    return true;
   };
 
   /** Comprueba que la hoja esté compartida como lector con el enlace. */
@@ -5144,449 +5146,81 @@ function processSheet(sheet) {
         );
       })()}
 
-      {isConfigOpen && canManageConfigs && (
-        <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col">
-            {/* Header Modal */}
-            <div className="px-5 py-4 sm:px-6 sm:py-5 flex items-center justify-between bg-slate-900 sticky top-0 z-10">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-teal-500/15 rounded-xl flex items-center justify-center text-teal-400 shadow-inner">
-                  <Settings className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="font-black text-white text-base sm:text-lg uppercase tracking-tight">
-                    Conexiones de stock
-                  </h3>
-                  <p className="text-[10px] sm:text-xs text-slate-400 font-medium tracking-tight mt-0.5">
-                    Vincule la hoja de cálculo de su UNGET
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setIsConfigOpen(false);
-                  setEditingIndex(null);
-                  setNewUrlInput("");
-                  setNewNameInput("");
-                }}
-                className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white"
-              >
-                <X className="h-5 w-5 sm:h-6 sm:w-6" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100/70">
-              {(() => {
-                const role = user?.role || "";
-                const r = role.toUpperCase();
-                const isAdminOrRegional =
-                  r === "ADMIN" ||
-                  r === "GLOBAL" ||
-                  r.includes("SUPER") ||
-                  r.includes("GENERAL") ||
-                  r === "ADMINISTRADOR" ||
-                  r.includes("DIRESA") ||
-                  r.includes("OGESS");
-
-
-                return (
-                  <div className="grid grid-cols-1 items-stretch gap-5 lg:grid-cols-2 max-w-7xl mx-auto">
-                    {/* Dos columnas: a la izquierda se da de alta la conexión y a la derecha se
-                        ven las que ya hay, en vez de una debajo de la otra con la mitad del
-                        ancho en blanco. */}
-                    {/* ---------- ROW 1: EQUAL HEIGHTS HEADER PANEL ---------- */}
-                    <div className="font-sans">
-                      {/* Tarjeta: añadir o editar una conexión */}
-                      <div>
-                        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm h-full flex flex-col justify-between">
-                          <div>
-                        <h4 className="text-xs sm:text-sm font-black text-gray-800 mb-4 sm:mb-5 flex items-center gap-2 uppercase tracking-tight">
-                          <Plus
-                            className={`h-5 w-5 ${editingIndex !== null ? "text-amber-500" : "text-teal-600"}`}
-                          />
-                          {editingIndex !== null ? "Editar conexión" : "Nueva conexión"}
-                        </h4>
-
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-1 gap-4">
-                            {/* A quien es de una UNGET no se le pregunta cuál: el campo solo
-                                repetía su propio nombre y no se podía cambiar. */}
-                            {!isUngetRole && (
-                            <div className="space-y-1">
-                              <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
-                                UNGET
-                              </label>
-                              {editingIndex !== null ? (
-                                <input
-                                  type="text"
-                                  placeholder="Ej: UNGET CENTRO"
-                                  value={(() => {
-                                    const matching = allUngets.find(u => String(u.id) === newNameInput || u.name === newNameInput);
-                                    return matching ? matching.name : newNameInput;
-                                  })()}
-                                  disabled
-                                  className="w-full text-xs sm:text-sm rounded-lg border border-gray-200 bg-gray-100 cursor-not-allowed shadow-sm py-2.5 px-3 font-bold text-gray-400"
-                                />
-                              ) : availableUngetsForConfig.length === 0 ? (
-                                <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200/50 rounded-lg px-3 py-2 font-bold min-h-[42px] leading-tight flex items-center justify-center">
-                                  Todas las UNGETs de su jurisdicción ya están configuradas.
-                                </div>
-                              ) : (
-                                /* El selector del kit: trae buscador en cuanto hay más de cinco
-                                   opciones, que es lo que hacía falta con tantas UNGET. */
-                                <CustomSelect
-                                  value={newNameInput}
-                                  onChange={setNewNameInput}
-                                  placeholder="Seleccionar UNGET..."
-                                  ariaLabel="UNGET de la conexión"
-                                  className="h-[42px] text-xs sm:text-sm"
-                                  options={availableUngetsForConfig.map((unget: any) => {
-                                    const diresa = allDiresas.find(d => String(d.id) === String(unget.diresaId))?.name || "";
-                                    const ogess = allOgess.find(o => String(o.id) === String(unget.ogessId))?.name || "";
-                                    const locationTag = [diresa, ogess].filter(Boolean).join(" - ");
-                                    return {
-                                      value: unget.id,
-                                      label: `${unget.name}${locationTag ? ` (${locationTag})` : ""}`,
-                                    };
-                                  })}
-                                />
-                              )}
-                            </div>
-                            )}
-                            <div className="space-y-1">
-                              <label className="text-[9px] font-black text-gray-400 ml-1 uppercase tracking-wider">
-                                Enlace de la hoja de cálculo
-                              </label>
-                              <div className="flex gap-2">
-                                <input
-                                  type="url"
-                                  placeholder="https://docs.google.com/spreadsheets/d/..."
-                                  value={newSpreadsheetInput}
-                                  onChange={(e) => {
-                                    setNewSpreadsheetInput(e.target.value);
-                                    setSpreadsheetCheck(null);
-                                  }}
-                                  className="flex-1 min-w-0 text-[10px] sm:text-xs rounded-lg border border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2.5 px-3 font-mono bg-white"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={handleCheckSpreadsheet}
-                                  disabled={isCheckingSpreadsheet || !newSpreadsheetInput.trim()}
-                                  className="px-3 py-2.5 rounded-lg border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 hover:border-slate-400 disabled:opacity-50 font-black text-[10px] uppercase tracking-wider transition-all shrink-0"
-                                >
-                                  {isCheckingSpreadsheet ? "Probando..." : "Probar"}
-                                </button>
-                              </div>
-                              {spreadsheetCheck && (
-                                <p
-                                  className={`text-[9px] font-bold ml-1 flex items-start gap-1 ${spreadsheetCheck.ok ? "text-emerald-600" : "text-amber-600"}`}
-                                >
-                                  {spreadsheetCheck.ok ? (
-                                    <CheckCircle2 className="h-3 w-3 shrink-0 mt-px" />
-                                  ) : (
-                                    <AlertCircle className="h-3 w-3 shrink-0 mt-px" />
-                                  )}
-                                  {spreadsheetCheck.message}
-                                </p>
-                              )}
-                              <p className="text-[9px] text-gray-400 ml-1 font-medium">
-                                Comparta la hoja como "Cualquiera con el enlace: Lector".{" "}
-                                <button
-                                  type="button"
-                                  onClick={() => setIsShareHelpOpen(true)}
-                                  className="text-teal-600 font-black hover:underline"
-                                >
-                                  Cómo se hace
-                                </button>
-                              </p>
-                            </div>
-                            {/* La Web App es respaldo: se pliega para no confundir a quien configura por primera vez. */}
-                            <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
-                              <button
-                                type="button"
-                                onClick={() => setIsWebAppSectionOpen(!isWebAppSectionOpen)}
-                                className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-slate-100/70 transition-colors"
-                              >
-                                <span className="flex items-center gap-2 min-w-0">
-                                  <ChevronRight
-                                    className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${isWebAppSectionOpen ? "rotate-90" : ""}`}
-                                  />
-                                  <span className="min-w-0">
-                                    <span className="block text-[10px] sm:text-xs font-black text-slate-700 uppercase tracking-tight">
-                                      Web App de Apps Script
-                                    </span>
-                                    <span className="block text-[9px] text-slate-400 font-medium">
-                                      Opcional · solo si la hoja no se puede compartir
-                                    </span>
-                                  </span>
-                                </span>
-                                {newUrlInput.trim() && !isWebAppSectionOpen && (
-                                  <span className="text-[8px] font-black text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0">
-                                    Configurada
-                                  </span>
-                                )}
-                              </button>
-                              {isWebAppSectionOpen && (
-                                <div className="px-3 pb-3 space-y-2">
-                                  <input
-                                    type="url"
-                                    placeholder="https://script.google.com/..."
-                                    value={newUrlInput}
-                                    onChange={(e) => setNewUrlInput(e.target.value)}
-                                    onKeyDown={(e) => e.key === "Enter" && handleAddUrl()}
-                                    className="w-full text-[10px] sm:text-xs rounded-lg border border-slate-300 focus:border-teal-600 focus:ring-teal-600 shadow-sm py-2.5 px-3 font-mono bg-white"
-                                  />
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <p className="text-[9px] text-slate-400 font-medium">
-                                      Con la hoja configurada, la Web App solo se usa como respaldo.
-                                    </p>
-                                    <button
-                                      type="button"
-                                      onClick={() => setIsInstructionModalOpen(true)}
-                                      className="text-[9px] font-black uppercase tracking-wider text-blue-600 hover:text-blue-700 shrink-0 flex items-center gap-1"
-                                    >
-                                      Ver guía paso a paso
-                                      <ArrowRight className="h-3 w-3" />
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5 pt-1">
-                            <button
-                              onClick={handleAddUrl}
-                              className={`w-full sm:w-auto px-8 py-2.5 rounded-lg text-white font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 ${editingIndex !== null ? "bg-amber-500 shadow-amber-500/20 hover:bg-amber-600 hover:shadow-amber-600/30" : "bg-teal-600 shadow-teal-600/20 hover:bg-teal-700 hover:shadow-teal-700/30"}`}
-                            >
-                              {editingIndex !== null ? (
-                                <Check className="h-3.5 w-3.5" />
-                              ) : (
-                                <Plus className="h-3.5 w-3.5" />
-                              )}
-                              {editingIndex !== null
-                                ? "Actualizar en Lista"
-                                : "Añadir a Lista"}
-                            </button>
-                            {editingIndex !== null && (
-                              <button
-                                onClick={() => {
-                                  setEditingIndex(null);
-                                  setNewUrlInput("");
-                                  setNewNameInput("");
-                                  setNewSpreadsheetInput("");
-                                  setSpreadsheetCheck(null);
-                                }}
-                                className="w-full sm:w-auto px-4 py-2.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-all font-bold text-[10px] sm:text-xs uppercase tracking-wider"
-                              >
-                                Cancelar
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                  </div>
-
-                  {/* ---------- ROW 2: CONNECTIONS & JURISDICTION ---------- */}
-                  <div className="lg:relative animate-in fade-in slide-in-from-bottom-4 duration-300">
-                    {/* Card: Lista de conexiones.
-
-                        En pantalla ancha va en posición absoluta a propósito: así no aporta
-                        altura a la fila, que queda marcada por el formulario de la izquierda,
-                        y la lista se desplaza por dentro en vez de alargar el modal. */}
-                    <div className="lg:absolute lg:inset-0">
-                      <div
-                        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col h-full min-h-[320px] lg:min-h-0"
-                      >
-                        <div className="flex flex-wrap gap-2 justify-between items-center mb-4 shrink-0">
-                          <h4 className="text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-widest">
-                            CONEXIONES CONFIGURADAS (
-                            {tempUrls.length})
-                          </h4>
-                          {typeof maxUrlsAllowed === "number" && maxUrlsAllowed > 0 ? (
-                            <span className="text-[9px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-2.5 py-1 rounded-full uppercase tracking-widest shrink-0">
-                              Límite de URLs: {maxUrlsAllowed}
-                            </span>
-                          ) : null}
-                        </div>
-
-                        <div className="space-y-2.5 flex-1 min-h-0 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar">
-                          {/* Map own URLs */}
-                          {tempUrls.length > 0 ? (
-                            tempUrls.map((config, idx) => {
-                            // Misma regla que en las tarjetas: la conexión de otra cuenta
-                            // se ve, con su etiqueta de quién la mantiene, pero no se toca.
-                            const esConexionPropia = canEditConnection(config, user?.username, cuentasActivas);
-                            return (
-                              <div
-                                key={idx}
-                                className={`group relative flex gap-2 sm:gap-3 items-center border p-3 rounded-lg transition-all duration-200 shadow-sm ${
-                                  editingIndex === idx
-                                    ? "border-amber-400 bg-amber-50/40 shadow-md shadow-amber-500/5"
-                                    : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-md hover:shadow-slate-500/5"
-                                }`}
-                              >
-                                <div
-                                  className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow-sm ${
-                                    editingIndex === idx
-                                      ? "bg-amber-100 text-amber-600 border border-amber-200/50"
-                                      : "bg-slate-50 border border-slate-100 text-slate-400"
-                                  }`}
-                                >
-                                  <LinkIcon className="h-4 w-4" />
-                                </div>
-                                <div className="flex-1 min-w-0 pr-1">
-                                  <div className="text-[10px] sm:text-xs font-black text-slate-800 truncate uppercase mt-0.5 tracking-tight flex items-center gap-1.5 flex-wrap">
-                                    {(() => {
-                                      const configNorm = normalizeName(config.name);
-                                      const matching = allUngets.find((u) => 
-                                        (config.ungetId && String(u.id) === String(config.ungetId)) || 
-                                        u.name === config.name || 
-                                        normalizeName(u.name) === configNorm
-                                      );
-                                      const nameStr = formatDisplayName(matching ? matching.name : config.name);
-                                      const ungetSlug = matching?.id ? `UNG-${matching.id.substring(0, 5).toUpperCase()}` : "";
-                                      return (
-                                        <>
-                                          <span className="truncate">{nameStr}</span>
-                                          {ungetSlug && (
-                                            <span className="text-[8px] font-black text-teal-600 bg-teal-50/70 border border-teal-100 px-1 py-0.5 rounded leading-none shrink-0 scale-95 origin-left">
-                                              {ungetSlug}
-                                            </span>
-                                          )}
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-                                  <div className="text-[8.5px] sm:text-[9.5px] text-slate-400 truncate font-mono mt-1 flex items-center gap-1 border-b border-transparent group-hover:border-slate-100 pb-0.5 max-w-[240px] md:max-w-xs xl:max-w-none">
-                                    {describeConfigUrl(config)}
-                                  </div>
-                                  {config.spreadsheetId ? (
-                                    <div className="text-[8px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5">
-                                      <CheckCircle2 className="h-2 w-2 text-emerald-500 shrink-0" />
-                                      Lectura directa
-                                    </div>
-                                  ) : hasWebApp(config) ? (
-                                    <div
-                                      className="text-[8px] font-extrabold text-amber-700 bg-amber-50 border border-amber-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5"
-                                      title="Configure la hoja de cálculo para leer sin Apps Script."
-                                    >
-                                      <AlertTriangle className="h-2 w-2 text-amber-500 shrink-0" />
-                                      Solo Apps Script
-                                    </div>
-                                  ) : (
-                                    <div className="text-[8px] font-extrabold text-slate-500 bg-slate-100 border border-slate-200/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5">
-                                      <AlertCircle className="h-2 w-2 text-slate-400 shrink-0" />
-                                      Sin hoja configurada
-                                    </div>
-                                  )}
-                                  {connectionErrors[config.url] && (
-                                    <div
-                                      className="text-[8px] font-extrabold text-red-600 bg-red-50 border border-red-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5"
-                                      title={connectionErrors[config.url]}
-                                    >
-                                      <AlertCircle className="h-2 w-2 text-red-400 shrink-0" />
-                                      {getGasErrorLabel(connectionErrors[config.url]).label}
-                                    </div>
-                                  )}
-                                  {isConnectionOrphaned(config, cuentasActivas) ? (
-                                    <div className="text-[8px] font-extrabold text-amber-800 bg-amber-50 border border-amber-200/70 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5">
-                                      <AlertCircle className="h-2 w-2 text-amber-500 shrink-0" />
-                                      Sin responsable ({config.username} ya no está activo)
-                                    </div>
-                                  ) : (
-                                    config.username &&
-                                    config.username !== user?.username && (
-                                      <div className="text-[8px] font-extrabold text-teal-700 bg-teal-50 border border-teal-100/60 px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 uppercase tracking-tight mt-1.5">
-                                        <CheckCircle2 className="h-2 w-2 text-teal-500" />
-                                        Heredado de la Jurisdicción ({config.username})
-                                      </div>
-                                    )
-                                  )}
-                                </div>
-                                {esConexionPropia ? (
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleEditUrl(idx, e)}
-                                    className={`p-1.5 sm:p-2 rounded-lg border transition-all ${
-                                      editingIndex === idx
-                                        ? "border-amber-200 text-amber-600 bg-amber-50/50 shadow-sm"
-                                        : "border-slate-100 bg-slate-50 text-slate-400 hover:border-blue-200 hover:bg-blue-50/50 hover:text-blue-600 hover:shadow-sm"
-                                    }`}
-                                    title="Editar Origen"
-                                  >
-                                    <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveUrl(idx)}
-                                    className="p-1.5 sm:p-2 border border-slate-100 bg-slate-50 text-slate-400 hover:border-red-200 hover:bg-red-50/50 hover:text-red-500 rounded-lg transition-all hover:shadow-sm"
-                                    title="Eliminar Origen"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                  </button>
-                                </div>
-                                ) : (
-                                  <div
-                                    className="shrink-0 p-1.5 sm:p-2 text-slate-300"
-                                    title={`Solo ${connectionOwner(config)} puede modificar esta conexión`}
-                                  >
-                                    <Lock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                  </div>
-                                )}
-                              </div>
-                            );
-                            })
-                          ) : (
-                            <div className="py-8 sm:py-10 text-center bg-slate-50/80 rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center">
-                              <div className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-100 flex items-center justify-center mb-3">
-                                <LinkIcon className="h-5 w-5 text-slate-300" />
-                              </div>
-                              <h4 className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-widest">
-                                Todavía no hay conexiones
-                              </h4>
-                              <p className="text-[9px] sm:text-[10px] text-slate-400 font-medium max-w-[200px] mt-1.5 leading-relaxed">
-                                Añada la primera arriba, con el enlace de su hoja.
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                </div>
-              </div>
-                );
-              })()}
-            </div>
-
-            {/* Footer Modal */}
-            <div className="px-5 py-4 sm:px-6 border-t border-slate-200 bg-white flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 sticky bottom-0 z-10">
-              <button
-                onClick={() => {
-                  setIsConfigOpen(false);
-                  setEditingIndex(null);
-                }}
-                className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-gray-500 hover:text-gray-700 transition-colors whitespace-nowrap"
-              >
-                Cerrar sin guardar
-              </button>
-              <button
-                onClick={handleSaveConfig}
-                disabled={isLoading}
-                className="w-full sm:w-auto bg-teal-600 text-white px-6 sm:px-8 py-2.5 rounded-lg text-sm font-black hover:bg-teal-700 transition-all shadow-lg shadow-teal-600/20 flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap"
-              >
-                <Save className="h-4 w-4 shrink-0" />
-                <span className="sm:hidden">GUARDAR Y SINCRONIZAR</span>
-                <span className="hidden sm:inline">GUARDAR Y SINCRONIZAR CAMBIOS</span>
-              </button>
-            </div>
-          </div>
-        </div>
+      {canManageConfigs && (
+        <StockConnectionsDialog
+          open={isConfigOpen}
+          onClose={() => {
+            setIsConfigOpen(false);
+            setEditingIndex(null);
+            setNewUrlInput("");
+            setNewNameInput("");
+            setNewSpreadsheetInput("");
+            setSpreadsheetCheck(null);
+          }}
+          rows={tempUrls.map((config, idx) => {
+            const configNorm = normalizeName(config.name);
+            const matching = allUngets.find((u) =>
+              (config.ungetId && String(u.id) === String(config.ungetId)) ||
+              u.name === config.name ||
+              normalizeName(u.name) === configNorm
+            );
+            const error = connectionErrors[config.url];
+            return {
+              key: `${config.url}-${idx}`,
+              name: formatDisplayName(matching ? matching.name : config.name),
+              slug: matching?.id ? `UNG-${String(matching.id).substring(0, 5).toUpperCase()}` : "",
+              urlText: describeConfigUrl(config),
+              kind: config.spreadsheetId ? "direct" : hasWebApp(config) ? "gas" : "none",
+              errorLabel: error ? getGasErrorLabel(error).label : undefined,
+              errorTitle: error || undefined,
+              orphan: isConnectionOrphaned(config, cuentasActivas),
+              owner: config.username && config.username !== user?.username ? config.username : undefined,
+              // Misma regla que en las tarjetas: la conexión de otra cuenta se ve, con quién
+              // la mantiene, pero no se toca (AGENTS.md §7 bis).
+              editable: canEditConnection(config, user?.username, cuentasActivas),
+            } as StockConnectionRow;
+          })}
+          dirty={JSON.stringify(tempUrls) !== JSON.stringify(scriptUrls)}
+          maxUrlsAllowed={typeof maxUrlsAllowed === "number" ? maxUrlsAllowed : null}
+          saving={isLoading}
+          onSave={handleSaveConfig}
+          editingIndex={editingIndex}
+          // A quien es de una UNGET no se le pregunta cuál: el campo solo repetía su nombre.
+          showUngetField={!isUngetRole}
+          ungetValue={newNameInput}
+          onUngetChange={setNewNameInput}
+          ungetOptions={availableUngetsForConfig.map((unget: any) => {
+            const diresa = allDiresas.find(d => String(d.id) === String(unget.diresaId))?.name || "";
+            const ogess = allOgess.find(o => String(o.id) === String(unget.ogessId))?.name || "";
+            const locationTag = [diresa, ogess].filter(Boolean).join(" - ");
+            return { value: unget.id, label: `${unget.name}${locationTag ? ` (${locationTag})` : ""}` };
+          })}
+          editingUngetName={(() => {
+            const matching = allUngets.find(u => String(u.id) === newNameInput || u.name === newNameInput);
+            return matching ? matching.name : newNameInput;
+          })()}
+          spreadsheetInput={newSpreadsheetInput}
+          onSpreadsheetChange={(value) => { setNewSpreadsheetInput(value); setSpreadsheetCheck(null); }}
+          spreadsheetCheck={spreadsheetCheck}
+          checkingSpreadsheet={isCheckingSpreadsheet}
+          onCheckSpreadsheet={handleCheckSpreadsheet}
+          webAppOpen={isWebAppSectionOpen}
+          onToggleWebApp={() => setIsWebAppSectionOpen(!isWebAppSectionOpen)}
+          webAppInput={newUrlInput}
+          onWebAppChange={setNewUrlInput}
+          onSubmit={handleAddUrl}
+          onCancelForm={() => {
+            setEditingIndex(null);
+            setNewUrlInput("");
+            setNewNameInput(isUngetRole && myUnget ? myUnget.name : "");
+            setNewSpreadsheetInput("");
+            setSpreadsheetCheck(null);
+          }}
+          onEdit={(idx) => handleEditUrl(idx)}
+          onRemove={handleRemoveUrl}
+          onShareHelp={() => setIsShareHelpOpen(true)}
+          onWebAppGuide={() => setIsInstructionModalOpen(true)}
+        />
       )}
 
       {/* BUSCADOR EN TODA LA RED DE LA UNGET */}
