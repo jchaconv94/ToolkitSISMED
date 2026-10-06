@@ -4,6 +4,7 @@ import type { ScopeRule } from "./availabilityConfig";
 import { DME_LEVEL_LABEL, dmeLevelOf, ipressCodeOf, wholeMonthsBetween, type AvailabilityItem, type AvailabilityReport, type TformdetMonthSheet, type WarehouseItem } from "./availabilityReport";
 import type { DmeLevel } from "./stockStatus";
 import { formatNumber } from "./numberFormat";
+import { CHART_COLORS, donutCard, findingCard, gaugeCard, hBarsCard, kpiCard, levelColumnsCard, miniKpiCard, rankingCard, type ChartImage, type KpiSpec } from "./availabilityCharts";
 
 /**
  * Excel del módulo Disponibilidad (rehecho el 2026-10-06, pedido del usuario: «es un reporte
@@ -159,11 +160,26 @@ const colLetter = (n: number) => {
  * Cabecera de hoja con el mismo estilo de la portada: banda oscura a todo el ancho de la tabla
  * con el título en blanco y el subtítulo debajo. `span` es el número de columnas de la tabla.
  */
-const sheetTitle = (ws: ExcelJS.Worksheet, title: string, subtitle: string, span: number) => {
-  const textSpan = Math.max(1, Math.min(span, 12));
+const sheetTitle = (ws: ExcelJS.Worksheet, title: string, subtitle: string, span: number, who?: { name?: string; role?: string }) => {
+  // El responsable va a la derecha, dentro de las 12 primeras columnas (las que se ven al abrir).
+  const visible = Math.max(1, Math.min(span, 12));
+  const whoFrom = who?.name && visible >= 6 ? visible - 2 : 0;
+  const textSpan = whoFrom ? whoFrom - 1 : visible;
   for (let r = 1; r <= 3; r++) for (let c = 1; c <= span; c++) ws.getCell(r, c).fill = fill(C.dark);
   ws.mergeCells(1, 1, 1, textSpan);
   ws.mergeCells(2, 1, 2, textSpan);
+  if (whoFrom) {
+    ws.mergeCells(1, whoFrom, 1, visible);
+    ws.mergeCells(2, whoFrom, 2, visible);
+    const n = ws.getCell(1, whoFrom);
+    n.value = who!.name!;
+    n.font = { name: FONT, size: 11, bold: true, color: { argb: C.white } };
+    n.alignment = { vertical: "bottom", horizontal: "right", indent: 1 };
+    const r2 = ws.getCell(2, whoFrom);
+    r2.value = who!.role || "";
+    r2.font = { name: FONT, size: 9.5, color: { argb: "FFCBD5E1" } };
+    r2.alignment = { vertical: "middle", horizontal: "right", indent: 1 };
+  }
   const t = ws.getCell(1, 1);
   t.value = title;
   t.font = { name: FONT, size: 15, bold: true, color: { argb: C.white } };
@@ -177,6 +193,63 @@ const sheetTitle = (ws: ExcelJS.Worksheet, title: string, subtitle: string, span
   ws.getRow(3).height = 8;
   ws.getRow(4).height = 10;
 };
+
+/* ------------------------------------------------------------------ Imágenes */
+
+/** Columnas de la portada y de Hallazgos: 12 iguales. */
+const COVER_COL_WIDTH = 12.5;
+/** Filas donde van imágenes: 15 pt = 20 px. */
+const ROW_PT = 15;
+const ROW_PX = 20;
+const EMU_PER_PX = 9525;
+/** Ancho en píxeles de una columna de Excel (el ancho guardado ya incluye el margen). */
+const colPx = (width: number | undefined) => Math.trunc((width ?? 9.14) * 7);
+const coverWidthPx = () => 12 * colPx(COVER_COL_WIDTH);
+const titleCase = (s: string) => s.toLocaleLowerCase("es-PE").replace(/(^|[\s\-(])(\p{L})/gu, (_, sep: string, l: string) => sep + l.toLocaleUpperCase("es-PE"));
+
+/**
+ * Coloca una imagen a `xPx`, `yPx` píxeles de la esquina de la fila `startRow`. Se ancla en
+ * coordenadas nativas (columna/fila + desplazamiento en EMU) para que quede donde se dibujó.
+ */
+const placeImage = (wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet, img: ChartImage, xPx: number, yPx: number, startRow: number) => {
+  const id = wb.addImage({ buffer: new Uint8Array(img.png) as unknown as ExcelJS.Buffer, extension: "png" });
+  let col = 0;
+  let restX = Math.max(0, xPx);
+  while (col < 200) {
+    const w = colPx(ws.getColumn(col + 1).width);
+    if (restX < w) break;
+    restX -= w;
+    col++;
+  }
+  let row = startRow - 1;
+  let restY = Math.max(0, yPx);
+  while (row < startRow + 400) {
+    const h = ((ws.getRow(row + 1).height ?? ROW_PT) * 4) / 3;
+    if (restY < h) break;
+    restY -= h;
+    row++;
+  }
+  ws.addImage(id, {
+    tl: { nativeCol: col, nativeColOff: Math.round(restX * EMU_PER_PX), nativeRow: row, nativeRowOff: Math.round(restY * EMU_PER_PX) } as unknown as ExcelJS.Anchor,
+    ext: { width: img.width, height: img.height },
+    editAs: "oneCell",
+  });
+};
+
+/** Fila de tarjetas pequeñas encima de una tabla (filas 5 a 8); la tabla empieza en la 10. */
+const TABLE_ROW_WITH_CARDS = 10;
+const miniCards = async (wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet, cards: KpiSpec[], widthPx: number) => {
+  for (let r = 5; r <= 8; r++) ws.getRow(r).height = ROW_PT;
+  ws.getRow(9).height = 8;
+  const gap = 14;
+  const w = Math.min(300, (widthPx - gap * (cards.length - 1)) / cards.length);
+  for (const [i, k] of cards.entries()) {
+    const im = await miniKpiCard(k, w, 74);
+    if (im) placeImage(wb, ws, im, i * (w + gap), 3, 5);
+  }
+};
+/** Ancho en píxeles de las primeras `n` columnas de una hoja. */
+const sheetWidthPx = (ws: ExcelJS.Worksheet, n: number) => Array.from({ length: n }, (_, i) => colPx(ws.getColumn(i + 1).width)).reduce((a, b) => a + b, 0);
 
 const dateText = (d: Date | null) => (d ? `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}` : "");
 const monthsValue = (m: number) => (Number.isFinite(m) ? Math.round(m * 10) / 10 : null);
@@ -208,7 +281,7 @@ export interface AvailabilityExportParams {
   tformdet?: TformdetMonthSheet | null;
 }
 
-export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.Workbook => {
+export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Promise<ExcelJS.Workbook> => {
   const { report, months, scope } = p;
   const warehouse = p.warehouse ?? [];
   const hasWarehouse = warehouse.length > 0;
@@ -231,120 +304,107 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   const scopeLabel = scope === "essential" ? "Medicamentos esenciales (DME)" : "Todos los productos";
   const cut = months[months.length - 1] || "";
   const period = months.length ? `${monthFull(months[0])} a ${monthFull(cut)} (${months.length} ${months.length === 1 ? "mes" : "meses"})` : "";
-  const subtitle = `${p.title} · corte ${cut ? monthFull(cut) : "—"} · ${scopeLabel}`;
+  const subtitle = `${p.title.toUpperCase()} · corte ${cut ? monthFull(cut) : "—"} · ${scopeLabel}`;
   const lv = p.levels;
   const levelRange: Record<DmeLevel, string> = {
     OPTIMO: `≥ ${lv.optimo} %`, ALTO: `${lv.alto} – ${lv.optimo} %`, REGULAR: `${lv.regular} – ${lv.alto} %`, BAJO: `< ${lv.regular} %`,
   };
 
   /* ---------------- Resumen (portada) ---------------- */
-  // Portada pensada para compartir: banda oscura con el título y el responsable, el indicador
-  // principal grande, un recuadro por nivel y por situación, mejores y peores establecimientos,
-  // microredes y, al pie, la ficha técnica. 12 columnas iguales para armar los bloques.
+  // Tablero aprobado por el usuario el 2026-10-06 (opción A con las tarjetas de la B): cabecera
+  // con el título, la UNGET y el corte, y el responsable; debajo, solo gráficos. Los hallazgos
+  // en texto van en su propia hoja.
   const rs = wb.addWorksheet("Resumen", { properties: { tabColor: { argb: C.teal } } });
-  rs.columns = Array.from({ length: 12 }, () => ({ width: 11.5 }));
+  rs.columns = Array.from({ length: 12 }, () => ({ width: COVER_COL_WIDTH }));
   const c = report.counts;
-  const box = (r1: number, c1: number, r2: number, c2: number, value: ExcelJS.CellValue, style: Partial<ExcelJS.Style>) => {
-    if (r1 !== r2 || c1 !== c2) rs.mergeCells(r1, c1, r2, c2);
-    const cell = rs.getCell(r1, c1);
-    cell.value = value;
-    Object.assign(cell, style);
-    return cell;
-  };
-  const paintArea = (r1: number, c1: number, r2: number, c2: number, argb: string) => {
-    for (let r = r1; r <= r2; r++) for (let cc = c1; cc <= c2; cc++) rs.getCell(r, cc).fill = fill(argb);
-  };
-  const outline = (r1: number, c1: number, r2: number, c2: number, argb = C.line) => {
-    const side = { style: "thin" as const, color: { argb } };
-    for (let r = r1; r <= r2; r++) {
-      for (let cc = c1; cc <= c2; cc++) {
-        rs.getCell(r, cc).border = { top: r === r1 ? side : undefined, bottom: r === r2 ? side : undefined, left: cc === c1 ? side : undefined, right: cc === c2 ? side : undefined };
-      }
-    }
-  };
   const pctText = (v: number) => `${v.toFixed(1).replace(".", ",")} %`;
-
-  // Banda del título (diseño del usuario del 2026-10-06: el título lleva la UNGET al final, y
-  // debajo el corte a la izquierda y el nombre y la profesión del responsable a la derecha).
-  // Encima, una línea con el nombre del reporte; debajo, una franja de acento.
-  paintArea(1, 1, 5, 12, C.dark);
-  [1, 2, 3, 4, 5, 6, 7].forEach((r, i) => (rs.getRow(r).height = [18, 24, 24, 18, 16, 4, 12][i]));
-  box(1, 1, 1, 8, `TOOLKIT SISMED  ·  REPORTE DE DISPONIBILIDAD  ·  ${scopeLabel.toUpperCase()}`, { font: { name: FONT, size: 8, bold: true, color: { argb: "FF5EEAD4" } }, alignment: { vertical: "bottom", indent: 1 } });
-  box(1, 9, 1, 12, `Generado el ${new Date().toLocaleDateString("es-PE")}`, { font: { name: FONT, size: 8, color: { argb: "FF94A3B8" } }, alignment: { vertical: "bottom", horizontal: "right", indent: 1 } });
-  box(2, 1, 3, 12, { richText: [
-    { text: scope === "essential" ? "ANÁLISIS DE DISPONIBILIDAD DE MEDICAMENTOS ESENCIALES (DME) " : "ANÁLISIS DE DISPONIBILIDAD DE PRODUCTOS FARMACÉUTICOS, DISPOSITIVOS MÉDICOS Y PRODUCTOS SANITARIOS ", font: { name: FONT, size: 16, bold: true, color: { argb: C.white } } },
-    { text: p.title, font: { name: FONT, size: 16, bold: true, color: { argb: "FF99F6E4" } } },
-  ] }, { alignment: { vertical: "middle", wrapText: true, indent: 1 } });
-  box(4, 1, 4, 8, `Corte ${cut ? monthFull(cut) : "—"} · consumo ${period} · ${scopeLabel}`, { font: { name: FONT, size: 9, color: { argb: "FFCBD5E1" } }, alignment: { vertical: "middle", indent: 1 } });
-  box(4, 9, 4, 12, p.preparedBy || "", { font: { name: FONT, size: 10, bold: true, color: { argb: C.white } }, alignment: { vertical: "middle", horizontal: "right", indent: 1 } });
-  box(5, 9, 5, 12, p.preparedByRole || "", { font: { name: FONT, size: 9, color: { argb: "FFCBD5E1" } }, alignment: { vertical: "top", horizontal: "right", indent: 1 } });
-  paintArea(6, 1, 6, 12, "FF14B8A6");
-
-  // Indicador principal
-  const H = 8;
-  [H, H + 1, H + 2, H + 3, H + 4].forEach((r, i) => (rs.getRow(r).height = [18, 26, 30, 18, 18][i]));
-  const [heroBg, heroFg] = LEVEL_FILL[report.level];
-  paintArea(H, 1, H + 4, 4, heroBg);
-  box(H, 1, H, 4, scope === "essential" ? "DISPONIBILIDAD DME DE LA UNGET" : "DISPONIBILIDAD DE LA UNGET", { font: { name: FONT, size: 9, bold: true, color: { argb: heroFg } }, alignment: { vertical: "bottom", indent: 1 } });
-  box(H + 1, 1, H + 2, 4, report.pct / 100, { numFmt: "0.0 %", font: { name: FONT, size: 40, bold: true, color: { argb: heroFg } }, alignment: { vertical: "middle", horizontal: "left", indent: 1 } });
-  box(H + 3, 1, H + 3, 4, `Nivel ${DME_LEVEL_LABEL[report.level]} · ${report.establishments.length} establecimientos`, { font: { name: FONT, size: 10, bold: true, color: { argb: heroFg } }, alignment: { vertical: "middle", indent: 1 } });
-  box(H + 4, 1, H + 4, 4, p.otherScopePct != null ? `${scope === "essential" ? "Todos los productos" : "Medicamentos esenciales (DME)"}: ${pctText(p.otherScopePct)}` : `${formatNumber(c.total)} ítems evaluados`, { font: { name: FONT, size: 10, color: { argb: heroFg } }, alignment: { vertical: "top", indent: 1 } });
-  outline(H, 1, H + 4, 4, heroFg);
-
-  // Establecimientos por nivel
   const levels: DmeLevel[] = ["OPTIMO", "ALTO", "REGULAR", "BAJO"];
   const perLevel = (l: DmeLevel) => report.establishments.filter((e) => e.level === l).length;
-  levels.forEach((l, i) => {
-    const col = 5 + i * 2;
-    const [bg, fg] = LEVEL_FILL[l];
-    box(H, col, H, col + 1, DME_LEVEL_LABEL[l].toUpperCase(), { fill: fill(fg), font: { name: FONT, size: 9, bold: true, color: { argb: C.white } }, alignment: { horizontal: "center", vertical: "middle" } });
-    paintArea(H + 1, col, H + 4, col + 1, bg);
-    box(H + 1, col, H + 2, col + 1, perLevel(l), { font: { name: FONT, size: 28, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
-    box(H + 3, col, H + 3, col + 1, "establecimientos", { font: { name: FONT, size: 9, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
-    box(H + 4, col, H + 4, col + 1, levelRange[l], { font: { name: FONT, size: 9, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "top" } });
-    outline(H, col, H + 4, col + 1, fg);
-  });
+  const who = { name: p.preparedBy, role: p.preparedByRole };
+  const unget = p.title.toUpperCase();
+  const cutText = cut ? monthFull(cut) : "";
 
-  const sectionTitle = (row: number, text: string, c1 = 1, c2 = 12, horizontal: "left" | "center" = "left") => {
-    rs.getRow(row).height = 22;
-    box(row, c1, row, c2, text, { font: { name: FONT, size: 12, bold: true, color: { argb: C.ink } }, alignment: { vertical: "bottom", horizontal } });
-    for (let cc = c1; cc <= c2; cc++) rs.getCell(row, cc).border = { bottom: { style: "medium", color: { argb: C.teal } } };
+  // Cabecera
+  for (let r = 1; r <= 3; r++) for (let cc = 1; cc <= 12; cc++) rs.getCell(r, cc).fill = fill(C.dark);
+  [1, 2, 3].forEach((r, i) => (rs.getRow(r).height = [28, 28, 22][i]));
+  rs.mergeCells(1, 1, 3, 9);
+  rs.getCell(1, 1).value = { richText: [
+    { text: scope === "essential" ? "ANÁLISIS DE DISPONIBILIDAD DE MEDICAMENTOS ESENCIALES (DME) " : "ANÁLISIS DE DISPONIBILIDAD DE PRODUCTOS FARMACÉUTICOS, DISPOSITIVOS MÉDICOS Y PRODUCTOS SANITARIOS ", font: { name: FONT, size: 16, bold: true, color: { argb: C.white } } },
+    { text: unget, font: { name: FONT, size: 16, bold: true, color: { argb: "FF99F6E4" } } },
+    ...(cutText ? [{ text: ` · CORTE ${cutText.toUpperCase()}`, font: { name: FONT, size: 16, bold: true, color: { argb: "FF99F6E4" } } }] : []),
+  ] };
+  rs.getCell(1, 1).alignment = { vertical: "middle", wrapText: true, indent: 1 };
+  rs.mergeCells(2, 10, 2, 12);
+  rs.getCell(2, 10).value = who.name || "";
+  rs.getCell(2, 10).font = { name: FONT, size: 11, bold: true, color: { argb: C.white } };
+  rs.getCell(2, 10).alignment = { vertical: "bottom", horizontal: "right", indent: 1 };
+  rs.mergeCells(3, 10, 3, 12);
+  rs.getCell(3, 10).value = who.role || "";
+  rs.getCell(3, 10).font = { name: FONT, size: 9.5, color: { argb: "FFCBD5E1" } };
+  rs.getCell(3, 10).alignment = { vertical: "top", horizontal: "right", indent: 1 };
+  rs.getRow(4).height = 4;
+  for (let cc = 1; cc <= 12; cc++) rs.getCell(4, cc).fill = fill("FF14B8A6");
+
+  // Gráficos: se dibujan en el lienzo y se colocan por píxeles desde la fila 5.
+  const W = coverWidthPx();
+  const GAP = 16;
+  const level = report.level;
+  const mrsSorted = report.microredes.slice().sort((a, b) => b.pct - a.pct);
+  const byPct = report.establishments.slice().sort((a, b) => b.pct - a.pct);
+  const shortName = (n: string) => n.replace(/^(P\.S\.|C\.S\.M\.C\.|C\.S\.|HOSPITAL\s+[IVX]+(-[A-Z])?)\s*/i, "").trim() || n;
+  const kpiW = (W - 3 * GAP) / 4;
+  const rowB = 152, gaugeW = 400, h2 = 330;
+  const mrH = Math.max(300, 92 + mrsSorted.length * 40);
+  const rowC = rowB + h2 + GAP;
+  const rowD = rowC + mrH + GAP;
+  const rankH = byPct.length > 50 ? 400 : 440;
+  const totalH = rowD + rankH + GAP;
+  const imagesStart = 5;
+  for (let r = imagesStart; r <= imagesStart + Math.ceil(totalH / ROW_PX) + 1; r++) rs.getRow(r).height = ROW_PT;
+  const place = async (img: Promise<ChartImage | null>, xPx: number, yPx: number) => {
+    const im = await img;
+    if (im) placeImage(wb, rs, im, xPx, yPx + 8, imagesStart);
+    return !!im;
   };
+  const other = p.otherScopePct;
+  const desab = c.desabastecido;
+  const drawn = await place(kpiCard({ label: scope === "essential" ? "Disponibilidad DME" : "Disponibilidad UNGET", value: pctText(report.pct), hint: `Nivel ${DME_LEVEL_LABEL[level]}`, color: CHART_COLORS.level[level], progress: report.pct }, kpiW), 0, 0);
+  if (drawn) {
+    const otherLevel = other != null ? dmeLevelOf(other, lv) : null;
+    await place(other != null && otherLevel
+      ? kpiCard({ label: scope === "essential" ? "Todos los productos" : "Medicamentos esenciales", value: pctText(other), hint: `Nivel ${DME_LEVEL_LABEL[otherLevel]}${scope === "essential" ? "" : " (DME)"}`, color: CHART_COLORS.level[otherLevel], progress: other }, kpiW)
+      : kpiCard({ label: "Ítems evaluados", value: formatNumber(c.total), hint: `${report.establishments.length} establecimientos`, color: C.teal.replace(/^FF/, "#"), progress: null }, kpiW), kpiW + GAP, 0);
+    await place(kpiCard({ label: "Establecimientos en Bajo", value: `${perLevel("BAJO")} de ${report.establishments.length}`, hint: `${perLevel("REGULAR")} Regular · ${perLevel("ALTO")} Alto · ${perLevel("OPTIMO")} Óptimo`, color: CHART_COLORS.level.BAJO, progress: null }, kpiW), 2 * (kpiW + GAP), 0);
+    await place(kpiCard({ label: "Ítems desabastecidos", value: formatNumber(desab), hint: `${pctText(c.total ? (desab / c.total) * 100 : 0)} de ${formatNumber(c.total)} ítems`, color: "#EF4444", progress: null }, kpiW), 3 * (kpiW + GAP), 0);
+    await place(gaugeCard({ title: scope === "essential" ? "Disponibilidad DME de la UNGET" : "Disponibilidad de la UNGET", pct: report.pct, level, levelLabel: DME_LEVEL_LABEL[level], caption: `Nivel ${DME_LEVEL_LABEL[level]} · ${report.establishments.length} establecimientos`, levels: lv }, gaugeW, h2), 0, rowB);
+    await place(levelColumnsCard({ title: "Establecimientos por nivel", items: levels.map((l) => ({ level: l, label: DME_LEVEL_LABEL[l], count: perLevel(l), range: levelRange[l] })) }, W - gaugeW - GAP, h2), gaugeW + GAP, rowB);
+    await place(donutCard({ title: "Situación de los ítems", center: formatNumber(c.total), centerSub: "ítems", parts: [
+      { label: "Normostock", value: c.normostock, color: "#10B981" }, { label: "Sobrestock", value: c.sobrestock, color: "#3B82F6" }, { label: "Substock", value: c.substock, color: "#F59E0B" },
+      { label: "Sin rotación", value: c.sinRotacion, color: "#94A3B8" }, { label: "Desabastecido", value: c.desabastecido, color: "#EF4444" },
+    ] }, 500, mrH), 0, rowC);
+    await place(hBarsCard({ title: "Disponibilidad por microred", items: mrsSorted.map((m) => ({ label: titleCase(m.microred), pct: m.pct, level: m.level })), levels: lv }, W - 500 - GAP, mrH), 500 + GAP, rowC);
+    await place(rankingCard({ title: "Ranking de establecimientos (%)", items: byPct.map((e) => ({ label: shortName(e.name), pct: e.pct, level: e.level })), levels: lv }, W, rankH), 0, rowD);
+  } else {
+    // Sin lienzo (pruebas o navegador antiguo): el indicador principal en celdas.
+    rs.getCell(imagesStart + 1, 1).value = scope === "essential" ? "Disponibilidad DME de la UNGET" : "Disponibilidad de la UNGET";
+    rs.getCell(imagesStart + 2, 1).value = report.pct / 100;
+    rs.getCell(imagesStart + 2, 1).numFmt = "0.0 %";
+    rs.getCell(imagesStart + 2, 1).font = { name: FONT, size: 28, bold: true, color: { argb: LEVEL_FILL[level][1] } };
+    rs.getCell(imagesStart + 3, 1).value = `Nivel ${DME_LEVEL_LABEL[level]} · ${report.establishments.length} establecimientos`;
+  }
+  rs.views = [{ showGridLines: false }];
+  rs.pageSetup = { orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 1, paperSize: 9, margins: { left: 0.3, right: 0.3, top: 0.3, bottom: 0.3, header: 0.2, footer: 0.2 } };
 
-  // Situación de los ítems
-  const S = H + 6;
-  sectionTitle(S, "Situación de los ítems evaluados");
-  rs.getRow(S + 1).height = 6;
-  const stTiles: Array<[StockStatus, number]> = [
-    [StockStatus.NORMOSTOCK, c.normostock], [StockStatus.SOBRESTOCK, c.sobrestock], [StockStatus.SUBSTOCK, c.substock],
-    [StockStatus.SIN_ROTACION, c.sinRotacion], [StockStatus.DESABASTECIDO, c.desabastecido],
-  ];
-  const T = S + 2;
-  [T, T + 1, T + 2].forEach((r, i) => (rs.getRow(r).height = [18, 30, 18][i]));
-  stTiles.forEach(([s, n], i) => {
-    const col = 1 + i * 2;
-    const [bg, fg] = STATUS_FILL[s];
-    paintArea(T, col, T + 2, col + 1, bg);
-    box(T, col, T, col + 1, STATUS_LABEL[s], { font: { name: FONT, size: 10, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
-    box(T + 1, col, T + 1, col + 1, n, { numFmt: FMT.int, font: { name: FONT, size: 22, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
-    box(T + 2, col, T + 2, col + 1, c.total ? n / c.total : 0, { numFmt: "0.0 %\" del total\"", font: { name: FONT, size: 9, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
-    outline(T, col, T + 2, col + 1, fg);
-  });
-  paintArea(T, 11, T + 2, 12, "FFE0F2F1");
-  box(T, 11, T, 12, "Total ítems", { font: { name: FONT, size: 10, bold: true, color: { argb: C.muted } }, alignment: { horizontal: "center", vertical: "middle" } });
-  box(T + 1, 11, T + 1, 12, c.total, { numFmt: FMT.int, font: { name: FONT, size: 22, bold: true, color: { argb: C.ink } }, alignment: { horizontal: "center", vertical: "middle" } });
-  box(T + 2, 11, T + 2, 12, "producto × establecimiento", { font: { name: FONT, size: 9, color: { argb: C.muted } }, alignment: { horizontal: "center", vertical: "middle" } });
-  outline(T, 11, T + 2, 12, "FF334155");
-
-  // Hallazgos principales: lo que hay que leer primero, en frases cortas.
-  const findings: Array<[string, string]> = [];
+  /* ---------------- Hallazgos ---------------- */
+  // Lo que hay que leer primero, en tarjetas con su cifra (salió de la portada a pedido del usuario).
+  const findings: Array<{ big: string; title: string; text: string; color: string }> = [];
   const nEst = report.establishments.length;
-  const nHigh = perLevel("OPTIMO") + perLevel("ALTO");
-  findings.push([`${perLevel("BAJO")} de ${nEst} establecimientos`, ` están en nivel Bajo (< ${lv.regular} %); ${nHigh} alcanzan nivel Óptimo o Alto (≥ ${lv.alto} %).`]);
-  const mrByPct = report.microredes.slice().sort((a, b) => b.pct - a.pct);
-  if (mrByPct.length > 1) {
-    const top = mrByPct[0], low = mrByPct[mrByPct.length - 1];
-    findings.push([`Microredes: `, `la de mayor disponibilidad es ${top.microred} (${pctText(top.pct)}) y la de menor, ${low.microred} (${pctText(low.pct)}).`]);
+  findings.push({ big: `${perLevel("BAJO")} / ${nEst}`, title: "Establecimientos en nivel Bajo", color: CHART_COLORS.level.BAJO,
+    text: `${perLevel("BAJO")} establecimientos están por debajo de ${lv.regular} %; ${perLevel("REGULAR")} en Regular, ${perLevel("ALTO")} en Alto y ${perLevel("OPTIMO")} en Óptimo.` });
+  if (mrsSorted.length > 1) {
+    const top = mrsSorted[0], low = mrsSorted[mrsSorted.length - 1];
+    findings.push({ big: pctText(low.pct), title: `Microred con menor disponibilidad: ${titleCase(low.microred)}`, color: CHART_COLORS.level[low.level],
+      text: `La de mayor disponibilidad es ${titleCase(top.microred)} (${pctText(top.pct)}). Diferencia de ${(top.pct - low.pct).toFixed(1).replace(".", ",")} puntos.` });
   }
   const desabItems = report.items.filter((i) => i.status === StockStatus.DESABASTECIDO && i.cpa > 0);
   if (desabItems.length) {
@@ -355,117 +415,49 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
       byProduct.set(i.medCode, e);
     }
     const topMissing = [...byProduct.values()].sort((a, b) => b.n - a.n).slice(0, 3);
-    findings.push([`${formatNumber(desabItems.length)} ítems desabastecidos con consumo.`, ` Los que faltan en más establecimientos: ${topMissing.map((t) => `${t.name} (${t.n})`).join("; ")}.`]);
+    findings.push({ big: formatNumber(desabItems.length), title: "Ítems desabastecidos con consumo", color: "#EF4444",
+      text: `Faltan en más establecimientos: ${topMissing.map((t) => `${t.name} (${t.n})`).join("; ")}.` });
   }
   const risky = report.items.filter((i) => i.expiryRisk);
   if (risky.length) {
     const value = risky.reduce((sum, i) => sum + i.stock * (i.price || 0), 0);
-    findings.push([`${formatNumber(risky.length)} ítems vencerían antes de consumirse`, ` (S/ ${formatNumber(value, 2)} en stock): revisar redistribución en la hoja «Atención».`]);
+    findings.push({ big: `S/ ${formatNumber(Math.round(value))}`, title: "Stock que vencería antes de consumirse", color: "#B45309",
+      text: `${formatNumber(risky.length)} ítems con riesgo de vencimiento: revisar redistribución en la hoja «Atención».` });
   }
   if (hasWarehouse) {
     const need = report.items.filter((i) => (i.status === StockStatus.DESABASTECIDO && i.cpa > 0) || i.status === StockStatus.SUBSTOCK);
     const covered = need.filter((i) => warehouseStockOf(i) > 0).length;
-    findings.push([`El almacén tiene stock para ${formatNumber(covered)} de los ${formatNumber(need.length)} ítems`, ` desabastecidos o en substock (hoja «Almacén»).`]);
+    findings.push({ big: formatNumber(covered), title: "Ítems que el almacén puede cubrir", color: "#0369A1",
+      text: `De ${formatNumber(need.length)} ítems desabastecidos o en substock, ${formatNumber(covered)} tienen stock en el almacén (hoja «Almacén»).` });
   }
-  const F = T + 4;
-  sectionTitle(F, "Hallazgos principales");
-  rs.getRow(F + 1).height = 6;
-  findings.forEach(([lead, rest], i) => {
-    const r = F + 2 + i;
-    rs.getRow(r).height = Math.max(20, Math.ceil((lead.length + rest.length) / 115) * 15);
-    box(r, 1, r, 12, { richText: [
-      { text: "▸  ", font: { name: FONT, size: 10, bold: true, color: { argb: C.teal } } },
-      { text: lead, font: { name: FONT, size: 10, bold: true, color: { argb: C.ink } } },
-      { text: rest, font: { name: FONT, size: 10, color: { argb: C.ink } } },
-    ] }, { fill: fill(i % 2 ? C.white : "FFF0FDFA"), alignment: { vertical: "middle", wrapText: true, indent: 1 } });
-    rs.getCell(r, 1).border = { left: { style: "thick", color: { argb: C.teal } } };
-  });
-
-  // Tabla compacta con columnas que ocupan varias celdas. `bar`: barra de datos con el valor
-  // en blanco y negrita a la izquierda (como lo dejó el usuario).
-  const spanTable = (row: number, cols: Array<{ header: string; span: number; fmt?: string; align?: "left" | "right" | "center"; bar?: boolean }>, rows: unknown[][], c1 = 1, paint?: (r: number, cell: (i: number) => ExcelJS.Cell) => void) => {
-    const starts: number[] = [];
-    let x = c1;
-    cols.forEach((col) => { starts.push(x); x += col.span; });
-    rs.getRow(row).height = 22;
-    cols.forEach((col, i) => box(row, starts[i], row, starts[i] + col.span - 1, col.header, {
-      fill: fill(C.teal), font: { name: FONT, size: 10, bold: true, color: { argb: C.white } },
-      alignment: { vertical: "middle", horizontal: col.bar ? "left" : col.align || "left", indent: col.align === "right" || col.align === "center" ? 0 : 1 },
-    }));
-    rows.forEach((values, r) => {
-      const rr = row + 1 + r;
-      rs.getRow(rr).height = 19;
-      cols.forEach((col, i) => {
-        const cell = box(rr, starts[i], rr, starts[i] + col.span - 1, values[i] as ExcelJS.CellValue, {
-          font: col.bar ? { name: FONT, size: 10, bold: true, color: { argb: C.white } } : { name: FONT, size: 10, color: { argb: C.ink } },
-          alignment: { vertical: "middle", horizontal: col.bar ? "left" : col.align || (typeof values[i] === "number" ? "right" : "left"), indent: col.align === "center" ? 0 : 1 },
-        });
-        if (col.fmt) cell.numFmt = col.fmt;
-        if (r % 2 === 1) for (let cc = starts[i]; cc < starts[i] + col.span; cc++) rs.getCell(rr, cc).fill = fill(C.band);
-        for (let cc = starts[i]; cc < starts[i] + col.span; cc++) rs.getCell(rr, cc).border = { bottom: thin };
-      });
-      paint?.(rr, (i) => rs.getCell(rr, starts[i]));
+  const hs = wb.addWorksheet("Hallazgos", { properties: { tabColor: { argb: "FF0369A1" } } });
+  hs.columns = Array.from({ length: 12 }, () => ({ width: COVER_COL_WIDTH }));
+  sheetTitle(hs, "Hallazgos principales", `${unget}${cutText ? ` · corte ${cutText}` : ""}`, 12, who);
+  const cardH = 96, cardGap = 12;
+  for (let r = 5; r <= 5 + Math.ceil((findings.length * (cardH + cardGap)) / ROW_PX) + 1; r++) hs.getRow(r).height = ROW_PT;
+  let fy = 0;
+  let anyCard = false;
+  for (const [i, f] of findings.entries()) {
+    const im = await findingCard({ index: i + 1, ...f }, coverWidthPx());
+    if (im) { placeImage(wb, hs, im, 0, fy, 5); anyCard = true; }
+    fy += cardH + cardGap;
+  }
+  if (!anyCard) {
+    findings.forEach((f, i) => {
+      const r = 5 + i;
+      hs.mergeCells(r, 1, r, 12);
+      hs.getCell(r, 1).value = `${i + 1}. ${f.title}: ${f.big}. ${f.text}`;
+      hs.getCell(r, 1).alignment = { wrapText: true, vertical: "middle", indent: 1 };
+      hs.getRow(r).height = 32;
     });
-    return row + rows.length;
-  };
-
-  // Mejores y peores establecimientos
-  const byPct = report.establishments.slice().sort((a, b) => b.pct - a.pct);
-  const topN = Math.min(5, Math.ceil(byPct.length / 2));
-  const best = byPct.slice(0, topN);
-  const worst = byPct.slice(-topN).reverse();
-  const B = F + 2 + findings.length + 1;
-  sectionTitle(B, "Mayor disponibilidad", 1, 6, "center");
-  sectionTitle(B, "Menor disponibilidad", 7, 12, "center");
-  rs.getRow(B + 1).height = 6;
-  const estCols = [{ header: "Establecimiento", span: 4 }, { header: "%", span: 1, fmt: FMT.pct, align: "right" as const }, { header: "Nivel", span: 1, align: "center" as const }];
-  const estRow = (e: (typeof byPct)[number]) => [`${e.name} (${e.code})`, e.pct / 100, DME_LEVEL_LABEL[e.level]];
-  const endBest = spanTable(B + 2, estCols, best.map(estRow), 1, (rr, cell) => paintLevel(cell(2), best[rr - B - 3].level));
-  spanTable(B + 2, estCols, worst.map(estRow), 7, (rr, cell) => paintLevel(cell(2), worst[rr - B - 3].level));
-  // Línea que separa las dos tablas.
-  for (let r = B + 2; r <= endBest; r++) {
-    const cell = rs.getCell(r, 6);
-    cell.border = { ...(cell.border || {}), right: { style: "medium", color: { argb: C.teal } } };
   }
-
-  // Microredes
-  const mrStart = endBest + 2;
-  sectionTitle(mrStart, "Disponibilidad por microred");
-  rs.getRow(mrStart + 1).height = 6;
-  const mrsSorted = report.microredes.slice().sort((a, b) => b.pct - a.pct);
-  const mrEnd = spanTable(mrStart + 2, [
-    { header: "Microred", span: 3 }, { header: "Establec.", span: 1, fmt: FMT.int, align: "right" }, { header: "Ítems", span: 1, fmt: FMT.int, align: "right" },
-    { header: "Desabast.", span: 1, fmt: FMT.int, align: "right" }, { header: "Substock", span: 1, fmt: FMT.int, align: "right" }, { header: "Normo + Sobre", span: 2, fmt: FMT.int, align: "right" },
-    { header: "Disponibilidad", span: 2, fmt: FMT.pct, bar: true }, { header: "Nivel", span: 1, align: "center" },
-  ], mrsSorted.map((m) => [m.microred, m.establishments, m.counts.total, m.counts.desabastecido, m.counts.substock, m.counts.normostock + m.counts.sobrestock, m.pct / 100, DME_LEVEL_LABEL[m.level]]),
-  1, (rr, cell) => paintLevel(cell(7), mrsSorted[rr - mrStart - 3].level));
-  dataBar(rs, `J${mrStart + 3}:J${mrEnd}`);
-
-  // Ficha técnica
-  const ft = mrEnd + 2;
-  sectionTitle(ft, "Ficha técnica");
-  const facts: Array<[string, string]> = [
-    ["Fuente", p.source],
-    ["Periodo de consumo", period],
-    ["Fórmula", p.formulaText],
-    ["Elaborado por", [p.preparedBy, p.preparedByRole].filter(Boolean).join(" · ") || "—"],
-    ["Generado", `${new Date().toLocaleString("es-PE")} con Toolkit SISMED`],
-  ];
-  facts.forEach(([kk, v], i) => {
-    const r = ft + 1 + i;
-    box(r, 1, r, 2, kk, { font: { name: FONT, size: 9, bold: true, color: { argb: C.muted } }, alignment: { vertical: "top", indent: 1 } });
-    box(r, 3, r, 12, v, { font: { name: FONT, size: 9, color: { argb: C.ink } }, alignment: { vertical: "top", wrapText: true } });
-    rs.getRow(r).height = Math.max(16, Math.ceil(v.length / 120) * 13);
-  });
-  rs.views = [{ showGridLines: false }];
-  rs.pageSetup = { orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9, margins: { left: 0.4, right: 0.4, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } };
-  rs.headerFooter = { oddFooter: `&L&8${p.title} · Disponibilidad &R&8Página &P de &N` };
+  hs.views = [{ showGridLines: false }];
 
   /* ---------------- Establecimientos ---------------- */
   const es = wb.addWorksheet("Establecimientos");
-  sheetTitle(es, "Ranking de establecimientos", subtitle, 13);
+  sheetTitle(es, "Ranking de establecimientos", subtitle, 13, who);
   const ranked = report.establishments.slice().sort((a, b) => b.pct - a.pct);
-  const te = writeTable(es, 5, [
+  const te = writeTable(es, TABLE_ROW_WITH_CARDS, [
     { header: "N°", width: 5, align: "center" }, { header: "Microred", width: 20 }, { header: "Código", width: 9, align: "center" }, { header: "Establecimiento", width: 32 },
     { header: "Cat.", width: 6, align: "center" }, { header: "Desabast.", width: 10, fmt: FMT.int }, { header: "Substock", width: 10, fmt: FMT.int },
     { header: "Normostock", width: 11, fmt: FMT.int }, { header: "Sobrestock", width: 11, fmt: FMT.int }, { header: "Sin rotación", width: 11, fmt: FMT.int },
@@ -474,10 +466,11 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   ranked.forEach((e, i) => paintLevel(es.getCell(te.head + 1 + i, 13), e.level));
   for (let i = 0; i < ranked.length; i++) restyle(es.getCell(te.head + 1 + i, 6), { font: { name: FONT, size: 10, color: { argb: "FFB91C1C" } } });
   dataBar(es, `L${te.head + 1}:L${te.last}`);
+  await miniCards(wb, es, levels.map((l) => ({ label: DME_LEVEL_LABEL[l], value: String(perLevel(l)), hint: `establecimientos · ${levelRange[l]}`, color: CHART_COLORS.level[l] })), sheetWidthPx(es, 13));
 
   /* ---------------- Microredes ---------------- */
   const ms = wb.addWorksheet("Microredes");
-  sheetTitle(ms, "Disponibilidad por microred", subtitle, 10);
+  sheetTitle(ms, "Disponibilidad por microred", subtitle, 10, who);
   const mrs = report.microredes.slice().sort((a, b) => b.pct - a.pct);
   const tm = writeTable(ms, 5, [
     { header: "Microred", width: 26 }, { header: "Establec.", width: 10, fmt: FMT.int }, { header: "Desabast.", width: 10, fmt: FMT.int }, { header: "Substock", width: 10, fmt: FMT.int },
@@ -499,12 +492,12 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
 
   /* ---------------- Atención: lo que hay que resolver ---------------- */
   const at = wb.addWorksheet("Atención", { properties: { tabColor: { argb: "FFDC2626" } } });
-  sheetTitle(at, "Productos que requieren atención", `${subtitle} · desabastecidos, substock y los que vencerían antes de usarse`, hasWarehouse ? 13 : 12);
+  sheetTitle(at, "Productos que requieren atención", `${subtitle} · desabastecidos, substock y los que vencerían antes de usarse`, hasWarehouse ? 13 : 12, who);
   const rank: Record<string, number> = { [StockStatus.DESABASTECIDO]: 0, [StockStatus.SUBSTOCK]: 1 };
   const attention = report.items
     .filter((i) => (i.status === StockStatus.DESABASTECIDO && i.cpa > 0) || i.status === StockStatus.SUBSTOCK || i.expiryRisk)
     .sort((a, b) => a.microred.localeCompare(b.microred, "es") || a.name.localeCompare(b.name, "es") || (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || a.description.localeCompare(b.description, "es"));
-  const ta = writeTable(at, 5, [
+  const ta = writeTable(at, TABLE_ROW_WITH_CARDS, [
     { header: "Microred", width: 18 }, { header: "Establecimiento", width: 28 }, { header: "Código", width: 8, align: "center" }, { header: "Producto", width: 46 },
     { header: "Stock", width: 9, fmt: FMT.int }, { header: "CPA", width: 9, fmt: FMT.dec1 }, { header: "Meses", width: 8, fmt: FMT.dec1 },
     { header: "Situación", width: 13, align: "center" }, { header: "Vence primero", width: 12, align: "center" }, { header: "Meses para vencer", width: 10, fmt: FMT.int },
@@ -523,6 +516,12 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
       if (warehouseStockOf(i) > 0) restyle(at.getCell(ta.head + 1 + n, 13), { font: { name: FONT, size: 10, bold: true, color: { argb: "FF065F46" } } });
     });
   }
+  await miniCards(wb, at, [
+    { label: "Desabastecidos", value: formatNumber(attention.filter((i) => i.status === StockStatus.DESABASTECIDO).length), hint: "sin stock y con consumo", color: "#DC2626" },
+    { label: "Substock", value: formatNumber(attention.filter((i) => i.status === StockStatus.SUBSTOCK).length), hint: `menos de ${p.limits?.subMax ?? 2} meses de stock`, color: "#D97706" },
+    { label: "Riesgo de vencimiento", value: formatNumber(attention.filter((i) => i.expiryRisk).length), hint: "vencerían antes de usarse", color: "#B45309" },
+    ...(hasWarehouse ? [{ label: "Con stock en almacén", value: formatNumber(attention.filter((i) => warehouseStockOf(i) > 0).length), hint: "se pueden cubrir", color: "#0369A1" }] : []),
+  ], sheetWidthPx(at, hasWarehouse ? 13 : 12));
 
   /* ---------------- Almacén ---------------- */
   // Stock del almacén (030S05…) al corte: no entra en la disponibilidad, pero dice qué se
@@ -538,8 +537,8 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
       return { desab: desab.length, sub: sub.length, units };
     };
     const whRows = warehouse.map((w) => ({ w, need: needOf(w.medCode), nearest: w.lots[0]?.expiry ?? null }));
-    sheetTitle(wh, `Stock en almacén · ${cut ? monthFull(cut) : "mes de corte"}`, `${p.title} · ${[...new Set(warehouse.map((w) => `${w.code}${w.name ? ` ${w.name}` : ""}`))].join(", ")} · no se cuenta en la disponibilidad`, 13);
-    const tw = writeTable(wh, 5, [
+    sheetTitle(wh, `Stock en almacén · ${cut ? monthFull(cut) : "mes de corte"}`, `${p.title.toUpperCase()} · ${[...new Set(warehouse.map((w) => `${w.code}${w.name ? ` ${w.name}` : ""}`))].join(", ")} · no se cuenta en la disponibilidad`, 13, who);
+    const tw = writeTable(wh, TABLE_ROW_WITH_CARDS, [
       { header: "Almacén", width: 10, align: "center" }, { header: "Código", width: 8, align: "center" }, { header: "Producto", width: 46 },
       { header: "Stock", width: 10, fmt: FMT.int }, { header: "Precio", width: 9, fmt: FMT.money }, { header: "Valor del stock (S/)", width: 13, fmt: FMT.money },
       { header: "Lotes", width: 7, fmt: FMT.int }, { header: "Vence primero", width: 12, align: "center" }, { header: "Meses para vencer", width: 10, fmt: FMT.int },
@@ -554,6 +553,12 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
     whRows.forEach(({ need }, n) => {
       if (need.desab) restyle(wh.getCell(tw.head + 1 + n, 10), { font: { name: FONT, size: 10, bold: true, color: { argb: "FF991B1B" } } });
     });
+    await miniCards(wb, wh, [
+      { label: "Productos con stock", value: formatNumber(whRows.length), hint: "en el almacén", color: "#0369A1" },
+      { label: "Valor del stock", value: `S/ ${formatNumber(Math.round(whRows.reduce((sum, { w }) => sum + w.stock * (w.price || 0), 0)))}`, hint: "a precio de operación", color: "#0F766E" },
+      { label: "Necesarios en EESS", value: formatNumber(whRows.filter(({ need }) => need.desab + need.sub > 0).length), hint: "con EESS desabastecidos o en substock", color: "#DC2626" },
+      { label: "Vencen en < 6 meses", value: formatNumber(whRows.filter(({ nearest }) => nearest && wholeMonthsBetween(today, nearest) < 6).length), hint: "revisar rotación", color: "#B45309" },
+    ], sheetWidthPx(wh, 13));
   }
 
   /* ---------------- Detalle de productos ---------------- */
@@ -572,7 +577,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
       { header: "Riesgo de vencimiento", width: 12, align: "center" }, { header: "Fusiona", width: 18 },
     ];
     const cols = [...fixed, ...monthCols, ...tail];
-    sheetTitle(ws, title, subtitle, cols.length);
+    sheetTitle(ws, title, subtitle, cols.length, who);
     const t = writeTable(ws, 5, cols, items.map((i) => [
       i.red, i.microred, i.code, i.name, i.category, i.medCode, i.description, i.form, i.price, i.medtip, i.medpet, i.medest,
       ...i.consumption, i.stock, i.cpa, monthsValue(i.months), STATUS_LABEL[i.status], i.stock * (i.price || 0), dateText(i.nearestExpiry),
@@ -614,7 +619,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
       { header: "Microred", width: 18 },
       ...tf.header.map((h) => ({ header: h, width: widthOf(h), fmt: textCols.test(h) ? undefined : moneyCols.test(h) ? FMT.money : FMT.int, align: /^(CODIGO.PRE|CODIGO.MED|FEC.EXP|MEDTIP|MEDPET|MEDEST|TIPSUM2|FFINAN)$/i.test(h) ? "center" as const : undefined })),
     ];
-    sheetTitle(ws, `Registros del TFORMDET · ${tfMonth ? monthFull(tfMonth) : "mes de corte"}`, `${p.title} · ${formatNumber(tf.rows.length)} registros por establecimiento, producto y lote`, tf.header.length + 1);
+    sheetTitle(ws, `Registros del TFORMDET · ${tfMonth ? monthFull(tfMonth) : "mes de corte"}`, `${p.title.toUpperCase()} · ${formatNumber(tf.rows.length)} registros por establecimiento, producto y lote`, tf.header.length + 1, who);
     writeTable(ws, 5, cols, tf.rows.map((r) => [iPre >= 0 ? microredOf.get(ipressCodeOf(String(r[iPre] ?? ""))) || "" : "", ...r]), { freezeCols: 1 + Math.max(0, tf.header.findIndex((h) => /^DESCRIPCION/i.test(h)) + 1) });
   }
 
@@ -741,7 +746,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
 /** El libro ya serializado (.xlsx). Lo usan el Worker y, si no hay Worker, la propia página. */
 export const availabilityWorkbookBuffer = async (params: AvailabilityExportParams): Promise<ArrayBuffer> => {
   // ExcelJS devuelve un Uint8Array (Buffer); el Worker necesita un ArrayBuffer para transferirlo.
-  const out = (await buildAvailabilityWorkbook(params).xlsx.writeBuffer()) as ArrayBuffer | Uint8Array;
+  const out = (await (await buildAvailabilityWorkbook(params)).xlsx.writeBuffer()) as ArrayBuffer | Uint8Array;
   if (out instanceof ArrayBuffer) return out;
   return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
 };
