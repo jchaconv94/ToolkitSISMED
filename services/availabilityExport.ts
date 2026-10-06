@@ -213,15 +213,18 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   };
   const pctText = (v: number) => `${v.toFixed(1).replace(".", ",")} %`;
 
-  // Banda del título
+  // Banda del título (ajustada por el usuario el 2026-10-06: título completo en mayúsculas a
+  // todo el ancho y, a la derecha, solo nombre y profesión del responsable).
   paintArea(1, 1, 5, 12, C.dark);
-  [1, 2, 3, 4, 5].forEach((r, i) => (rs.getRow(r).height = [10, 30, 20, 18, 10][i]));
-  box(2, 1, 2, 8, `Disponibilidad de ${scope === "essential" ? "medicamentos esenciales" : "productos"}`, { font: { name: FONT, size: 22, bold: true, color: { argb: C.white } }, alignment: { vertical: "middle", indent: 1 } });
-  box(3, 1, 3, 8, p.title, { font: { name: FONT, size: 13, bold: true, color: { argb: "FF99F6E4" } }, alignment: { vertical: "middle", indent: 1 } });
-  box(4, 1, 4, 8, `Corte ${cut ? monthFull(cut) : "—"} · consumo ${period} · ${scopeLabel}`, { font: { name: FONT, size: 10, color: { argb: "FFCBD5E1" } }, alignment: { vertical: "middle", indent: 1 } });
-  box(2, 9, 2, 12, "ELABORADO POR", { font: { name: FONT, size: 8, bold: true, color: { argb: "FF99F6E4" } }, alignment: { vertical: "bottom", horizontal: "right", indent: 1 } });
-  box(3, 9, 3, 12, p.preparedBy || "—", { font: { name: FONT, size: 13, bold: true, color: { argb: C.white } }, alignment: { vertical: "middle", horizontal: "right", indent: 1 } });
-  box(4, 9, 4, 12, [p.preparedByRole, new Date().toLocaleDateString("es-PE")].filter(Boolean).join(" · "), { font: { name: FONT, size: 10, color: { argb: "FFCBD5E1" } }, alignment: { vertical: "middle", horizontal: "right", indent: 1 } });
+  [1, 2, 3, 4, 5].forEach((r, i) => (rs.getRow(r).height = [26, 26, 22, 18, 8][i]));
+  box(1, 1, 2, 12, scope === "essential"
+    ? "ANÁLISIS DE DISPONIBILIDAD DE MEDICAMENTOS ESENCIALES (DME)"
+    : "ANÁLISIS DE DISPONIBILIDAD DE PRODUCTOS FARMACÉUTICOS, DISPOSITIVOS MÉDICOS Y PRODUCTOS SANITARIOS",
+  { font: { name: FONT, size: 16, bold: true, color: { argb: C.white } }, alignment: { vertical: "middle", wrapText: true, indent: 1 } });
+  box(3, 1, 3, 8, p.title, { font: { name: FONT, size: 12, bold: true, color: { argb: "FF99F6E4" } }, alignment: { vertical: "middle", indent: 1 } });
+  box(4, 1, 4, 8, `Corte ${cut ? monthFull(cut) : "—"} · consumo ${period} · ${scopeLabel}`, { font: { name: FONT, size: 9, color: { argb: "FFCBD5E1" } }, alignment: { vertical: "middle", indent: 1 } });
+  box(3, 9, 3, 12, p.preparedBy || "", { font: { name: FONT, size: 12, bold: true, color: { argb: C.white } }, alignment: { vertical: "middle", horizontal: "right", indent: 1 } });
+  box(4, 9, 4, 12, p.preparedByRole || "", { font: { name: FONT, size: 9, color: { argb: "FFCBD5E1" } }, alignment: { vertical: "middle", horizontal: "right", indent: 1 } });
 
   // Indicador principal
   rs.getRow(6).height = 14;
@@ -247,9 +250,9 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
     outline(7, col, 11, col + 1, fg);
   });
 
-  const sectionTitle = (row: number, text: string, c1 = 1, c2 = 12) => {
+  const sectionTitle = (row: number, text: string, c1 = 1, c2 = 12, horizontal: "left" | "center" = "left") => {
     rs.getRow(row).height = 22;
-    box(row, c1, row, c2, text, { font: { name: FONT, size: 12, bold: true, color: { argb: C.ink } }, alignment: { vertical: "bottom" } });
+    box(row, c1, row, c2, text, { font: { name: FONT, size: 12, bold: true, color: { argb: C.ink } }, alignment: { vertical: "bottom", horizontal } });
     for (let cc = c1; cc <= c2; cc++) rs.getCell(row, cc).border = { bottom: { style: "medium", color: { argb: C.teal } } };
   };
 
@@ -270,11 +273,11 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
     box(17, col, 17, col + 1, c.total ? n / c.total : 0, { numFmt: "0.0 %\" del total\"", font: { name: FONT, size: 9, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
     outline(15, col, 17, col + 1, fg);
   });
-  paintArea(15, 11, 17, 12, C.band);
+  paintArea(15, 11, 17, 12, "FFE0F2F1");
   box(15, 11, 15, 12, "Total ítems", { font: { name: FONT, size: 10, bold: true, color: { argb: C.muted } }, alignment: { horizontal: "center", vertical: "middle" } });
   box(16, 11, 16, 12, c.total, { numFmt: FMT.int, font: { name: FONT, size: 22, bold: true, color: { argb: C.ink } }, alignment: { horizontal: "center", vertical: "middle" } });
   box(17, 11, 17, 12, "producto × establecimiento", { font: { name: FONT, size: 9, color: { argb: C.muted } }, alignment: { horizontal: "center", vertical: "middle" } });
-  outline(15, 11, 17, 12);
+  outline(15, 11, 17, 12, "FF334155");
 
   // Tabla compacta con columnas que ocupan varias celdas.
   const spanTable = (row: number, cols: Array<{ header: string; span: number; fmt?: string; align?: "left" | "right" | "center" }>, rows: unknown[][], c1 = 1, paint?: (r: number, cell: (i: number) => ExcelJS.Cell) => void) => {
@@ -308,13 +311,18 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   const topN = Math.min(5, Math.ceil(byPct.length / 2));
   const best = byPct.slice(0, topN);
   const worst = byPct.slice(-topN).reverse();
-  sectionTitle(19, "Mayor disponibilidad", 1, 6);
-  sectionTitle(19, "Menor disponibilidad", 7, 12);
+  sectionTitle(19, "Mayor disponibilidad", 1, 6, "center");
+  sectionTitle(19, "Menor disponibilidad", 7, 12, "center");
   rs.getRow(20).height = 6;
   const estCols = [{ header: "Establecimiento", span: 4 }, { header: "%", span: 1, fmt: FMT.pct, align: "right" as const }, { header: "Nivel", span: 1, align: "center" as const }];
   const estRow = (e: (typeof byPct)[number]) => [`${e.name} (${e.code})`, e.pct / 100, DME_LEVEL_LABEL[e.level]];
   const endBest = spanTable(21, estCols, best.map(estRow), 1, (rr, cell) => paintLevel(cell(2), best[rr - 22].level));
   spanTable(21, estCols, worst.map(estRow), 7, (rr, cell) => paintLevel(cell(2), worst[rr - 22].level));
+  // Línea que separa las dos tablas.
+  for (let r = 21; r <= endBest; r++) {
+    const cell = rs.getCell(r, 6);
+    cell.border = { ...(cell.border || {}), right: { style: "medium", color: { argb: C.ink } } };
+  }
 
   // Microredes
   const mrStart = endBest + 2;
