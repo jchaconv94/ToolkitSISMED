@@ -551,6 +551,47 @@ export interface ParsedTformdet extends ParsedAvailability {
 /** Código de establecimiento o de farmacia: `06503`, `06502F01`. Los almacenes (`030S05`) no. */
 export const isEstablishmentCode = (code: string) => /^\d{5}(F\d{2})?$/i.test(code.trim());
 
+/** Registros del TFORMDET de un mes tal como vienen, para revisarlos en el Excel. */
+export interface TformdetMonthSheet {
+  /** AAAAMM, si el archivo trae ANNOMES. */
+  month?: string;
+  header: string[];
+  rows: unknown[][];
+}
+
+/**
+ * Del TFORMDET (uno o varios meses) se queda con los registros del último mes, con todas sus
+ * columnas: lotes, registro sanitario, ingresos, consumos por tipo, stock. Los almacenes
+ * (030S05) se dejan fuera, como en el cálculo. Devuelve null si no es un TFORMDET.
+ */
+export const tformdetLastMonth = (sheet: unknown[][]): TformdetMonthSheet | null => {
+  const headerIdx = sheet.slice(0, 15).findIndex((row) => {
+    const cells = (row || []).map(normHeader);
+    return cells.includes("CODIGO PRE") && cells.includes("CODIGO MED");
+  });
+  if (headerIdx < 0) return null;
+  const rawHeader = sheet[headerIdx].map((c) => text(c));
+  const header = rawHeader.map(normHeader);
+  const cMonth = header.indexOf("ANNOMES") >= 0 ? header.indexOf("ANNOMES") : header.indexOf("ANOMES");
+  const cPre = header.indexOf("CODIGO PRE"), cMed = header.indexOf("CODIGO MED");
+  const body = sheet.slice(headerIdx + 1).filter((r) => r && r.length && isEstablishmentCode(padCode(r[cPre])));
+  let month: string | undefined;
+  if (cMonth >= 0) {
+    for (const r of body) {
+      const m = text(r[cMonth]);
+      if (/^\d{6}$/.test(m) && (!month || m > month)) month = m;
+    }
+  }
+  const rows = month ? body.filter((r) => text(r[cMonth]) === month) : body;
+  // Sin la columna ANNOMES: en esta hoja todo es del mismo mes.
+  const keep = rawHeader.map((_, i) => i).filter((i) => i !== cMonth && rawHeader[i] !== "");
+  return {
+    month,
+    header: keep.map((i) => rawHeader[i]),
+    rows: rows.map((r) => keep.map((i) => (i === cPre || i === cMed ? padCode(r[i]) : r[i] ?? null))),
+  };
+};
+
 /**
  * Lee la consulta TFORMDET del Toolkit (uno o varios meses, columna ANNOMES) y arma una fila por
  * farmacia y producto: el consumo de cada mes, el stock al cierre del último mes y los lotes

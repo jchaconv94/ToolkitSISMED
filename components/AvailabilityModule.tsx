@@ -5,12 +5,13 @@ import {
   Activity, AlertTriangle, Building2, CalendarClock, CheckCircle2, ChevronRight, Download, FileSpreadsheet, Loader2, MoreVertical, RefreshCw, Settings2, Upload, X,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { userFullName } from "../services/sessionDisplay";
 import { api } from "../services/api";
 import { StockStatus } from "../types";
 import {
-  DME_LEVEL_LABEL, buildItems, essentialRows, groupByIpress, parseAvailabilitySheet, parseLotsSheet, parseTformdetHistory, summarize,
+  DME_LEVEL_LABEL, buildItems, essentialRows, groupByIpress, parseAvailabilitySheet, parseLotsSheet, parseTformdetHistory, summarize, tformdetLastMonth,
   type EstablishmentInfo,
-  type AvailabilityItem, type AvailabilityScope, type EstablishmentSummary, type Lot, type MicroredSummary, type ParsedAvailability,
+  type AvailabilityItem, type AvailabilityScope, type EstablishmentSummary, type Lot, type TformdetMonthSheet, type MicroredSummary, type ParsedAvailability,
 } from "../services/availabilityReport";
 import { STATUS_LABEL, exportAvailabilityExcel, monthLabel } from "../services/availabilityExport";
 import { formatOneDecimal, type DmeLevel } from "../services/stockStatus";
@@ -197,6 +198,8 @@ export const AvailabilityModule: React.FC = () => {
 
   const [dispFile, setDispFile] = useState<{ name: string; data: ParsedAvailability } | null>(null);
   const [lotsFile, setLotsFile] = useState<{ name: string; data: Map<string, Lot[]> } | null>(null);
+  /** Registros del TFORMDET del mes de corte, tal como vienen: van en una hoja del Excel. */
+  const [tformdetSheet, setTformdetSheet] = useState<TformdetMonthSheet | null>(null);
   const [reading, setReading] = useState<"disp" | "lots" | null>(null);
   const [calculated, setCalculated] = useState(false);
   const [registry, setRegistry] = useState<Map<string, EstablishmentInfo>>(new Map());
@@ -250,13 +253,14 @@ export const AvailabilityModule: React.FC = () => {
         const data = parseTformdetHistory(sheet, { fallbackMonth });
         setDispFile({ name: file.name, data });
         setLotsFile({ name: "Del mismo TFORMDET", data: data.lots });
+        setTformdetSheet(tformdetLastMonth(sheet));
         setSource({ kind: "tformdet", classified: data.hasClassification, skipped: data.skippedCodes });
         if (!data.hasClassification) setScope("all");
       } else {
         const data = parseAvailabilitySheet(sheet);
         if (data.rows.length === 0) throw new Error("El archivo no tiene productos.");
         setDispFile({ name: file.name, data });
-        if (source?.kind === "tformdet") setLotsFile(null);
+        if (source?.kind === "tformdet") { setLotsFile(null); setTformdetSheet(null); }
         setSource({ kind: "disponibilidad", classified: true, skipped: [] });
       }
       setCalculated(false);
@@ -268,10 +272,14 @@ export const AvailabilityModule: React.FC = () => {
   };
 
   const handleLotsFile = async (file: File) => {
+    // Si aún no hay archivo principal, el TFORMDET puesto aquí ya basta para calcular: va arriba.
+    if (!dispFile) return handleDispFile(file);
     setReading("lots");
     try {
-      const data = parseLotsSheet(await readSheet(file));
+      const sheet = await readSheet(file);
+      const data = parseLotsSheet(sheet);
       setLotsFile({ name: file.name, data });
+      setTformdetSheet(tformdetLastMonth(sheet));
     } catch (e: any) {
       toast.error(e?.message || "No se pudo leer el TFORMDET.");
     } finally {
@@ -358,10 +366,33 @@ export const AvailabilityModule: React.FC = () => {
   const resetFilters = () => { setMicrored("ALL"); setLevel(null); setEstablishment("ALL"); setStatus("ALL"); setRiskOnly(false); };
   const openEstablishment = (code: string) => { resetFilters(); setSearch(""); setEstablishment(code); setTab("meds"); };
 
+  /** Profesión de quien genera el reporte, para la portada del Excel. */
+  const professionOf = async (): Promise<string | undefined> => {
+    const p = user?.personnelData;
+    if (!p) return undefined;
+    if (p.professionData?.name) return p.professionData.name;
+    if (!p.professionId) return undefined;
+    const list = await api.getProfessions().catch(() => []);
+    return list.find((x) => x.id === p.professionId)?.name;
+  };
+
   const handleExport = async () => {
     setExporting(true);
     try {
-      await exportAvailabilityExcel({ report, pharmacyItems, months, scopeLabel: scope === "essential" ? "Esenciales" : "Todos", title });
+      // El porcentaje del otro alcance va como referencia en el resumen.
+      const otherScope: AvailabilityScope = scope === "all" ? "essential" : "all";
+      const otherItems = computed && (otherScope === "all" || source?.classified !== false) ? (otherScope === "all" ? computed.all : computed.essential) : null;
+      const otherScopePct = otherItems && otherItems.length ? summarize(otherItems, summaryOptionsOf(config.formula, otherScope, vitalCodes)).pct : null;
+      await exportAvailabilityExcel({
+        report, otherScopePct, pharmacyItems, months, scope, title,
+        formulaText: describeFormula(config.formula, scope),
+        levels: config.formula.levels,
+        fusedVersion: config.fused.version,
+        source: `${dispFile?.name || ""} (${source?.kind === "tformdet" ? "TFORMDET" : "archivo de disponibilidad"})`,
+        preparedBy: user ? userFullName(user) : undefined,
+        preparedByRole: await professionOf(),
+        tformdet: tformdetSheet,
+      });
     } catch (e: any) {
       toast.error(e?.message || "No se pudo generar el Excel.");
     } finally {
@@ -393,7 +424,7 @@ export const AvailabilityModule: React.FC = () => {
               fileName={dispFile?.name}
               detail={d ? `${formatNumber(d.rows.length)} filas` : undefined}
               onFile={handleDispFile}
-              onClear={() => { setDispFile(null); setCalculated(false); if (source?.kind === "tformdet") setLotsFile(null); setSource(null); }}
+              onClear={() => { setDispFile(null); setCalculated(false); if (source?.kind === "tformdet") { setLotsFile(null); setTformdetSheet(null); } setSource(null); }}
               busy={reading === "disp"}
             />
             {source?.kind === "tformdet" ? (
@@ -410,7 +441,7 @@ export const AvailabilityModule: React.FC = () => {
               fileName={lotsFile?.name}
               detail={lotsFile ? `${formatNumber(lotsFile.data.size)} productos con lote` : undefined}
               onFile={handleLotsFile}
-              onClear={() => setLotsFile(null)}
+              onClear={() => { setLotsFile(null); setTformdetSheet(null); }}
               busy={reading === "lots"}
             />
             )}
