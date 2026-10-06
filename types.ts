@@ -124,6 +124,7 @@ export type AppModule =
   | 'DASHBOARD'
   | 'ANALYSIS'
   | 'ANALYSIS_EXCLUSIONS'
+  | 'AVAILABILITY'
   | 'ADMIN_USERS'
   | 'ADMIN_ROLES'
   | 'ADMIN_FACILITIES'
@@ -141,6 +142,7 @@ export const AVAILABLE_MODULES: { id: AppModule; label: string; description: str
   { id: 'HOME', label: 'Inicio', description: 'Pantalla de inicio con acceso a todas las herramientas' },
   { id: 'DASHBOARD', label: 'Análisis de Requerimiento', description: 'Vista principal y resumen de indicadores' },
   { id: 'ANALYSIS_EXCLUSIONS', label: 'Lista de Exclusiones', description: 'Medicamentos excluidos del análisis por establecimiento' },
+  { id: 'AVAILABILITY', label: 'Disponibilidad', description: 'Disponibilidad de productos y de medicamentos esenciales (DME) por establecimiento, microred y UNGET' },
   { id: 'ANALYSIS', label: 'Análisis Inteligente', description: 'Módulo de análisis de requerimientos' },
   { id: 'SIG_SEARCH', label: 'Consulta Stock', description: 'Buscador de stock SIG' },
   { id: 'REDISTRIBUTION', label: 'Redistribución', description: 'Módulo de redistribución de medicamentos' },

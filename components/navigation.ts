@@ -1,4 +1,5 @@
 import {
+  Activity,
   ArrowRightLeft,
   Ban,
   BarChart2,
@@ -70,6 +71,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { module: "DASHBOARD", label: "Análisis de Requerimiento", shortLabel: "Análisis", description: "Requerimiento por establecimiento", icon: BarChart2 },
       { module: "ANALYSIS_EXCLUSIONS", label: "Lista de Exclusiones", shortLabel: "Exclusiones", description: "Medicamentos fuera del análisis", icon: Ban },
+      { module: "AVAILABILITY", label: "Disponibilidad", shortLabel: "Disponibilidad", description: "Disponibilidad y DME por establecimiento", icon: Activity },
       { module: "REDISTRIBUTION", label: "Redistribución", shortLabel: "Redistribución", description: "Canjes entre establecimientos", icon: ArrowRightLeft },
     ],
   },
