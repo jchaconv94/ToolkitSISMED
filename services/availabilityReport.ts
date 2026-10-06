@@ -1,5 +1,6 @@
 import { StockStatus } from "../types";
-import { classifyStock, type DmeLevel } from "./stockStatus";
+import { monthsOfStock, truncateOneDecimal, type DmeLevel } from "./stockStatus";
+import type { ScopeRule } from "./availabilityConfig";
 import { FUSED_CODE_GROUPS } from "./fusedCodes";
 
 /**
@@ -9,8 +10,10 @@ import { FUSED_CODE_GROUPS } from "./fusedCodes";
  * reglas acordadas:
  *
  * - CPA = consumo de los 12 meses ÷ meses con consumo (ficha 28 de DIGEMID).
- * - Meses de provisión = stock ÷ CPA, **cortados a un decimal** (`classifyStock`, la misma
- *   regla del Análisis de Requerimiento).
+ * - Meses de provisión = stock ÷ CPA. Por omisión **no** se cortan a un decimal (el usuario lo
+ *   pidió para este módulo, 2026-10-06; el Análisis sí corta); es configurable.
+ * - Todo lo configurable (qué situaciones cuentan, límites de meses, niveles, cómo se juntan
+ *   microred y UNGET) viene de `services/availabilityConfig.ts`.
  * - Situación: Desabastecido (stock 0), Sin rotación (stock > 0 y CPA 0), Substock (< 2),
  *   Normostock (2 a 6) y Sobrestock (> 6). No existe «Sin consumo» (decisión del usuario).
  * - Disponibilidad = (Normostock + Sobrestock) ÷ total de ítems. Sin rotación cuenta en el
@@ -325,7 +328,28 @@ const byExpiry = (a: Lot, b: Lot) => (a.expiry?.getTime() ?? Infinity) - (b.expi
  * fila de IPRESS toma los de todas sus farmacias, y una fila fusionada (DME) los de todos los
  * códigos que se sumaron en ella.
  */
-export const buildItems = (rows: AvailabilityRow[], lots?: Map<string, Lot[]>, today = new Date()): AvailabilityItem[] => {
+export interface ClassifyOptions {
+  truncate: boolean;
+  subMax: number;
+  sobreMin: number;
+}
+
+export const DEFAULT_CLASSIFY: ClassifyOptions = { truncate: false, subMax: 2, sobreMin: 6 };
+
+/** Situación de un producto con los límites configurados. */
+export const classifyAvailability = (stock: number, cpa: number, opts: ClassifyOptions = DEFAULT_CLASSIFY): { months: number; status: StockStatus } => {
+  const months = monthsOfStock(stock, cpa);
+  const m = opts.truncate ? truncateOneDecimal(months) : months;
+  let status: StockStatus;
+  if (stock <= 0) status = StockStatus.DESABASTECIDO;
+  else if (cpa <= 0) status = StockStatus.SIN_ROTACION;
+  else if (m > opts.sobreMin) status = StockStatus.SOBRESTOCK;
+  else if (m >= opts.subMax) status = StockStatus.NORMOSTOCK;
+  else status = StockStatus.SUBSTOCK;
+  return { months: opts.truncate ? m : months, status };
+};
+
+export const buildItems = (rows: AvailabilityRow[], lots?: Map<string, Lot[]>, today = new Date(), opts: ClassifyOptions = DEFAULT_CLASSIFY): AvailabilityItem[] => {
   // Lotes por IPRESS, armados una sola vez (recorrerlos por cada fila tardaba demasiado).
   const byIpress = new Map<string, Lot[]>();
   if (lots) {
@@ -339,7 +363,7 @@ export const buildItems = (rows: AvailabilityRow[], lots?: Map<string, Lot[]>, t
   const lotsOf = (code: string, medCode: string) => [...(lots?.get(`${code}|${medCode}`) || []), ...(byIpress.get(`${code}|${medCode}`) || [])];
   return rows.map((r) => {
     const cpa = averageConsumption(r.consumption);
-    const { months, status } = classifyStock(r.stock, cpa);
+    const { months, status } = classifyAvailability(r.stock, cpa, opts);
     const codes = r.fusedFrom?.length ? r.fusedFrom : [r.medCode];
     const list = lots ? codes.flatMap((med) => lotsOf(r.code, med)).sort(byExpiry) : [];
     const nearestExpiry = list.find((l) => l.expiry)?.expiry ?? null;
@@ -349,19 +373,31 @@ export const buildItems = (rows: AvailabilityRow[], lots?: Map<string, Lot[]>, t
   });
 };
 
-export const dmeLevelOf = (pct: number): DmeLevel => (pct >= 90 ? "OPTIMO" : pct >= 80 ? "ALTO" : pct >= 70 ? "REGULAR" : "BAJO");
+export interface LevelThresholds { optimo: number; alto: number; regular: number }
+export const DEFAULT_LEVELS: LevelThresholds = { optimo: 90, alto: 80, regular: 70 };
+
+export const dmeLevelOf = (pct: number, t: LevelThresholds = DEFAULT_LEVELS): DmeLevel =>
+  pct >= t.optimo ? "OPTIMO" : pct >= t.alto ? "ALTO" : pct >= t.regular ? "REGULAR" : "BAJO";
 
 export const DME_LEVEL_LABEL: Record<DmeLevel, string> = { OPTIMO: "Óptimo", ALTO: "Alto", REGULAR: "Regular", BAJO: "Bajo" };
 
 const emptyCounts = (): StatusCounts => ({ desabastecido: 0, substock: 0, normostock: 0, sobrestock: 0, sinRotacion: 0, total: 0, available: 0 });
 
-/** ¿Cuenta como disponible? Normostock y Sobrestock; Sin rotación solo si es vital. */
-const isAvailable = (item: AvailabilityItem, vitalCodes?: ReadonlySet<string>) =>
-  item.status === StockStatus.NORMOSTOCK ||
-  item.status === StockStatus.SOBRESTOCK ||
-  (item.status === StockStatus.SIN_ROTACION && !!vitalCodes?.has(item.medCode));
+export const DEFAULT_RULE: ScopeRule = { normostock: true, sobrestock: true, substock: false, sinRotacion: "no" };
 
-const countItems = (items: AvailabilityItem[], vitalCodes?: ReadonlySet<string>): StatusCounts => {
+/** ¿Cuenta como disponible según la regla? Desabastecido nunca. */
+export const isAvailable = (item: AvailabilityItem, rule: ScopeRule, vitalCodes?: ReadonlySet<string>) => {
+  switch (item.status) {
+    case StockStatus.NORMOSTOCK: return rule.normostock;
+    case StockStatus.SOBRESTOCK: return rule.sobrestock;
+    case StockStatus.SUBSTOCK: return rule.substock;
+    case StockStatus.SIN_ROTACION:
+      return rule.sinRotacion === "yes" || (rule.sinRotacion === "vital" && (!!vitalCodes?.has(item.medCode) || !!item.fusedFrom?.some((c) => vitalCodes?.has(c))));
+    default: return false;
+  }
+};
+
+const countItems = (items: AvailabilityItem[], rule: ScopeRule, vitalCodes?: ReadonlySet<string>): StatusCounts => {
   const c = emptyCounts();
   for (const it of items) {
     c.total++;
@@ -370,7 +406,7 @@ const countItems = (items: AvailabilityItem[], vitalCodes?: ReadonlySet<string>)
     else if (it.status === StockStatus.NORMOSTOCK) c.normostock++;
     else if (it.status === StockStatus.SOBRESTOCK) c.sobrestock++;
     else c.sinRotacion++;
-    if (isAvailable(it, vitalCodes)) c.available++;
+    if (isAvailable(it, rule, vitalCodes)) c.available++;
   }
   return c;
 };
@@ -387,12 +423,26 @@ const addCounts = (a: StatusCounts, b: StatusCounts): StatusCounts => ({
 
 const average = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
 
+export interface SummaryOptions {
+  rule: ScopeRule;
+  /** Códigos vitales: cuentan si la regla de Sin rotación es «vital». */
+  vitalCodes?: ReadonlySet<string>;
+  levels: LevelThresholds;
+  /** Microred y UNGET: promedio de establecimientos o suma de ítems. */
+  aggregate: "average" | "sum";
+}
+
+export const DEFAULT_SUMMARY: SummaryOptions = { rule: DEFAULT_RULE, levels: DEFAULT_LEVELS, aggregate: "average" };
+
+const pctOf = (c: StatusCounts) => (c.total ? (c.available / c.total) * 100 : 0);
+
 /**
  * Resúmenes por establecimiento, microred y UNGET. `items` deben ser de nivel IPRESS (una
  * fila por establecimiento y producto): todos los productos, o los de `essentialRows` para la
- * DME. `vitalCodes` (solo DME): Sin rotación de esos códigos cuenta como disponible.
+ * DME.
  */
-export const summarize = (items: AvailabilityItem[], vitalCodes?: ReadonlySet<string>): AvailabilityReport => {
+export const summarize = (items: AvailabilityItem[], opts: SummaryOptions = DEFAULT_SUMMARY): AvailabilityReport => {
+  const { rule, vitalCodes, levels, aggregate } = opts;
   const inScope = items;
   const byCode = new Map<string, AvailabilityItem[]>();
   for (const it of inScope) {
@@ -401,10 +451,10 @@ export const summarize = (items: AvailabilityItem[], vitalCodes?: ReadonlySet<st
     byCode.set(it.code, list);
   }
   const establishments: EstablishmentSummary[] = [...byCode.entries()].map(([code, list]) => {
-    const counts = countItems(list, vitalCodes);
-    const pct = counts.total ? (counts.available / counts.total) * 100 : 0;
+    const counts = countItems(list, rule, vitalCodes);
+    const pct = pctOf(counts);
     const first = list[0];
-    return { ...counts, code, name: first.name, microred: first.microred, red: first.red, category: first.category, pct, level: dmeLevelOf(pct) };
+    return { ...counts, code, name: first.name, microred: first.microred, red: first.red, category: first.category, pct, level: dmeLevelOf(pct, levels) };
   });
   establishments.sort((a, b) => a.microred.localeCompare(b.microred, "es") || a.code.localeCompare(b.code));
 
@@ -415,20 +465,15 @@ export const summarize = (items: AvailabilityItem[], vitalCodes?: ReadonlySet<st
     byMicrored.set(e.microred, list);
   }
   const microredes: MicroredSummary[] = [...byMicrored.entries()].map(([microred, list]) => {
-    const pct = average(list.map((e) => e.pct));
-    return { microred, establishments: list.length, counts: list.reduce((acc, e) => addCounts(acc, e), emptyCounts()), pct, level: dmeLevelOf(pct) };
+    const counts = list.reduce((acc, e) => addCounts(acc, e), emptyCounts());
+    const pct = aggregate === "sum" ? pctOf(counts) : average(list.map((e) => e.pct));
+    return { microred, establishments: list.length, counts, pct, level: dmeLevelOf(pct, levels) };
   });
   microredes.sort((a, b) => a.microred.localeCompare(b.microred, "es"));
 
-  const pct = average(establishments.map((e) => e.pct));
-  return {
-    items: inScope,
-    establishments,
-    microredes,
-    pct,
-    level: dmeLevelOf(pct),
-    counts: establishments.reduce((acc, e) => addCounts(acc, e), emptyCounts()),
-  };
+  const counts = establishments.reduce((acc, e) => addCounts(acc, e), emptyCounts());
+  const pct = aggregate === "sum" ? pctOf(counts) : average(establishments.map((e) => e.pct));
+  return { items: inScope, establishments, microredes, pct, level: dmeLevelOf(pct, levels), counts };
 };
 
 /** Código destino de cada código fusionado. */

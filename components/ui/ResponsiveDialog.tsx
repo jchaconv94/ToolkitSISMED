@@ -8,7 +8,8 @@ import { X } from "lucide-react";
  *
  * - Celular: pantalla completa, como una app: arriba la X y el título, en medio el contenido
  *   con su desplazamiento y abajo los botones fijos.
- * - Escritorio: la misma ventana, centrada (`size`: "md" formulario corto, "lg" con columnas).
+ * - Escritorio: la misma ventana, centrada (`size`: "md" formulario corto, "lg" con columnas,
+ *   "xl" configuración con pestañas y tablas).
  *
  * `top` va fijo bajo el título (p. ej. el avance de un asistente). Con `onSubmit` la ventana es
  * un `<form>`: los botones del pie pueden ser `type="submit"`.
@@ -21,7 +22,7 @@ export const ResponsiveDialog: React.FC<{
   children: React.ReactNode;
   footer: React.ReactNode;
   top?: React.ReactNode;
-  size?: "md" | "lg";
+  size?: "md" | "lg" | "xl";
   onSubmit?: (event: React.FormEvent) => void;
   /** Mientras guarda, la X, Escape y el fondo no cierran. */
   busy?: boolean;
@@ -40,7 +41,7 @@ export const ResponsiveDialog: React.FC<{
 
   if (!open) return null;
 
-  const panelClass = `flex h-full w-full flex-col bg-white md:h-auto md:max-h-[90vh] md:overflow-hidden md:rounded-2xl md:shadow-2xl ${size === "lg" ? "md:max-w-3xl" : "md:max-w-lg"} animate-in fade-in slide-in-from-bottom-4 duration-200 md:zoom-in-95 md:slide-in-from-bottom-0`;
+  const panelClass = `flex h-full w-full flex-col bg-white md:h-auto md:max-h-[90vh] md:overflow-hidden md:rounded-2xl md:shadow-2xl ${size === "xl" ? "md:max-w-5xl" : size === "lg" ? "md:max-w-3xl" : "md:max-w-lg"} animate-in fade-in slide-in-from-bottom-4 duration-200 md:zoom-in-95 md:slide-in-from-bottom-0`;
   const content = (
     <>
       <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 px-2 py-2 md:px-5 md:py-3.5">
