@@ -287,6 +287,8 @@ export interface User {
   personnelData?: Personnel; // Hydrated data
   facilityData?: HealthFacility; // Hydrated data
   permissions: AppModule[]; // Computed from Role
+  /** Acciones apagadas para su rol, "MODULO:accion" (services/moduleActions.ts). */
+  deniedActions?: string[];
   maxUrlsAllowed?: number;
   jurisdictionLevel?: 'GLOBAL' | 'DIRESA' | 'OGESS' | 'UNGET' | 'MICRORED' | 'IPRESS';
 }
@@ -314,6 +316,8 @@ export interface RoleConfig {
   oldRole?: UserRole; // Internal use to know if role was renamed
   label: string;
   allowedModules: AppModule[];
+  /** Acciones apagadas dentro de los módulos, "MODULO:accion" (services/moduleActions.ts). */
+  deniedActions?: string[];
   maxUrlsAllowed?: number;
   jurisdictionLevel?: 'GLOBAL' | 'DIRESA' | 'OGESS' | 'UNGET' | 'MICRORED' | 'IPRESS' | '';
 }

@@ -57,8 +57,12 @@ const usersLabel = (n: number) => (n ? `${n} ${n === 1 ? 'usuario' : 'usuarios'}
  * eliminar, en `ConfirmationDialog` con cuántos usuarios quedan sin ese dato.
  */
 export const AdminCatalogsModule: React.FC<AdminCatalogsModuleProps> = ({ onChanged, users }) => {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const isSuperAdmin = user?.role === 'ADMIN';
+  // Acciones que el rol puede usar (Configuración de Roles).
+  const canCreate = can('ADMIN_CATALOGS', 'create');
+  const canEdit = can('ADMIN_CATALOGS', 'edit');
+  const canDelete = isSuperAdmin && can('ADMIN_CATALOGS', 'delete');
   const isDesktop = useIsDesktop();
 
   const [regimes, setRegimes] = useState<CatalogItem[]>([]);
@@ -170,13 +174,13 @@ export const AdminCatalogsModule: React.FC<AdminCatalogsModuleProps> = ({ onChan
               <h3 className="text-[15px] font-black text-slate-900">{text.title} <span className="font-semibold text-slate-400">· {itemsOf(kind).length}</span></h3>
               <p className="text-[12.5px] text-slate-500">{text.subtitle}</p>
             </div>
-            <button
+            {canCreate && <button
               type="button"
               onClick={() => setForm({ kind, name: '', description: '' })}
               className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-teal-600 px-3 text-[13px] font-bold text-white transition-colors hover:bg-teal-700"
             >
               <Plus className="h-4 w-4" /> {text.newLabel}
-            </button>
+            </button>}
           </div>
         )}
         <div className="border-b border-slate-100 p-3">
@@ -209,7 +213,7 @@ export const AdminCatalogsModule: React.FC<AdminCatalogsModuleProps> = ({ onChan
                       <span className={n ? 'text-slate-600' : 'text-slate-400'}>{usersLabel(n)}</span>
                     </p>
                   </div>
-                  <button
+                  {canEdit && <button
                     type="button"
                     onClick={() => setForm({ kind, id: item.id, name: item.name, description: item.description || '' })}
                     title="Editar"
@@ -217,8 +221,8 @@ export const AdminCatalogsModule: React.FC<AdminCatalogsModuleProps> = ({ onChan
                     className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-500 transition-colors hover:bg-teal-50 hover:text-teal-600"
                   >
                     <Edit className="h-[18px] w-[18px]" />
-                  </button>
-                  {isSuperAdmin && (
+                  </button>}
+                  {canDelete && (
                     <button
                       type="button"
                       onClick={() => setToDelete({ kind, id: item.id, name: item.name })}
@@ -275,7 +279,7 @@ export const AdminCatalogsModule: React.FC<AdminCatalogsModuleProps> = ({ onChan
             ))}
           </div>
           {renderList(mobileTab)}
-          <FloatingActionButton icon={<Plus />} label={KIND_TEXT[mobileTab].newLabel} onClick={() => setForm({ kind: mobileTab, name: '', description: '' })} />
+          {canCreate && <FloatingActionButton icon={<Plus />} label={KIND_TEXT[mobileTab].newLabel} onClick={() => setForm({ kind: mobileTab, name: '', description: '' })} />}
         </>
       )}
 

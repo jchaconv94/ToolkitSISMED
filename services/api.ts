@@ -1,4 +1,5 @@
 import { User, UserRole, Personnel, HealthFacility, RoleConfig, SystemConfig, Unget, Diresa, Ogess, Microred } from "../types";
+import { parseDeniedActions } from "./moduleActions";
 import { SESSION_TOKEN_KEY, supabase } from "./supabaseClient";
 import { connectionsToRetire, shouldAdoptConnection } from "./ungetConnections";
 import bcrypt from "bcryptjs";
@@ -259,6 +260,7 @@ export const api = {
                             microredId: facilityData.microred_id
                         } : undefined as any,
                         permissions: roleConfig ? roleConfig.allowed_modules : [],
+                        deniedActions: roleConfig ? parseDeniedActions(roleConfig.denied_actions) : [],
                         maxUrlsAllowed: roleConfig ? roleConfig.max_urls_allowed : 0,
                         jurisdictionLevel: roleConfig ? (roleConfig.jurisdiction_level || roleConfig.jurisdictionLevel) : undefined
                     }
@@ -344,6 +346,7 @@ export const api = {
                             microredId: facilityData.microred_id
                         } : undefined as any,
                         permissions: roleConfig ? roleConfig.allowed_modules : [],
+                        deniedActions: roleConfig ? parseDeniedActions(roleConfig.denied_actions) : [],
                         maxUrlsAllowed: roleConfig ? roleConfig.max_urls_allowed : 0,
                         jurisdictionLevel: roleConfig ? (roleConfig.jurisdiction_level || roleConfig.jurisdictionLevel) : undefined
                     }
@@ -450,6 +453,7 @@ export const api = {
                                 microredId: f.microred_id
                             } : null,
                             permissions: roleCfg ? roleCfg.allowed_modules : [],
+                            deniedActions: roleCfg ? parseDeniedActions(roleCfg.denied_actions) : [],
                             maxUrlsAllowed: roleCfg ? roleCfg.max_urls_allowed : 0,
                             created_at: u.created_at
                         };
@@ -1034,6 +1038,7 @@ export const api = {
                             role: r.role,
                             label: r.label,
                             allowedModules,
+                            deniedActions: parseDeniedActions(r.denied_actions),
                             maxUrlsAllowed: r.max_urls_allowed,
                             jurisdictionLevel: r.jurisdiction_level
                         };
@@ -1059,6 +1064,24 @@ export const api = {
                     p_jurisdiction_level: roleConfig.jurisdictionLevel || null
                 });
                 if (error) throw error;
+                // Las acciones van aparte (supabase/SUPABASE_ROLES_ACCIONES.sql): si ese SQL
+                // todavía no se aplicó, el rol se guarda igual y se avisa.
+                if (roleConfig.deniedActions !== undefined) {
+                    const { error: actionsError } = await supabase.rpc('app_admin_save_role_actions', {
+                        p_token: requireSessionToken(),
+                        p_role: roleConfig.role,
+                        p_denied_actions: roleConfig.deniedActions
+                    });
+                    if (actionsError) {
+                        const missing = /app_admin_save_role_actions|PGRST202|does not exist|schema cache/i.test(`${actionsError.code || ''} ${actionsError.message || ''}`);
+                        return {
+                            success: false,
+                            message: missing
+                                ? 'Se guardaron los módulos, pero no las acciones: falta ejecutar en Supabase el script SUPABASE_ROLES_ACCIONES.sql.'
+                                : `Se guardaron los módulos, pero no las acciones: ${actionsError.message}`
+                        };
+                    }
+                }
                 return { success: true };
             }
         } catch(e: any) {

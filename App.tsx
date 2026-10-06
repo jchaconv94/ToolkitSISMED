@@ -412,7 +412,9 @@ const AuthenticatedApp: React.FC = () => {
 // Extracted to keep App.tsx clean
 const AnalysisModule: React.FC = () => {
   // NEW: Get User Context
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  const canPdf = can('DASHBOARD', 'pdf');
+  const canAdditional = can('DASHBOARD', 'additional');
 
   const userFacilityCode = useMemo(() => {
     return (user?.facilityData?.code || user?.personnelData?.facilityCode || '').trim().replace(/^0+/, '');
@@ -1230,13 +1232,13 @@ const AnalysisModule: React.FC = () => {
                                     {quickFilter === 'PENDING' ? 'Mostrando pendientes · Ver todos' : `Ver pendientes (${pendientes})`}
                                 </button>
                             )}
-                            <button
+                            {canPdf && <button
                                 onClick={handleDownloadClick}
                                 className={`inline-flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 py-2.5 text-xs font-bold transition-colors ${isReviewComplete ? 'bg-teal-600 text-white shadow-sm hover:bg-teal-700' : 'border border-gray-200 bg-gray-50 text-gray-400'}`}
                             >
                                 {isReviewComplete ? <FileText className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
                                 Descargar informe PDF
-                            </button>
+                            </button>}
                         </div>
                         {!isReviewComplete && (
                             <p className="mt-2 text-[11px] text-slate-500">
@@ -1291,7 +1293,7 @@ const AnalysisModule: React.FC = () => {
                 quickFilter={quickFilter}
                 onQuickFilterChange={setQuickFilter}
                 additionalItemsCount={additionalItems.length}
-                onOpenAdditionalModal={() => setIsManualEntryModalOpen(true)}
+                onOpenAdditionalModal={canAdditional ? () => setIsManualEntryModalOpen(true) : undefined}
             />
           </div>
         )}
@@ -1299,7 +1301,7 @@ const AnalysisModule: React.FC = () => {
         <Suspense fallback={null}>
             <ReportOptionsModal isOpen={isReportModalOpen} onClose={() => setIsReportModalOpen(false)} onConfirm={handleGenerateReport} totalItems={horizonMedications.length} />
             <ReviewWarningModal isOpen={showReviewWarning} onClose={() => setShowReviewWarning(false)} progress={reviewProgress} />
-            <SuccessModal isOpen={showSuccessModal} onClose={() => setShowSuccessModal(false)} onDownload={handleDownloadClick} />
+            <SuccessModal isOpen={showSuccessModal} onClose={() => setShowSuccessModal(false)} onDownload={canPdf ? handleDownloadClick : undefined} />
             <ManualEntryModal isOpen={isManualEntryModalOpen} onClose={() => setIsManualEntryModalOpen(false)} items={additionalItems} onAdd={handleAddAdditionalItem} onRemove={handleRemoveAdditionalItem} />
         </Suspense>
     </div>

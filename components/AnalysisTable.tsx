@@ -29,6 +29,7 @@ import { TablePagination } from './ui/TablePagination';
 import { FloatingTableHead, useFloatingTableHead } from './ui/FloatingTableHead';
 import { SortButton, SortDir, ariaSort, tableSearchBoxClass, useTableSort } from './ui/kit';
 import { analysisFilterValue, formatOneDecimal, truncateOneDecimal } from '../services/stockStatus';
+import { useAuth } from '../contexts/AuthContext';
 
 interface AnalysisTableProps {
   medications: AnalyzedMedication[]; // The FILTERED list to display
@@ -283,6 +284,10 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
     setOpenFilter(current => (current?.field === field && current.anchor === anchor ? null : { field, anchor }));
   const [isMainFilterOpen, setIsMainFilterOpen] = useState(false); // State for the main header filter dropdown
   
+  const { can } = useAuth();
+  // Acciones que el rol puede usar (Configuración de Roles).
+  const canEditRequirement = can('DASHBOARD', 'editRequirement');
+  const canExportExcel = can('DASHBOARD', 'exportExcel');
   const itemsPerPage = isFullScreen ? 15 : 10; // Show more items in full screen
   const mainFilterRef = useRef<HTMLDivElement>(null); // Ref for main header filter
   const mainFilterDropdownRef = useRef<HTMLDivElement>(null); // Ref for main header filter dropdown
@@ -721,13 +726,13 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
 
               {/* RIGHT SIDE: Progress + Exit */}
               <div className="flex items-center gap-3 sm:gap-6 ml-3 shrink-0">
-                  <button 
+                  {canEditRequirement && <button 
                       onClick={handleStartAnalysis}
                       className="flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9 bg-teal-600 hover:bg-teal-500 hover:scale-[1.05] active:scale-95 text-white rounded-lg transition-all shadow-[0_0_12px_rgba(20,184,166,0.3)] shrink-0 group animate-pulse"
                       title="Comenzar análisis del primer ítem pendiente"
                   >
                       <Play className="h-4 w-4 fill-current group-hover:scale-110 transition-transform" />
-                  </button>
+                  </button>}
 
                   <div className="hidden md:flex items-center gap-3 sm:gap-6">
                       <div className="text-right hidden lg:block">
@@ -807,14 +812,14 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                         />
                     </div>
 
-                    <button 
+                    {canEditRequirement && <button 
                         onClick={handleStartAnalysis}
                         className="flex justify-center items-center gap-2 px-4 py-2.5 sm:py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-lg transition-all shadow-sm whitespace-nowrap shrink-0 group transform hover:scale-[1.02]"
                         title="Comenzar análisis del primer ítem pendiente"
                     >
                         <Play className="h-4 w-4 fill-current group-hover:scale-110 transition-transform" />
                         <span>Comenzar Análisis</span>
-                    </button>
+                    </button>}
                 </div>
                 
                 {/* Buttons */}
@@ -846,13 +851,13 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
                         <span className="block sm:hidden">Pantalla Completa</span>
                     </button>
 
-                    <button 
+                    {canExportExcel && <button 
                         onClick={handleExportExcel}
                         className="flex justify-center items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm whitespace-nowrap col-span-2 sm:col-span-1 sm:w-auto"
                     >
                         <FileSpreadsheet className="h-4 w-4" />
                         <span>Exportar Excel</span>
-                    </button>
+                    </button>}
                 </div>
             </div>
         </div>

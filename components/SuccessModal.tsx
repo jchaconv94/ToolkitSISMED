@@ -6,7 +6,8 @@ import { Trophy, FileText, X, CheckCircle, ArrowRight } from 'lucide-react';
 interface SuccessModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onDownload: () => void;
+  /** Sin él (rol sin permiso para el PDF) no se ofrece la descarga. */
+  onDownload?: () => void;
 }
 
 export const SuccessModal: React.FC<SuccessModalProps> = ({ 
@@ -53,17 +54,17 @@ export const SuccessModal: React.FC<SuccessModalProps> = ({
           </p>
 
           <div className="w-full space-y-3">
-            <button 
+            {onDownload && <button 
                 onClick={() => {
                     onDownload();
                     onClose();
                 }}
-                className="w-full py-3.5 px-4 bg-gray-900 text-white rounded-xl font-bold shadow-lg hover:bg-black hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 group"
+                className="w-full py-3.5 px-4 bg-teal-600 text-white rounded-xl font-bold shadow-lg hover:bg-teal-700 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 group"
             >
                 <FileText className="h-5 w-5" />
                 Descargar Reporte PDF
                 <ArrowRight className="h-4 w-4 opacity-50 group-hover:translate-x-1 transition-transform" />
-            </button>
+            </button>}
 
             <button 
                 onClick={onClose}

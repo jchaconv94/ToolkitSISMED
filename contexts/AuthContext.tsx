@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { User, AuthState, AppModule, SystemConfig } from '../types';
 import { api } from '../services/api';
+import { isActionAllowed } from '../services/moduleActions';
 import type { DeviceLoginResult } from '../services/deviceAccess';
 
 interface AuthContextType extends AuthState {
@@ -10,6 +11,8 @@ interface AuthContextType extends AuthState {
   loginWithDevice: (deviceId: string, secret: string, pin: string | null) => Promise<{ success: boolean; message?: string; result?: DeviceLoginResult }>;
   logout: () => void;
   hasPermission: (module: AppModule) => boolean;
+  /** ¿Puede usar esta acción del módulo? (Configuración de Roles, services/moduleActions.ts) */
+  can: (module: AppModule, action: string) => boolean;
   updateUserContext: (data: Partial<User>) => void;
   updateSystemConfigContext: (config: SystemConfig) => void;
   refreshUserData: (customUsername?: string) => Promise<void>; // Nueva función expuesta
@@ -153,6 +156,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
   }, [state.user]);
 
+  // Acciones dentro de cada módulo. El Administrador total puede todo: así nadie se queda
+  // sin poder volver a habilitar una acción. Apagar una acción solo quita; las reglas propias
+  // de cada pantalla siguen cumpliéndose encima.
+  const can = useCallback((module: AppModule, action: string): boolean => {
+      if (!state.user) return false;
+      if (state.user.role === 'ADMIN') return true;
+      return isActionAllowed(state.user.deniedActions, module, action);
+  }, [state.user]);
+
   // --- INACTIVITY TIMEOUT ---
   useEffect(() => {
       if (!state.isAuthenticated) return;
@@ -215,8 +227,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const contextValue = useMemo(() => ({
-      ...state, login, loginWithDevice, logout, hasPermission, updateUserContext, updateSystemConfigContext, refreshUserData
-  }), [state, hasPermission]);
+      ...state, login, loginWithDevice, logout, hasPermission, can, updateUserContext, updateSystemConfigContext, refreshUserData
+  }), [state, hasPermission, can]);
 
   return (
     <AuthContext.Provider value={contextValue}>
