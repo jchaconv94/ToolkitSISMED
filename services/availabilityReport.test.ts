@@ -139,6 +139,11 @@ describe("disponibilidad", () => {
     ]);
     expect(parsed.months).toEqual(["202608", "202609"]);
     expect(parsed.skippedCodes).toEqual(["030S05"]);
+    // El almacén no entra en el cálculo, pero se guarda su stock del mes de corte.
+    expect(parsed.rows.some((x) => x.code === "030S05")).toBe(false);
+    expect(parsed.warehouse).toHaveLength(1);
+    expect(parsed.warehouse[0]).toMatchObject({ code: "030S05", medCode: "00143", stock: 50 });
+    expect(parsed.warehouse[0].lots.map((l) => l.lot)).toEqual(["L9"]);
     expect(parsed.hasClassification).toBe(true);
     const f1 = parsed.rows.find((x) => x.code === "06502F01")!;
     // Consumo sin EXO ni REINGRE; stock del último mes.

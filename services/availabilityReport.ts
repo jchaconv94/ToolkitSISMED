@@ -539,7 +539,21 @@ export interface EstablishmentInfo {
   category?: string;
 }
 
+/** Stock de un almacén (030S05…) por producto al cierre del último mes del TFORMDET. */
+export interface WarehouseItem {
+  code: string;
+  name: string;
+  medCode: string;
+  description: string;
+  price: number;
+  stock: number;
+  /** Lotes con saldo, del vencimiento más próximo al más lejano. */
+  lots: Lot[];
+}
+
 export interface ParsedTformdet extends ParsedAvailability {
+  /** Stock de los almacenes (códigos que no son establecimientos) al cierre del último mes. */
+  warehouse: WarehouseItem[];
   /** Lotes con saldo del último mes, para el vencimiento más próximo. */
   lots: Map<string, Lot[]>;
   /** ¿Trae MEDTIP/MEDPET/MEDEST? (consulta TFORMDET del Toolkit 2.2.5 o posterior). */
@@ -629,14 +643,20 @@ export const parseTformdetHistory = (
   const monthSet = new Set<string>();
   const skipped = new Set<string>();
   const lotRows: Array<{ month: string; key: string; lot: Lot }> = [];
+  const warehouseRows: Array<{ month: string; raw: unknown[]; code: string; medCode: string }> = [];
 
   for (const raw of sheet.slice(headerIdx + 1)) {
     if (!raw) continue;
     const code = padCode(raw[cPre]);
     const medCode = padCode(raw[cMed]);
     if (!code || !medCode) continue;
-    if (!isEstablishmentCode(code)) { skipped.add(code); continue; }
     const month = cMonth >= 0 ? (monthKey(raw[cMonth]) || text(raw[cMonth])) : options.fallbackMonth!;
+    if (!isEstablishmentCode(code)) {
+      // El almacén no entra en la disponibilidad, pero su stock sirve para ver si puede cubrir.
+      skipped.add(code);
+      warehouseRows.push({ month, raw, code, medCode });
+      continue;
+    }
     monthSet.add(month);
     const key = `${code}|${medCode}`;
     let g = groups.get(key);
@@ -695,11 +715,31 @@ export const parseTformdetHistory = (
   }
   for (const list of lots.values()) list.sort(byExpiry);
 
+  // Almacenes: solo el mes de corte, sumando los lotes de cada producto.
+  const whMap = new Map<string, WarehouseItem>();
+  for (const { month, raw, code, medCode } of warehouseRows) {
+    if (month !== last) continue;
+    const stock = Math.max(0, toNumber(raw[cStock]));
+    const key = `${code}|${medCode}`;
+    let w = whMap.get(key);
+    if (!w) {
+      w = { code, name: cName >= 0 ? text(raw[cName]) : "", medCode, description: cDesc >= 0 ? text(raw[cDesc]) : "", price: 0, stock: 0, lots: [] };
+      whMap.set(key, w);
+    }
+    w.stock += stock;
+    if (cPrice >= 0 && toNumber(raw[cPrice]) > 0) w.price = toNumber(raw[cPrice]);
+    if (stock > 0 && cLot >= 0) w.lots.push({ lot: text(raw[cLot]), expiry: cExp >= 0 ? parseExpiry(raw[cExp]) : null, balance: stock });
+  }
+  const warehouse = [...whMap.values()].filter((w) => w.stock > 0);
+  for (const w of warehouse) w.lots.sort(byExpiry);
+  warehouse.sort((a, b) => a.code.localeCompare(b.code) || a.description.localeCompare(b.description, "es"));
+
   return {
     rows,
     months,
     hasPharmacies: rows.some((r) => r.code !== r.ipressCode),
     lots,
+    warehouse,
     hasClassification: cTip >= 0 && cPet >= 0 && cEst >= 0,
     skippedCodes: [...skipped].sort(),
   };

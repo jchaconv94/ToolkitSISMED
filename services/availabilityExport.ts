@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { StockStatus } from "../types";
-import { DME_LEVEL_LABEL, ipressCodeOf, type AvailabilityItem, type AvailabilityReport, type TformdetMonthSheet } from "./availabilityReport";
+import { DME_LEVEL_LABEL, ipressCodeOf, wholeMonthsBetween, type AvailabilityItem, type AvailabilityReport, type TformdetMonthSheet, type WarehouseItem } from "./availabilityReport";
 import type { DmeLevel } from "./stockStatus";
 import { formatNumber } from "./numberFormat";
 
@@ -174,12 +174,29 @@ export interface AvailabilityExportParams {
   /** Nombre y profesión de quien lo generó (van en la portada). */
   preparedBy?: string;
   preparedByRole?: string;
+  /** Stock de los almacenes al corte (no cuenta en la disponibilidad). */
+  warehouse?: WarehouseItem[] | null;
   /** Registros del TFORMDET del mes de corte, para revisarlos en detalle. */
   tformdet?: TformdetMonthSheet | null;
 }
 
 export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.Workbook => {
   const { report, months, scope } = p;
+  const warehouse = p.warehouse ?? [];
+  const hasWarehouse = warehouse.length > 0;
+  // Productos de los establecimientos por código (las presentaciones fusionadas de la DME
+  // cuentan para cada uno de sus códigos), y stock del almacén de cada producto.
+  const itemsByCode = new Map<string, AvailabilityItem[]>();
+  for (const i of report.items) {
+    for (const code of i.fusedFrom?.length ? i.fusedFrom : [i.medCode]) {
+      const list = itemsByCode.get(code) || [];
+      list.push(i);
+      itemsByCode.set(code, list);
+    }
+  }
+  const warehouseByCode = new Map<string, number>();
+  for (const w of warehouse) warehouseByCode.set(w.medCode, (warehouseByCode.get(w.medCode) || 0) + w.stock);
+  const warehouseStockOf = (i: AvailabilityItem) => (i.fusedFrom?.length ? i.fusedFrom : [i.medCode]).reduce((sum, c) => sum + (warehouseByCode.get(c) || 0), 0);
   const wb = new ExcelJS.Workbook();
   wb.creator = "Toolkit SISMED";
   wb.created = new Date();
@@ -411,12 +428,51 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
     { header: "Stock", width: 9, fmt: FMT.int }, { header: "CPA", width: 9, fmt: FMT.dec1 }, { header: "Meses", width: 8, fmt: FMT.dec1 },
     { header: "Situación", width: 13, align: "center" }, { header: "Vence primero", width: 12, align: "center" }, { header: "Meses para vencer", width: 10, fmt: FMT.int },
     { header: "Motivo", width: 26 }, { header: "Cubrir 2 meses (unid.)", width: 12, fmt: FMT.int },
+    ...(hasWarehouse ? [{ header: "Stock en almacén", width: 12, fmt: FMT.int }] : []),
   ], attention.map((i) => [
     i.microred, i.name, i.medCode, i.description, i.stock, i.cpa, monthsValue(i.months), STATUS_LABEL[i.status], dateText(i.nearestExpiry), i.monthsToExpiry,
     i.status === StockStatus.DESABASTECIDO ? "Sin stock y con consumo" : i.status === StockStatus.SUBSTOCK ? "Menos de 2 meses de stock" : "Vence antes de consumirse",
     i.status === StockStatus.DESABASTECIDO || i.status === StockStatus.SUBSTOCK ? Math.max(0, Math.ceil(i.cpa * 2 - i.stock)) : null,
+    ...(hasWarehouse ? [warehouseStockOf(i) || null] : []),
   ]), { freezeCols: 4 });
   attention.forEach((i, n) => paintStatus(at.getCell(ta.head + 1 + n, 8), i.status));
+  if (hasWarehouse) {
+    // En verde lo que el almacén tiene para cubrir.
+    attention.forEach((i, n) => {
+      if (warehouseStockOf(i) > 0) restyle(at.getCell(ta.head + 1 + n, 13), { font: { name: FONT, size: 10, bold: true, color: { argb: "FF065F46" } } });
+    });
+  }
+
+  /* ---------------- Almacén ---------------- */
+  // Stock del almacén (030S05…) al corte: no entra en la disponibilidad, pero dice qué se
+  // puede cubrir. Junto a cada producto, cuántos establecimientos lo necesitan.
+  if (hasWarehouse) {
+    const wh = wb.addWorksheet("Almacén", { properties: { tabColor: { argb: "FF0369A1" } } });
+    const today = new Date();
+    const needOf = (medCode: string) => {
+      const list = itemsByCode.get(medCode) || [];
+      const desab = list.filter((i) => i.status === StockStatus.DESABASTECIDO && i.cpa > 0);
+      const sub = list.filter((i) => i.status === StockStatus.SUBSTOCK);
+      const units = [...desab, ...sub].reduce((sum, i) => sum + Math.max(0, Math.ceil(i.cpa * 2 - i.stock)), 0);
+      return { desab: desab.length, sub: sub.length, units };
+    };
+    const whRows = warehouse.map((w) => ({ w, need: needOf(w.medCode), nearest: w.lots[0]?.expiry ?? null }));
+    sheetTitle(wh, `Stock en almacén · ${cut ? monthFull(cut) : "mes de corte"}`, `${p.title} · ${[...new Set(warehouse.map((w) => `${w.code}${w.name ? ` ${w.name}` : ""}`))].join(", ")} · no se cuenta en la disponibilidad`, 12);
+    const tw = writeTable(wh, 5, [
+      { header: "Almacén", width: 10, align: "center" }, { header: "Código", width: 8, align: "center" }, { header: "Producto", width: 46 },
+      { header: "Stock", width: 10, fmt: FMT.int }, { header: "Precio", width: 9, fmt: FMT.money }, { header: "Valor del stock (S/)", width: 13, fmt: FMT.money },
+      { header: "Lotes", width: 7, fmt: FMT.int }, { header: "Vence primero", width: 12, align: "center" }, { header: "Meses para vencer", width: 10, fmt: FMT.int },
+      { header: "Detalle de lotes (lote · vence · saldo)", width: 48 },
+      { header: "EESS desabastecidos", width: 12, fmt: FMT.int }, { header: "EESS en substock", width: 11, fmt: FMT.int }, { header: "Faltan para 2 meses (unid.)", width: 13, fmt: FMT.int },
+    ], whRows.map(({ w, need, nearest }) => [
+      w.code, w.medCode, w.description, w.stock, w.price || null, w.stock * (w.price || 0), w.lots.length, dateText(nearest),
+      nearest ? wholeMonthsBetween(today, nearest) : null, w.lots.map((l) => `${l.lot} · ${dateText(l.expiry)} · ${l.balance}`).join("  |  "),
+      need.desab || null, need.sub || null, need.units || null,
+    ]), { freezeCols: 3 });
+    whRows.forEach(({ need }, n) => {
+      if (need.desab) restyle(wh.getCell(tw.head + 1 + n, 11), { font: { name: FONT, size: 10, bold: true, color: { argb: "FF991B1B" } } });
+    });
+  }
 
   /* ---------------- Detalle de productos ---------------- */
   const detail = (name: string, title: string, items: AvailabilityItem[]) => {
@@ -494,6 +550,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
     ["Fórmula aplicada", p.formulaText],
     ["Niveles", `Óptimo ${levelRange.OPTIMO}; Alto ${levelRange.ALTO}; Regular ${levelRange.REGULAR}; Bajo ${levelRange.BAJO}.`],
     ["Cubrir 2 meses", "Hoja «Atención»: unidades que faltan para llegar a 2 meses de stock (CPA × 2 − stock)."],
+    ["Almacén", "El stock de los almacenes (códigos que no son establecimientos, como 030S05) no cuenta en la disponibilidad. Se muestra en la hoja «Almacén» y en la columna «Stock en almacén» de «Atención», para ver qué se puede cubrir."],
     ["Riesgo de vencimiento", "Los meses de provisión superan los meses que faltan para el vencimiento más próximo: el producto vencería antes de consumirse."],
     ["Fuente", p.source],
     ["Periodo", period],
