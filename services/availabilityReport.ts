@@ -668,8 +668,10 @@ export const parseTformdetHistory = (
   for (const g of groups.values()) {
     const consumption = months.map((m) => g.consumption.get(m) || 0);
     const stock = g.stock.get(last) || 0;
-    // Como el reporte de Disponibilidad del Toolkit: todo producto con registro en el periodo,
-    // aunque no tenga consumo ni stock (cuenta como Desabastecido).
+    // Sin stock al corte y sin consumo en todo el periodo: no se evalúa. Así lo deja fuera el
+    // archivo de disponibilidad del SISMED (comprobado con agosto 2026 de Bellavista: con esta
+    // regla coinciden las 11 444 filas por farmacia, las 8 691 por IPRESS y el 71,68 %).
+    if (stock === 0 && consumption.every((c) => c === 0)) continue;
     const info = options.info?.(g.row.ipressCode);
     const priceMonth = [...g.price.keys()].sort().pop();
     rows.push({
