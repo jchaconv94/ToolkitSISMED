@@ -8,7 +8,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { api } from "../services/api";
 import { StockStatus } from "../types";
 import {
-  DME_LEVEL_LABEL, buildItems, essentialRows, groupByIpress, parseAvailabilitySheet, parseLotsSheet, summarize,
+  DME_LEVEL_LABEL, buildItems, essentialRows, groupByIpress, parseAvailabilitySheet, parseLotsSheet, parseTformdetHistory, summarize,
+  type EstablishmentInfo,
   type AvailabilityItem, type AvailabilityScope, type EstablishmentSummary, type Lot, type MicroredSummary, type ParsedAvailability,
 } from "../services/availabilityReport";
 import { STATUS_LABEL, exportAvailabilityExcel, monthLabel } from "../services/availabilityExport";
@@ -77,7 +78,7 @@ const CodeChip: React.FC<{ code: string }> = ({ code }) => (
 
 /** Lee la primera hoja de un Excel como filas. */
 const readSheet = async (file: File): Promise<unknown[][]> => {
-  const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true });
+  const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true, dense: true });
   const preferred = wb.SheetNames.find((n) => /dispo.*farm/i.test(n)) || wb.SheetNames[0];
   return XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[preferred], { header: 1, raw: true, defval: null });
 };
@@ -198,7 +199,9 @@ export const AvailabilityModule: React.FC = () => {
   const [lotsFile, setLotsFile] = useState<{ name: string; data: Map<string, Lot[]> } | null>(null);
   const [reading, setReading] = useState<"disp" | "lots" | null>(null);
   const [calculated, setCalculated] = useState(false);
-  const [facilityNames, setFacilityNames] = useState<Map<string, string>>(new Map());
+  const [registry, setRegistry] = useState<Map<string, EstablishmentInfo>>(new Map());
+  /** De dónde salió el archivo principal y si trae la clasificación de productos. */
+  const [source, setSource] = useState<{ kind: "disponibilidad" | "tformdet"; classified: boolean; skipped: string[] } | null>(null);
 
   const [scope, setScope] = useState<AvailabilityScope>("all");
   const [tab, setTab] = useState<Tab>("eess");
@@ -221,21 +224,44 @@ export const AvailabilityModule: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Nombre oficial de cada IPRESS: el archivo por farmacia no trae el del hospital.
-    api.getFacilities()
-      .then((list) => setFacilityNames(new Map(list.map((f) => [String(f.code).trim(), f.name]))))
+    // Nombre, microred y red (UNGET) de cada IPRESS, del registro de Establecimientos: el archivo
+    // por farmacia no trae el nombre del hospital y el TFORMDET no trae microred ni red.
+    Promise.all([api.getFacilities(), api.getMicroredes().catch(() => []), api.getUngets().catch(() => [])])
+      .then(([facilities, microredes, ungets]) => {
+        const mr = new Map(microredes.map((m) => [m.id, m]));
+        const ug = new Map(ungets.map((u) => [u.id, u.name]));
+        setRegistry(new Map(facilities.map((f) => {
+          const m = f.microredId ? mr.get(f.microredId) : undefined;
+          const unget = f.ungetId || m?.ungetId;
+          return [String(f.code).trim(), { name: f.name, microred: m?.name || "", red: (unget && ug.get(unget)) || "", category: f.category || "" }];
+        })));
+      })
       .catch(() => undefined);
   }, []);
 
   const handleDispFile = async (file: File) => {
     setReading("disp");
     try {
-      const data = parseAvailabilitySheet(await readSheet(file));
-      if (data.rows.length === 0) throw new Error("El archivo no tiene productos.");
-      setDispFile({ name: file.name, data });
+      const sheet = await readSheet(file);
+      // El archivo principal puede ser el de disponibilidad o la consulta TFORMDET (uno o varios meses).
+      const isTformdet = sheet.slice(0, 15).some((row) => (row || []).some((c) => /^ANN?OMES$|^CODIGO_PRE$/i.test(String(c ?? "").trim())));
+      if (isTformdet) {
+        const fallbackMonth = (file.name.match(/(20\d{2})(0[1-9]|1[0-2])/g) || []).pop();
+        const data = parseTformdetHistory(sheet, { fallbackMonth });
+        setDispFile({ name: file.name, data });
+        setLotsFile({ name: "Del mismo TFORMDET", data: data.lots });
+        setSource({ kind: "tformdet", classified: data.hasClassification, skipped: data.skippedCodes });
+        if (!data.hasClassification) setScope("all");
+      } else {
+        const data = parseAvailabilitySheet(sheet);
+        if (data.rows.length === 0) throw new Error("El archivo no tiene productos.");
+        setDispFile({ name: file.name, data });
+        if (source?.kind === "tformdet") setLotsFile(null);
+        setSource({ kind: "disponibilidad", classified: true, skipped: [] });
+      }
       setCalculated(false);
     } catch (e: any) {
-      toast.error(e?.message || "No se pudo leer el archivo de disponibilidad.");
+      toast.error(e?.message || "No se pudo leer el archivo.");
     } finally {
       setReading(null);
     }
@@ -256,11 +282,17 @@ export const AvailabilityModule: React.FC = () => {
   // Filas por IPRESS (las farmacias sumadas): no dependen de la fórmula.
   const baseRows = useMemo(() => {
     if (!dispFile || !calculated) return null;
+    // El TFORMDET no trae microred ni red: salen del registro de Establecimientos.
+    const rows = dispFile.data.rows.map((r) => {
+      if (r.microred && r.red) return r;
+      const info = registry.get(r.ipressCode);
+      return info ? { ...r, microred: r.microred || info.microred || "", red: r.red || info.red || "", category: r.category || info.category || "" } : r;
+    });
     return {
-      ipress: groupByIpress(dispFile.data.rows, (code) => facilityNames.get(code)),
-      pharmacy: dispFile.data.hasPharmacies ? dispFile.data.rows : null,
+      ipress: groupByIpress(rows, (code) => registry.get(code)?.name),
+      pharmacy: dispFile.data.hasPharmacies ? rows : null,
     };
-  }, [dispFile, calculated, facilityNames]);
+  }, [dispFile, calculated, registry]);
 
   // Todos los productos y, del mismo cálculo, la DME con los códigos fusionados.
   const vitalCodes = useMemo(() => vitalCodeSet(config.vitals), [config.vitals]);
@@ -356,14 +388,21 @@ export const AvailabilityModule: React.FC = () => {
           <p className="mt-1 text-[13px] text-slate-500">Suba los archivos del mes de corte. Se calcula por producto, establecimiento, microred y UNGET; los medicamentos esenciales salen del mismo cálculo.</p>
           <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
             <DropZone
-              title="Disponibilidad"
-              hint="Excel del SISMED por farmacia (o por IPRESS) con los 12 meses de consumo y el stock final."
+              title="TFORMDET o disponibilidad"
+              hint="Consulta TFORMDET del Toolkit con los meses que quiera (se calcula con todos), o el Excel de disponibilidad por farmacia o IPRESS."
               fileName={dispFile?.name}
               detail={d ? `${formatNumber(d.rows.length)} filas` : undefined}
               onFile={handleDispFile}
-              onClear={() => { setDispFile(null); setCalculated(false); }}
+              onClear={() => { setDispFile(null); setCalculated(false); if (source?.kind === "tformdet") setLotsFile(null); setSource(null); }}
               busy={reading === "disp"}
             />
+            {source?.kind === "tformdet" ? (
+              <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-5 text-center md:p-6">
+                <CheckCircle2 className="mb-2 h-6 w-6 text-emerald-600" />
+                <p className="text-[14px] font-bold text-slate-800">Lotes y vencimientos incluidos</p>
+                <p className="mt-1 max-w-xs text-[12.5px] text-slate-500">Salen del mismo TFORMDET (los lotes con saldo del último mes).</p>
+              </div>
+            ) : (
             <DropZone
               title="TFORMDET"
               optional
@@ -374,14 +413,24 @@ export const AvailabilityModule: React.FC = () => {
               onClear={() => setLotsFile(null)}
               busy={reading === "lots"}
             />
+            )}
           </div>
+          {reading === "disp" && (
+            <p className="mt-3 flex items-center gap-2 text-[12.5px] text-slate-500"><Loader2 className="h-4 w-4 animate-spin text-teal-600" />Leyendo el archivo… un TFORMDET de 12 meses puede tardar medio minuto.</p>
+          )}
+          {source?.kind === "tformdet" && !source.classified && (
+            <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>Este TFORMDET no trae la clasificación de los productos (MEDTIP, MEDPET, MEDEST): se calcula la disponibilidad de todos los productos, pero no la de medicamentos esenciales. Descárguelo con el <b>Toolkit 2.2.5</b> o posterior.</span>
+            </div>
+          )}
           {d && cut && (
             <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-slate-50 px-4 py-3 text-[12.5px] text-slate-600">
               <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />
               <span>
                 Mes de corte: <b className="text-slate-900">{monthLabel(cut)}</b> · consumo de {monthLabel(months[0])} a {monthLabel(cut)} ·{" "}
-                {d.hasPharmacies ? `${pharmacyCount} farmacias en ${ipressCount} establecimientos` : `${ipressCount} establecimientos`}
-                {months.length < 12 && <b className="text-amber-700"> · el archivo trae solo {months.length} meses</b>}
+                {months.length} {months.length === 1 ? "mes" : "meses"} · {d.hasPharmacies ? `${pharmacyCount} farmacias en ${ipressCount} establecimientos` : `${ipressCount} establecimientos`}
+                {source?.skipped.length ? ` · sin contar ${source.skipped.join(", ")} (no son establecimientos)` : ""}
               </span>
             </div>
           )}
@@ -406,7 +455,7 @@ export const AvailabilityModule: React.FC = () => {
   const scopeSwitch = (
     <div className="flex rounded-xl bg-slate-100 p-1" role="tablist" aria-label="Productos evaluados">
       {([["all", "Todos los productos", "Todos"], ["essential", "Medicamentos esenciales", "Esenciales (DME)"]] as const).map(([id, label, short]) => (
-        <button key={id} type="button" role="tab" aria-selected={scope === id} onClick={() => setScope(id)} className={`flex-1 whitespace-nowrap rounded-lg px-3 py-2 text-[13px] font-bold transition-colors md:flex-none md:px-4 ${scope === id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+        <button key={id} type="button" role="tab" aria-selected={scope === id} disabled={id === "essential" && source?.classified === false} title={id === "essential" && source?.classified === false ? "El TFORMDET no trae la clasificación de productos (Toolkit 2.2.5)" : undefined} onClick={() => setScope(id)} className={`disabled:cursor-not-allowed disabled:opacity-40 flex-1 whitespace-nowrap rounded-lg px-3 py-2 text-[13px] font-bold transition-colors md:flex-none md:px-4 ${scope === id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
           <span className="md:hidden">{short}</span><span className="hidden md:inline">{label}</span>
         </button>
       ))}
@@ -569,7 +618,7 @@ export const AvailabilityModule: React.FC = () => {
           <h2 className="truncate text-[18px] font-black text-slate-900">{title}{cut ? ` · ${monthLabel(cut)}` : ""}</h2>
           <p className="text-[12.5px] text-slate-500">
             {scope === "essential" ? `Medicamentos esenciales (sin estrategias) con códigos fusionados de DIGEMID ${config.fused.version}` : "Todos los productos"} · meses {config.formula.truncate ? "cortados a un decimal" : "sin cortar"}
-            {lotsFile ? " · con lotes del TFORMDET" : ""}
+            {source?.kind === "tformdet" ? ` · desde el TFORMDET (${months.length} ${months.length === 1 ? "mes" : "meses"})` : lotsFile ? " · con lotes del TFORMDET" : ""}
           </p>
         </div>
         <div className="flex items-center gap-2 [&>div:first-child]:flex-1 md:[&>div:first-child]:flex-none">

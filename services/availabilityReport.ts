@@ -454,7 +454,7 @@ export const summarize = (items: AvailabilityItem[], opts: SummaryOptions = DEFA
     const counts = countItems(list, rule, vitalCodes);
     const pct = pctOf(counts);
     const first = list[0];
-    return { ...counts, code, name: first.name, microred: first.microred, red: first.red, category: first.category, pct, level: dmeLevelOf(pct, levels) };
+    return { ...counts, code, name: first.name, microred: first.microred || "Sin microred", red: first.red, category: first.category, pct, level: dmeLevelOf(pct, levels) };
   });
   establishments.sort((a, b) => a.microred.localeCompare(b.microred, "es") || a.code.localeCompare(b.code));
 
@@ -521,4 +521,143 @@ export const essentialRows = (
     }
   }
   return [...out.values()];
+};
+
+/* ------------------------------------------------------------ TFORMDET de varios meses */
+
+/**
+ * Consumo del mes, igual que el reporte de Disponibilidad del Toolkit de escritorio
+ * (`disponibilidad_report_manager.py`): VENTA + SIS + INTERSAN + SOAT + CREDHOSP + OTR_CONV.
+ * REINGRE, EXO y DEFNAC no cuentan. Comprobado contra el archivo de disponibilidad del usuario.
+ */
+export const TFORMDET_CONSUMPTION_COLUMNS = ["VENTA", "SIS", "INTERSAN", "SOAT", "CREDHOSP", "OTR_CONV"] as const;
+
+export interface EstablishmentInfo {
+  name?: string;
+  microred?: string;
+  red?: string;
+  category?: string;
+}
+
+export interface ParsedTformdet extends ParsedAvailability {
+  /** Lotes con saldo del último mes, para el vencimiento más próximo. */
+  lots: Map<string, Lot[]>;
+  /** ¿Trae MEDTIP/MEDPET/MEDEST? (consulta TFORMDET del Toolkit 2.2.5 o posterior). */
+  hasClassification: boolean;
+  /** Códigos que no son establecimientos (almacenes como 030S05) y se dejaron fuera. */
+  skippedCodes: string[];
+}
+
+/** Código de establecimiento o de farmacia: `06503`, `06502F01`. Los almacenes (`030S05`) no. */
+export const isEstablishmentCode = (code: string) => /^\d{5}(F\d{2})?$/i.test(code.trim());
+
+/**
+ * Lee la consulta TFORMDET del Toolkit (uno o varios meses, columna ANNOMES) y arma una fila por
+ * farmacia y producto: el consumo de cada mes, el stock al cierre del último mes y los lotes
+ * con saldo de ese mes. `fallbackMonth` es el mes de un TFORMDET de un solo periodo, que no
+ * trae ANNOMES (se toma del nombre del archivo).
+ */
+export const parseTformdetHistory = (
+  sheet: unknown[][],
+  options: { fallbackMonth?: string; info?: (code: string) => EstablishmentInfo | undefined } = {},
+): ParsedTformdet => {
+  const headerIdx = sheet.slice(0, 15).findIndex((row) => {
+    const cells = (row || []).map(normHeader);
+    return cells.includes("CODIGO PRE") && cells.includes("CODIGO MED") && cells.includes("STOCK FIN");
+  });
+  if (headerIdx < 0) throw new Error("No se encontraron las columnas CODIGO_PRE, CODIGO_MED y STOCK_FIN. Revise que sea la consulta TFORMDET.");
+  const header = sheet[headerIdx].map(normHeader);
+  const at = (name: string) => header.indexOf(name);
+  const cMonth = at("ANNOMES") >= 0 ? at("ANNOMES") : at("ANOMES");
+  const cPre = at("CODIGO PRE"), cMed = at("CODIGO MED"), cStock = at("STOCK FIN");
+  const cName = at("EESS"), cDesc = at("DESCRIPCION MED"), cPrice = at("PRECIO");
+  const cLot = at("MEDLOTE"), cExp = at("FEC EXP");
+  const cTip = at("MEDTIP"), cPet = at("MEDPET"), cEst = at("MEDEST"), cFf = at("MEDFF");
+  const cCons = TFORMDET_CONSUMPTION_COLUMNS.map((c) => at(normHeader(c)));
+  if (cMonth < 0 && !options.fallbackMonth) {
+    throw new Error("El TFORMDET no trae la columna ANNOMES y no se pudo saber de qué mes es. Descárguelo con un rango de meses en el Toolkit.");
+  }
+
+  interface Acc {
+    row: Omit<AvailabilityRow, "consumption" | "stock">;
+    consumption: Map<string, number>;
+    stock: Map<string, number>;
+    price: Map<string, number>;
+  }
+  const groups = new Map<string, Acc>();
+  const monthSet = new Set<string>();
+  const skipped = new Set<string>();
+  const lotRows: Array<{ month: string; key: string; lot: Lot }> = [];
+
+  for (const raw of sheet.slice(headerIdx + 1)) {
+    if (!raw) continue;
+    const code = padCode(raw[cPre]);
+    const medCode = padCode(raw[cMed]);
+    if (!code || !medCode) continue;
+    if (!isEstablishmentCode(code)) { skipped.add(code); continue; }
+    const month = cMonth >= 0 ? (monthKey(raw[cMonth]) || text(raw[cMonth])) : options.fallbackMonth!;
+    monthSet.add(month);
+    const key = `${code}|${medCode}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        row: {
+          red: "", microred: "", code, ipressCode: ipressCodeOf(code), name: text(raw[cName]), category: "",
+          medCode, description: text(raw[cDesc]), form: cFf >= 0 ? text(raw[cFf]) : "", price: 0,
+          medtip: cTip >= 0 ? text(raw[cTip]).toUpperCase() : "",
+          medpet: cPet >= 0 ? text(raw[cPet]).toUpperCase() : "",
+          medest: cEst >= 0 ? text(raw[cEst]).toUpperCase() : "",
+        },
+        consumption: new Map(), stock: new Map(), price: new Map(),
+      };
+      groups.set(key, g);
+    }
+    const used = cCons.reduce((sum, i) => sum + (i >= 0 ? Math.max(0, toNumber(raw[i])) : 0), 0);
+    g.consumption.set(month, (g.consumption.get(month) || 0) + used);
+    const stock = Math.max(0, toNumber(raw[cStock]));
+    g.stock.set(month, (g.stock.get(month) || 0) + stock);
+    if (cPrice >= 0) g.price.set(month, toNumber(raw[cPrice]));
+    if (stock > 0 && cLot >= 0) lotRows.push({ month, key, lot: { lot: text(raw[cLot]), expiry: cExp >= 0 ? parseExpiry(raw[cExp]) : null, balance: stock } });
+  }
+  if (!groups.size) throw new Error("El TFORMDET no trae productos de establecimientos.");
+
+  const months = [...monthSet].sort();
+  const last = months[months.length - 1];
+  const rows: AvailabilityRow[] = [];
+  for (const g of groups.values()) {
+    const consumption = months.map((m) => g.consumption.get(m) || 0);
+    const stock = g.stock.get(last) || 0;
+    // Como el reporte de Disponibilidad del Toolkit: todo producto con registro en el periodo,
+    // aunque no tenga consumo ni stock (cuenta como Desabastecido).
+    const info = options.info?.(g.row.ipressCode);
+    const priceMonth = [...g.price.keys()].sort().pop();
+    rows.push({
+      ...g.row,
+      name: g.row.code === g.row.ipressCode ? info?.name || g.row.name : g.row.name,
+      microred: info?.microred || "",
+      red: info?.red || "",
+      category: info?.category || "",
+      price: priceMonth ? g.price.get(priceMonth) || 0 : 0,
+      consumption,
+      stock,
+    });
+  }
+
+  const lots = new Map<string, Lot[]>();
+  for (const { month, key, lot } of lotRows) {
+    if (month !== last) continue;
+    const list = lots.get(key) || [];
+    list.push(lot);
+    lots.set(key, list);
+  }
+  for (const list of lots.values()) list.sort(byExpiry);
+
+  return {
+    rows,
+    months,
+    hasPharmacies: rows.some((r) => r.code !== r.ipressCode),
+    lots,
+    hasClassification: cTip >= 0 && cPet >= 0 && cEst >= 0,
+    skippedCodes: [...skipped].sort(),
+  };
 };

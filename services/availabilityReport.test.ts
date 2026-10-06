@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import {
-  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, essentialRows, groupByIpress, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, wholeMonthsBetween,
+  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, essentialRows, groupByIpress, isEstablishmentCode, parseTformdetHistory, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, wholeMonthsBetween,
 } from "./availabilityReport";
 
 const HEADER = ["RED", "MICRORED", "COD EESS", "ESTABLECIMIENTO", "CAT", "MED COD", "DESCRIPCION DEL PRODUCTO", "MEDFF", "PRECIO", "MEDTIP", "MEDPET", "MEDEST",
@@ -123,6 +123,33 @@ describe("disponibilidad", () => {
     expect(fused[0].consumption.slice(-2)).toEqual([5, 20]);
     // Por separado, el 00091 era Desabastecido; fusionado tiene 40 de stock y CPA 12,5: 3,2 meses.
     expect(buildItems(fused)[0].status).toBe(StockStatus.NORMOSTOCK);
+  });
+
+  it("arma la disponibilidad desde el TFORMDET de varios meses", () => {
+    const H = ["ANNOMES", "CODIGO_PRE", "EESS", "CODIGO_MED", "DESCRIPCION MED", "MEDLOTE", "FEC_EXP", "PRECIO", "VENTA", "SIS", "INTERSAN", "EXO", "SOAT", "CREDHOSP", "OTR_CONV", "REINGRE", "STOCK_FIN", "MEDFF", "MEDTIP", "MEDPET", "MEDEST"];
+    const r = (m: string, pre: string, med: string, lot: string, venta: number, sis: number, exo: number, stock: number) =>
+      [m, pre, "FARM", med, "PRODUCTO", lot, "31/12/2027", 1.5, venta, sis, 0, exo, 0, 0, 0, 99, stock, "TABLET", "M", "P", "S"];
+    const parsed = parseTformdetHistory([H,
+      r("202608", "06502F01", "143", "L1", 5, 5, 7, 30),
+      r("202609", "06502F01", "143", "L1", 0, 4, 0, 20),
+      r("202609", "06502F02", "143", "L2", 2, 0, 0, 10),
+      r("202609", "030S05", "143", "L9", 1, 1, 0, 50), // almacén: fuera
+      r("202608", "06503", "00200", "L3", 0, 0, 0, 0), // sin movimiento: cuenta (Desabastecido)
+    ]);
+    expect(parsed.months).toEqual(["202608", "202609"]);
+    expect(parsed.skippedCodes).toEqual(["030S05"]);
+    expect(parsed.hasClassification).toBe(true);
+    const f1 = parsed.rows.find((x) => x.code === "06502F01")!;
+    // Consumo sin EXO ni REINGRE; stock del último mes.
+    expect(f1.consumption).toEqual([10, 4]);
+    expect(f1.stock).toBe(20);
+    expect(parsed.rows.find((x) => x.code === "06503")!.stock).toBe(0);
+    const ipress = groupByIpress(parsed.rows).find((x) => x.code === "06502")!;
+    expect(ipress.consumption).toEqual([10, 6]);
+    expect(ipress.stock).toBe(30);
+    expect(parsed.lots.get("06502F02|00143")!.map((l) => l.lot)).toEqual(["L2"]);
+    expect(isEstablishmentCode("06502F01")).toBe(true);
+    expect(isEstablishmentCode("030S05")).toBe(false);
   });
 
   it("avisa si el archivo no es de disponibilidad", () => {
