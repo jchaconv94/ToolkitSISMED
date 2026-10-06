@@ -134,7 +134,8 @@ describe("disponibilidad", () => {
       r("202609", "06502F01", "143", "L1", 0, 4, 0, 20),
       r("202609", "06502F02", "143", "L2", 2, 0, 0, 10),
       r("202609", "030S05", "143", "L9", 1, 1, 0, 50), // almacén: fuera
-      r("202608", "06503", "00200", "L3", 0, 0, 0, 0), // sin movimiento: cuenta (Desabastecido)
+      r("202608", "06503", "00200", "L3", 0, 0, 0, 0), // sin stock ni consumo en el periodo: fuera
+      r("202608", "06504", "00300", "L4", 3, 0, 0, 0), // consumo sin stock al corte: Desabastecido
     ]);
     expect(parsed.months).toEqual(["202608", "202609"]);
     expect(parsed.skippedCodes).toEqual(["030S05"]);
@@ -143,7 +144,8 @@ describe("disponibilidad", () => {
     // Consumo sin EXO ni REINGRE; stock del último mes.
     expect(f1.consumption).toEqual([10, 4]);
     expect(f1.stock).toBe(20);
-    expect(parsed.rows.find((x) => x.code === "06503")!.stock).toBe(0);
+    expect(parsed.rows.find((x) => x.code === "06503")).toBeUndefined();
+    expect(parsed.rows.find((x) => x.code === "06504")!.stock).toBe(0);
     const ipress = groupByIpress(parsed.rows).find((x) => x.code === "06502")!;
     expect(ipress.consumption).toEqual([10, 6]);
     expect(ipress.stock).toBe(30);

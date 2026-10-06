@@ -487,7 +487,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   const lines: Array<[string, string]> = [
     ["Productos evaluados", scope === "essential"
       ? `Medicamentos esenciales: tipo M, de estrategia «S» o «_» (sin estrategias), del petitorio o del listado de códigos fusionados de DIGEMID${p.fusedVersion ? ` (${p.fusedVersion})` : ""}. Las presentaciones de un mismo grupo se suman en su código destino.`
-      : "Todos los productos con registro en el periodo."],
+      : "Todos los productos con stock al cierre del mes de corte o con consumo en el periodo (los que no tienen ni lo uno ni lo otro no se evalúan, como en el archivo de disponibilidad del SISMED)."],
     ["Consumo promedio (CPA)", "Suma del consumo del periodo ÷ número de meses con consumo (ficha 28 de DIGEMID)."],
     ["Meses de provisión", "Stock al cierre del mes de corte ÷ CPA."],
     ["Situación", "Desabastecido: stock 0. Sin rotación: stock > 0 y CPA 0. Substock, Normostock y Sobrestock según los meses de provisión y los límites de la fórmula."],
