@@ -269,6 +269,8 @@ export const AvailabilityModule: React.FC = () => {
   };
 
   const handleLotsFile = async (file: File) => {
+    // Si aún no hay archivo principal, el TFORMDET puesto aquí ya basta para calcular: va arriba.
+    if (!dispFile) return handleDispFile(file);
     setReading("lots");
     try {
       const data = parseLotsSheet(await readSheet(file));
