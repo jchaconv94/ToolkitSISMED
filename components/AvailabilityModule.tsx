@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, Building2, CalendarClock, CheckCircle2, ChevronRight, Download, FileSpreadsheet, Loader2, MoreVertical, RefreshCw, Upload, X,
+  Activity, AlertTriangle, Building2, CalendarClock, CheckCircle2, ChevronRight, Download, FileSpreadsheet, Loader2, MoreVertical, RefreshCw, Settings2, Upload, X,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../services/api";
@@ -13,7 +13,8 @@ import {
 } from "../services/availabilityReport";
 import { STATUS_LABEL, exportAvailabilityExcel, monthLabel } from "../services/availabilityExport";
 import { formatOneDecimal, type DmeLevel } from "../services/stockStatus";
-import { FUSED_CODES_VERSION } from "../services/fusedCodes";
+import { availabilityConfigApi, classifyOptionsOf, describeFormula, factoryConfig, summaryOptionsOf, vitalCodeSet, type AvailabilityConfig } from "../services/availabilityConfig";
+import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
 import { formatNumber } from "../services/numberFormat";
 import {
   EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, SortButton, TableSearch, ariaSort, filterInputClass, useTableSort, type Tone,
@@ -189,7 +190,8 @@ const DropZone: React.FC<{
 /* ---------------------------------------------------------------- Módulo */
 
 export const AvailabilityModule: React.FC = () => {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
   const isDesktop = useIsDesktop();
 
   const [dispFile, setDispFile] = useState<{ name: string; data: ParsedAvailability } | null>(null);
@@ -210,7 +212,13 @@ export const AvailabilityModule: React.FC = () => {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [config, setConfig] = useState<AvailabilityConfig>(() => factoryConfig());
+  const [configOpen, setConfigOpen] = useState(false);
   const sticky = useStickyBar<HTMLDivElement>();
+
+  useEffect(() => {
+    availabilityConfigApi.load().then(setConfig);
+  }, []);
 
   useEffect(() => {
     // Nombre oficial de cada IPRESS: el archivo por farmacia no trae el del hospital.
@@ -245,23 +253,34 @@ export const AvailabilityModule: React.FC = () => {
     }
   };
 
-  // Todos los productos por IPRESS y, del mismo cálculo, la DME con los códigos fusionados.
-  const computed = useMemo(() => {
+  // Filas por IPRESS (las farmacias sumadas): no dependen de la fórmula.
+  const baseRows = useMemo(() => {
     if (!dispFile || !calculated) return null;
-    const lots = lotsFile?.data;
-    const ipressRows = groupByIpress(dispFile.data.rows, (code) => facilityNames.get(code));
-    const pharmacyRows = dispFile.data.hasPharmacies ? dispFile.data.rows : null;
     return {
-      all: buildItems(ipressRows, lots),
-      essential: buildItems(essentialRows(ipressRows), lots),
-      pharmacyAll: pharmacyRows ? buildItems(pharmacyRows, lots) : null,
-      pharmacyEssential: pharmacyRows ? buildItems(essentialRows(pharmacyRows), lots) : null,
+      ipress: groupByIpress(dispFile.data.rows, (code) => facilityNames.get(code)),
+      pharmacy: dispFile.data.hasPharmacies ? dispFile.data.rows : null,
     };
-  }, [dispFile, lotsFile, calculated, facilityNames]);
+  }, [dispFile, calculated, facilityNames]);
+
+  // Todos los productos y, del mismo cálculo, la DME con los códigos fusionados.
+  const vitalCodes = useMemo(() => vitalCodeSet(config.vitals), [config.vitals]);
+  const computed = useMemo(() => {
+    if (!baseRows) return null;
+    const lots = lotsFile?.data;
+    const opts = classifyOptionsOf(config.formula);
+    const groups = config.fused.groups;
+    const today = new Date();
+    return {
+      all: buildItems(baseRows.ipress, lots, today, opts),
+      essential: buildItems(essentialRows(baseRows.ipress, groups), lots, today, opts),
+      pharmacyAll: baseRows.pharmacy ? buildItems(baseRows.pharmacy, lots, today, opts) : null,
+      pharmacyEssential: baseRows.pharmacy ? buildItems(essentialRows(baseRows.pharmacy, groups), lots, today, opts) : null,
+    };
+  }, [baseRows, lotsFile, config.formula, config.fused]);
 
   const ipressItems = useMemo<AvailabilityItem[]>(() => (computed ? (scope === "all" ? computed.all : computed.essential) : []), [computed, scope]);
   const pharmacyItems = computed ? (scope === "all" ? computed.pharmacyAll : computed.pharmacyEssential) : null;
-  const report = useMemo(() => summarize(ipressItems), [ipressItems]);
+  const report = useMemo(() => summarize(ipressItems, summaryOptionsOf(config.formula, scope, vitalCodes)), [ipressItems, config.formula, scope, vitalCodes]);
 
   const months = dispFile?.data.months ?? [];
   const cut = months[months.length - 1];
@@ -326,7 +345,14 @@ export const AvailabilityModule: React.FC = () => {
     return (
       <div className="mx-auto max-w-4xl px-4 pb-24 pt-2 md:px-0 md:pb-8">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
-          <h2 className="text-[18px] font-black text-slate-900">Calcular la disponibilidad</h2>
+          <div className="flex items-start gap-3">
+            <h2 className="flex-1 text-[18px] font-black text-slate-900">Calcular la disponibilidad</h2>
+            {isAdmin && (
+              <button type="button" onClick={() => setConfigOpen(true)} className="flex h-9 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50">
+                <Settings2 className="h-4 w-4" />Configuración
+              </button>
+            )}
+          </div>
           <p className="mt-1 text-[13px] text-slate-500">Suba los archivos del mes de corte. Se calcula por producto, establecimiento, microred y UNGET; los medicamentos esenciales salen del mismo cálculo.</p>
           <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
             <DropZone
@@ -365,11 +391,13 @@ export const AvailabilityModule: React.FC = () => {
             </button>
           </div>
         </div>
+        <AvailabilityConfigDialog open={configOpen} onClose={() => setConfigOpen(false)} config={config} onSaved={setConfig} previewRows={null} />
       </div>
     );
   }
 
   /* ------------------------------------------------------------ Resultados */
+  const lv = config.formula.levels;
   const tabs: Array<{ id: Tab; label: string; short: string }> = [
     { id: "eess", label: "Establecimientos", short: "Establec." },
     { id: "mr", label: "Microredes", short: "Microredes" },
@@ -480,6 +508,11 @@ export const AvailabilityModule: React.FC = () => {
       <button type="button" onClick={() => { setActionsOpen(false); setCalculated(false); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 active:bg-slate-100">
         <RefreshCw className="h-5 w-5" />Otros archivos
       </button>
+      {isAdmin && (
+        <button type="button" onClick={() => { setActionsOpen(false); setConfigOpen(true); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 active:bg-slate-100">
+          <Settings2 className="h-5 w-5" />Configuración
+        </button>
+      )}
       {pharmacyItems && tab === "meds" && (
         <button type="button" onClick={() => { setActionsOpen(false); setByPharmacy(!byPharmacy); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 active:bg-slate-100">
           <Building2 className="h-5 w-5" />{byPharmacy ? "Ver por establecimiento" : "Ver por farmacia"}
@@ -535,12 +568,17 @@ export const AvailabilityModule: React.FC = () => {
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[18px] font-black text-slate-900">{title}{cut ? ` · ${monthLabel(cut)}` : ""}</h2>
           <p className="text-[12.5px] text-slate-500">
-            {scope === "essential" ? `Medicamentos esenciales (sin estrategias) con códigos fusionados de DIGEMID ${FUSED_CODES_VERSION}` : "Todos los productos"} · meses cortados a un decimal
+            {scope === "essential" ? `Medicamentos esenciales (sin estrategias) con códigos fusionados de DIGEMID ${config.fused.version}` : "Todos los productos"} · meses {config.formula.truncate ? "cortados a un decimal" : "sin cortar"}
             {lotsFile ? " · con lotes del TFORMDET" : ""}
           </p>
         </div>
         <div className="flex items-center gap-2 [&>div:first-child]:flex-1 md:[&>div:first-child]:flex-none">
           {scopeSwitch}
+          {isAdmin && (
+            <button type="button" onClick={() => setConfigOpen(true)} title="Configuración" aria-label="Configuración" className="hidden h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 md:grid">
+              <Settings2 className="h-4 w-4" />
+            </button>
+          )}
           <button type="button" onClick={() => setCalculated(false)} className="hidden h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 md:flex">
             <RefreshCw className="h-4 w-4" />Otros archivos
           </button>
@@ -563,7 +601,7 @@ export const AvailabilityModule: React.FC = () => {
               icon={<Building2 />}
               label={DME_LEVEL_LABEL[l]}
               value={String(levelCounts[l])}
-              hint={l === "OPTIMO" ? "establecimientos ≥ 90 %" : l === "ALTO" ? "establecimientos 80 – 89,9 %" : l === "REGULAR" ? "establecimientos 70 – 79,9 %" : "establecimientos < 70 %"}
+              hint={l === "OPTIMO" ? `establecimientos ≥ ${lv.optimo} %` : l === "ALTO" ? `establecimientos ${lv.alto} – ${lv.optimo} %` : l === "REGULAR" ? `establecimientos ${lv.regular} – ${lv.alto} %` : `establecimientos < ${lv.regular} %`}
               onClick={() => { setLevel(level === l ? null : l); setTab("eess"); }}
               active={level === l}
             />
@@ -621,11 +659,19 @@ export const AvailabilityModule: React.FC = () => {
         ) : mobileCards}
 
         <p className="border-t border-slate-100 px-4 py-2.5 text-[11.5px] text-slate-500">
-          Disponibilidad = (Normostock + Sobrestock) ÷ total de ítems. Sin rotación cuenta en el total y no como disponible. Microred y UNGET: promedio de sus establecimientos.
+          {describeFormula(config.formula, scope)}{!config.fromServer && " Configuración de fábrica."}
         </p>
       </div>
 
       {filterSheet}
+      <AvailabilityConfigDialog
+        open={configOpen}
+        onClose={() => setConfigOpen(false)}
+        config={config}
+        onSaved={setConfig}
+        previewRows={baseRows?.ipress ?? null}
+        lots={lotsFile?.data}
+      />
       {actionsSheet}
     </div>
   );

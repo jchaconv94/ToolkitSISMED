@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import {
-  averageConsumption, buildItems, essentialRows, groupByIpress, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, wholeMonthsBetween,
+  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, essentialRows, groupByIpress, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, wholeMonthsBetween,
 } from "./availabilityReport";
 
 const HEADER = ["RED", "MICRORED", "COD EESS", "ESTABLECIMIENTO", "CAT", "MED COD", "DESCRIPCION DEL PRODUCTO", "MEDFF", "PRECIO", "MEDTIP", "MEDPET", "MEDEST",
@@ -56,7 +56,17 @@ describe("disponibilidad", () => {
     expect(all.establishments[0]).toMatchObject({ total: 4, available: 2, pct: 50, level: "BAJO" });
     const essItems = buildItems(essentialRows(rows, {}));
     expect(summarize(essItems).establishments[0]).toMatchObject({ total: 3, available: 1 });
-    expect(summarize(essItems, new Set(["00002"])).establishments[0].available).toBe(2);
+    const vital = { ...DEFAULT_SUMMARY, rule: { ...DEFAULT_SUMMARY.rule, sinRotacion: "vital" as const }, vitalCodes: new Set(["00002"]) };
+    expect(summarize(essItems, vital).establishments[0].available).toBe(2);
+    // Sin rotación encendido para todos: también cuenta en «todos los productos».
+    expect(summarize(buildItems(rows), { ...DEFAULT_SUMMARY, rule: { ...DEFAULT_SUMMARY.rule, sinRotacion: "yes" } }).establishments[0].available).toBe(3);
+  });
+
+  it("corte a un decimal y límites configurables", () => {
+    // 6,03 meses: sin cortar es Sobrestock; cortado a 6,0 es Normostock.
+    expect(classifyAvailability(603, 100).status).toBe(StockStatus.SOBRESTOCK);
+    expect(classifyAvailability(603, 100, { truncate: true, subMax: 2, sobreMin: 6 }).status).toBe(StockStatus.NORMOSTOCK);
+    expect(classifyAvailability(250, 100, { truncate: false, subMax: 3, sobreMin: 6 }).status).toBe(StockStatus.SUBSTOCK);
   });
 
   it("microred y UNGET: promedio de sus establecimientos", () => {
@@ -69,6 +79,8 @@ describe("disponibilidad", () => {
     expect(rep.microredes[0].pct).toBe(75);
     expect(rep.pct).toBe(75);
     expect(rep.level).toBe("REGULAR");
+    // Suma de ítems: 2 disponibles de 3.
+    expect(summarize(buildItems(rows), { ...DEFAULT_SUMMARY, aggregate: "sum" }).pct).toBeCloseTo(66.67, 1);
   });
 
   it("lotes del TFORMDET: vencimiento más próximo y riesgo", () => {
