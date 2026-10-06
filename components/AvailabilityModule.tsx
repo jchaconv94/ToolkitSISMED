@@ -12,7 +12,8 @@ import {
   type EstablishmentInfo,
   type AvailabilityItem, type AvailabilityScope, type EstablishmentSummary, type Lot, type TformdetMonthSheet, type MicroredSummary, type ParsedAvailability,
 } from "../services/availabilityReport";
-import { STATUS_LABEL, exportAvailabilityExcel, monthLabel } from "../services/availabilityExport";
+import { STATUS_LABEL, monthLabel } from "../services/availabilityExport";
+import { exportAvailabilityExcel } from "../services/availabilityExportClient";
 import { formatOneDecimal, type DmeLevel } from "../services/stockStatus";
 import { availabilityConfigApi, classifyOptionsOf, describeFormula, factoryConfig, summaryOptionsOf, vitalCodeSet, type AvailabilityConfig } from "../services/availabilityConfig";
 import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
@@ -373,7 +374,9 @@ export const AvailabilityModule: React.FC = () => {
   };
 
   const handleExport = async () => {
+    if (exporting) return;
     setExporting(true);
+    const notice = toast.loading("Generando el Excel…");
     try {
       // El porcentaje del otro alcance va como referencia en el resumen.
       const otherScope: AvailabilityScope = scope === "all" ? "essential" : "all";
@@ -392,6 +395,7 @@ export const AvailabilityModule: React.FC = () => {
     } catch (e: any) {
       toast.error(e?.message || "No se pudo generar el Excel.");
     } finally {
+      toast.dismiss(notice);
       setExporting(false);
     }
   };
@@ -642,7 +646,7 @@ export const AvailabilityModule: React.FC = () => {
           </button>
           {can("AVAILABILITY", "export") && (
             <button type="button" onClick={handleExport} disabled={exporting} className="hidden h-10 items-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60 md:flex">
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}Exportar Excel
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{exporting ? "Generando…" : "Exportar Excel"}
             </button>
           )}
         </div>
