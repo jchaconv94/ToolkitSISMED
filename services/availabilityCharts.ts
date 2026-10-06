@@ -357,3 +357,35 @@ export const findingCard = async (o: { index: number; big: string; title: string
   lines.slice(0, 2).forEach((l, i) => text(x, i === 1 && lines.length > 2 ? fit(x, `${l} ${lines.slice(2).join(" ")}`, w - tx - 24) : l, tx, h / 2 + 16 + i * 17, { size: 13, color: CHART_COLORS.muted }));
   return finish(c, w, h);
 };
+
+/* ------------------------------------------------------------------ Marca */
+
+/**
+ * Marca de Toolkit SISMED para la cabecera oscura: el símbolo de las cuatro piezas con la cruz
+ * naranja y el nombre (mismo dibujo que `BrandLogo`, tono oscuro). `h` es el alto en píxeles.
+ */
+export const brandImage = async (h = 30): Promise<ChartImage | null> => {
+  const probe = canvas(10, 10);
+  if (!probe) return null;
+  const nameSize = h * 0.62;
+  font(probe.x, nameSize, 600);
+  const wToolkit = probe.x.measureText("Toolkit ").width;
+  font(probe.x, nameSize, 800);
+  const wSismed = probe.x.measureText("SISMED").width;
+  const mark = h, gap = h * 0.35;
+  const w = Math.ceil(mark + gap + wToolkit + wSismed + 4);
+  const cv = canvas(w, h);
+  if (!cv) return null;
+  const { c, x } = cv;
+  const k = mark / 64;
+  const piece = (px: number, py: number, pw: number, ph: number, r: number, col: string) => { roundRect(x, px * k, py * k, pw * k, ph * k, r * k); x.fillStyle = col; x.fill(); };
+  piece(3, 3, 26, 26, 7, "#2bb3a0");
+  piece(35, 3, 26, 26, 7, "#5fd0be");
+  piece(3, 35, 26, 26, 7, "#ffffff");
+  piece(43.25, 35, 9.5, 26, 3.5, "#f28c28");
+  piece(35, 43.25, 26, 9.5, 3.5, "#f28c28");
+  const base = h * 0.72;
+  text(x, "Toolkit ", mark + gap, base, { size: nameSize, weight: 600, color: "#ffffff" });
+  text(x, "SISMED", mark + gap + wToolkit, base, { size: nameSize, weight: 800, color: "#5fd0be" });
+  return finish(c, w, h);
+};
