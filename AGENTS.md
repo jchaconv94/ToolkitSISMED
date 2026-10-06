@@ -233,6 +233,8 @@ justamente porque cuando estaba repetida solo se actualizó uno.
 
 **La ventana «Conexiones de stock»** (rediseñada el 2026-10-06) es `components/StockConnectionsDialog.tsx`: lista a la izquierda y formulario a la derecha en escritorio; en el celular, lista a pantalla completa, «Nueva conexión» flotante y menú ⋯ por tarjeta. **Solo dibuja**: el estado, el guardado y quién puede editar cada conexión siguen en `SheetSearchModule`, que le pasa cada fila ya resuelta (`editable` sale de `canEditConnection`).
 
+**El engranaje de cada UNGET** abre `components/StockConnectionDetailDialog.tsx`: la conexión completa de esa UNGET, con la hoja como vía principal y la Web App plegada (la dirección interna `sheets://…` de la lectura directa nunca va en el campo de la Web App). Si la conexión es ajena solo se prueba. Las guías «Compartir la hoja» y «Cómo crear la Web App» están en `components/StockConnectionGuides.tsx`.
+
 ---
 
 ## 8. Convenciones de UI

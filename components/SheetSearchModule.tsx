@@ -143,6 +143,8 @@ import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
 import { BottomSheet } from "./ui/BottomSheet";
 import { StockConnectionsDialog, type StockConnectionRow } from "./StockConnectionsDialog";
+import { StockConnectionDetailDialog } from "./StockConnectionDetailDialog";
+import { ShareSheetGuideDialog, WebAppGuideDialog } from "./StockConnectionGuides";
 import { DeficiencyCaptureBar } from "./DeficiencyCaptureBar";
 import { EstablishmentCard, EstablishmentMobileRow, type EstablishmentCardData } from "./EstablishmentCard";
 import { EstablishmentSyncPanel, EstablishmentTable, type SyncFilter } from "./EstablishmentTable";
@@ -1449,7 +1451,6 @@ const SheetSearchModuleContent: React.FC = () => {
   /** La Web App es un respaldo: la sección viene plegada y se abre si ya hay una configurada. */
   const [isWebAppSectionOpen, setIsWebAppSectionOpen] = useState(false);
   const [isShareHelpOpen, setIsShareHelpOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<SIGData | null>(null);
   /** Celular: las acciones de la cabecera van juntas en un botón de tres puntos. */
   const [headerActionsOpen, setHeaderActionsOpen] = useState(false);
@@ -2929,7 +2930,20 @@ const SheetSearchModuleContent: React.FC = () => {
       e.stopPropagation();
     }
     setQuickFixConfig(config);
-    setQuickFixUrlInput(config.url || "");
+    // La hoja es la vía principal; la Web App solo se muestra si existe (la dirección
+    // interna `sheets://…` de la lectura directa no es una Web App).
+    setQuickFixUrlInput(hasWebApp(config) ? config.url : "");
+    setNewSpreadsheetInput(config.spreadsheetId ? `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}` : "");
+    setSpreadsheetCheck(null);
+    setIsWebAppSectionOpen(hasWebApp(config));
+    setGasTestResult(null);
+  };
+
+  const closeQuickFix = () => {
+    setQuickFixConfig(null);
+    setQuickFixUrlInput("");
+    setNewSpreadsheetInput("");
+    setSpreadsheetCheck(null);
     setGasTestResult(null);
   };
 
@@ -2969,11 +2983,19 @@ const SheetSearchModuleContent: React.FC = () => {
       );
       return;
     }
-    const cleanUrl = quickFixUrlInput.trim();
-    if (!cleanUrl) {
-      toast.error("La URL no puede estar vacía.");
+    const webAppUrl = quickFixUrlInput.trim();
+    const sheetInput = newSpreadsheetInput.trim();
+    const spreadsheetId = sheetInput ? extractSpreadsheetId(sheetInput) : "";
+    if (sheetInput && !spreadsheetId) {
+      toast.error("El enlace de la hoja de cálculo no es válido. Pegue la dirección completa de Google Sheets.");
       return;
     }
+    if (!webAppUrl && !spreadsheetId) {
+      toast.error("Indique el enlace de la hoja de cálculo o la URL de la Web App.");
+      return;
+    }
+    // Sin Web App, la conexión se identifica por su hoja (igual que en handleAddUrl).
+    const cleanUrl = webAppUrl || `${VIRTUAL_SHEET_URL_PREFIX}${spreadsheetId}`;
     setIsSavingGasUrl(true);
     try {
       // Al guardar, una conexión sin responsable pasa a ser de quien la guarda —es lo que
@@ -2984,6 +3006,7 @@ const SheetSearchModuleContent: React.FC = () => {
           ? {
               ...c,
               url: cleanUrl,
+              spreadsheetId: spreadsheetId || undefined,
               username: isConnectionOrphaned(c, cuentasActivas) ? user.username : c.username,
             }
           : c,
@@ -3007,14 +3030,14 @@ const SheetSearchModuleContent: React.FC = () => {
         opcionesDeAdopcion,
       );
       if (res.success) {
-        toast.success(`Enlace de ${quickFixConfig.name} actualizado con éxito.`);
+        toast.success(`Conexión de ${quickFixConfig.name} actualizada.`);
         setConnectionErrors((prev) => {
           const next = { ...prev };
           delete next[quickFixConfig.url];
           return next;
         });
-        const updatedConfig = { ...quickFixConfig, url: cleanUrl };
-        setQuickFixConfig(null);
+        const updatedConfig = { ...quickFixConfig, url: cleanUrl, spreadsheetId: spreadsheetId || undefined };
+        closeQuickFix();
         retrySingleUrl(updatedConfig);
       } else {
         toast.error(res.message || "No se pudo guardar la configuración.");
@@ -3811,12 +3834,6 @@ const SheetSearchModuleContent: React.FC = () => {
     );
 
     setIsExportOptionsModalOpen(false);
-  };
-
-  const copyScript = () => {
-    navigator.clipboard.writeText(scriptCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const scriptCode = `function doGet(e) {
@@ -5280,367 +5297,54 @@ function processSheet(sheet) {
       />
 
       {/* MODAL RÁPIDO DE CORRECCIÓN / PRUEBA DE ENLACE DE UNGET */}
-      {quickFixConfig && (
-        <div className="fixed inset-0 z-[9999999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-xl overflow-hidden rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-slate-200">
-            {/* Header */}
-            <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-teal-50/60 to-slate-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-teal-600 text-white flex items-center justify-center shadow-md shadow-teal-600/20">
-                  <LinkIcon className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-slate-900 uppercase tracking-tight">
-                    {quickFixEsAjena ? "Probar Enlace Web App" : "Configurar Enlace Web App"}
-                  </h3>
-                  <div className="text-xs font-bold text-teal-700 uppercase tracking-wide flex items-center gap-1.5 mt-0.5">
-                    <Building2 className="h-3.5 w-3.5 text-teal-500" />
-                    UNGET: {quickFixConfig.name}
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setQuickFixConfig(null)}
-                className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-white rounded-lg transition-all border border-transparent hover:border-slate-200"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+      {quickFixConfig && (() => {
+        const config = quickFixConfig;
+        const configNorm = normalizeName(config.name);
+        const matching = allUngets.find((u) =>
+          (config.ungetId && String(u.id) === String(config.ungetId)) ||
+          u.name === config.name ||
+          normalizeName(u.name) === configNorm
+        );
+        const ogessName = matching?.ogessId ? allOgess.find((o) => o.id === matching.ogessId)?.name || "" : "";
+        const originalIdx = scriptUrls.findIndex((u) => u.url === config.url && u.name === config.name);
+        const error = connectionErrors[config.url];
+        const sheetId = config.spreadsheetId || "";
+        return (
+          <StockConnectionDetailDialog
+            open
+            onClose={closeQuickFix}
+            name={formatDisplayName(matching ? matching.name : config.name)}
+            subtitle={[matching?.id ? `UNG-${String(matching.id).substring(0, 5).toUpperCase()}` : "", ogessName ? formatDisplayName(ogessName) : ""].filter(Boolean).join(" · ") || undefined}
+            kind={sheetId ? "direct" : hasWebApp(config) ? "gas" : "none"}
+            errorLabel={error ? getGasErrorLabel(error).label : undefined}
+            errorTitle={error || undefined}
+            establishmentCount={originalIdx >= 0 ? sources.filter((s) => s.urlIndex === originalIdx).length : 0}
+            owner={config.username && config.username !== user?.username ? config.username : undefined}
+            orphan={isConnectionOrphaned(config, cuentasActivas)}
+            readOnly={quickFixEsAjena}
+            spreadsheetInput={newSpreadsheetInput}
+            onSpreadsheetChange={(value) => { setNewSpreadsheetInput(value); setSpreadsheetCheck(null); }}
+            spreadsheetUrl={sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}` : undefined}
+            spreadsheetCheck={spreadsheetCheck}
+            checkingSpreadsheet={isCheckingSpreadsheet}
+            onCheckSpreadsheet={handleCheckSpreadsheet}
+            webAppOpen={isWebAppSectionOpen}
+            onToggleWebApp={() => setIsWebAppSectionOpen(!isWebAppSectionOpen)}
+            webAppInput={quickFixUrlInput}
+            onWebAppChange={(value) => { setQuickFixUrlInput(value); setGasTestResult(null); }}
+            testingWebApp={isTestingGasUrl}
+            onTestWebApp={handleTestQuickFixUrl}
+            webAppTest={gasTestResult}
+            onShareHelp={() => setIsShareHelpOpen(true)}
+            onWebAppGuide={() => setIsInstructionModalOpen(true)}
+            saving={isSavingGasUrl}
+            onSave={handleSaveQuickFixUrl}
+          />
+        );
+      })()}
 
-            {/* Body */}
-            <div className="p-5 sm:p-6 space-y-4">
-              {quickFixEsAjena && (
-                <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3.5 text-xs leading-relaxed text-amber-900">
-                  <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
-                  <div>
-                    <div className="font-extrabold uppercase tracking-tight text-[11px]">
-                      Conexión de otra cuenta
-                    </div>
-                    <div className="mt-0.5 font-medium">
-                      La mantiene <span className="font-black">{connectionOwner(quickFixConfig)}</span>, el
-                      informático de esta UNGET, y solo esa cuenta puede cambiar su enlace. Desde aquí
-                      sí puede probarla para saber por qué no conecta.
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2">
-                  URL de la Web App de Google Apps Script (*.exec)
-                </label>
-                <div className="relative">
-                  <input
-                    type="url"
-                    value={quickFixUrlInput}
-                    onChange={(e) => {
-                      setQuickFixUrlInput(e.target.value);
-                      setGasTestResult(null);
-                    }}
-                    readOnly={quickFixEsAjena}
-                    placeholder="https://script.google.com/macros/s/.../exec"
-                    className={`w-full rounded-lg border px-3.5 py-2.5 text-xs font-mono outline-none transition-all shadow-inner ${
-                      quickFixEsAjena
-                        ? "bg-slate-100 border-slate-200 text-slate-500 cursor-default"
-                        : "bg-slate-50 border-slate-300 focus:border-teal-500 focus:bg-white text-slate-800 placeholder-slate-400"
-                    }`}
-                  />
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1.5 font-medium leading-relaxed">
-                  Asegúrese de que el enlace termine en <code className="bg-slate-100 text-teal-700 px-1 py-0.5 rounded font-bold font-mono text-[10px]">/exec</code> y tenga permisos de acceso configurados en <span className="font-bold text-slate-700">"Cualquier usuario"</span> (Anyone).
-                </p>
-              </div>
-
-              {/* Botón de prueba de conexión en vivo */}
-              <div className="flex items-center justify-between gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={handleTestQuickFixUrl}
-                  disabled={isTestingGasUrl || !quickFixUrlInput.trim()}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-extrabold rounded-lg transition-all flex items-center gap-2 border border-slate-200/80 disabled:opacity-50 cursor-pointer"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${isTestingGasUrl ? "animate-spin text-teal-600" : ""}`} />
-                  {isTestingGasUrl ? "Probando conexión con Google..." : "Probar Conexión Ahora"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsInstructionModalOpen(true)}
-                  className="text-xs text-teal-700 hover:text-teal-800 font-bold underline flex items-center gap-1"
-                >
-                  <HelpCircle className="h-3.5 w-3.5" />
-                  ¿Cómo obtenerla?
-                </button>
-              </div>
-
-              {/* Resultado de la prueba */}
-              {gasTestResult && (
-                <div
-                  className={`p-3.5 rounded-lg border text-xs leading-relaxed animate-in fade-in duration-200 ${
-                    gasTestResult.success
-                      ? "bg-emerald-50 border-emerald-200 text-emerald-900"
-                      : "bg-red-50 border-red-200 text-red-900"
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5">
-                    {gasTestResult.success ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                    ) : (
-                      <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
-                    )}
-                    <div className="flex-1">
-                      <div className="font-extrabold uppercase tracking-tight text-[11px]">
-                        {gasTestResult.success ? "Conexión Exitosa" : "Fallo de Conexión"}
-                      </div>
-                      <div className="text-xs mt-0.5 font-medium">{gasTestResult.message}</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2.5">
-              <button
-                type="button"
-                onClick={() => setQuickFixConfig(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 rounded-lg transition-all"
-              >
-                {quickFixEsAjena ? "Cerrar" : "Cancelar"}
-              </button>
-              {!quickFixEsAjena && (
-              <button
-                type="button"
-                onClick={handleSaveQuickFixUrl}
-                disabled={isSavingGasUrl || !quickFixUrlInput.trim()}
-                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-xs font-extrabold rounded-lg shadow-md shadow-teal-600/20 transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
-              >
-                <Save className="h-4 w-4" />
-                {isSavingGasUrl ? "Guardando..." : "Guardar y Conectar"}
-              </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* INSTRUCTIONS MODAL */}
-      {/* Cómo compartir la hoja. Antes se desplegaba dentro del formulario y empujaba
-          todo hacia abajo, con los pasos en letra diminuta. */}
-      {isShareHelpOpen && (
-        <div
-          className="fixed inset-0 z-[10000000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200"
-          onClick={() => setIsShareHelpOpen(false)}
-        >
-          <div
-            className="bg-white w-full max-w-lg overflow-hidden rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-5 py-4 sm:px-6 flex items-center justify-between bg-slate-900">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-teal-500/15 rounded-xl flex items-center justify-center text-teal-400 shrink-0">
-                  <Share2 className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="font-black text-white text-base uppercase tracking-tight">
-                    Compartir la hoja
-                  </h3>
-                  <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-                    Tres pasos en Google Sheets
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsShareHelpOpen(false)}
-                className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <ol className="p-5 sm:p-6 space-y-3.5">
-              {[
-                <>Abra su hoja en Google Sheets y pulse <strong className="font-black text-slate-900">Compartir</strong>.</>,
-                <>En <strong className="font-black text-slate-900">Acceso general</strong>, elija <strong className="font-black text-slate-900">Cualquiera con el enlace</strong> y déjelo como <strong className="font-black text-slate-900">Lector</strong>.</>,
-                <>Pulse <strong className="font-black text-slate-900">Copiar enlace</strong>, péguelo en el campo y use <strong className="font-black text-slate-900">Probar</strong>.</>,
-              ].map((paso, i) => (
-                <li key={i} className="flex gap-3.5">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-teal-600 text-[11px] font-black text-white">
-                    {i + 1}
-                  </span>
-                  <span className="text-sm leading-relaxed text-slate-600 pt-0.5">{paso}</span>
-                </li>
-              ))}
-            </ol>
-
-            <div className="px-5 py-4 sm:px-6 border-t border-slate-200 bg-slate-50/70 flex items-center justify-between gap-3">
-              <p className="text-[11px] text-slate-500 leading-snug">
-                Con «Lector» nadie puede modificar su hoja: solo se lee el stock.
-              </p>
-              <button
-                type="button"
-                onClick={() => setIsShareHelpOpen(false)}
-                className="shrink-0 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-700"
-              >
-                Entendido
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isInstructionModalOpen && (
-        <div className="fixed inset-0 z-[10000000] flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-2xl overflow-hidden rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-white/20">
-            {/* Header Modal with Gradient */}
-            <div className="p-6 sm:p-8 bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-800 text-white relative flex items-center justify-between overflow-hidden">
-              <div className="absolute right-0 top-0 opacity-10 pointer-events-none transform translate-x-10 -translate-y-10">
-                <HelpCircle className="w-48 h-48" />
-              </div>
-              <div className="flex items-center gap-4 relative z-10">
-                <div className="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center text-blue-50 backdrop-blur-sm border border-white/20">
-                  <HelpCircle className="h-6 w-6" />
-                </div>
-                <div>
-                  <h3 className="font-black text-white text-lg sm:text-xl uppercase tracking-tight">
-                    ¿Cómo obtener la URL?
-                  </h3>
-                  <p className="text-xs sm:text-sm text-blue-100 font-medium tracking-tight mt-1">
-                    Guía de conexión paso a paso para Google Apps Script
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsInstructionModalOpen(false)}
-                className="p-2.5 sm:p-3 bg-white/10 hover:bg-white/20 rounded-full transition-all text-white active:scale-95 relative z-10"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="p-6 sm:p-8 overflow-y-auto max-h-[70vh] bg-slate-50/50">
-              <div className="space-y-6 text-xs sm:text-sm text-slate-700 font-medium leading-relaxed">
-                <div className="flex gap-4">
-                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center shrink-0 font-black text-blue-700 text-lg shadow-sm">
-                    1
-                  </div>
-                  <div>
-                    <p className="mt-1 sm:mt-1.5 font-bold uppercase tracking-tight text-slate-800">
-                      Crear Proyecto
-                    </p>
-                    <p className="text-slate-500 mt-1">
-                      Ingrese a{" "}
-                      <a
-                        href="https://script.google.com"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-600 font-black hover:underline decoration-2"
-                      >
-                        script.google.com
-                      </a>{" "}
-                      con la cuenta donde tiene sus archivos Excel (Google
-                      Sheets). Cree un "Nuevo Proyecto" y pegue el código
-                      adjunto borrando lo que haya.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex gap-4">
-                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center shrink-0 font-black text-blue-700 text-lg shadow-sm">
-                    2
-                  </div>
-                  <div>
-                    <p className="mt-1 sm:mt-1.5 font-bold uppercase tracking-tight text-slate-800">
-                      Implementar
-                    </p>
-                    <p className="text-slate-500 mt-1">
-                      En la parte superior derecha, haga click en el botón azul{" "}
-                      <span className="font-black bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 border border-slate-200/60">
-                        Implementar
-                      </span>{" "}
-                      y luego seleccione{" "}
-                      <span className="font-black bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 border border-slate-200/60">
-                        Nueva Implementación
-                      </span>
-                      .
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex gap-4">
-                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center shrink-0 font-black text-blue-700 text-lg shadow-sm">
-                    3
-                  </div>
-                  <div>
-                    <p className="mt-1 sm:mt-1.5 font-bold uppercase tracking-tight text-slate-800">
-                      Configurar Permisos
-                    </p>
-                    <p className="text-slate-500 mt-1">
-                      En Tipo, haga click en el engranaje "⚙️" y elija{" "}
-                      <span className="font-black text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
-                        Aplicación Web
-                      </span>
-                      .<br />
-                      En la sección Seguridad (Acceso), cambie a{" "}
-                      <span className="font-black text-white bg-slate-800 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider">
-                        Cualquier persona
-                      </span>{" "}
-                      y presione el botón "Implementar".
-                      <br />
-                      <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-2.5 py-1.5 rounded-lg inline-block mt-3 border border-amber-200/50 leading-relaxed shadow-sm">
-                        Nota: Al autorizar, Google mostrará una advertencia.
-                        Haga click en "Avanzado" e "Ir al proyecto".
-                      </span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="relative mt-8 group">
-                  <div className="absolute -top-3 left-6 bg-slate-800 text-[10px] text-white px-3.5 py-1 rounded-full font-black tracking-widest shadow-sm z-10 uppercase">
-                    CÓDIGO RECOMENDADO
-                  </div>
-                  <div className="relative pt-3 border border-slate-200 rounded-xl bg-slate-900 shadow-xl overflow-hidden">
-                    <pre className="text-[11px] text-slate-300 p-6 sm:p-8 h-56 overflow-y-auto font-mono scrollbar-thin scrollbar-thumb-slate-700">
-                      {scriptCode}
-                    </pre>
-                    <button
-                      onClick={copyScript}
-                      className="absolute top-6 right-6 bg-white/10 hover:bg-white/20 p-2.5 rounded-lg text-white backdrop-blur-sm transition-all border border-white/10 flex items-center gap-2 hover:scale-105 active:scale-95"
-                    >
-                      {copied ? (
-                        <>
-                          <Check className="h-4 w-4 text-green-400" />
-                          <span className="text-[10px] font-bold text-green-400 tracking-wider">
-                            COPIADO
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="h-4 w-4" />
-                          <span className="text-[10px] font-bold hidden sm:inline-block tracking-wider">
-                            COPIAR SCRIPT
-                          </span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer Modal */}
-            <div className="p-5 sm:p-6 border-t border-slate-100 bg-white flex items-center justify-end">
-              <button
-                onClick={() => setIsInstructionModalOpen(false)}
-                className="bg-blue-600 text-white hover:bg-blue-700 px-8 py-3 rounded-lg text-xs sm:text-sm font-black transition-all shadow-md hover:shadow-lg hover:shadow-blue-600/20 active:scale-95 uppercase tracking-wide"
-              >
-                Entendido, Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ShareSheetGuideDialog open={isShareHelpOpen} onClose={() => setIsShareHelpOpen(false)} />
+      <WebAppGuideDialog open={isInstructionModalOpen} onClose={() => setIsInstructionModalOpen(false)} scriptCode={scriptCode} />
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 sm:rounded-xl flex items-center gap-2 mb-6 mx-4 sm:mx-10 lg:mx-14 xl:mx-16">
@@ -6376,7 +6080,7 @@ function processSheet(sheet) {
                         type="button"
                         onClick={(e) => handleOpenQuickFix(item.config, e)}
                         className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-teal-300 hover:text-teal-700"
-                        title={item.esConexionPropia ? "Configurar / Probar enlace Web App" : `Probar el enlace (la mantiene ${connectionOwner(item.config)})`}
+                        title={item.esConexionPropia ? "Configurar conexión" : `Ver y probar la conexión (la mantiene ${connectionOwner(item.config)})`}
                         aria-label="Configurar conexión"
                       >
                         <Settings className="h-4 w-4" />
