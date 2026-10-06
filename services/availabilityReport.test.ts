@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import {
-  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, essentialRows, groupByIpress, isEstablishmentCode, parseTformdetHistory, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, wholeMonthsBetween,
+  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, essentialRows, groupByIpress, isEstablishmentCode, parseTformdetHistory, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, tformdetLastMonth, wholeMonthsBetween,
 } from "./availabilityReport";
 
 const HEADER = ["RED", "MICRORED", "COD EESS", "ESTABLECIMIENTO", "CAT", "MED COD", "DESCRIPCION DEL PRODUCTO", "MEDFF", "PRECIO", "MEDTIP", "MEDPET", "MEDEST",
@@ -150,6 +150,19 @@ describe("disponibilidad", () => {
     expect(parsed.lots.get("06502F02|00143")!.map((l) => l.lot)).toEqual(["L2"]);
     expect(isEstablishmentCode("06502F01")).toBe(true);
     expect(isEstablishmentCode("030S05")).toBe(false);
+  });
+
+  it("guarda los registros del último mes del TFORMDET para el Excel", () => {
+    const sheet = [["ANNOMES", "CODIGO_PRE", "CODIGO_MED", "MEDLOTE", "MEDREGSAN", "VENTA", "STOCK_FIN"],
+      ["202608", "06503", "143", "L1", "EE-1", 5, 30],
+      ["202609", "06503", "143", "L1", "EE-1", 4, 26],
+      ["202609", "030S05", "143", "L9", "EE-1", 1, 50],
+      ["202609", 6502, "00200", "L2", "EN-2", 0, 10]];
+    const last = tformdetLastMonth(sheet)!;
+    expect(last.month).toBe("202609");
+    expect(last.header).toEqual(["CODIGO_PRE", "CODIGO_MED", "MEDLOTE", "MEDREGSAN", "VENTA", "STOCK_FIN"]);
+    expect(last.rows).toEqual([["06503", "00143", "L1", "EE-1", 4, 26], ["06502", "00200", "L2", "EN-2", 0, 10]]);
+    expect(tformdetLastMonth([["A", "B"]])).toBeNull();
   });
 
   it("avisa si el archivo no es de disponibilidad", () => {
