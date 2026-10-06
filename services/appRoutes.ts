@@ -18,6 +18,7 @@ const RUTAS: Record<AppModule, string> = {
   DASHBOARD: "/analisis",
   ANALYSIS: "/analisis-inteligente",
   ANALYSIS_EXCLUSIONS: "/analisis/exclusiones",
+  AVAILABILITY: "/disponibilidad",
   SIG_SEARCH: "/consulta-stock",
   REDISTRIBUTION: "/redistribucion",
   IPRESS_STOCK: "/stock-sismed",

@@ -50,6 +50,7 @@ import { NotificationsProvider } from './contexts/NotificationsContext';
 import { NotificationBell } from './components/NotificationBell';
 import { AssignedIpressStockModule } from './components/AssignedIpressStockModule';
 import { AnalysisExclusionsModule } from './components/AnalysisExclusionsModule';
+import { AvailabilityModule } from './components/AvailabilityModule';
 import { ModuleHeaderProvider, type ModuleHeaderOverride } from './contexts/ModuleHeaderContext';
 import { APP_BASE, moduleForPath, pathForModule, pathForView, viewForLocation } from './services/appRoutes';
 
@@ -377,6 +378,7 @@ const AuthenticatedApp: React.FC = () => {
                                 )}
                                 {currentView === 'DASHBOARD' && <AnalysisModule />}
                                 {currentView === 'ANALYSIS_EXCLUSIONS' && <AnalysisExclusionsModule />}
+                                {currentView === 'AVAILABILITY' && <AvailabilityModule />}
                                 {currentView === 'REDISTRIBUTION' && <RedistributionModule />}
                                 {currentView === 'SIG_SEARCH' && <SheetSearchModule />}
                                 {currentView === 'IPRESS_STOCK' && <AssignedIpressStockModule />}

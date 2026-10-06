@@ -41,6 +41,9 @@ export const MODULE_ACTIONS: Partial<Record<AppModule, ModuleAction[]>> = {
     { id: "export", label: "Exportar lista", readOnly: true },
     { id: "clear", label: "Vaciar lista" },
   ],
+  AVAILABILITY: [
+    { id: "export", label: "Exportar Excel", readOnly: true },
+  ],
   SIG_SEARCH: [
     { id: "connections", label: "Configurar conexiones de stock", hint: "Además, cada conexión solo la edita su responsable" },
     { id: "export", label: "Exportar stock", readOnly: true },
