@@ -4,7 +4,7 @@ import type { ScopeRule } from "./availabilityConfig";
 import { DME_LEVEL_LABEL, dmeLevelOf, ipressCodeOf, wholeMonthsBetween, type AvailabilityItem, type AvailabilityReport, type TformdetMonthSheet, type WarehouseItem } from "./availabilityReport";
 import type { DmeLevel } from "./stockStatus";
 import { formatNumber } from "./numberFormat";
-import { CHART_COLORS, donutCard, findingCard, gaugeCard, hBarsCard, kpiCard, levelColumnsCard, miniKpiCard, rankingCard, type ChartImage, type KpiSpec } from "./availabilityCharts";
+import { CHART_COLORS, brandImage, donutCard, findingCard, gaugeCard, hBarsCard, kpiCard, levelColumnsCard, miniKpiCard, rankingCard, type ChartImage, type KpiSpec } from "./availabilityCharts";
 
 /**
  * Excel del módulo Disponibilidad (rehecho el 2026-10-06, pedido del usuario: «es un reporte
@@ -344,6 +344,9 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   rs.getCell(3, 10).alignment = { vertical: "top", horizontal: "right", indent: 1 };
   rs.getRow(4).height = 4;
   for (let cc = 1; cc <= 12; cc++) rs.getCell(4, cc).fill = fill("FF14B8A6");
+  // Marca de Toolkit SISMED arriba a la derecha, sobre el nombre del responsable.
+  const brand = await brandImage(26);
+  if (brand) placeImage(wb, rs, brand, coverWidthPx() - brand.width - 12, 8, 1);
 
   // Gráficos: se dibujan en el lienzo y se colocan por píxeles desde la fila 5.
   const W = coverWidthPx();
