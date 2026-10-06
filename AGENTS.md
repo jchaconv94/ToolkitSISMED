@@ -231,6 +231,8 @@ resuelve con `facilityForSheet` en `SheetSearchModule`. Hay **dos** caminos que 
 las tarjetas —la metadata y el payload de Apps Script—; la regla está en un solo sitio
 justamente porque cuando estaba repetida solo se actualizó uno.
 
+**La ventana «Conexiones de stock»** (rediseñada el 2026-10-06) es `components/StockConnectionsDialog.tsx`: lista a la izquierda y formulario a la derecha en escritorio; en el celular, lista a pantalla completa, «Nueva conexión» flotante y menú ⋯ por tarjeta. **Solo dibuja**: el estado, el guardado y quién puede editar cada conexión siguen en `SheetSearchModule`, que le pasa cada fila ya resuelta (`editable` sale de `canEditConnection`).
+
 ---
 
 ## 8. Convenciones de UI
