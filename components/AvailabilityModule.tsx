@@ -393,6 +393,9 @@ export const AvailabilityModule: React.FC = () => {
         source: `${dispFile?.name || ""} (${source?.kind === "tformdet" ? "TFORMDET" : "archivo de disponibilidad"})`,
         preparedBy: user ? userFullName(user) : undefined,
         preparedByRole: await professionOf(),
+        rule: scope === "all" ? config.formula.all : config.formula.essential,
+        limits: { subMax: config.formula.subMax, sobreMin: config.formula.sobreMin },
+        aggregate: config.formula.aggregate,
         tformdet: tformdetSheet,
         warehouse,
       });

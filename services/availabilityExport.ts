@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { StockStatus } from "../types";
-import { DME_LEVEL_LABEL, ipressCodeOf, wholeMonthsBetween, type AvailabilityItem, type AvailabilityReport, type TformdetMonthSheet, type WarehouseItem } from "./availabilityReport";
+import type { ScopeRule } from "./availabilityConfig";
+import { DME_LEVEL_LABEL, dmeLevelOf, ipressCodeOf, wholeMonthsBetween, type AvailabilityItem, type AvailabilityReport, type TformdetMonthSheet, type WarehouseItem } from "./availabilityReport";
 import type { DmeLevel } from "./stockStatus";
 import { formatNumber } from "./numberFormat";
 
@@ -66,7 +67,16 @@ interface Col {
   width: number;
   fmt?: string;
   align?: "left" | "right" | "center";
+  /** Columna con barra de datos: el valor va a la izquierda, en blanco y negrita, sobre la barra. */
+  bar?: boolean;
 }
+
+/**
+ * Alineación pedida por el usuario (2026-10-06, sobre su propio ajuste del Excel): los textos
+ * (nombres, producto, motivo, detalle) a la izquierda; códigos, números y estados centrados.
+ */
+const TEXT_HEADER = /^(Red|Microred|Establecimiento|Producto|Motivo|EESS|DESCRIPCION MED)$|^Detalle/i;
+const alignOf = (c: Col): "left" | "right" | "center" => c.align ?? (c.bar || TEXT_HEADER.test(c.header) ? "left" : "center");
 
 /**
  * Tabla con cabecera teal, filas alternadas, bordes finos, filtro y paneles fijos. Devuelve la
@@ -75,7 +85,9 @@ interface Col {
 const writeTable = (ws: ExcelJS.Worksheet, startRow: number, cols: Col[], rows: unknown[][], opts: { freezeCols?: number; filter?: boolean } = {}) => {
   cols.forEach((c, i) => {
     const col = ws.getColumn(i + 1);
-    if (!col.width || col.width < c.width) col.width = c.width;
+    // Las columnas centradas necesitan aire para la cabecera y el botón del filtro.
+    const width = alignOf(c) === "center" ? Math.max(c.width, 11) : c.width;
+    if (!col.width || col.width < width) col.width = width;
   });
   const head = ws.getRow(startRow);
   cols.forEach((c, i) => {
@@ -83,18 +95,23 @@ const writeTable = (ws: ExcelJS.Worksheet, startRow: number, cols: Col[], rows: 
     cell.value = c.header;
     cell.font = { name: FONT, bold: true, size: 10, color: { argb: C.white } };
     cell.fill = fill(C.teal);
-    cell.alignment = { vertical: "middle", horizontal: c.align === "right" ? "right" : c.align === "center" ? "center" : "left", wrapText: true };
+    cell.alignment = { vertical: "middle", horizontal: alignOf(c), wrapText: true, indent: alignOf(c) === "left" ? 1 : 0 };
     cell.border = border;
   });
-  head.height = 32;
+  head.height = 36;
   // Estilos compartidos (mismo objeto para todas las celdas de una columna): ExcelJS
   // serializa mucho más rápido que con un objeto nuevo por celda.
   const font = { name: FONT, size: 10, color: { argb: C.ink } };
+  const barFont = { name: FONT, size: 10, bold: true, color: { argb: C.white } };
   const band = fill(C.band);
-  const styleFor = cols.map((c) => ({
-    plain: { font, border, numFmt: c.fmt, alignment: { vertical: "middle" as const, horizontal: c.align } },
-    banded: { font, border, numFmt: c.fmt, fill: band, alignment: { vertical: "middle" as const, horizontal: c.align } },
-  }));
+  const styleFor = cols.map((c) => {
+    const alignment = { vertical: "middle" as const, horizontal: alignOf(c), indent: alignOf(c) === "left" ? 1 : 0 };
+    const f = c.bar ? barFont : font;
+    return {
+      plain: { font: f, border, numFmt: c.fmt, alignment },
+      banded: { font: f, border, numFmt: c.fmt, fill: band, alignment },
+    };
+  });
   rows.forEach((values, r) => {
     const row = ws.getRow(startRow + 1 + r);
     values.forEach((v, i) => {
@@ -138,20 +155,27 @@ const colLetter = (n: number) => {
   return s;
 };
 
-/** Título de hoja: nombre grande, subtítulo y una línea teal. */
+/**
+ * Cabecera de hoja con el mismo estilo de la portada: banda oscura a todo el ancho de la tabla
+ * con el título en blanco y el subtítulo debajo. `span` es el número de columnas de la tabla.
+ */
 const sheetTitle = (ws: ExcelJS.Worksheet, title: string, subtitle: string, span: number) => {
-  ws.mergeCells(1, 1, 1, span);
-  ws.mergeCells(2, 1, 2, span);
+  const textSpan = Math.max(1, Math.min(span, 12));
+  for (let r = 1; r <= 3; r++) for (let c = 1; c <= span; c++) ws.getCell(r, c).fill = fill(C.dark);
+  ws.mergeCells(1, 1, 1, textSpan);
+  ws.mergeCells(2, 1, 2, textSpan);
   const t = ws.getCell(1, 1);
   t.value = title;
-  t.font = { name: FONT, size: 15, bold: true, color: { argb: C.ink } };
-  t.alignment = { vertical: "middle" };
-  ws.getRow(1).height = 26;
+  t.font = { name: FONT, size: 15, bold: true, color: { argb: C.white } };
+  t.alignment = { vertical: "bottom", indent: 1 };
+  ws.getRow(1).height = 30;
   const s = ws.getCell(2, 1);
   s.value = subtitle;
-  s.font = { name: FONT, size: 10, color: { argb: C.muted } };
-  for (let i = 1; i <= span; i++) ws.getCell(3, i).border = { top: { style: "medium", color: { argb: C.teal } } };
-  ws.getRow(3).height = 6;
+  s.font = { name: FONT, size: 10, color: { argb: "FF99F6E4" } };
+  s.alignment = { vertical: "middle", indent: 1 };
+  ws.getRow(2).height = 20;
+  ws.getRow(3).height = 8;
+  ws.getRow(4).height = 10;
 };
 
 const dateText = (d: Date | null) => (d ? `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}` : "");
@@ -174,6 +198,10 @@ export interface AvailabilityExportParams {
   /** Nombre y profesión de quien lo generó (van en la portada). */
   preparedBy?: string;
   preparedByRole?: string;
+  /** Regla de la vista exportada, para explicarla en Metodología. */
+  rule?: ScopeRule;
+  limits?: { subMax: number; sobreMin: number };
+  aggregate?: "average" | "sum";
   /** Stock de los almacenes al corte (no cuenta en la disponibilidad). */
   warehouse?: WarehouseItem[] | null;
   /** Registros del TFORMDET del mes de corte, para revisarlos en detalle. */
@@ -236,41 +264,45 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   };
   const pctText = (v: number) => `${v.toFixed(1).replace(".", ",")} %`;
 
-  // Banda del título (ajustada por el usuario el 2026-10-06: título completo en mayúsculas a
-  // todo el ancho y, a la derecha, solo nombre y profesión del responsable).
+  // Banda del título (diseño del usuario del 2026-10-06: el título lleva la UNGET al final, y
+  // debajo el corte a la izquierda y el nombre y la profesión del responsable a la derecha).
+  // Encima, una línea con el nombre del reporte; debajo, una franja de acento.
   paintArea(1, 1, 5, 12, C.dark);
-  [1, 2, 3, 4, 5].forEach((r, i) => (rs.getRow(r).height = [26, 26, 22, 18, 8][i]));
-  box(1, 1, 2, 12, scope === "essential"
-    ? "ANÁLISIS DE DISPONIBILIDAD DE MEDICAMENTOS ESENCIALES (DME)"
-    : "ANÁLISIS DE DISPONIBILIDAD DE PRODUCTOS FARMACÉUTICOS, DISPOSITIVOS MÉDICOS Y PRODUCTOS SANITARIOS",
-  { font: { name: FONT, size: 16, bold: true, color: { argb: C.white } }, alignment: { vertical: "middle", wrapText: true, indent: 1 } });
-  box(3, 1, 3, 8, p.title, { font: { name: FONT, size: 12, bold: true, color: { argb: "FF99F6E4" } }, alignment: { vertical: "middle", indent: 1 } });
+  [1, 2, 3, 4, 5, 6, 7].forEach((r, i) => (rs.getRow(r).height = [18, 24, 24, 18, 16, 4, 12][i]));
+  box(1, 1, 1, 8, `TOOLKIT SISMED  ·  REPORTE DE DISPONIBILIDAD  ·  ${scopeLabel.toUpperCase()}`, { font: { name: FONT, size: 8, bold: true, color: { argb: "FF5EEAD4" } }, alignment: { vertical: "bottom", indent: 1 } });
+  box(1, 9, 1, 12, `Generado el ${new Date().toLocaleDateString("es-PE")}`, { font: { name: FONT, size: 8, color: { argb: "FF94A3B8" } }, alignment: { vertical: "bottom", horizontal: "right", indent: 1 } });
+  box(2, 1, 3, 12, { richText: [
+    { text: scope === "essential" ? "ANÁLISIS DE DISPONIBILIDAD DE MEDICAMENTOS ESENCIALES (DME) " : "ANÁLISIS DE DISPONIBILIDAD DE PRODUCTOS FARMACÉUTICOS, DISPOSITIVOS MÉDICOS Y PRODUCTOS SANITARIOS ", font: { name: FONT, size: 16, bold: true, color: { argb: C.white } } },
+    { text: p.title, font: { name: FONT, size: 16, bold: true, color: { argb: "FF99F6E4" } } },
+  ] }, { alignment: { vertical: "middle", wrapText: true, indent: 1 } });
   box(4, 1, 4, 8, `Corte ${cut ? monthFull(cut) : "—"} · consumo ${period} · ${scopeLabel}`, { font: { name: FONT, size: 9, color: { argb: "FFCBD5E1" } }, alignment: { vertical: "middle", indent: 1 } });
-  box(3, 9, 3, 12, p.preparedBy || "", { font: { name: FONT, size: 12, bold: true, color: { argb: C.white } }, alignment: { vertical: "middle", horizontal: "right", indent: 1 } });
-  box(4, 9, 4, 12, p.preparedByRole || "", { font: { name: FONT, size: 9, color: { argb: "FFCBD5E1" } }, alignment: { vertical: "middle", horizontal: "right", indent: 1 } });
+  box(4, 9, 4, 12, p.preparedBy || "", { font: { name: FONT, size: 10, bold: true, color: { argb: C.white } }, alignment: { vertical: "middle", horizontal: "right", indent: 1 } });
+  box(5, 9, 5, 12, p.preparedByRole || "", { font: { name: FONT, size: 9, color: { argb: "FFCBD5E1" } }, alignment: { vertical: "top", horizontal: "right", indent: 1 } });
+  paintArea(6, 1, 6, 12, "FF14B8A6");
 
   // Indicador principal
-  rs.getRow(6).height = 14;
-  [7, 8, 9, 10, 11].forEach((r, i) => (rs.getRow(r).height = [18, 26, 30, 18, 18][i]));
+  const H = 8;
+  [H, H + 1, H + 2, H + 3, H + 4].forEach((r, i) => (rs.getRow(r).height = [18, 26, 30, 18, 18][i]));
   const [heroBg, heroFg] = LEVEL_FILL[report.level];
-  paintArea(7, 1, 11, 4, heroBg);
-  box(7, 1, 7, 4, scope === "essential" ? "DISPONIBILIDAD DME DE LA UNGET" : "DISPONIBILIDAD DE LA UNGET", { font: { name: FONT, size: 9, bold: true, color: { argb: heroFg } }, alignment: { vertical: "bottom", indent: 1 } });
-  box(8, 1, 9, 4, report.pct / 100, { numFmt: "0.0 %", font: { name: FONT, size: 40, bold: true, color: { argb: heroFg } }, alignment: { vertical: "middle", horizontal: "left", indent: 1 } });
-  box(10, 1, 10, 4, `Nivel ${DME_LEVEL_LABEL[report.level]} · ${report.establishments.length} establecimientos`, { font: { name: FONT, size: 10, bold: true, color: { argb: heroFg } }, alignment: { vertical: "middle", indent: 1 } });
-  box(11, 1, 11, 4, p.otherScopePct != null ? `${scope === "essential" ? "Todos los productos" : "Medicamentos esenciales (DME)"}: ${pctText(p.otherScopePct)}` : `${formatNumber(c.total)} ítems evaluados`, { font: { name: FONT, size: 10, color: { argb: heroFg } }, alignment: { vertical: "top", indent: 1 } });
-  outline(7, 1, 11, 4, heroFg);
+  paintArea(H, 1, H + 4, 4, heroBg);
+  box(H, 1, H, 4, scope === "essential" ? "DISPONIBILIDAD DME DE LA UNGET" : "DISPONIBILIDAD DE LA UNGET", { font: { name: FONT, size: 9, bold: true, color: { argb: heroFg } }, alignment: { vertical: "bottom", indent: 1 } });
+  box(H + 1, 1, H + 2, 4, report.pct / 100, { numFmt: "0.0 %", font: { name: FONT, size: 40, bold: true, color: { argb: heroFg } }, alignment: { vertical: "middle", horizontal: "left", indent: 1 } });
+  box(H + 3, 1, H + 3, 4, `Nivel ${DME_LEVEL_LABEL[report.level]} · ${report.establishments.length} establecimientos`, { font: { name: FONT, size: 10, bold: true, color: { argb: heroFg } }, alignment: { vertical: "middle", indent: 1 } });
+  box(H + 4, 1, H + 4, 4, p.otherScopePct != null ? `${scope === "essential" ? "Todos los productos" : "Medicamentos esenciales (DME)"}: ${pctText(p.otherScopePct)}` : `${formatNumber(c.total)} ítems evaluados`, { font: { name: FONT, size: 10, color: { argb: heroFg } }, alignment: { vertical: "top", indent: 1 } });
+  outline(H, 1, H + 4, 4, heroFg);
 
   // Establecimientos por nivel
   const levels: DmeLevel[] = ["OPTIMO", "ALTO", "REGULAR", "BAJO"];
+  const perLevel = (l: DmeLevel) => report.establishments.filter((e) => e.level === l).length;
   levels.forEach((l, i) => {
     const col = 5 + i * 2;
     const [bg, fg] = LEVEL_FILL[l];
-    box(7, col, 7, col + 1, DME_LEVEL_LABEL[l].toUpperCase(), { fill: fill(fg), font: { name: FONT, size: 9, bold: true, color: { argb: C.white } }, alignment: { horizontal: "center", vertical: "middle" } });
-    paintArea(8, col, 11, col + 1, bg);
-    box(8, col, 9, col + 1, report.establishments.filter((e) => e.level === l).length, { font: { name: FONT, size: 28, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
-    box(10, col, 10, col + 1, "establecimientos", { font: { name: FONT, size: 9, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
-    box(11, col, 11, col + 1, levelRange[l], { font: { name: FONT, size: 9, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "top" } });
-    outline(7, col, 11, col + 1, fg);
+    box(H, col, H, col + 1, DME_LEVEL_LABEL[l].toUpperCase(), { fill: fill(fg), font: { name: FONT, size: 9, bold: true, color: { argb: C.white } }, alignment: { horizontal: "center", vertical: "middle" } });
+    paintArea(H + 1, col, H + 4, col + 1, bg);
+    box(H + 1, col, H + 2, col + 1, perLevel(l), { font: { name: FONT, size: 28, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
+    box(H + 3, col, H + 3, col + 1, "establecimientos", { font: { name: FONT, size: 9, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
+    box(H + 4, col, H + 4, col + 1, levelRange[l], { font: { name: FONT, size: 9, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "top" } });
+    outline(H, col, H + 4, col + 1, fg);
   });
 
   const sectionTitle = (row: number, text: string, c1 = 1, c2 = 12, horizontal: "left" | "center" = "left") => {
@@ -280,45 +312,93 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   };
 
   // Situación de los ítems
-  sectionTitle(13, "Situación de los ítems evaluados");
-  rs.getRow(14).height = 6;
+  const S = H + 6;
+  sectionTitle(S, "Situación de los ítems evaluados");
+  rs.getRow(S + 1).height = 6;
   const stTiles: Array<[StockStatus, number]> = [
     [StockStatus.NORMOSTOCK, c.normostock], [StockStatus.SOBRESTOCK, c.sobrestock], [StockStatus.SUBSTOCK, c.substock],
     [StockStatus.SIN_ROTACION, c.sinRotacion], [StockStatus.DESABASTECIDO, c.desabastecido],
   ];
-  [15, 16, 17].forEach((r, i) => (rs.getRow(r).height = [18, 30, 18][i]));
+  const T = S + 2;
+  [T, T + 1, T + 2].forEach((r, i) => (rs.getRow(r).height = [18, 30, 18][i]));
   stTiles.forEach(([s, n], i) => {
     const col = 1 + i * 2;
     const [bg, fg] = STATUS_FILL[s];
-    paintArea(15, col, 17, col + 1, bg);
-    box(15, col, 15, col + 1, STATUS_LABEL[s], { font: { name: FONT, size: 10, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
-    box(16, col, 16, col + 1, n, { numFmt: FMT.int, font: { name: FONT, size: 22, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
-    box(17, col, 17, col + 1, c.total ? n / c.total : 0, { numFmt: "0.0 %\" del total\"", font: { name: FONT, size: 9, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
-    outline(15, col, 17, col + 1, fg);
+    paintArea(T, col, T + 2, col + 1, bg);
+    box(T, col, T, col + 1, STATUS_LABEL[s], { font: { name: FONT, size: 10, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
+    box(T + 1, col, T + 1, col + 1, n, { numFmt: FMT.int, font: { name: FONT, size: 22, bold: true, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
+    box(T + 2, col, T + 2, col + 1, c.total ? n / c.total : 0, { numFmt: "0.0 %\" del total\"", font: { name: FONT, size: 9, color: { argb: fg } }, alignment: { horizontal: "center", vertical: "middle" } });
+    outline(T, col, T + 2, col + 1, fg);
   });
-  paintArea(15, 11, 17, 12, "FFE0F2F1");
-  box(15, 11, 15, 12, "Total ítems", { font: { name: FONT, size: 10, bold: true, color: { argb: C.muted } }, alignment: { horizontal: "center", vertical: "middle" } });
-  box(16, 11, 16, 12, c.total, { numFmt: FMT.int, font: { name: FONT, size: 22, bold: true, color: { argb: C.ink } }, alignment: { horizontal: "center", vertical: "middle" } });
-  box(17, 11, 17, 12, "producto × establecimiento", { font: { name: FONT, size: 9, color: { argb: C.muted } }, alignment: { horizontal: "center", vertical: "middle" } });
-  outline(15, 11, 17, 12, "FF334155");
+  paintArea(T, 11, T + 2, 12, "FFE0F2F1");
+  box(T, 11, T, 12, "Total ítems", { font: { name: FONT, size: 10, bold: true, color: { argb: C.muted } }, alignment: { horizontal: "center", vertical: "middle" } });
+  box(T + 1, 11, T + 1, 12, c.total, { numFmt: FMT.int, font: { name: FONT, size: 22, bold: true, color: { argb: C.ink } }, alignment: { horizontal: "center", vertical: "middle" } });
+  box(T + 2, 11, T + 2, 12, "producto × establecimiento", { font: { name: FONT, size: 9, color: { argb: C.muted } }, alignment: { horizontal: "center", vertical: "middle" } });
+  outline(T, 11, T + 2, 12, "FF334155");
 
-  // Tabla compacta con columnas que ocupan varias celdas.
-  const spanTable = (row: number, cols: Array<{ header: string; span: number; fmt?: string; align?: "left" | "right" | "center" }>, rows: unknown[][], c1 = 1, paint?: (r: number, cell: (i: number) => ExcelJS.Cell) => void) => {
+  // Hallazgos principales: lo que hay que leer primero, en frases cortas.
+  const findings: Array<[string, string]> = [];
+  const nEst = report.establishments.length;
+  const nHigh = perLevel("OPTIMO") + perLevel("ALTO");
+  findings.push([`${perLevel("BAJO")} de ${nEst} establecimientos`, ` están en nivel Bajo (< ${lv.regular} %); ${nHigh} alcanzan nivel Óptimo o Alto (≥ ${lv.alto} %).`]);
+  const mrByPct = report.microredes.slice().sort((a, b) => b.pct - a.pct);
+  if (mrByPct.length > 1) {
+    const top = mrByPct[0], low = mrByPct[mrByPct.length - 1];
+    findings.push([`Microredes: `, `la de mayor disponibilidad es ${top.microred} (${pctText(top.pct)}) y la de menor, ${low.microred} (${pctText(low.pct)}).`]);
+  }
+  const desabItems = report.items.filter((i) => i.status === StockStatus.DESABASTECIDO && i.cpa > 0);
+  if (desabItems.length) {
+    const byProduct = new Map<string, { name: string; n: number }>();
+    for (const i of desabItems) {
+      const e = byProduct.get(i.medCode) || { name: i.description, n: 0 };
+      e.n++;
+      byProduct.set(i.medCode, e);
+    }
+    const topMissing = [...byProduct.values()].sort((a, b) => b.n - a.n).slice(0, 3);
+    findings.push([`${formatNumber(desabItems.length)} ítems desabastecidos con consumo.`, ` Los que faltan en más establecimientos: ${topMissing.map((t) => `${t.name} (${t.n})`).join("; ")}.`]);
+  }
+  const risky = report.items.filter((i) => i.expiryRisk);
+  if (risky.length) {
+    const value = risky.reduce((sum, i) => sum + i.stock * (i.price || 0), 0);
+    findings.push([`${formatNumber(risky.length)} ítems vencerían antes de consumirse`, ` (S/ ${formatNumber(value, 2)} en stock): revisar redistribución en la hoja «Atención».`]);
+  }
+  if (hasWarehouse) {
+    const need = report.items.filter((i) => (i.status === StockStatus.DESABASTECIDO && i.cpa > 0) || i.status === StockStatus.SUBSTOCK);
+    const covered = need.filter((i) => warehouseStockOf(i) > 0).length;
+    findings.push([`El almacén tiene stock para ${formatNumber(covered)} de los ${formatNumber(need.length)} ítems`, ` desabastecidos o en substock (hoja «Almacén»).`]);
+  }
+  const F = T + 4;
+  sectionTitle(F, "Hallazgos principales");
+  rs.getRow(F + 1).height = 6;
+  findings.forEach(([lead, rest], i) => {
+    const r = F + 2 + i;
+    rs.getRow(r).height = Math.max(20, Math.ceil((lead.length + rest.length) / 115) * 15);
+    box(r, 1, r, 12, { richText: [
+      { text: "▸  ", font: { name: FONT, size: 10, bold: true, color: { argb: C.teal } } },
+      { text: lead, font: { name: FONT, size: 10, bold: true, color: { argb: C.ink } } },
+      { text: rest, font: { name: FONT, size: 10, color: { argb: C.ink } } },
+    ] }, { fill: fill(i % 2 ? C.white : "FFF0FDFA"), alignment: { vertical: "middle", wrapText: true, indent: 1 } });
+    rs.getCell(r, 1).border = { left: { style: "thick", color: { argb: C.teal } } };
+  });
+
+  // Tabla compacta con columnas que ocupan varias celdas. `bar`: barra de datos con el valor
+  // en blanco y negrita a la izquierda (como lo dejó el usuario).
+  const spanTable = (row: number, cols: Array<{ header: string; span: number; fmt?: string; align?: "left" | "right" | "center"; bar?: boolean }>, rows: unknown[][], c1 = 1, paint?: (r: number, cell: (i: number) => ExcelJS.Cell) => void) => {
     const starts: number[] = [];
     let x = c1;
     cols.forEach((col) => { starts.push(x); x += col.span; });
     rs.getRow(row).height = 22;
     cols.forEach((col, i) => box(row, starts[i], row, starts[i] + col.span - 1, col.header, {
       fill: fill(C.teal), font: { name: FONT, size: 10, bold: true, color: { argb: C.white } },
-      alignment: { vertical: "middle", horizontal: col.align || "left", indent: col.align === "right" || col.align === "center" ? 0 : 1 },
+      alignment: { vertical: "middle", horizontal: col.bar ? "left" : col.align || "left", indent: col.align === "right" || col.align === "center" ? 0 : 1 },
     }));
     rows.forEach((values, r) => {
       const rr = row + 1 + r;
       rs.getRow(rr).height = 19;
       cols.forEach((col, i) => {
         const cell = box(rr, starts[i], rr, starts[i] + col.span - 1, values[i] as ExcelJS.CellValue, {
-          font: { name: FONT, size: 10, color: { argb: C.ink } },
-          alignment: { vertical: "middle", horizontal: col.align || (typeof values[i] === "number" ? "right" : "left"), indent: col.align === "center" ? 0 : 1 },
+          font: col.bar ? { name: FONT, size: 10, bold: true, color: { argb: C.white } } : { name: FONT, size: 10, color: { argb: C.ink } },
+          alignment: { vertical: "middle", horizontal: col.bar ? "left" : col.align || (typeof values[i] === "number" ? "right" : "left"), indent: col.align === "center" ? 0 : 1 },
         });
         if (col.fmt) cell.numFmt = col.fmt;
         if (r % 2 === 1) for (let cc = starts[i]; cc < starts[i] + col.span; cc++) rs.getCell(rr, cc).fill = fill(C.band);
@@ -334,15 +414,16 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   const topN = Math.min(5, Math.ceil(byPct.length / 2));
   const best = byPct.slice(0, topN);
   const worst = byPct.slice(-topN).reverse();
-  sectionTitle(19, "Mayor disponibilidad", 1, 6, "center");
-  sectionTitle(19, "Menor disponibilidad", 7, 12, "center");
-  rs.getRow(20).height = 6;
+  const B = F + 2 + findings.length + 1;
+  sectionTitle(B, "Mayor disponibilidad", 1, 6, "center");
+  sectionTitle(B, "Menor disponibilidad", 7, 12, "center");
+  rs.getRow(B + 1).height = 6;
   const estCols = [{ header: "Establecimiento", span: 4 }, { header: "%", span: 1, fmt: FMT.pct, align: "right" as const }, { header: "Nivel", span: 1, align: "center" as const }];
   const estRow = (e: (typeof byPct)[number]) => [`${e.name} (${e.code})`, e.pct / 100, DME_LEVEL_LABEL[e.level]];
-  const endBest = spanTable(21, estCols, best.map(estRow), 1, (rr, cell) => paintLevel(cell(2), best[rr - 22].level));
-  spanTable(21, estCols, worst.map(estRow), 7, (rr, cell) => paintLevel(cell(2), worst[rr - 22].level));
+  const endBest = spanTable(B + 2, estCols, best.map(estRow), 1, (rr, cell) => paintLevel(cell(2), best[rr - B - 3].level));
+  spanTable(B + 2, estCols, worst.map(estRow), 7, (rr, cell) => paintLevel(cell(2), worst[rr - B - 3].level));
   // Línea que separa las dos tablas.
-  for (let r = 21; r <= endBest; r++) {
+  for (let r = B + 2; r <= endBest; r++) {
     const cell = rs.getCell(r, 6);
     cell.border = { ...(cell.border || {}), right: { style: "medium", color: { argb: C.teal } } };
   }
@@ -355,7 +436,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   const mrEnd = spanTable(mrStart + 2, [
     { header: "Microred", span: 3 }, { header: "Establec.", span: 1, fmt: FMT.int, align: "right" }, { header: "Ítems", span: 1, fmt: FMT.int, align: "right" },
     { header: "Desabast.", span: 1, fmt: FMT.int, align: "right" }, { header: "Substock", span: 1, fmt: FMT.int, align: "right" }, { header: "Normo + Sobre", span: 2, fmt: FMT.int, align: "right" },
-    { header: "Disponibilidad", span: 2, fmt: FMT.pct, align: "right" }, { header: "Nivel", span: 1, align: "center" },
+    { header: "Disponibilidad", span: 2, fmt: FMT.pct, bar: true }, { header: "Nivel", span: 1, align: "center" },
   ], mrsSorted.map((m) => [m.microred, m.establishments, m.counts.total, m.counts.desabastecido, m.counts.substock, m.counts.normostock + m.counts.sobrestock, m.pct / 100, DME_LEVEL_LABEL[m.level]]),
   1, (rr, cell) => paintLevel(cell(7), mrsSorted[rr - mrStart - 3].level));
   dataBar(rs, `J${mrStart + 3}:J${mrEnd}`);
@@ -388,7 +469,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
     { header: "N°", width: 5, align: "center" }, { header: "Microred", width: 20 }, { header: "Código", width: 9, align: "center" }, { header: "Establecimiento", width: 32 },
     { header: "Cat.", width: 6, align: "center" }, { header: "Desabast.", width: 10, fmt: FMT.int }, { header: "Substock", width: 10, fmt: FMT.int },
     { header: "Normostock", width: 11, fmt: FMT.int }, { header: "Sobrestock", width: 11, fmt: FMT.int }, { header: "Sin rotación", width: 11, fmt: FMT.int },
-    { header: "Total ítems", width: 10, fmt: FMT.int }, { header: "Disponibilidad", width: 14, fmt: FMT.pct }, { header: "Nivel", width: 11, align: "center" },
+    { header: "Total ítems", width: 10, fmt: FMT.int }, { header: "Disponibilidad", width: 14, fmt: FMT.pct, bar: true }, { header: "Nivel", width: 11, align: "center" },
   ], ranked.map((e, i) => [i + 1, e.microred, e.code, e.name, e.category, e.desabastecido, e.substock, e.normostock, e.sobrestock, e.sinRotacion, e.total, e.pct / 100, DME_LEVEL_LABEL[e.level]]), { freezeCols: 4 });
   ranked.forEach((e, i) => paintLevel(es.getCell(te.head + 1 + i, 13), e.level));
   for (let i = 0; i < ranked.length; i++) restyle(es.getCell(te.head + 1 + i, 6), { font: { name: FONT, size: 10, color: { argb: "FFB91C1C" } } });
@@ -401,7 +482,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
   const tm = writeTable(ms, 5, [
     { header: "Microred", width: 26 }, { header: "Establec.", width: 10, fmt: FMT.int }, { header: "Desabast.", width: 10, fmt: FMT.int }, { header: "Substock", width: 10, fmt: FMT.int },
     { header: "Normostock", width: 11, fmt: FMT.int }, { header: "Sobrestock", width: 11, fmt: FMT.int }, { header: "Sin rotación", width: 11, fmt: FMT.int },
-    { header: "Total ítems", width: 10, fmt: FMT.int }, { header: "Disponibilidad", width: 14, fmt: FMT.pct }, { header: "Nivel", width: 11, align: "center" },
+    { header: "Total ítems", width: 10, fmt: FMT.int }, { header: "Disponibilidad", width: 14, fmt: FMT.pct, bar: true }, { header: "Nivel", width: 11, align: "center" },
   ], mrs.map((m) => [m.microred, m.establishments, m.counts.desabastecido, m.counts.substock, m.counts.normostock, m.counts.sobrestock, m.counts.sinRotacion, m.counts.total, m.pct / 100, DME_LEVEL_LABEL[m.level]]), { freezeCols: 1 });
   mrs.forEach((m, i) => paintLevel(ms.getCell(tm.head + 1 + i, 10), m.level));
   dataBar(ms, `I${tm.head + 1}:I${tm.last}`);
@@ -418,7 +499,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
 
   /* ---------------- Atención: lo que hay que resolver ---------------- */
   const at = wb.addWorksheet("Atención", { properties: { tabColor: { argb: "FFDC2626" } } });
-  sheetTitle(at, "Productos que requieren atención", `${subtitle} · desabastecidos, substock y los que vencerían antes de usarse`, 12);
+  sheetTitle(at, "Productos que requieren atención", `${subtitle} · desabastecidos, substock y los que vencerían antes de usarse`, hasWarehouse ? 13 : 12);
   const rank: Record<string, number> = { [StockStatus.DESABASTECIDO]: 0, [StockStatus.SUBSTOCK]: 1 };
   const attention = report.items
     .filter((i) => (i.status === StockStatus.DESABASTECIDO && i.cpa > 0) || i.status === StockStatus.SUBSTOCK || i.expiryRisk)
@@ -457,20 +538,21 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
       return { desab: desab.length, sub: sub.length, units };
     };
     const whRows = warehouse.map((w) => ({ w, need: needOf(w.medCode), nearest: w.lots[0]?.expiry ?? null }));
-    sheetTitle(wh, `Stock en almacén · ${cut ? monthFull(cut) : "mes de corte"}`, `${p.title} · ${[...new Set(warehouse.map((w) => `${w.code}${w.name ? ` ${w.name}` : ""}`))].join(", ")} · no se cuenta en la disponibilidad`, 12);
+    sheetTitle(wh, `Stock en almacén · ${cut ? monthFull(cut) : "mes de corte"}`, `${p.title} · ${[...new Set(warehouse.map((w) => `${w.code}${w.name ? ` ${w.name}` : ""}`))].join(", ")} · no se cuenta en la disponibilidad`, 13);
     const tw = writeTable(wh, 5, [
       { header: "Almacén", width: 10, align: "center" }, { header: "Código", width: 8, align: "center" }, { header: "Producto", width: 46 },
       { header: "Stock", width: 10, fmt: FMT.int }, { header: "Precio", width: 9, fmt: FMT.money }, { header: "Valor del stock (S/)", width: 13, fmt: FMT.money },
       { header: "Lotes", width: 7, fmt: FMT.int }, { header: "Vence primero", width: 12, align: "center" }, { header: "Meses para vencer", width: 10, fmt: FMT.int },
-      { header: "Detalle de lotes (lote · vence · saldo)", width: 48 },
-      { header: "EESS desabastecidos", width: 12, fmt: FMT.int }, { header: "EESS en substock", width: 11, fmt: FMT.int }, { header: "Faltan para 2 meses (unid.)", width: 13, fmt: FMT.int },
+      { header: "EESS desabastecidos", width: 14, fmt: FMT.int }, { header: "EESS en substock", width: 12, fmt: FMT.int }, { header: "Faltan para 2 meses (unid.)", width: 14, fmt: FMT.int },
+      // El detalle de lotes va al final: es largo (pedido del usuario).
+      { header: "Detalle de lotes (lote · vence · saldo)", width: 60 },
     ], whRows.map(({ w, need, nearest }) => [
       w.code, w.medCode, w.description, w.stock, w.price || null, w.stock * (w.price || 0), w.lots.length, dateText(nearest),
-      nearest ? wholeMonthsBetween(today, nearest) : null, w.lots.map((l) => `${l.lot} · ${dateText(l.expiry)} · ${l.balance}`).join("  |  "),
-      need.desab || null, need.sub || null, need.units || null,
+      nearest ? wholeMonthsBetween(today, nearest) : null,
+      need.desab || null, need.sub || null, need.units || null, w.lots.map((l) => `${l.lot} · ${dateText(l.expiry)} · ${l.balance}`).join("  |  "),
     ]), { freezeCols: 3 });
     whRows.forEach(({ need }, n) => {
-      if (need.desab) restyle(wh.getCell(tw.head + 1 + n, 11), { font: { name: FONT, size: 10, bold: true, color: { argb: "FF991B1B" } } });
+      if (need.desab) restyle(wh.getCell(tw.head + 1 + n, 10), { font: { name: FONT, size: 10, bold: true, color: { argb: "FF991B1B" } } });
     });
   }
 
@@ -490,7 +572,7 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
       { header: "Riesgo de vencimiento", width: 12, align: "center" }, { header: "Fusiona", width: 18 },
     ];
     const cols = [...fixed, ...monthCols, ...tail];
-    sheetTitle(ws, title, subtitle, Math.min(cols.length, 14));
+    sheetTitle(ws, title, subtitle, cols.length);
     const t = writeTable(ws, 5, cols, items.map((i) => [
       i.red, i.microred, i.code, i.name, i.category, i.medCode, i.description, i.form, i.price, i.medtip, i.medpet, i.medest,
       ...i.consumption, i.stock, i.cpa, monthsValue(i.months), STATUS_LABEL[i.status], i.stock * (i.price || 0), dateText(i.nearestExpiry),
@@ -532,41 +614,126 @@ export const buildAvailabilityWorkbook = (p: AvailabilityExportParams): ExcelJS.
       { header: "Microred", width: 18 },
       ...tf.header.map((h) => ({ header: h, width: widthOf(h), fmt: textCols.test(h) ? undefined : moneyCols.test(h) ? FMT.money : FMT.int, align: /^(CODIGO.PRE|CODIGO.MED|FEC.EXP|MEDTIP|MEDPET|MEDEST|TIPSUM2|FFINAN)$/i.test(h) ? "center" as const : undefined })),
     ];
-    sheetTitle(ws, `Registros del TFORMDET · ${tfMonth ? monthFull(tfMonth) : "mes de corte"}`, `${p.title} · ${formatNumber(tf.rows.length)} registros por establecimiento, producto y lote`, 12);
+    sheetTitle(ws, `Registros del TFORMDET · ${tfMonth ? monthFull(tfMonth) : "mes de corte"}`, `${p.title} · ${formatNumber(tf.rows.length)} registros por establecimiento, producto y lote`, tf.header.length + 1);
     writeTable(ws, 5, cols, tf.rows.map((r) => [iPre >= 0 ? microredOf.get(ipressCodeOf(String(r[iPre] ?? ""))) || "" : "", ...r]), { freezeCols: 1 + Math.max(0, tf.header.findIndex((h) => /^DESCRIPCION/i.test(h)) + 1) });
   }
 
   /* ---------------- Metodología ---------------- */
+  // Rehecha el 2026-10-06 («no se entiende»): qué mide, con qué datos, el cálculo paso a paso con
+  // un ejemplo, y las tablas de situaciones y niveles con la regla de esta exportación.
   const me = wb.addWorksheet("Metodología", { properties: { tabColor: { argb: C.muted } } });
-  me.columns = [{ width: 28 }, { width: 110 }];
-  sheetTitle(me, "Metodología", "Cómo se calculó este reporte", 2);
-  const lines: Array<[string, string]> = [
-    ["Productos evaluados", scope === "essential"
-      ? `Medicamentos esenciales: tipo M, de estrategia «S» o «_» (sin estrategias), del petitorio o del listado de códigos fusionados de DIGEMID${p.fusedVersion ? ` (${p.fusedVersion})` : ""}. Las presentaciones de un mismo grupo se suman en su código destino.`
-      : "Todos los productos con stock al cierre del mes de corte o con consumo en el periodo (los que no tienen ni lo uno ni lo otro no se evalúan, como en el archivo de disponibilidad del SISMED)."],
-    ["Consumo promedio (CPA)", "Suma del consumo del periodo ÷ número de meses con consumo (ficha 28 de DIGEMID)."],
-    ["Meses de provisión", "Stock al cierre del mes de corte ÷ CPA."],
-    ["Situación", "Desabastecido: stock 0. Sin rotación: stock > 0 y CPA 0. Substock, Normostock y Sobrestock según los meses de provisión y los límites de la fórmula."],
-    ["Fórmula aplicada", p.formulaText],
-    ["Niveles", `Óptimo ${levelRange.OPTIMO}; Alto ${levelRange.ALTO}; Regular ${levelRange.REGULAR}; Bajo ${levelRange.BAJO}.`],
-    ["Cubrir 2 meses", "Hoja «Atención»: unidades que faltan para llegar a 2 meses de stock (CPA × 2 − stock)."],
-    ["Almacén", "El stock de los almacenes (códigos que no son establecimientos, como 030S05) no cuenta en la disponibilidad. Se muestra en la hoja «Almacén» y en la columna «Stock en almacén» de «Atención», para ver qué se puede cubrir."],
-    ["Riesgo de vencimiento", "Los meses de provisión superan los meses que faltan para el vencimiento más próximo: el producto vencería antes de consumirse."],
-    ["Fuente", p.source],
-    ["Periodo", period],
+  me.columns = [{ width: 8 }, { width: 30 }, { width: 62 }, { width: 40 }];
+  sheetTitle(me, "Metodología", "Cómo se calculó este reporte, paso a paso", 4);
+  const rule = p.rule ?? { normostock: true, sobrestock: true, substock: false, sinRotacion: "no" as const };
+  const lim = p.limits ?? { subMax: 2, sobreMin: 6 };
+  const n = (v: number) => String(v).replace(".", ",");
+  let mr = 5;
+  const meBox = (r: number, c1: number, c2: number, value: ExcelJS.CellValue, style: Partial<ExcelJS.Style>) => {
+    if (c1 !== c2) me.mergeCells(r, c1, r, c2);
+    const cell = me.getCell(r, c1);
+    cell.value = value;
+    Object.assign(cell, style);
+    return cell;
+  };
+  const meSection = (text: string) => {
+    mr += 1;
+    me.getRow(mr).height = 24;
+    meBox(mr, 1, 4, text, { font: { name: FONT, size: 12, bold: true, color: { argb: C.dark } }, alignment: { vertical: "bottom" } });
+    for (let c = 1; c <= 4; c++) me.getCell(mr, c).border = { bottom: { style: "medium", color: { argb: C.teal } } };
+    mr += 2;
+  };
+  const meParagraph = (text: string) => {
+    me.getRow(mr).height = Math.max(18, Math.ceil(text.length / 150) * 15);
+    meBox(mr, 1, 4, text, { font: { name: FONT, size: 10, color: { argb: C.ink } }, alignment: { vertical: "top", wrapText: true } });
+    mr += 1;
+  };
+  /** Tabla de la metodología: `spans` dice cuántas columnas ocupa cada campo (suman 4). */
+  const meTable = (headers: string[], spans: number[], rows: string[][], paint?: (row: number, values: string[]) => void) => {
+    const starts = spans.map((_, i) => 1 + spans.slice(0, i).reduce((a, b) => a + b, 0));
+    me.getRow(mr).height = 22;
+    headers.forEach((h, i) => meBox(mr, starts[i], starts[i] + spans[i] - 1, h, {
+      fill: fill(C.teal), font: { name: FONT, size: 10, bold: true, color: { argb: C.white } }, alignment: { vertical: "middle", horizontal: i === 0 ? "center" : "left", indent: i === 0 ? 0 : 1 },
+    }));
+    mr += 1;
+    rows.forEach((values, r) => {
+      // Alto según el texto más largo (≈ 34 caracteres por columna de ancho medio).
+      const height = Math.max(20, ...values.map((v, i) => Math.ceil(v.length / (spans[i] * 34)) * 15 + 4));
+      me.getRow(mr).height = Math.min(height, 60);
+      values.forEach((v, i) => {
+        const cell = meBox(mr, starts[i], starts[i] + spans[i] - 1, v, {
+          font: { name: FONT, size: 10, bold: i === 0, color: { argb: C.ink } },
+          alignment: { vertical: "middle", horizontal: i === 0 ? "center" : "left", wrapText: true, indent: i === 0 ? 0 : 1 },
+        });
+        if (r % 2 === 1) for (let c = starts[i]; c < starts[i] + spans[i]; c++) me.getCell(mr, c).fill = fill(C.band);
+        for (let c = starts[i]; c < starts[i] + spans[i]; c++) me.getCell(mr, c).border = { bottom: thin };
+        void cell;
+      });
+      paint?.(mr, values);
+      mr += 1;
+    });
+  };
+
+  meSection("1. ¿Qué mide este reporte?");
+  meParagraph(`La disponibilidad es el porcentaje de productos que un establecimiento tiene en cantidad suficiente para atender a sus pacientes (ficha técnica 28 de DIGEMID). Se evalúa cada producto de cada establecimiento, se cuenta cuántos están disponibles y el resultado se resume por microred y por UNGET.`);
+  meParagraph(`Resultado de ${p.title}: ${pctText(report.pct)} · nivel ${DME_LEVEL_LABEL[report.level]} · ${formatNumber(report.counts.total)} ítems evaluados en ${report.establishments.length} establecimientos.`);
+
+  meSection("2. Datos utilizados");
+  meTable(["", "Dato", "Detalle"], [1, 1, 2], [
+    ["", "Fuente", p.source],
+    ["", "Periodo de consumo", period],
+    ["", "Stock", `Al cierre de ${cut ? monthFull(cut) : "el mes de corte"} (columna STOCK_FIN del TFORMDET).`],
+    ["", "Consumo de cada mes", "Venta + SIS + intersanitario + SOAT + crédito hospitalario + otros convenios."],
+    ["", "Productos evaluados", scope === "essential"
+      ? `Medicamentos esenciales (DME): tipo M, de estrategia «S» o «_», del petitorio o del listado de códigos fusionados de DIGEMID${p.fusedVersion ? ` (${p.fusedVersion})` : ""}. Las presentaciones de un mismo grupo se suman en su código destino (columna «Fusiona»).`
+      : "Todos los productos con stock al cierre o con consumo en el periodo."],
+    ["", "No se incluyen", "Los almacenes (códigos como 030S05): su stock se muestra en la hoja «Almacén». Los productos sin stock y sin consumo en todo el periodo."],
+  ]);
+
+  meSection("3. Cálculo paso a paso");
+  meTable(["Paso", "Qué se calcula", "Cómo se calcula", "Ejemplo"], [1, 1, 1, 1], [
+    ["1", "Consumo promedio mensual (CPA)", "Suma del consumo del periodo ÷ número de meses que tuvieron consumo (los meses en cero no cuentan).", "Consumo de 4 meses: 10, 0, 20, 0 → CPA = 30 ÷ 2 = 15"],
+    ["2", "Meses de provisión", "Stock al cierre ÷ CPA.", "Stock 45 ÷ CPA 15 = 3 meses"],
+    ["3", "Situación del producto", "Según los meses de provisión (tabla 4).", `3 meses → Normostock (entre ${n(lim.subMax)} y ${n(lim.sobreMin)})`],
+    ["4", "Disponibilidad del establecimiento", "Productos disponibles ÷ productos evaluados × 100. Qué situaciones cuentan como disponibles: tabla 4.", "150 disponibles de 200 → 75 %"],
+    ["5", "Disponibilidad de microred y UNGET", p.aggregate === "sum"
+      ? "Suma de los productos disponibles de sus establecimientos ÷ suma de los productos evaluados."
+      : "Promedio de la disponibilidad de sus establecimientos.",
+    p.aggregate === "sum" ? "Est. A: 150 de 200; Est. B: 60 de 100 → 210 ÷ 300 = 70 %" : "Est. A 75 %, Est. B 65 % → (75 + 65) ÷ 2 = 70 %"],
+    ["6", "Nivel", "Según el porcentaje (tabla 5).", `70 % → ${DME_LEVEL_LABEL[dmeLevelOf(70, { optimo: lv.optimo, alto: lv.alto, regular: lv.regular })]}`],
+  ]);
+
+  meSection("4. Situaciones");
+  const counts = (yes: boolean) => (yes ? "Sí" : "No");
+  const sitRows: Array<[StockStatus, string, string]> = [
+    [StockStatus.DESABASTECIDO, "No hay stock (stock 0).", "No"],
+    [StockStatus.SUBSTOCK, `Menos de ${n(lim.subMax)} meses de provisión.`, counts(rule.substock)],
+    [StockStatus.NORMOSTOCK, `De ${n(lim.subMax)} a ${n(lim.sobreMin)} meses de provisión.`, counts(rule.normostock)],
+    [StockStatus.SOBRESTOCK, `Más de ${n(lim.sobreMin)} meses de provisión.`, counts(rule.sobrestock)],
+    [StockStatus.SIN_ROTACION, "Hay stock, pero no hubo consumo en todo el periodo.", rule.sinRotacion === "yes" ? "Sí" : rule.sinRotacion === "vital" ? "Solo si es medicamento vital (RM 1288-2018)" : "No"],
   ];
-  lines.forEach(([kk, v], i) => {
-    const row = me.getRow(5 + i);
-    row.getCell(1).value = kk;
-    row.getCell(1).font = { name: FONT, size: 10, bold: true, color: { argb: C.ink } };
-    row.getCell(2).value = v;
-    row.getCell(2).font = { name: FONT, size: 10, color: { argb: C.ink } };
-    row.getCell(2).alignment = { wrapText: true, vertical: "top" };
-    row.getCell(1).alignment = { vertical: "top" };
-    row.height = Math.max(18, Math.ceil(v.length / 105) * 15);
-    if (i % 2 === 1) { row.getCell(1).fill = fill(C.band); row.getCell(2).fill = fill(C.band); }
+  const sitStart = mr;
+  meTable(["", "Situación", "Condición", "¿Cuenta como disponible?"], [1, 1, 1, 1], sitRows.map(([st, cond, yes]) => ["", STATUS_LABEL[st], cond, yes]));
+  sitRows.forEach(([st, , yes], i) => {
+    const r = sitStart + 1 + i;
+    paintStatus(me.getCell(r, 2), st);
+    me.getCell(r, 4).font = { name: FONT, size: 10, bold: true, color: { argb: yes === "No" ? "FF991B1B" : "FF065F46" } };
   });
+
+  meSection("5. Niveles de disponibilidad");
+  const lvStart = mr;
+  meTable(["", "Nivel", "Disponibilidad del establecimiento, microred o UNGET"], [1, 1, 2], levels.map((l) => ["", DME_LEVEL_LABEL[l], levelRange[l]]));
+  levels.forEach((l, i) => paintLevel(me.getCell(lvStart + 1 + i, 2), l));
+
+  meSection("6. Columnas de apoyo");
+  meTable(["", "Columna", "Qué significa"], [1, 1, 2], [
+    ["", "Cubrir 2 meses (unid.)", "Hoja «Atención»: unidades que le faltan al establecimiento para tener 2 meses de stock (CPA × 2 − stock)."],
+    ["", "Riesgo de vencimiento", "El producto vencería antes de consumirse: sus meses de provisión superan los meses que faltan para el vencimiento más próximo."],
+    ["", "Valor del stock (S/)", "Stock × precio del producto."],
+    ["", "Stock en almacén", "Stock del almacén al cierre del mes de corte. No cuenta en la disponibilidad; sirve para ver qué se puede cubrir."],
+    ...(scope === "essential" ? [["", "Fusiona", "Códigos de las presentaciones que se sumaron en este producto (listado de códigos fusionados de DIGEMID)."]] : []),
+  ]);
   me.views = [{ showGridLines: false }];
+  me.pageSetup = { orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
 
   return wb;
 };
