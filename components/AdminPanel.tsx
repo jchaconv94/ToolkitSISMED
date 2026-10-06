@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { RoleConfig, HealthFacility, AVAILABLE_MODULES, LaborRegime, Profession } from '../types';
 import { canAssignRole } from '../services/userManagementRules';
-import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench, Archive, MoreVertical, MoreHorizontal, MapPin, UserCheck, UserX, SlidersHorizontal, Plus, ChevronRight, Check, ArrowLeft, BarChart2, ArrowRightLeft, HardDriveDownload } from 'lucide-react';
+import { Users, Shield, X, Sliders, Save, Clock, Link2, AlertTriangle, RefreshCw, UserPlus, Edit, Power, Building2, Briefcase, Trash2, Search, Filter, Phone, Mail, Lock, Calendar, FileSpreadsheet, Wrench, Archive, MoreVertical, MoreHorizontal, MapPin, UserCheck, UserX, SlidersHorizontal, Plus, ChevronRight, ChevronDown, Check, ArrowLeft, BarChart2, ArrowRightLeft, HardDriveDownload } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -30,6 +30,7 @@ import { useIsDesktop } from './ui/useIsDesktop';
 import { stickyBarClass, useStickyBar } from './ui/useStickyBar';
 import { ModuleFooterPortal } from './ui/ModuleHeaderSlot';
 import { NAV_SECTIONS } from './navigation';
+import { actionsOf, allowedActionCount, isActionAllowed, setActionAllowed, setAllActionsAllowed } from '../services/moduleActions';
 import { useModuleHeaderOverride } from '../contexts/ModuleHeaderContext';
 
 export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) => {
@@ -87,7 +88,14 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
   const [laborRegimes, setLaborRegimes] = useState<LaborRegime[]>([]);
   const [professions, setProfessions] = useState<Profession[]>([]);
 
-  const { systemConfig, updateSystemConfigContext, user: currentUser, refreshUserData, hasPermission } = useAuth();
+  const { systemConfig, updateSystemConfigContext, user: currentUser, refreshUserData, hasPermission, can } = useAuth();
+  // Acciones que el rol puede usar en cada pestaña (Configuración de Roles).
+  const canUsers = {
+      create: can('ADMIN_USERS', 'create'), edit: can('ADMIN_USERS', 'edit'), toggle: can('ADMIN_USERS', 'toggle'),
+      delete: can('ADMIN_USERS', 'delete'), export: can('ADMIN_USERS', 'export'),
+  };
+  const canRoles = { create: can('ADMIN_ROLES', 'create'), edit: can('ADMIN_ROLES', 'edit') };
+  const canParams = { maintenance: can('ADMIN_PARAMS', 'maintenance'), save: can('ADMIN_PARAMS', 'save') };
   const [tempConfig, setTempConfig] = useState(systemConfig);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   // Backups SISMED: el límite vive en su propia tabla, que solo escribe el administrador.
@@ -442,11 +450,24 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
   // Módulos asignables a un rol, agrupados como en el menú, con interruptores. Lo usan el
   // detalle del rol y la ventana «Nuevo rol».
   const SECTION_DOT: Record<string, string> = { teal: 'bg-teal-500', cyan: 'bg-cyan-500', violet: 'bg-violet-500', slate: 'bg-slate-500' };
+  // Acciones de cada módulo (services/moduleActions.ts): un módulo activo muestra cuántas tiene
+  // el rol y, al tocarlo, sus interruptores. Solo en el detalle del rol: un rol nuevo empieza
+  // con todas.
+  const [openActionsModule, setOpenActionsModule] = useState<string | null>(null);
+  type ModuleActionsConfig = {
+      denied: string[];
+      onAction: (module: string, action: string | null, allowed: boolean) => void;
+      /** El Administrador total siempre puede todo (AuthContext `can`). */
+      locked?: boolean;
+      /** Sin permiso para cambiar módulos y acciones: solo se muestran. */
+      readOnly?: boolean;
+  };
   const renderModuleGroups = (
       enabled: Set<string>,
       onToggle: (module: string, on: boolean) => void,
       onSection: (modules: string[], on: boolean) => void,
-      twoColumns: boolean
+      twoColumns: boolean,
+      actionsConfig?: ModuleActionsConfig
   ) => (
       <div className={twoColumns ? 'grid gap-4 xl:grid-cols-2' : 'space-y-3'}>
           {NAV_SECTIONS.map(section => {
@@ -461,34 +482,100 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                               {section.label}
                               <span className="font-bold normal-case tracking-normal text-slate-400">· {on} de {sectionModules.length}</span>
                           </p>
-                          <button type="button" onClick={() => onSection(sectionModules, !all)} className="text-[12px] font-bold text-teal-700 hover:text-teal-900 cursor-pointer">
-                              {all ? 'Quitar todos' : 'Marcar todos'}
-                          </button>
+                          {!actionsConfig?.readOnly && (
+                              <button type="button" onClick={() => onSection(sectionModules, !all)} className="text-[12px] font-bold text-teal-700 hover:text-teal-900 cursor-pointer">
+                                  {all ? 'Quitar todos' : 'Marcar todos'}
+                              </button>
+                          )}
                       </div>
                       <div className="divide-y divide-slate-100">
                           {section.items.map(item => {
                               const checked = enabled.has(item.module);
                               const Icon = item.icon;
+                              const moduleActions = actionsConfig ? actionsOf(item.module) : [];
+                              const counts = actionsConfig ? allowedActionCount(actionsConfig.locked ? [] : actionsConfig.denied, item.module) : { allowed: 0, total: 0 };
+                              const showActions = checked && moduleActions.length > 0;
+                              const open = showActions && openActionsModule === item.module;
+                              const toggleModule = () => { if (!actionsConfig?.readOnly) onToggle(item.module, !checked); };
                               return (
-                                  <button
-                                      key={item.module}
-                                      type="button"
-                                      role="switch"
-                                      aria-checked={checked}
-                                      onClick={() => onToggle(item.module, !checked)}
-                                      className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-slate-50 cursor-pointer"
-                                  >
-                                      <Icon className={`h-[18px] w-[18px] shrink-0 ${checked ? 'text-teal-600' : 'text-slate-400'}`} />
-                                      <span className="min-w-0 flex-1">
-                                          <span className={`block text-[13.5px] font-bold ${checked ? 'text-slate-900' : 'text-slate-600'}`}>{item.label}</span>
-                                          <span className="block truncate text-xs text-slate-500">{item.description}</span>
-                                      </span>
-                                      <span className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? 'bg-teal-600' : 'bg-slate-200'}`}>
-                                          <span className={`absolute top-0.5 grid h-5 w-5 place-items-center rounded-full bg-white shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`}>
-                                              {checked && <Check className="h-3 w-3 text-teal-600" />}
+                                  <div key={item.module}>
+                                      <div
+                                          onClick={toggleModule}
+                                          className={`flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors ${actionsConfig?.readOnly ? '' : 'hover:bg-slate-50 cursor-pointer'}`}
+                                      >
+                                          <Icon className={`h-[18px] w-[18px] shrink-0 ${checked ? 'text-teal-600' : 'text-slate-400'}`} />
+                                          <span className="min-w-0 flex-1">
+                                              <span className={`block text-[13.5px] font-bold ${checked ? 'text-slate-900' : 'text-slate-600'}`}>{item.label}</span>
+                                              <span className="block truncate text-xs text-slate-500">{item.description}</span>
                                           </span>
-                                      </span>
-                                  </button>
+                                          {showActions && (
+                                              <button
+                                                  type="button"
+                                                  aria-expanded={open}
+                                                  onClick={(e) => { e.stopPropagation(); setOpenActionsModule(open ? null : item.module); }}
+                                                  className={`flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11.5px] font-bold cursor-pointer ${counts.allowed === counts.total ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                                              >
+                                                  {counts.allowed === counts.total ? 'Todas las acciones' : `${counts.allowed} de ${counts.total} acciones`}
+                                                  {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                              </button>
+                                          )}
+                                          <button
+                                              type="button"
+                                              role="switch"
+                                              aria-checked={checked}
+                                              aria-label={item.label}
+                                              disabled={actionsConfig?.readOnly}
+                                              onClick={(e) => { e.stopPropagation(); toggleModule(); }}
+                                              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60 ${checked ? 'bg-teal-600' : 'bg-slate-200'} ${actionsConfig?.readOnly ? '' : 'cursor-pointer'}`}
+                                          >
+                                              <span className={`absolute top-0.5 grid h-5 w-5 place-items-center rounded-full bg-white shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`}>
+                                                  {checked && <Check className="h-3 w-3 text-teal-600" />}
+                                              </span>
+                                          </button>
+                                      </div>
+                                      {open && actionsConfig && (
+                                          <div className="mx-4 mb-3 rounded-xl border border-slate-200 bg-slate-50/70">
+                                              <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
+                                                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Qué puede hacer en este módulo</p>
+                                                  {!actionsConfig.locked && !actionsConfig.readOnly && (
+                                                      <button type="button" onClick={() => actionsConfig.onAction(item.module, null, counts.allowed !== counts.total)} className="text-[12px] font-bold text-teal-700 hover:text-teal-900 cursor-pointer">
+                                                          {counts.allowed === counts.total ? 'Quitar todas' : 'Marcar todas'}
+                                                      </button>
+                                                  )}
+                                              </div>
+                                              <div className="divide-y divide-slate-200/70">
+                                                  {moduleActions.map(action => {
+                                                      const allowed = actionsConfig.locked || isActionAllowed(actionsConfig.denied, item.module, action.id);
+                                                      const disabled = actionsConfig.locked || actionsConfig.readOnly;
+                                                      return (
+                                                          <button
+                                                              key={action.id}
+                                                              type="button"
+                                                              role="switch"
+                                                              aria-checked={allowed}
+                                                              disabled={disabled}
+                                                              onClick={() => actionsConfig.onAction(item.module, action.id, !allowed)}
+                                                              className={`flex w-full items-center gap-3 px-3 py-2.5 text-left ${disabled ? 'cursor-default' : 'cursor-pointer hover:bg-white'}`}
+                                                          >
+                                                              <span className="min-w-0 flex-1">
+                                                                  <span className={`block text-[13px] font-semibold ${allowed ? 'text-slate-800' : 'text-slate-500'}`}>{action.label}</span>
+                                                                  {action.hint && <span className="block text-[11.5px] text-slate-400">{action.hint}</span>}
+                                                              </span>
+                                                              {action.readOnly && <span className="shrink-0 rounded-md bg-white px-1.5 py-0.5 text-[10.5px] font-bold text-slate-400 ring-1 ring-slate-200">Solo lectura</span>}
+                                                              <span className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${allowed ? 'bg-teal-600' : 'bg-slate-200'} ${disabled ? 'opacity-60' : ''}`}>
+                                                                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${allowed ? 'left-[18px]' : 'left-0.5'}`} />
+                                                              </span>
+                                                          </button>
+                                                      );
+                                                  })}
+                                              </div>
+                                              <p className="flex items-center gap-1.5 border-t border-slate-200 px-3 py-2 text-[11.5px] text-slate-500">
+                                                  <Lock className="h-3.5 w-3.5 shrink-0" />
+                                                  {actionsConfig.locked ? 'El Administrador total siempre puede usar todas las acciones.' : 'Ver el módulo siempre está permitido si el módulo está activo.'}
+                                              </p>
+                                          </div>
+                                      )}
+                                  </div>
                               );
                           })}
                       </div>
@@ -1089,6 +1176,18 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
       }));
   };
 
+  // Encender o apagar una acción (o todas las de un módulo, con `action` nulo).
+  const handleRoleActionChange = (roleName: string, module: string, action: string | null, allowed: boolean) => {
+      rememberRoleOriginal(roleName);
+      setRoles(prevRoles => prevRoles.map(r => {
+          if (r.role !== roleName) return r;
+          const deniedActions = action === null
+              ? setAllActionsAllowed(r.deniedActions, module, allowed)
+              : setActionAllowed(r.deniedActions, module, action, allowed);
+          return { ...r, deniedActions };
+      }));
+  };
+
   const handleRoleMaxUrlsChange = (roleName: string, maxUrlsStr: string) => {
       rememberRoleOriginal(roleName);
       const maxUrls = maxUrlsStr ? parseInt(maxUrlsStr) : undefined;
@@ -1541,7 +1640,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                     )}
                                 </button>
                                 <div className="ml-auto hidden items-center gap-2 md:flex">
-                                    <button
+                                    {canUsers.export && <button
                                         type="button"
                                         onClick={handleExportPersonnelExcel}
                                         className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
@@ -1549,7 +1648,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                     >
                                         <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
                                         Exportar Excel
-                                    </button>
+                                    </button>}
                                     <button
                                         type="button"
                                         onClick={handleRefreshUsers}
@@ -1559,14 +1658,14 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                     >
                                         <RefreshCw className={`h-4 w-4 ${isRefreshingUsers ? 'animate-spin' : ''}`} />
                                     </button>
-                                    <button
+                                    {canUsers.create && <button
                                         type="button"
                                         onClick={handleAddUserClick}
                                         className="flex h-10 items-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white transition-colors hover:bg-teal-700 cursor-pointer"
                                     >
                                         <UserPlus className="h-4 w-4" />
                                         Nuevo usuario
-                                    </button>
+                                    </button>}
                                 </div>
                                 <button
                                     type="button"
@@ -1659,16 +1758,16 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                             {/* Celular: acciones de la barra («⋯») */}
                             <BottomSheet open={usersActionsOpen} title="Acciones" onClose={() => setUsersActionsOpen(false)}>
                                 <div className="space-y-2">
-                                    <button type="button" onClick={() => { setUsersActionsOpen(false); handleExportPersonnelExcel(); }} className="flex h-12 w-full items-center gap-3 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700">
+                                    {canUsers.export && <button type="button" onClick={() => { setUsersActionsOpen(false); handleExportPersonnelExcel(); }} className="flex h-12 w-full items-center gap-3 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700">
                                         <FileSpreadsheet className="h-4 w-4 text-emerald-600" /> Exportar Excel
-                                    </button>
+                                    </button>}
                                     <button type="button" onClick={() => { setUsersActionsOpen(false); handleRefreshUsers(); }} className="flex h-12 w-full items-center gap-3 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700">
                                         <RefreshCw className="h-4 w-4 text-slate-500" /> Actualizar lista
                                     </button>
                                 </div>
                             </BottomSheet>
 
-                            <FloatingActionButton icon={<UserPlus />} label="Nuevo usuario" onClick={handleAddUserClick} />
+                            {canUsers.create && <FloatingActionButton icon={<UserPlus />} label="Nuevo usuario" onClick={handleAddUserClick} />}
 
                             {filteredUsers.length === 0 && !isRefreshingUsers && (
                                 <div className="rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center text-sm font-medium text-slate-400">
@@ -1714,7 +1813,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                             <td className="px-4 py-2">
                                                                 <div className="flex justify-end gap-1.5">
                                                                     {canAssignRoleKey(u.role) && (<>
-                                                                        <button
+                                                                        {canUsers.edit && <button
                                                                             type="button"
                                                                             onClick={(e) => { e.stopPropagation(); handleEditUserClick(u); }}
                                                                             className={`${rowIconButton} hover:border-teal-200 hover:bg-teal-50 hover:text-teal-600`}
@@ -1722,8 +1821,8 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                                             aria-label={`Editar a ${name}`}
                                                                         >
                                                                             <Edit className="h-4 w-4" />
-                                                                        </button>
-                                                                        <button
+                                                                        </button>}
+                                                                        {canUsers.toggle && <button
                                                                             type="button"
                                                                             onClick={(e) => { e.stopPropagation(); handleToggleStatus(u.username, u.isActive); }}
                                                                             className={`${rowIconButton} ${active ? 'hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600' : 'hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-600'}`}
@@ -1731,9 +1830,9 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                                             aria-label={`${active ? 'Desactivar' : 'Activar'} a ${name}`}
                                                                         >
                                                                             <Power className="h-4 w-4" />
-                                                                        </button>
+                                                                        </button>}
                                                                     </>)}
-                                                                    {isSuperAdmin && currentUser?.username !== u.username && (
+                                                                    {isSuperAdmin && canUsers.delete && currentUser?.username !== u.username && (
                                                                         <button
                                                                             type="button"
                                                                             onClick={(e) => { e.stopPropagation(); setUserToDelete({ username: u.username, personnelId: u.personnelId || null }); }}
@@ -1764,8 +1863,11 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                         const name = u.personnel ? `${u.personnel.firstName} ${u.personnel.lastName}` : 'Sin datos de personal';
                                         const professionName = u.personnel?.professionData?.name || professionMapLookup.get(u.personnel?.professionId)?.name || '';
                                         const jurisdiction = jurisdictionOf(u);
-                                        const canEdit = canAssignRoleKey(u.role);
-                                        const canDelete = isSuperAdmin && currentUser?.username !== u.username;
+                                        const canManage = canAssignRoleKey(u.role);
+                                        const canEditRow = canManage && canUsers.edit;
+                                        const canToggleRow = canManage && canUsers.toggle;
+                                        const canEdit = canEditRow || canToggleRow;
+                                        const canDelete = isSuperAdmin && canUsers.delete && currentUser?.username !== u.username;
                                         const menuOpen = userMenuFor === u.username;
                                         return (
                                             <div key={u.username} onClick={() => setViewingUser(u)} className="relative cursor-pointer rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm active:bg-slate-50">
@@ -1805,14 +1907,16 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                 </div>
                                                 {menuOpen && (
                                                     <div onClick={(e) => e.stopPropagation()} className="absolute right-3 top-12 z-20 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
-                                                        {canEdit && (<>
+                                                        {canEditRow && (
                                                             <button type="button" onClick={() => { setUserMenuFor(null); handleEditUserClick(u); }} className="flex h-11 w-full items-center gap-3 px-4 text-left text-sm font-semibold text-slate-700 active:bg-slate-50">
                                                                 <Edit className="h-4 w-4 text-slate-400" /> Editar
                                                             </button>
+                                                        )}
+                                                        {canToggleRow && (
                                                             <button type="button" onClick={() => { setUserMenuFor(null); handleToggleStatus(u.username, u.isActive); }} className="flex h-11 w-full items-center gap-3 px-4 text-left text-sm font-semibold text-slate-700 active:bg-slate-50">
                                                                 <Power className="h-4 w-4 text-slate-400" /> {active ? 'Desactivar' : 'Activar'}
                                                             </button>
-                                                        </>)}
+                                                        )}
                                                         {canDelete && (
                                                             <button type="button" onClick={() => { setUserMenuFor(null); setUserToDelete({ username: u.username, personnelId: u.personnelId || null }); }} className={`flex h-11 w-full items-center gap-3 px-4 text-left text-sm font-semibold text-red-600 active:bg-rose-50 ${canEdit ? 'border-t border-slate-100' : ''}`}>
                                                                 <Trash2 className="h-4 w-4" /> Eliminar
@@ -1849,9 +1953,9 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                             {isDesktop && (
                                 <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
                                     <p className="text-sm font-black text-slate-900">Roles <span className="font-semibold text-slate-400">· {roles.length}</span></p>
-                                    <button type="button" onClick={openNewRole} className="flex h-9 items-center gap-1.5 rounded-xl bg-teal-600 px-3 text-[13px] font-bold text-white transition-colors hover:bg-teal-700 cursor-pointer">
+                                    {canRoles.create && <button type="button" onClick={openNewRole} className="flex h-9 items-center gap-1.5 rounded-xl bg-teal-600 px-3 text-[13px] font-bold text-white transition-colors hover:bg-teal-700 cursor-pointer">
                                         <Plus className="h-4 w-4" /> Nuevo rol
-                                    </button>
+                                    </button>}
                                 </div>
                             )}
                             {isRolesLoading ? (
@@ -1911,9 +2015,9 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                                 <span className="inline-flex items-center gap-1 text-[13px] text-slate-600"><Users className="h-3.5 w-3.5 text-slate-400" /><b className="text-slate-800">{usersByRole.get(currentRole.role) || 0}</b> {(usersByRole.get(currentRole.role) || 0) === 1 ? 'usuario' : 'usuarios'}</span>
                                             </div>
                                         </div>
-                                        <button type="button" onClick={() => handleOpenEditRole(currentRole)} className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer">
+                                        {canRoles.edit && <button type="button" onClick={() => handleOpenEditRole(currentRole)} className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer">
                                             <Edit className="h-4 w-4 text-slate-500" /> {isDesktop ? 'Editar nombre y nivel' : 'Editar'}
-                                        </button>
+                                        </button>}
                                     </div>
                                 </div>
 
@@ -1923,7 +2027,13 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                         enabled,
                                         (module, on) => handleRoleModuleChange(currentRole.role, module, on),
                                         (modules, on) => handleRoleSectionChange(currentRole.role, modules, on),
-                                        isDesktop
+                                        isDesktop,
+                                        {
+                                            denied: currentRole.deniedActions || [],
+                                            onAction: (module, action, allowed) => handleRoleActionChange(currentRole.role, module, action, allowed),
+                                            locked: currentRole.role === 'ADMIN',
+                                            readOnly: !can('ADMIN_ROLES', 'permissions'),
+                                        }
                                     )}
 
                                     <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${isDesktop ? 'max-w-md' : ''}`}>
@@ -1973,7 +2083,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                         <div className={isDesktop ? 'flex items-start gap-5' : ''}>
                             {showList && roleList}
                             {showDetail && roleDetail}
-                            {!isDesktop && !roleDetailOpen && <FloatingActionButton icon={<Plus />} label="Nuevo rol" onClick={openNewRole} />}
+                            {!isDesktop && !roleDetailOpen && canRoles.create && <FloatingActionButton icon={<Plus />} label="Nuevo rol" onClick={openNewRole} />}
                         </div>
                     );
                 })()}
@@ -2091,8 +2201,10 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                         role="switch"
                                         aria-checked={!!tempConfig.maintenanceMode}
                                         aria-label="Activar mantenimiento"
+                                        disabled={!canParams.maintenance}
+                                        title={canParams.maintenance ? undefined : 'Su rol no puede cambiar el modo mantenimiento'}
                                         onClick={() => setTempConfig({ ...tempConfig, maintenanceMode: !tempConfig.maintenanceMode })}
-                                        className={`relative block h-7 w-12 rounded-full transition-colors cursor-pointer ${tempConfig.maintenanceMode ? 'bg-amber-500' : 'bg-slate-200'}`}
+                                        className={`relative block h-7 w-12 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${canParams.maintenance ? 'cursor-pointer' : ''} ${tempConfig.maintenanceMode ? 'bg-amber-500' : 'bg-slate-200'}`}
                                     >
                                         <span className={`absolute top-0.5 grid h-6 w-6 place-items-center rounded-full bg-white shadow transition-all ${tempConfig.maintenanceMode ? 'left-[22px]' : 'left-0.5'}`}>
                                             {tempConfig.maintenanceMode && <Check className="h-3.5 w-3.5 text-amber-600" />}
@@ -2131,9 +2243,13 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                             <button type="button" onClick={discardParams} disabled={isSavingConfig} className="ml-auto h-10 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 cursor-pointer">
                                                 Descartar
                                             </button>
-                                            <button type="button" onClick={handleSaveConfig} disabled={isSavingConfig} className="flex h-10 items-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60 cursor-pointer">
-                                                <Save className="h-4 w-4" /> {isSavingConfig ? 'Guardando…' : 'Guardar'}
-                                            </button>
+                                            {canParams.save ? (
+                                                <button type="button" onClick={handleSaveConfig} disabled={isSavingConfig} className="flex h-10 items-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60 cursor-pointer">
+                                                    <Save className="h-4 w-4" /> {isSavingConfig ? 'Guardando…' : 'Guardar'}
+                                                </button>
+                                            ) : (
+                                                <span className="text-[12px] font-semibold text-slate-500">Su rol no puede guardar parámetros</span>
+                                            )}
                                         </div>
                                     </div>
                                 </ModuleFooterPortal>
@@ -2732,7 +2848,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
         }
 
         const isActive = u.isActive === true || String(u.isActive).toLowerCase() === 'true';
-        const canEdit = canAssignRoleKey(u.role);
+        const canEdit = canAssignRoleKey(u.role) && canUsers.edit;
         const hierarchyRows = [
             ['DIRESA', diresaName],
             ['OGESS', ogessName],

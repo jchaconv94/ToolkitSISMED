@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "../contexts/AuthContext";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronRight, Clock, Copy, Database, History, KeyRound,
@@ -247,6 +248,9 @@ const EstablishmentsPanel: React.FC<{
   alerts: SendKeyRow[];
   onIgnoreAll: () => void;
 }> = ({ rows, latest, latestSismed, busy, onGenerate, onIgnore, onPending, alerts, onIgnoreAll }) => {
+  const { can } = useAuth();
+  const canGenerate = can("ADMIN_SEND_KEYS", "generate");
+  const canIgnore = can("ADMIN_SEND_KEYS", "ignore");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<EstablishmentFilter>("all");
   const [sismedFilter, setSismedFilter] = useState<SismedFilter>("all");
@@ -326,7 +330,7 @@ const EstablishmentsPanel: React.FC<{
               <span className="font-semibold">{alerts.length === 1 ? "1 intento de envío bloqueado sin revisar" : `${alerts.length} intentos de envío bloqueados sin revisar`}</span>
               <span className="flex items-center gap-4 md:ml-auto md:gap-3">
                 <button type="button" onClick={() => setFilter("alerts")} className="font-bold text-red-700 hover:underline">Ver</button>
-                <button type="button" disabled={busy} onClick={onIgnoreAll} className="font-bold text-slate-500 hover:underline disabled:opacity-60">Ignorar todos</button>
+                {canIgnore && <button type="button" disabled={busy} onClick={onIgnoreAll} className="font-bold text-slate-500 hover:underline disabled:opacity-60">Ignorar todos</button>}
               </span>
             </div>
           </div>
@@ -416,7 +420,9 @@ const EstablishmentsPanel: React.FC<{
                         <td className="px-4 py-2"><SismedVersion device={device} state={sismedState(row, latestSismed)} withDate /> {!device?.sismedVersion && <Dash />}</td>
                         <td className="px-4 py-2 text-slate-500">{relativeTime(lastSendAt(row))}</td>
                         <td className="px-4 py-2 text-right">
-                          {state === "none" ? (
+                          {state === "none" && !canGenerate ? (
+                            <span className="text-xs text-slate-400">Sin clave</span>
+                          ) : state === "none" ? (
                             <button type="button" disabled={busy} onClick={() => onGenerate(row)} className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-teal-600 px-3 text-xs font-bold text-white hover:bg-teal-700 disabled:opacity-60">
                               <KeyRound className="h-3.5 w-3.5" /> Generar clave
                             </button>
@@ -459,7 +465,7 @@ const EstablishmentsPanel: React.FC<{
                     </button>
                     <div className="mt-2.5 flex items-center justify-between gap-2">
                       <span className="min-w-0 truncate text-[11.5px] text-slate-500">Último envío: {relativeTime(lastSendAt(row))}</span>
-                      {state === "none" && (
+                      {state === "none" && canGenerate && (
                         <button type="button" disabled={busy} onClick={() => onGenerate(row)} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-teal-600 px-3.5 text-xs font-bold text-white disabled:opacity-60">
                           <KeyRound className="h-3.5 w-3.5" /> Generar clave
                         </button>
@@ -583,6 +589,10 @@ const DetailDrawer: React.FC<{
   onRegenerate: () => void;
   onRevoke: () => void;
 }> = ({ row, latest, latestSismed, history, historyLoading, busy, onClose, onIgnore, onRebind, onRegenerate, onRevoke }) => {
+  const { can } = useAuth();
+  const canIgnore = can("ADMIN_SEND_KEYS", "ignore");
+  const canSwitch = can("ADMIN_SEND_KEYS", "switchDevice");
+  const canRegenerate = can("ADMIN_SEND_KEYS", "regenerate");
   const devices = activeDevices(row);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -635,10 +645,10 @@ const DetailDrawer: React.FC<{
                 {relativeTime(row.alert.at)}{row.alert.rows != null && <> · {row.alert.rows} lotes</>} · {ATTEMPT_RESULT_LABEL[row.alert.result].replace("Bloqueado · ", "")}
               </p>
               <div className="mt-3 grid grid-cols-[auto_1fr] gap-2">
-                <button type="button" disabled={busy} onClick={onIgnore} className="h-10 rounded-xl border border-red-200 bg-white px-4 text-[13px] font-bold text-red-700 hover:bg-red-50 disabled:opacity-60">Ignorar</button>
-                <button type="button" disabled={busy} onClick={onRebind} className="flex h-10 items-center justify-center gap-2 rounded-xl bg-red-600 text-[13px] font-bold text-white hover:bg-red-700 disabled:opacity-60">
+                {canIgnore && <button type="button" disabled={busy} onClick={onIgnore} className="h-10 rounded-xl border border-red-200 bg-white px-4 text-[13px] font-bold text-red-700 hover:bg-red-50 disabled:opacity-60">Ignorar</button>}
+                {canSwitch && <button type="button" disabled={busy} onClick={onRebind} className="flex h-10 items-center justify-center gap-2 rounded-xl bg-red-600 text-[13px] font-bold text-white hover:bg-red-700 disabled:opacity-60">
                   <ArrowRightLeft className="h-4 w-4" /> Cambiar a este equipo
-                </button>
+                </button>}
               </div>
             </section>
           )}
@@ -676,14 +686,14 @@ const DetailDrawer: React.FC<{
           </section>
         </div>
 
-        <footer className="grid grid-cols-2 gap-2 border-t border-slate-100 px-5 py-4 sm:px-6">
+        {canRegenerate && <footer className="grid grid-cols-2 gap-2 border-t border-slate-100 px-5 py-4 sm:px-6">
           <button type="button" disabled={busy} onClick={onRegenerate} className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 text-[12.5px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
             <RefreshCw className="h-4 w-4" /> Regenerar clave
           </button>
           <button type="button" disabled={busy} onClick={onRevoke} className="flex h-10 items-center justify-center gap-2 rounded-xl border border-red-200 text-[12.5px] font-bold text-red-700 hover:bg-red-50 disabled:opacity-60">
             <Trash2 className="h-4 w-4" /> Retirar clave
           </button>
-        </footer>
+        </footer>}
       </aside>
     </div>,
     document.body

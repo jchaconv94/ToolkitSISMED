@@ -109,7 +109,10 @@ export const BackupsSismedModule: React.FC = () => {
   const manager = useBackupManager();
   // La pestaña sale del rol de la sesión, no de lo que diga el servicio: así no aparece
   // ni desaparece al conectar. Los datos de Consumo los sigue protegiendo Supabase.
-  const isAdmin = useAuth().user?.role === "ADMIN";
+  const auth = useAuth();
+  const isAdmin = auth.user?.role === "ADMIN";
+  // Descargar gasta el cupo diario: se puede apagar por rol (Configuración de Roles).
+  const canDownload = auth.can("ADMIN_BACKUPS", "download");
   // La campana de avisos puede pedir abrir directamente «Consumo».
   const [tab, setTab] = useState<Tab>(() => takeRequestedBackupsTab() || "backups");
   useEffect(() => {
@@ -195,7 +198,7 @@ export const BackupsSismedModule: React.FC = () => {
     void load();
   };
 
-  const action = (row: BackupRowView, full = false) => (
+  const action = (row: BackupRowView, full = false) => !canDownload ? null : (
     <button
       type="button"
       disabled={!row.canDownload}

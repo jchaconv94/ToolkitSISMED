@@ -980,7 +980,13 @@ const getExpirationStats = (records: SIGData[]) => {
 };
 
 const SheetSearchModuleContent: React.FC = () => {
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, can } = useAuth();
+  // Acciones que el rol puede usar (Configuración de Roles); las reglas de conexiones siguen encima.
+  const canSig = {
+    export: can("SIG_SEARCH", "export"),
+    updateReport: can("SIG_SEARCH", "updateReport"),
+    photoReport: can("SIG_SEARCH", "photoReport"),
+  };
   const canAccess = hasPermission("SIG_SEARCH");
 
   // Configuración
@@ -1467,7 +1473,7 @@ const SheetSearchModuleContent: React.FC = () => {
   const isUngetRole = !isGlobalRole && (userExplicitLevel === "UNGET" || userRole.includes("UNGET") || userRole.includes("RED"));
 
   const canManageConfigs = useMemo(() => {
-    if (!user) return false;
+    if (!user || !can("SIG_SEARCH", "connections")) return false;
     const role = (user.role || "").toUpperCase();
     const level = (user.jurisdictionLevel || "").toUpperCase();
 
@@ -1515,7 +1521,7 @@ const SheetSearchModuleContent: React.FC = () => {
 
     // Personal operativo, farmacia e IPRESS NO gestionan URLs
     return false;
-  }, [user]);
+  }, [user, can]);
 
   const myUnget = useMemo(() => {
     if (!userUngetId || !allUngets || allUngets.length === 0) return null;
@@ -4848,7 +4854,7 @@ function processSheet(sheet) {
       )}
       {/* Hoja abierta: su Excel. Con puestos comunales y «Todos», se elige cómo armarlo; con un
           establecimiento elegido, o en una hoja de una sola farmacia, descarga directamente. */}
-      {viewLevel === "data" && (
+      {viewLevel === "data" && canSig.export && (
         hojaConPuestosComunales && dataFilterPharmacy === "all" ? (
           <SheetExportMenu onExport={exportCurrentSheetToExcel} />
         ) : (
@@ -4864,7 +4870,7 @@ function processSheet(sheet) {
         )
       )}
       {/* Dentro de una UNGET: los reportes de sus establecimientos (Excel y foto de deficiencias). */}
-      {viewLevel === "sheets" && (
+      {viewLevel === "sheets" && (canSig.export || canSig.updateReport || canSig.photoReport) && (
       <div className="relative z-30">
         <button
           onClick={() =>
@@ -4889,7 +4895,7 @@ function processSheet(sheet) {
             />
             {/* Dropdown Card */}
             <div className="absolute right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-[0_10px_25px_-5px_rgba(0,0,0,0.1),0_8px_10px_-6px_rgba(0,0,0,0.05)] z-50 overflow-hidden w-72 divide-y divide-slate-100 py-1 animate-in fade-in slide-in-from-top-2 duration-150 text-left">
-              <button
+              {canSig.photoReport && <button
                 onClick={() => {
                   setIsExportDropdownOpen(false);
                   setIsCaptureMode(true);
@@ -4913,9 +4919,9 @@ function processSheet(sheet) {
                     Seleccionar y descargar imagen para WhatsApp
                   </span>
                 </div>
-              </button>
+              </button>}
 
-              <button
+              {canSig.export && <button
                 onClick={() => {
                   setIsExportDropdownOpen(false);
                   exportAllEstablishmentsToExcel();
@@ -4933,9 +4939,9 @@ function processSheet(sheet) {
                     Saldos de todos los establecimientos
                   </span>
                 </div>
-              </button>
+              </button>}
 
-              <button
+              {canSig.updateReport && <button
                 onClick={() => {
                   setIsExportDropdownOpen(false);
                   exportReportToExcel();
@@ -4953,7 +4959,7 @@ function processSheet(sheet) {
                     Estado y fecha de cambios comprobados
                   </span>
                 </div>
-              </button>
+              </button>}
             </div>
           </>
         )}
@@ -6438,7 +6444,7 @@ function processSheet(sheet) {
 
               {viewLevel === "ungets" &&
                 globalUngetSummary &&
-                sources.length > 0 && (
+                sources.length > 0 && canSig.export && (
                   <button
                     onClick={exportAllUngetsToExcel}
                     aria-label="Exportar stock"
@@ -6466,20 +6472,20 @@ function processSheet(sheet) {
                   const item = "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40";
                   const run = (accion: () => void) => () => { setHeaderActionsOpen(false); accion(); };
                   const descargas: { label: string; detail: string; icon: React.ReactNode; onClick: () => void }[] = [];
-                  if (viewLevel === "ungets" && globalUngetSummary && sources.length > 0) {
+                  if (viewLevel === "ungets" && globalUngetSummary && sources.length > 0 && canSig.export) {
                     descargas.push({ label: "Exportar stock", detail: "Saldos de todas las UNGET", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: exportAllUngetsToExcel });
                   }
                   if (viewLevel === "sheets") {
-                    descargas.push(
-                      { label: "Exportar stock", detail: "Saldos de todos los establecimientos", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: exportAllEstablishmentsToExcel },
-                      { label: "Reporte de actualización", detail: "Estado y fecha de cambios comprobados", icon: <FileSpreadsheet className="h-5 w-5 text-indigo-600" />, onClick: exportReportToExcel },
+                    if (canSig.export) descargas.push({ label: "Exportar stock", detail: "Saldos de todos los establecimientos", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: exportAllEstablishmentsToExcel });
+                    if (canSig.updateReport) descargas.push({ label: "Reporte de actualización", detail: "Estado y fecha de cambios comprobados", icon: <FileSpreadsheet className="h-5 w-5 text-indigo-600" />, onClick: exportReportToExcel });
+                    if (canSig.photoReport) descargas.push(
                       {
                         label: "Foto reporte de deficiencias", detail: "Seleccionar y descargar imagen para WhatsApp", icon: <Camera className="h-5 w-5 text-rose-600" />,
                         onClick: () => { setIsCaptureMode(true); if (selectedCaptureIds.size === 0) handleAutoSelectDeficiencies(); },
                       },
                     );
                   }
-                  if (viewLevel === "data") {
+                  if (viewLevel === "data" && canSig.export) {
                     if (hojaConPuestosComunales && dataFilterPharmacy === "all") {
                       descargas.push(
                         { label: "Exportar stock consolidado", detail: "Sumar el stock de todas las farmacias", icon: <Download className="h-5 w-5 text-emerald-600" />, onClick: () => exportCurrentSheetToExcel("consolidado") },
@@ -7430,13 +7436,13 @@ function processSheet(sheet) {
                     </>
                   );
                 })()}
-                <button
+                {canSig.export && <button
                   onClick={exportModalStockToExcel}
                   className="flex items-center gap-1.5 bg-white hover:bg-teal-50 text-teal-700 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-bold transition-all shrink-0 shadow-sm"
                 >
                   <Download className="h-4 w-4 shrink-0" />
                   Exportar Stock
-                </button>
+                </button>}
                 <button
                   onClick={() => {
                     setStockModalSourceId(null);
@@ -8943,14 +8949,14 @@ function processSheet(sheet) {
                 </p>
               </div>
               <div className="flex items-center gap-2 self-end sm:self-auto">
-                <button
+                {canSig.updateReport && <button
                   onClick={exportReportToExcel}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 rounded-lg text-[10px] sm:text-[11px] font-black uppercase tracking-wider border border-green-200 transition-colors cursor-pointer shrink-0"
                   title="Descargar Excel"
                 >
                   <FileSpreadsheet className="h-3.5 w-3.5" />
                   <span>Exportar a Excel</span>
-                </button>
+                </button>}
                 <div className="h-6 w-px bg-slate-200 mx-1"></div>
                 <button
                   onClick={() => setIsReportModalOpen(false)}

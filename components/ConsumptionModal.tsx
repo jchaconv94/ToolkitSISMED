@@ -37,7 +37,9 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
     prevItemId,
     nextItemId
 }) => {
-  const { systemConfig } = useAuth();
+  const { systemConfig, can } = useAuth();
+  // Sin «Revisar y editar el requerimiento» el detalle se ve, pero no se valida ni se guarda.
+  const canEditRequirement = can('DASHBOARD', 'editRequirement');
   const [reqQuantity, setReqQuantity] = useState<number | ''>(0);
   
   // STATE: CPA MODE SELECTION
@@ -908,7 +910,9 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
                 </button>
 
                 {/* Primary Action Group - Split Button */}
-                {needsReview ? (
+                {!canEditRequirement ? (
+                    <span className="flex-1 self-center text-right text-[12px] font-semibold text-slate-500 sm:flex-none">Solo lectura: su rol no puede editar el requerimiento</span>
+                ) : needsReview ? (
                     isReviewed ? (
                          <button 
                             type="button"
@@ -981,7 +985,7 @@ export const ConsumptionModal: React.FC<ConsumptionModalProps> = ({
                 ) : (
                     <button 
                         onClick={handleManualSave}
-                        className="flex-1 sm:flex-none px-6 py-3 sm:py-2 rounded-lg bg-gray-900 text-white font-bold text-sm hover:bg-gray-800 transition-all"
+                        className="flex-1 sm:flex-none px-6 py-3 sm:py-2 rounded-lg bg-teal-600 text-white font-bold text-sm hover:bg-teal-700 transition-all"
                     >
                         Guardar Cambios
                     </button>

@@ -203,7 +203,14 @@ interface RedistributionModuleProps {
 }
 
 export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBack }) => {
-    const { systemConfig } = useAuth();
+    const { systemConfig, can } = useAuth();
+    // Acciones que el rol puede usar (Configuración de Roles).
+    const canRed = {
+        load: can('REDISTRIBUTION', 'load'), importProgress: can('REDISTRIBUTION', 'importProgress'),
+        exportProgress: can('REDISTRIBUTION', 'exportProgress'), consolidate: can('REDISTRIBUTION', 'consolidate'),
+        transfer: can('REDISTRIBUTION', 'transfer'), editTransfers: can('REDISTRIBUTION', 'editTransfers'),
+        exportList: can('REDISTRIBUTION', 'exportList'),
+    };
     // --- STATE INITIALIZATION ---
     const [isLoaded, setIsLoaded] = useState(false);
     const [records, setRecords] = useState<AvailabilityRecord[]>([]);
@@ -2807,27 +2814,27 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                             </div>
                         </div>
                         <div className="flex items-center gap-2 mr-10">
-                            <button 
+                            {canRed.exportProgress && <button 
                                 onClick={handleExportSession}
                                 className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                                 title="Exportar Avance"
                             >
                                 <Download className="w-4 h-4" />
-                            </button>
-                            <button 
+                            </button>}
+                            {canRed.importProgress && <button 
                                 onClick={() => setIsConfirmImportModalOpen(true)}
                                 className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                                 title="Importar Avance"
                             >
                                 <Upload className="w-4 h-4" />
-                            </button>
-                            <button 
+                            </button>}
+                            {canRed.load && <button 
                                 onClick={() => setIsConfirmUploadModalOpen(true)}
                                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                 title="Cargar nuevo archivo"
                             >
                                 <RefreshCw className="w-4 h-4" />
-                            </button>
+                            </button>}
                         </div>
                     </div>
                 ) : (
@@ -2849,6 +2856,9 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                 <div
                                     className="w-full max-w-2xl mx-auto border-2 border-dashed border-indigo-200 rounded-xl px-4 py-6 sm:p-10 max-sm:flex-1 max-sm:flex max-sm:flex-col max-sm:justify-center bg-indigo-50/30 hover:bg-indigo-50 transition-all group cursor-pointer relative"
                                     onClick={() => {
+                                        // Sin permiso para cargar archivos, el recuadro no abre nada
+                                        // (quedan Importar / Exportar avance, si los tiene).
+                                        if (!canRed.load) return;
                                         if (records.length > 0) {
                                             setIsConfirmUploadModalOpen(true);
                                         } else {
@@ -2887,7 +2897,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
 
                                         {/* Export/Import Session Buttons */}
                                         <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-2.5 sm:gap-4 mt-2 sm:mt-6 z-10">
-                                            {records.length > 0 && (
+                                            {records.length > 0 && canRed.exportProgress && (
                                                 <button 
                                                     onClick={(e) => { 
                                                         e.stopPropagation(); 
@@ -2901,7 +2911,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                                     Exportar Avance
                                                 </button>
                                             )}
-                                            <button 
+                                            {canRed.importProgress && <button 
                                                 onClick={(e) => { 
                                                     e.stopPropagation(); 
                                                     e.preventDefault();
@@ -2916,7 +2926,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                             >
                                                 <Upload className="w-4 h-4" />
                                                 Importar Avance
-                                            </button>
+                                            </button>}
                                             <input 
                                                 type="file" 
                                                 ref={importInputRef} 
@@ -3168,7 +3178,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                             )}
 
                             {/* Consolidate Button - Only show if there are secondary pharmacies */}
-                            {baseRedistributionData.some(item => /F\d{2}$/.test(String(item.codEess || '')) && !String(item.codEess || '').endsWith('F01')) && (
+                            {canRed.consolidate && baseRedistributionData.some(item => /F\d{2}$/.test(String(item.codEess || '')) && !String(item.codEess || '').endsWith('F01')) && (
                                 <button
                                     onClick={handleOpenConsolidateModal}
                                     className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold hover:bg-amber-700 transition-colors shadow-sm"
@@ -3417,7 +3427,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                         >
                                             <td className={`p-3 pr-4 font-medium relative whitespace-nowrap text-xs ${isPrincipal ? 'font-black text-gray-900 pl-11' : 'text-gray-700'} ${isSecondary ? 'pl-20 text-gray-600 italic' : ''}`} title={`${item.codEess} - ${item.establishmentName}`}>
                                                 <div className="flex items-center">
-                                                    {hasSecondaries && (
+                                                    {hasSecondaries && canRed.consolidate && (
                                                         <div
                                                             className={`absolute left-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-all duration-200 scale-90 group-hover:scale-100 z-10 p-1 rounded border cursor-pointer shadow-sm ${item.isConsolidated
                                                                 ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-600 hover:text-white'
@@ -3542,7 +3552,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
 
                                             {/* QUICK TRANSFER ACTION */}
                                             <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
-                                                <button
+                                                {canRed.transfer && <button
                                                     onClick={(e) => handleQuickTransferClick(item, e)}
                                                     className={`
                                                 p-1.5 rounded-lg transition-all shadow-sm border
@@ -3556,7 +3566,7 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                                     title={quickTransferSource ? (quickTransferSource.codEess === item.codEess ? "Cancelar Selección" : "Transferir Aquí") : "Seleccionar como Origen"}
                                                 >
                                                     <MousePointerClick className="h-4 w-4" />
-                                                </button>
+                                                </button>}
                                             </td>
                                         </tr>
                                         </React.Fragment>
@@ -3787,20 +3797,20 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                                                             </>
                                                         ) : (
                                                             <>
-                                                                <button
+                                                                {canRed.editTransfers && <button
                                                                     onClick={() => startEditingTransfer(t.id, t.quantity)}
                                                                     className="p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                                                                     title="Editar"
                                                                 >
                                                                     <Edit2 className="h-4 w-4" />
-                                                                </button>
-                                                                <button
+                                                                </button>}
+                                                                {canRed.editTransfers && <button
                                                                     onClick={() => removeTransferFromList(t.id)}
                                                                     className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                                                     title="Eliminar"
                                                                 >
                                                                     <Trash2 className="h-4 w-4" />
-                                                                </button>
+                                                                </button>}
                                                             </>
                                                         )}
                                                     </div>
@@ -3818,14 +3828,14 @@ export const RedistributionModule: React.FC<RedistributionModuleProps> = ({ onBa
                             </div>
                             <div className="flex gap-3">
                                 <button onClick={() => setIsTransferListOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg">Cerrar</button>
-                                <button
+                                {canRed.exportList && <button
                                     onClick={exportTransferList}
                                     disabled={transferList.length === 0}
                                     className="px-4 py-2 text-sm font-bold text-white bg-green-600 hover:bg-green-700 rounded-lg shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <FileSpreadsheet className="h-4 w-4" />
                                     Exportar Lista
-                                </button>
+                                </button>}
                             </div>
                         </div>
                     </div>

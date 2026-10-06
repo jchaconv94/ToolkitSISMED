@@ -55,7 +55,12 @@ const SheetAction: React.FC<{ icon: React.ReactNode; label: string; onClick: () 
 );
 
 export const AnalysisExclusionsModule: React.FC = () => {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  // Acciones que el rol puede usar (Configuración de Roles).
+  const canExcl = {
+    create: can('ANALYSIS_EXCLUSIONS', 'create'), edit: can('ANALYSIS_EXCLUSIONS', 'edit'), delete: can('ANALYSIS_EXCLUSIONS', 'delete'),
+    import: can('ANALYSIS_EXCLUSIONS', 'import'), export: can('ANALYSIS_EXCLUSIONS', 'export'), clear: can('ANALYSIS_EXCLUSIONS', 'clear'),
+  };
   const isSuperAdmin = user?.role === "ADMIN";
 
   const userScope = useMemo(() => getUserJurisdictionScope(user), [user]);
@@ -470,7 +475,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
           )}
 
           <div className="ml-auto hidden items-center gap-2 md:flex">
-            {exclusions.length > 0 && (
+            {exclusions.length > 0 && canExcl.clear && (
               <button
                 onClick={() => setIsClearAllDialogOpen(true)}
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-rose-200 px-3 text-xs font-bold text-rose-600 hover:bg-rose-50"
@@ -479,7 +484,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
                 Vaciar lista
               </button>
             )}
-            <div className="relative shrink-0" ref={excelDropdownRef}>
+            {(canExcl.import || canExcl.export) && <div className="relative shrink-0" ref={excelDropdownRef}>
               <button
                 type="button"
                 onClick={() => setIsExcelDropdownOpen(!isExcelDropdownOpen)}
@@ -491,6 +496,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
               </button>
               {isExcelDropdownOpen && (
                 <div className="absolute right-0 mt-2 w-60 rounded-2xl bg-white border border-slate-200 shadow-xl p-1.5 z-30 animate-in fade-in slide-in-from-top-2 duration-150">
+                  {canExcl.import && <>
                   <button
                     type="button"
                     onClick={() => {
@@ -524,8 +530,9 @@ export const AnalysisExclusionsModule: React.FC = () => {
                       <span className="text-[10px] text-slate-400 font-normal">Formato Excel de ejemplo</span>
                     </div>
                   </button>
+                  </>}
 
-                  <button
+                  {canExcl.export && <button
                     type="button"
                     onClick={() => {
                       setIsExcelDropdownOpen(false);
@@ -539,22 +546,22 @@ export const AnalysisExclusionsModule: React.FC = () => {
                       <span className="font-bold">Exportar Lista (.xlsx)</span>
                       <span className="text-[10px] text-slate-400 font-normal">Guardar medicamentos excluidos</span>
                     </div>
-                  </button>
+                  </button>}
                 </div>
               )}
-            </div>
-            <button
+            </div>}
+            {canExcl.create && <button
               type="button"
               onClick={handleOpenNewItem}
               className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-xs font-bold text-white whitespace-nowrap shrink-0"
             >
               <Plus className="h-4 w-4" />
               <span>Nuevo medicamento</span>
-            </button>
+            </button>}
           </div>
 
           {/* Celular: el botón principal es flotante (abajo); «…» abre el resto de acciones. */}
-          <FloatingActionButton icon={<Plus />} label="Nuevo medicamento" onClick={handleOpenNewItem} />
+          {canExcl.create && <FloatingActionButton icon={<Plus />} label="Nuevo medicamento" onClick={handleOpenNewItem} />}
           <button type="button" onClick={() => setActionsOpen(true)} aria-label="Más acciones" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 md:hidden">
             <MoreHorizontal className="h-5 w-5" />
           </button>
@@ -652,11 +659,11 @@ export const AnalysisExclusionsModule: React.FC = () => {
             </div>
           )}
           <div className="space-y-1">
-            <SheetAction icon={<UploadCloud className="h-5 w-5 text-teal-600" />} label="Carga masiva Excel" onClick={() => { setActionsOpen(false); setUploadedFile(null); setParsedPreview(null); setIsUploadModalOpen(true); }} />
-            <SheetAction icon={<Download className="h-5 w-5 text-slate-500" />} label="Descargar plantilla" onClick={() => { setActionsOpen(false); requirementExclusionService.downloadTemplate(); }} />
-            <SheetAction icon={<FileSpreadsheet className="h-5 w-5 text-emerald-600" />} label="Exportar lista (.xlsx)" disabled={exclusions.length === 0} onClick={() => { setActionsOpen(false); requirementExclusionService.exportExclusionsToExcel(exclusions, currentFacility.name, selectedFacilityCode); }} />
+            {canExcl.import && <SheetAction icon={<UploadCloud className="h-5 w-5 text-teal-600" />} label="Carga masiva Excel" onClick={() => { setActionsOpen(false); setUploadedFile(null); setParsedPreview(null); setIsUploadModalOpen(true); }} />}
+            {canExcl.import && <SheetAction icon={<Download className="h-5 w-5 text-slate-500" />} label="Descargar plantilla" onClick={() => { setActionsOpen(false); requirementExclusionService.downloadTemplate(); }} />}
+            {canExcl.export && <SheetAction icon={<FileSpreadsheet className="h-5 w-5 text-emerald-600" />} label="Exportar lista (.xlsx)" disabled={exclusions.length === 0} onClick={() => { setActionsOpen(false); requirementExclusionService.exportExclusionsToExcel(exclusions, currentFacility.name, selectedFacilityCode); }} />}
             <SheetAction icon={<RefreshCw className="h-5 w-5 text-teal-600" />} label="Actualizar" onClick={() => { setActionsOpen(false); void loadExclusions(); }} />
-            {exclusions.length > 0 && (
+            {exclusions.length > 0 && canExcl.clear && (
               <SheetAction icon={<Trash2 className="h-5 w-5 text-rose-600" />} label="Vaciar lista" danger onClick={() => { setActionsOpen(false); setIsClearAllDialogOpen(true); }} />
             )}
           </div>
@@ -742,20 +749,20 @@ export const AnalysisExclusionsModule: React.FC = () => {
                     </td>
                     <td className="px-4 py-3.5 text-right">
                       <div className="flex items-center justify-end gap-1.5 opacity-90 group-hover:opacity-100">
-                        <button
+                        {canExcl.edit && <button
                           onClick={() => handleOpenEditItem(item)}
                           className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors"
                           title="Editar"
                         >
                           <Edit3 className="h-4 w-4" />
-                        </button>
-                        <button
+                        </button>}
+                        {canExcl.delete && <button
                           onClick={() => setDeleteTarget(item)}
                           className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                           title="Eliminar"
                         >
                           <Trash2 className="h-4 w-4" />
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>
@@ -791,12 +798,12 @@ export const AnalysisExclusionsModule: React.FC = () => {
                     </div>
                     {/* Acciones con ícono y borde, a la derecha y con espacio entre ellas para tocarlas sin error. */}
                     <div className="flex shrink-0 items-center gap-2">
-                      <button onClick={() => handleOpenEditItem(item)} aria-label="Editar" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-teal-600 active:bg-teal-50">
+                      {canExcl.edit && <button onClick={() => handleOpenEditItem(item)} aria-label="Editar" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-teal-600 active:bg-teal-50">
                         <Edit3 className="h-[18px] w-[18px]" />
-                      </button>
-                      <button onClick={() => setDeleteTarget(item)} aria-label="Eliminar" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 text-rose-600 active:bg-rose-50">
+                      </button>}
+                      {canExcl.delete && <button onClick={() => setDeleteTarget(item)} aria-label="Eliminar" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 text-rose-600 active:bg-rose-50">
                         <Trash2 className="h-[18px] w-[18px]" />
-                      </button>
+                      </button>}
                     </div>
                   </li>
                 ))}

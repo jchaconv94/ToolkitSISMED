@@ -69,7 +69,8 @@ const normalizeKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g
 const parseNumber = parseStockNumber;
 
 export const AssignedIpressStockModule: React.FC = () => {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  const canExport = can("IPRESS_STOCK", "export");
   const legacyUser = user as (typeof user & { facilityCode?: string });
   const facilityCode = user?.personnelData?.facilityCode || user?.facilityData?.code || legacyUser?.facilityCode;
   const facilityName = user?.facilityData?.name || facilityCode || "Mi establecimiento";
@@ -365,7 +366,7 @@ export const AssignedIpressStockModule: React.FC = () => {
               <button type="button" onClick={() => void loadStock(true)} disabled={loading || !facilityCode} aria-label="Actualizar" className="hidden h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:inline-flex">
                 <RefreshCw className={`h-4 w-4 text-teal-600 ${loading ? "animate-spin" : ""}`} />Actualizar
               </button>
-              <div className="relative hidden shrink-0 sm:block">
+              <div className={`relative hidden shrink-0 ${canExport ? "sm:block" : ""}`}>
                 <button
                   type="button"
                   onClick={() => (exportByPharmacy ? setExportMenuOpen(open => !open) : exportStock())}
@@ -427,8 +428,8 @@ export const AssignedIpressStockModule: React.FC = () => {
                   <RefreshCw className="h-5 w-5 text-teal-600" />
                   {loading ? "Actualizando..." : "Actualizar"}
                 </button>
-                <p className="px-3 pb-1 pt-3 text-[11px] font-black uppercase tracking-wider text-slate-400">Descargar</p>
-                {(exportByPharmacy ? EXPORT_OPTIONS : [{ modo: undefined, title: "Exportar a Excel", detail: "Stock de la hoja", icon: <Download className="h-4 w-4" /> }]).map(opcion => (
+                {canExport && <p className="px-3 pb-1 pt-3 text-[11px] font-black uppercase tracking-wider text-slate-400">Descargar</p>}
+                {canExport && (exportByPharmacy ? EXPORT_OPTIONS : [{ modo: undefined, title: "Exportar a Excel", detail: "Stock de la hoja", icon: <Download className="h-4 w-4" /> }]).map(opcion => (
                   <button key={opcion.title} type="button" onClick={() => { setActionsOpen(false); exportStock(opcion.modo); }} className={SHEET_ACTION_CLASS}>
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600">{opcion.icon}</span>
                     <span className="min-w-0">

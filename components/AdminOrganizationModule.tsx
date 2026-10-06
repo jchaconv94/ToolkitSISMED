@@ -109,7 +109,9 @@ const TAB_SORT_KEYS: Record<OrgTab, (string | null)[]> = {
 const ORG_PAGE_SIZE = 10;
 
 export const AdminOrganizationModule: React.FC = () => {
-    const { user, hasPermission } = useAuth();
+    const { user, hasPermission, can } = useAuth();
+    // Acciones que el rol puede usar (Configuración de Roles); las reglas de nivel siguen encima.
+    const canFac = { create: can('ADMIN_FACILITIES', 'create'), edit: can('ADMIN_FACILITIES', 'edit'), delete: can('ADMIN_FACILITIES', 'delete') };
 
     // Premium spreadsheet-like column filter states
     const [activeFilterId, setActiveFilterId] = useState<string | null>(null);
@@ -1655,7 +1657,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             </button>
                         );
                     })}
-                    {canAddActiveTab && isDesktop && (
+                    {canAddActiveTab && canFac.create && isDesktop && (
                         <button
                             type="button"
                             onClick={openCreate}
@@ -1744,7 +1746,7 @@ export const AdminOrganizationModule: React.FC = () => {
                         </div>
                     </BottomSheet>
 
-                    {canAddActiveTab && !isDesktop && <FloatingActionButton icon={<Plus />} label={TAB_NEW[activeTab]} onClick={openCreate} />}
+                    {canAddActiveTab && canFac.create && !isDesktop && <FloatingActionButton icon={<Plus />} label={TAB_NEW[activeTab]} onClick={openCreate} />}
 
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm max-md:border-0 max-md:bg-transparent max-md:shadow-none">
                     <FloatingTableHead state={orgFloatingHead} padding="px-4" cells={TAB_HEADS[activeTab].map((label, index) => ({ key: label + index, index, content: orgSortHead(index), align: label === 'Acciones' ? 'right' as const : 'left' as const }))} />
@@ -1808,13 +1810,13 @@ export const AdminOrganizationModule: React.FC = () => {
                                                             <td className="p-4 text-slate-600 font-medium">{d.province || '-'}</td>
                                                             <td className="p-4 text-slate-600 font-medium">{d.department || '-'}</td>
                                                             <td className="p-4 flex gap-2 justify-end pr-6">
-                                                                <button 
+                                                                {canFac.edit && (<button 
                                                                     onClick={(e) => handleOpenEdit('DIRESA', d, e)} 
                                                                     className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 border border-slate-100 rounded-xl shadow-sm transition cursor-pointer"
                                                                 >
                                                                     <Edit className="h-3.5 w-3.5" />
-                                                                </button>
-                                                                {isSuperAdmin && (
+                                                                </button>)}
+                                                                {isSuperAdmin && canFac.delete && (
                                                                     <button 
                                                                         onClick={(e) => handleConfirmDelete('DIRESA', d, e)} 
                                                                         className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-100 rounded-xl shadow-sm transition cursor-pointer"
@@ -1868,13 +1870,13 @@ export const AdminOrganizationModule: React.FC = () => {
                                                                 <span className="bg-teal-50 text-teal-800 px-2 py-0.5 rounded-lg text-xs font-bold border border-teal-100">{getDiresaName(o.diresaId)}</span>
                                                             </td>
                                                             <td className="p-4 flex gap-2 justify-end pr-6">
-                                                                <button 
+                                                                {canFac.edit && (<button 
                                                                     onClick={(e) => handleOpenEdit('OGESS', o, e)} 
                                                                     className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 border border-slate-100 rounded-xl shadow-sm transition cursor-pointer"
                                                                 >
                                                                     <Edit className="h-3.5 w-3.5" />
-                                                                </button>
-                                                                {isSuperAdmin && (
+                                                                </button>)}
+                                                                {isSuperAdmin && canFac.delete && (
                                                                     <button 
                                                                         onClick={(e) => handleConfirmDelete('OGESS', o, e)} 
                                                                         className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-100 rounded-xl shadow-sm transition cursor-pointer"
@@ -1943,13 +1945,13 @@ export const AdminOrganizationModule: React.FC = () => {
                                                                 })()}
                                                             </td>
                                                             <td className="p-4 flex gap-2 justify-end pr-6">
-                                                                <button 
+                                                                {canFac.edit && (<button 
                                                                     onClick={(e) => handleOpenEdit('UNGET', u, e)} 
                                                                     className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 border border-slate-100 rounded-xl shadow-sm transition cursor-pointer"
                                                                 >
                                                                     <Edit className="h-3.5 w-3.5" />
-                                                                </button>
-                                                                {isSuperAdmin && (
+                                                                </button>)}
+                                                                {isSuperAdmin && canFac.delete && (
                                                                     <button 
                                                                         onClick={(e) => handleConfirmDelete('UNGET', u, e)} 
                                                                         className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-100 rounded-xl shadow-sm transition cursor-pointer"
@@ -2001,13 +2003,13 @@ export const AdminOrganizationModule: React.FC = () => {
                                                                     <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-lg text-xs font-bold">{pUnget ? getOgessName(pUnget.ogessId) : '-'}</span>
                                                                 </td>
                                                                 <td className="p-4 flex gap-2 justify-end pr-6">
-                                                                    <button 
+                                                                    {canFac.edit && (<button 
                                                                         onClick={(e) => handleOpenEdit('MICRORED', m, e)} 
                                                                         className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 border border-slate-100 rounded-xl shadow-sm transition cursor-pointer"
                                                                     >
                                                                         <Edit className="h-3.5 w-3.5" />
-                                                                    </button>
-                                                                    {isSuperAdmin && (
+                                                                    </button>)}
+                                                                    {isSuperAdmin && canFac.delete && (
                                                                         <button 
                                                                             onClick={(e) => handleConfirmDelete('MICRORED', m, e)} 
                                                                             className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-100 rounded-xl shadow-sm transition cursor-pointer"
@@ -2073,13 +2075,13 @@ export const AdminOrganizationModule: React.FC = () => {
                                                             <td className="p-4 text-slate-600 font-semibold">{getUngetName(f.ungetId)}</td>
                                                             <td className="p-4 text-slate-500 font-medium">{getOgessName(f.ogessId)}</td>
                                                             <td className="p-4 flex gap-2 justify-end pr-6">
-                                                                <button 
+                                                                {canFac.edit && (<button 
                                                                     onClick={(e) => handleOpenEdit('IPRESS', f, e)} 
                                                                     className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 border border-slate-100 rounded-xl shadow-sm transition cursor-pointer"
                                                                 >
                                                                     <Edit className="h-3.5 w-3.5" />
-                                                                </button>
-                                                                {isSuperAdmin && (
+                                                                </button>)}
+                                                                {isSuperAdmin && canFac.delete && (
                                                                     <button 
                                                                         onClick={(e) => handleConfirmDelete('IPRESS', f, e)} 
                                                                         className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-100 rounded-xl shadow-sm transition cursor-pointer"
@@ -2311,20 +2313,20 @@ export const AdminOrganizationModule: React.FC = () => {
 
                 const footer = (
                     <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6 md:pb-3">
-                        {isSuperAdmin && !isDesktop && (
+                        {isSuperAdmin && canFac.delete && !isDesktop && (
                             <button type="button" onClick={() => handleConfirmDelete(tab, item)} aria-label="Eliminar" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-slate-200 text-red-600"><Trash2 className="h-5 w-5" /></button>
                         )}
                         <button type="button" onClick={close} className="h-11 shrink-0 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50">Cerrar</button>
-                        {isSuperAdmin && isDesktop && (
+                        {isSuperAdmin && canFac.delete && isDesktop && (
                             <button type="button" onClick={() => handleConfirmDelete(tab, item)} className="h-11 shrink-0 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-red-600 transition-colors hover:bg-rose-50">Eliminar</button>
                         )}
-                        <button
+                        {canFac.edit && <button
                             type="button"
                             onClick={(e) => { close(); handleOpenEdit(tab, item, e); }}
                             className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 md:ml-auto md:flex-none"
                         >
                             <Edit className="h-4 w-4" /> Editar
-                        </button>
+                        </button>}
                     </div>
                 );
 

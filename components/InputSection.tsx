@@ -131,7 +131,12 @@ export const InputSection: React.FC<InputSectionProps> = ({
     additionalItems,
     onAdditionalItemsChange
 }) => {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  // Acciones que el rol puede usar (Configuración de Roles).
+  const canAn = {
+    analyze: can('DASHBOARD', 'analyze'), importProgress: can('DASHBOARD', 'importProgress'),
+    exportProgress: can('DASHBOARD', 'exportProgress'), clear: can('DASHBOARD', 'clear'),
+  };
 
   const userFacilityCode = React.useMemo(() => {
     return (user?.facilityData?.code || user?.personnelData?.facilityCode || '').trim().replace(/^0+/, '');
@@ -479,6 +484,10 @@ export const InputSection: React.FC<InputSectionProps> = ({
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!canAn.analyze) {
+      toast.error('Su rol no puede cargar archivos para el análisis.');
+      return;
+    }
 
     setUploadError(null);
     setIsProcessingFile(true);
@@ -791,6 +800,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
   };
 
   const triggerFileUpload = () => {
+    if (!canAn.analyze) return;
     // Check if we have analyzed data that might be lost
     if (hasAnalyzedData) {
         setShowOverwriteWarning(true);
@@ -995,13 +1005,13 @@ export const InputSection: React.FC<InputSectionProps> = ({
                   el celular el texto va siempre debajo. «Limpiar todo» va aparte, en rojo, para
                   que no se toque por error junto a las demás. */}
               <div className="flex w-full items-start justify-between gap-2 border-t border-gray-100 pt-3 sm:mr-12 sm:w-auto sm:items-center sm:justify-end sm:border-0 sm:pt-0">
-                  <AccionExpandible
+                  {canAn.analyze && <AccionExpandible
                       icon={<RefreshCw className="h-5 w-5" />}
                       label="Cargar nuevo archivo"
                       tone="teal"
                       onClick={triggerFileUpload}
-                  />
-                  <AccionExpandible
+                  />}
+                  {canAn.importProgress && <AccionExpandible
                       icon={<Upload className="h-5 w-5" />}
                       label="Importar avance"
                       tone="emerald"
@@ -1009,8 +1019,8 @@ export const InputSection: React.FC<InputSectionProps> = ({
                           e.stopPropagation();
                           importInputRef.current?.click();
                       }}
-                  />
-                  {hasAnalyzedData && (
+                  />}
+                  {hasAnalyzedData && canAn.exportProgress && (
                       <AccionExpandible
                           icon={<Download className="h-5 w-5" />}
                           label="Exportar avance"
@@ -1018,13 +1028,13 @@ export const InputSection: React.FC<InputSectionProps> = ({
                           onClick={handleExportSession}
                       />
                   )}
-                  <span className="mt-2 h-8 w-px shrink-0 bg-gray-200 sm:mx-1 sm:mt-0 sm:h-7" />
-                  <AccionExpandible
+                  {canAn.clear && <span className="mt-2 h-8 w-px shrink-0 bg-gray-200 sm:mx-1 sm:mt-0 sm:h-7" />}
+                  {canAn.clear && <AccionExpandible
                       icon={<Trash2 className="h-5 w-5" />}
                       label="Limpiar todo"
                       tone="red"
                       onClick={handleClearClick}
-                  />
+                  />}
               </div>
           </div>
       ) : (
@@ -1085,7 +1095,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                         </button>
     
                         <div className="mt-2 sm:mt-4 w-full flex flex-col sm:flex-row sm:flex-wrap gap-2.5 sm:gap-4 justify-center items-stretch sm:items-center z-10">
-                            <button 
+                            {canAn.analyze && <button 
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     triggerFileUpload();
@@ -1094,9 +1104,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
                             >
                                 <Upload className="h-4 w-4" />
                                 Subir Archivo
-                            </button>
+                            </button>}
 
-                            {hasAnalyzedData && (
+                            {hasAnalyzedData && canAn.exportProgress && (
                                 <button 
                                     onClick={handleExportSession}
                                     className="bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 w-full sm:w-auto justify-center px-4 h-11 sm:h-auto sm:py-2 font-bold text-sm rounded-xl sm:rounded-lg transition-all flex items-center gap-2 shadow-sm"
@@ -1107,7 +1117,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                                 </button>
                             )}
 
-                            <button 
+                            {canAn.importProgress && <button 
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     importInputRef.current?.click();
@@ -1117,7 +1127,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
                             >
                                 <Upload className="h-4 w-4 text-emerald-600" />
                                 <span>Importar Avance</span>
-                            </button>
+                            </button>}
                         </div>
                     </div>
                 </div>
@@ -1167,8 +1177,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
           <div className="flex justify-center pt-2">
             <button
               onClick={handleExecuteClick}
-              disabled={isAnalyzing}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 bg-gray-900 text-white font-bold text-sm rounded-full hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+              disabled={isAnalyzing || !canAn.analyze}
+              title={canAn.analyze ? undefined : 'Su rol no puede ejecutar el análisis'}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 bg-teal-600 text-white font-bold text-sm rounded-full hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
             >
               {isAnalyzing ? (
                 <>

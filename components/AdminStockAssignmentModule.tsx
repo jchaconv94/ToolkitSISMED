@@ -185,7 +185,10 @@ const alignConfigsWithOfficialUngets = (configs: any[], ungs: any[]): any[] => {
 };
 
 export const AdminStockAssignmentModule: React.FC = () => {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, can } = useAuth();
+  // Acciones que el rol puede usar (Configuración de Roles).
+  const canSave = can('ADMIN_STOCK_ASSIGN', 'save');
+  const canReset = can('ADMIN_STOCK_ASSIGN', 'reset');
   const [facilities, setFacilities] = useState<any[]>([]);
   const [ungetConfigs, setUngetConfigs] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
@@ -711,7 +714,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
                     : "Este establecimiento usa las columnas por omisión."}
               </p>
               <div className="flex flex-wrap items-center gap-2.5">
-                {tieneColumnasPropias && (
+                {tieneColumnasPropias && canReset && (
                   <button
                     type="button"
                     onClick={() => guardarColumnas(DEFAULT_STOCK_COLUMN_KEYS)}
@@ -723,7 +726,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
                     Restablecer por omisión
                   </button>
                 )}
-                <button
+                {canSave && <button
                   type="button"
                   onClick={() => guardarColumnas(visibleColumns)}
                   disabled={isSaving || !selectedFacilityCode || !selectedConnectionUrl || visibleColumns.length === 0}
@@ -733,7 +736,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
                     ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                     : <Save className="h-4 w-4" />}
                   {isSaving ? "Guardando..." : "Guardar columnas"}
-                </button>
+                </button>}
               </div>
             </div>
           </section>
@@ -776,7 +779,7 @@ export const AdminStockAssignmentModule: React.FC = () => {
         </div>
       )}
 
-      {!sinConexiones && (
+      {!sinConexiones && canSave && (
         <FloatingActionButton
           icon={isSaving ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <Save />}
           label="Guardar columnas"
