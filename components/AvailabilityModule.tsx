@@ -14,7 +14,7 @@ import {
 import { monthLabel } from "../services/availabilityExport";
 import { exportAvailabilityExcel } from "../services/availabilityExportClient";
 import type { DmeLevel } from "../services/stockStatus";
-import { isSeparateSite, type ProductGap } from "../services/availabilityInsights";
+import { isSeparateSite, lotRiskReport, type ProductGap } from "../services/availabilityInsights";
 import { availabilityConfigApi, classifyOptionsOf, describeFormula, factoryConfig, summaryOptionsOf, vitalCodeSet, type AvailabilityConfig } from "../services/availabilityConfig";
 import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
 import { formatNumber } from "../services/numberFormat";
@@ -322,6 +322,20 @@ export const AvailabilityModule: React.FC = () => {
   const openEstablishmentName = openCode ? (report.establishments.find((e) => e.code === openCode) ?? pharmacyReport?.establishments.find((e) => e.code === openCode))?.name : undefined;
   useModuleHeaderOverride(calculated && openCode ? { title: openEstablishmentName || openCode, subtitle: "Disponibilidad", onBack: closeEstablishment } : null);
 
+  /**
+   * Riesgo de vencimiento como lo muestra la web (FEFO por lote, por farmacia o puesto), para el
+   * Excel: por establecimiento y por farmacia, «código|producto» → unidades y valor.
+   */
+  const expiryRiskMap = () => {
+    const map: Record<string, { units: number; value: number }> = {};
+    const add = (key: string, units: number, value: number) => { const e = map[key] || (map[key] = { units: 0, value: 0 }); e.units += units; e.value += value; };
+    for (const r of lotRiskReport(byPharmacy(report.items), today).rows) {
+      add(`${r.item.ipressCode}|${r.item.medCode}`, r.atRisk, r.value);
+      if (r.item.code !== r.item.ipressCode) add(`${r.item.code}|${r.item.medCode}`, r.atRisk, r.value);
+    }
+    return map;
+  };
+
   /** Profesión de quien genera el reporte, para la portada del Excel. */
   const professionOf = async (): Promise<string | undefined> => {
     const p = user?.personnelData;
@@ -350,6 +364,7 @@ export const AvailabilityModule: React.FC = () => {
         aggregate: config.formula.aggregate,
         tformdet: tformdetSheet,
         warehouse,
+        expiryRisk: expiryRiskMap(),
       });
     } catch (e: any) {
       toast.error(e?.message || "No se pudo generar el Excel.");

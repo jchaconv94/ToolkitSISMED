@@ -51,4 +51,24 @@ describe("Excel de disponibilidad", () => {
     expect(wh.getCell(11, whHead.indexOf("EESS desabastecidos")).value).toBe(1);
     expect(wh.getCell(11, whHead.indexOf("Faltan para 2 meses (unid.)")).value).toBe(20);
   });
+
+  it("usa el riesgo de vencimiento de la web (FEFO) en vez del criterio simple", async () => {
+    const { rows } = parseAvailabilitySheet([HEADER,
+      ["R", "MR", "06503", "P.S. A", "I-1", "00001", "UNO", "TAB", 1, "M", "P", "S", 10, 10, 30],
+      ["R", "MR", "06503", "P.S. A", "I-1", "00003", "TRES", "TAB", 1, "M", "P", "S", 10, 10, 30]]);
+    const report = summarize(buildItems(rows));
+    const wb = await buildAvailabilityWorkbook({
+      report, pharmacyItems: null, months: ["202608", "202609"], scope: "all", title: "UNGET X", formulaText: "f",
+      levels: { optimo: 90, alto: 80, regular: 70 }, source: "s",
+      expiryRisk: { "06503|00003": { units: 12, value: 12 } },
+    });
+    const ws = wb.getWorksheet("Productos por establecimiento")!;
+    const header = (ws.getRow(5).values as unknown[]).map(String);
+    const col = header.indexOf("Riesgo de vencimiento");
+    expect(ws.getCell(6, col).value).toBe("");
+    expect(ws.getCell(7, col).value).toBe("12 u");
+    const at = wb.getWorksheet("Atención")!;
+    const head = (at.getRow(10).values as unknown[]).map(String);
+    expect(at.getCell(11, head.indexOf("Motivo")).value).toBe("Vencen 12 u sin usarse");
+  });
 });

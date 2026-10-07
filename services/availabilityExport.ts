@@ -279,10 +279,22 @@ export interface AvailabilityExportParams {
   warehouse?: WarehouseItem[] | null;
   /** Registros del TFORMDET del mes de corte, para revisarlos en detalle. */
   tformdet?: TformdetMonthSheet | null;
+  /**
+   * Riesgo de vencimiento calculado como en la web (por lote, FEFO, por farmacia o puesto
+   * comunal), por «código|producto»: unidades y valor que vencerían sin usarse. Sin esto se usa
+   * el criterio simple del ítem (`expiryRisk`).
+   */
+  expiryRisk?: Record<string, { units: number; value: number }>;
 }
 
 export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Promise<ExcelJS.Workbook> => {
   const { report, months, scope } = p;
+  // El mismo riesgo de vencimiento que muestra la web (FEFO por lote); sin él, el criterio simple.
+  const riskOf = (i: AvailabilityItem): { units: number; value: number } | undefined => {
+    if (!p.expiryRisk) return i.expiryRisk ? { units: i.stock, value: i.stock * (i.price || 0) } : undefined;
+    return p.expiryRisk[`${i.code}|${i.medCode}`];
+  };
+  const atRisk = (i: AvailabilityItem) => !!riskOf(i);
   const warehouse = p.warehouse ?? [];
   const hasWarehouse = warehouse.length > 0;
   // Productos de los establecimientos por código (las presentaciones fusionadas de la DME
@@ -421,9 +433,9 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
     findings.push({ big: formatNumber(desabItems.length), title: "Ítems desabastecidos con consumo", color: "#EF4444",
       text: `Faltan en más establecimientos: ${topMissing.map((t) => `${t.name} (${t.n})`).join("; ")}.` });
   }
-  const risky = report.items.filter((i) => i.expiryRisk);
+  const risky = report.items.filter(atRisk);
   if (risky.length) {
-    const value = risky.reduce((sum, i) => sum + i.stock * (i.price || 0), 0);
+    const value = risky.reduce((sum, i) => sum + (riskOf(i)?.value ?? 0), 0);
     findings.push({ big: `S/ ${formatNumber(Math.round(value))}`, title: "Stock que vencería antes de consumirse", color: "#B45309",
       text: `${formatNumber(risky.length)} ítems con riesgo de vencimiento: revisar redistribución en la hoja «Atención».` });
   }
@@ -498,7 +510,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   sheetTitle(at, "Productos que requieren atención", `${subtitle} · desabastecidos, substock y los que vencerían antes de usarse`, hasWarehouse ? 13 : 12, who);
   const rank: Record<string, number> = { [StockStatus.DESABASTECIDO]: 0, [StockStatus.SUBSTOCK]: 1 };
   const attention = report.items
-    .filter((i) => (i.status === StockStatus.DESABASTECIDO && i.cpa > 0) || i.status === StockStatus.SUBSTOCK || i.expiryRisk)
+    .filter((i) => (i.status === StockStatus.DESABASTECIDO && i.cpa > 0) || i.status === StockStatus.SUBSTOCK || atRisk(i))
     .sort((a, b) => a.microred.localeCompare(b.microred, "es") || a.name.localeCompare(b.name, "es") || (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || a.description.localeCompare(b.description, "es"));
   const ta = writeTable(at, TABLE_ROW_WITH_CARDS, [
     { header: "Microred", width: 18 }, { header: "Establecimiento", width: 28 }, { header: "Código", width: 8, align: "center" }, { header: "Producto", width: 46 },
@@ -508,7 +520,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
     ...(hasWarehouse ? [{ header: "Stock en almacén", width: 12, fmt: FMT.int }] : []),
   ], attention.map((i) => [
     i.microred, i.name, i.medCode, i.description, i.stock, i.cpa, monthsValue(i.months), STATUS_LABEL[i.status], dateText(i.nearestExpiry), i.monthsToExpiry,
-    i.status === StockStatus.DESABASTECIDO ? "Sin stock y con consumo" : i.status === StockStatus.SUBSTOCK ? "Menos de 2 meses de stock" : "Vence antes de consumirse",
+    i.status === StockStatus.DESABASTECIDO ? "Sin stock y con consumo" : i.status === StockStatus.SUBSTOCK ? "Menos de 2 meses de stock" : `Vencen ${formatNumber(riskOf(i)?.units ?? 0)} u sin usarse`,
     i.status === StockStatus.DESABASTECIDO || i.status === StockStatus.SUBSTOCK ? Math.max(0, Math.ceil(i.cpa * 2 - i.stock)) : null,
     ...(hasWarehouse ? [warehouseStockOf(i) || null] : []),
   ]), { freezeCols: 4 });
@@ -522,7 +534,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   await miniCards(wb, at, [
     { label: "Desabastecidos", value: formatNumber(attention.filter((i) => i.status === StockStatus.DESABASTECIDO).length), hint: "sin stock y con consumo", color: "#DC2626" },
     { label: "Substock", value: formatNumber(attention.filter((i) => i.status === StockStatus.SUBSTOCK).length), hint: `menos de ${p.limits?.subMax ?? 2} meses de stock`, color: "#D97706" },
-    { label: "Riesgo de vencimiento", value: formatNumber(attention.filter((i) => i.expiryRisk).length), hint: "vencerían antes de usarse", color: "#B45309" },
+    { label: "Riesgo de vencimiento", value: formatNumber(attention.filter(atRisk).length), hint: "lotes que vencerían sin usarse", color: "#B45309" },
     ...(hasWarehouse ? [{ label: "Con stock en almacén", value: formatNumber(attention.filter((i) => warehouseStockOf(i) > 0).length), hint: "se pueden cubrir", color: "#0369A1" }] : []),
   ], sheetWidthPx(at, hasWarehouse ? 13 : 12));
 
@@ -584,14 +596,14 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
     const t = writeTable(ws, 5, cols, items.map((i) => [
       i.red, i.microred, i.code, i.name, i.category, i.medCode, i.description, i.form, i.price, i.medtip, i.medpet, i.medest,
       ...i.consumption, i.stock, i.cpa, monthsValue(i.months), STATUS_LABEL[i.status], i.stock * (i.price || 0), dateText(i.nearestExpiry),
-      i.lots.length, i.lots.map((l) => `${l.lot} · ${dateText(l.expiry)} · ${l.balance}`).join("  |  "), i.monthsToExpiry, i.expiryRisk ? "Riesgo" : "",
+      i.lots.length, i.lots.map((l) => `${l.lot} · ${dateText(l.expiry)} · ${l.balance}`).join("  |  "), i.monthsToExpiry, riskOf(i) ? `${formatNumber(riskOf(i)!.units)} u` : "",
       (i.fusedFrom?.length ?? 0) > 1 ? i.fusedFrom!.join(", ") : "",
     ]), { freezeCols: 7 });
     const statusCol = fixed.length + monthCols.length + 4;
     const riskCol = statusCol + 6;
     items.forEach((i, n) => {
       paintStatus(ws.getCell(t.head + 1 + n, statusCol), i.status);
-      if (i.expiryRisk) {
+      if (atRisk(i)) {
         const cell = ws.getCell(t.head + 1 + n, riskCol);
         restyle(cell, { fill: fill("FFFEE2E2"), font: { name: FONT, size: 10, bold: true, color: { argb: "FF991B1B" } } });
       }
@@ -735,7 +747,9 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   meSection("6. Columnas de apoyo");
   meTable(["", "Columna", "Qué significa"], [1, 1, 2], [
     ["", "Cubrir 2 meses (unid.)", "Hoja «Atención»: unidades que le faltan al establecimiento para tener 2 meses de stock (CPA × 2 − stock)."],
-    ["", "Riesgo de vencimiento", "El producto vencería antes de consumirse: sus meses de provisión superan los meses que faltan para el vencimiento más próximo."],
+    ["", "Riesgo de vencimiento", p.expiryRisk
+      ? "Cada lote por separado: se usan del que vence primero al último al ritmo del CPA; lo que no alcanza a usarse antes de su fecha queda en riesgo (unidades en la columna). Los puestos comunales se evalúan con sus propios lotes y CPA; las farmacias del hospital, sumadas."
+      : "El producto vencería antes de consumirse: sus meses de provisión superan los meses que faltan para el vencimiento más próximo."],
     ["", "Valor del stock (S/)", "Stock × precio del producto."],
     ["", "Stock en almacén", "Stock del almacén al cierre del mes de corte. No cuenta en la disponibilidad; sirve para ver qué se puede cubrir."],
     ...(scope === "essential" ? [["", "Fusiona", "Códigos de las presentaciones que se sumaron en este producto (listado de códigos fusionados de DIGEMID)."]] : []),

@@ -534,6 +534,7 @@ export const EstablishmentsReport: React.FC<{
   const microreds = useMemo(() => [...new Set(report.establishments.map((e) => e.microred))].sort((a, b) => a.localeCompare(b, "es")), [report]);
   const eess = report.establishments.filter((e) => (level === "ALL" || e.level === level) && (microred === "ALL" || e.microred === microred));
   const pharmaciesOf = useMemo(() => pharmacyGroups(ctx.pharmacy), [ctx.pharmacy]);
+  const [showUntyped, setShowUntyped] = useState(false);
   const untyped = useMemo(() => (ctx.pharmacy?.establishments ?? []).filter((p) => pharmacyKind(p.code, ctx.facilityType(p.code)) === "Sin tipo"), [ctx]);
   const mrs = report.microredes.filter((m) => level === "ALL" || m.level === level);
   const switcher = (
@@ -577,9 +578,10 @@ export const EstablishmentsReport: React.FC<{
   const untypedBanner = untyped.length > 0 && (
     <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[12.5px] text-amber-800">
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-      <span>
-        <b>{untyped.length} {untyped.length === 1 ? "farmacia no tiene" : "farmacias no tienen"} tipo en el registro de Establecimientos</b> y se evalúan como puestos comunales:{" "}
-        {untyped.slice(0, 8).map((p) => `${p.code} ${p.name}`).join(" · ")}{untyped.length > 8 ? ` y ${untyped.length - 8} más` : ""}. Regístrelas como puesto comunal o farmacia para que el cálculo sea exacto.
+      <span className="min-w-0">
+        <b>{untyped.length} {untyped.length === 1 ? "farmacia no tiene" : "farmacias no tienen"} tipo en el registro de Establecimientos</b> y se evalúan como puestos comunales. Regístrelas como puesto comunal o farmacia para que el cálculo sea exacto.{" "}
+        <button type="button" onClick={() => setShowUntyped(!showUntyped)} className="font-bold underline underline-offset-2">{showUntyped ? "Ocultar" : "Ver cuáles"}</button>
+        {showUntyped && <span className="mt-1.5 block">{untyped.map((p) => `${p.code} ${p.name}`).join(" · ")}</span>}
       </span>
     </div>
   );
