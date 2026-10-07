@@ -250,6 +250,19 @@ export const AvailabilityModule: React.FC = () => {
 
   const ipressItems = useMemo<AvailabilityItem[]>(() => (computed ? (scope === "all" ? computed.all : computed.essential) : []), [computed, scope]);
   const pharmacyItems = computed ? (scope === "all" ? computed.pharmacyAll : computed.pharmacyEssential) : null;
+  // Ítems de cada farmacia (F01, F02…) por establecimiento y producto: el riesgo de vencimiento
+  // se calcula por farmacia, con sus propios lotes y su propio CPA.
+  const pharmacyIndex = useMemo(() => {
+    const m = new Map<string, AvailabilityItem[]>();
+    for (const it of pharmacyItems ?? []) {
+      if (it.code === it.ipressCode) continue;
+      const k = `${it.ipressCode}|${it.medCode}`;
+      const list = m.get(k);
+      if (list) list.push(it); else m.set(k, [it]);
+    }
+    return m;
+  }, [pharmacyItems]);
+  const byPharmacy = useCallback((items: AvailabilityItem[]) => items.flatMap((it) => (it.code === it.ipressCode ? pharmacyIndex.get(`${it.code}|${it.medCode}`) ?? [it] : [it])), [pharmacyIndex]);
   // Disponibilidad de cada farmacia y puesto comunal (F01, F02…), para abrir un establecimiento por farmacia.
   const pharmacyReport = useMemo(() => (pharmacyItems ? summarize(pharmacyItems, summaryOptionsOf(config.formula, scope, vitalCodes)) : null), [pharmacyItems, config.formula, scope, vitalCodes]);
   const report = useMemo(() => summarize(ipressItems, summaryOptionsOf(config.formula, scope, vitalCodes)), [ipressItems, config.formula, scope, vitalCodes]);
@@ -385,6 +398,7 @@ export const AvailabilityModule: React.FC = () => {
   const ctx: ReportContext = {
     report,
     pharmacy: pharmacyReport,
+    byPharmacy,
     facilityType: (code) => registry.get(code)?.type || undefined,
     months,
     levels: config.formula.levels,
