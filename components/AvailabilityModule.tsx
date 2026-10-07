@@ -402,7 +402,7 @@ export const AvailabilityModule: React.FC = () => {
 
   return (
     <div className="pb-24 md:pb-8">
-      {/* Título del reporte: UNGET y corte a la izquierda; alcance, Exportar y Configuración a la derecha */}
+      {/* Título del reporte: UNGET y corte a la izquierda; alcance y Exportar a la derecha; Configuración y otro TFORMDET en ⋯ */}
       <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <span className="hidden h-11 w-11 shrink-0 place-items-center rounded-2xl bg-teal-50 text-teal-700 sm:grid"><CalendarClock className="h-5 w-5" /></span>
@@ -418,11 +418,6 @@ export const AvailabilityModule: React.FC = () => {
           {can("AVAILABILITY", "export") && (
             <button type="button" onClick={handleExport} disabled={exporting} aria-label="Exportar Excel" className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-teal-600 px-3 text-[13px] font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60 md:px-4">
               {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}<span className="hidden sm:inline">{exporting ? "Generando…" : "Exportar"}</span>
-            </button>
-          )}
-          {isAdmin && (
-            <button type="button" onClick={() => setConfigOpen(true)} title="Configuración de la fórmula" aria-label="Configuración de la fórmula" className="hidden h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50 md:flex">
-              <Settings2 className="h-4 w-4" /><span className="hidden xl:inline">Configuración</span>
             </button>
           )}
           <button type="button" onClick={() => setActionsOpen(true)} aria-label="Más acciones" title="Más acciones" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50">
