@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Repeat2, TrendingUp, Warehouse, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Repeat2, TrendingUp, Warehouse, X } from "lucide-react";
 import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
 import { formatOneDecimal } from "../services/stockStatus";
@@ -16,6 +16,7 @@ import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, useTa
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useIsDesktop } from "./ui/useIsDesktop";
+import { BottomSheet } from "./ui/BottomSheet";
 import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type HeadAlign } from "./ui/FloatingTableHead";
 import {
   ChartCard, Donut, Gauge, HBars, InfoTip, LEVEL_COLOR, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar, TipBox, useChartTip,
@@ -625,6 +626,83 @@ const SituationBars: React.FC<{
   );
 };
 
+/**
+ * Selector compacto de farmacia de un establecimiento (todo el establecimiento, F01, F02…): un
+ * botón pequeño que abre la lista; en escritorio un desplegable con buscador si son muchas, en
+ * el celular un panel inferior. No ocupa espacio aunque el establecimiento tenga muchas.
+ */
+const PharmacyPicker: React.FC<{
+  current: string;
+  options: Array<{ code: string; name: string; hint: string; pct: number; level: DmeLevel }>;
+  onSelect: (code: string) => void;
+}> = ({ current, options, onSelect }) => {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const isDesktop = useIsDesktop();
+  const box = React.useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open || !isDesktop) return;
+    const close = (ev: MouseEvent) => { if (box.current && !box.current.contains(ev.target as Node)) setOpen(false); };
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", onKey); };
+  }, [open, isDesktop]);
+  const selected = options.find((o) => o.code === current);
+  const nq = norm(q.trim());
+  const shown = nq ? options.filter((o) => norm(`${o.name} ${o.hint}`).includes(nq)) : options;
+  const list = (
+    <div className="space-y-0.5">
+      {options.length > 6 && (
+        <div className="relative mb-2">
+          <TableSearch value={q} onChange={setQ} placeholder="Buscar farmacia…" className="!max-w-none" />
+        </div>
+      )}
+      {shown.map((o) => {
+        const on = o.code === current;
+        return (
+          <button
+            key={o.code}
+            type="button"
+            onClick={() => { setOpen(false); setQ(""); if (!on) onSelect(o.code); }}
+            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors ${on ? "bg-teal-50" : "hover:bg-slate-50"}`}
+          >
+            <span className="min-w-0 flex-1">
+              <span className={`block truncate text-[13px] font-bold ${on ? "text-teal-800" : "text-slate-800"}`}>{o.name}</span>
+              <span className="block truncate text-[11.5px] text-slate-500">{o.hint}</span>
+            </span>
+            <span className="font-mono text-[13px] font-black" style={{ color: LEVEL_COLOR[o.level] }}>{pctText(o.pct)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+  return (
+    <div ref={box} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className={`flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-bold transition-colors ${open ? "border-teal-300 bg-teal-50 text-teal-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+      >
+        <Building2 className="h-3.5 w-3.5" />
+        <span className="max-w-[200px] truncate">{current.length > 5 ? `${current.slice(5)} · ${selected?.name ?? ""}` : `Ver por farmacia (${options.length - 1})`}</span>
+        <ChevronRight className={`h-3.5 w-3.5 transition-transform ${open ? "-rotate-90" : "rotate-90"}`} />
+      </button>
+      {isDesktop ? (
+        open && (
+          <div className="absolute left-0 top-9 z-40 max-h-[360px] w-[340px] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+            <p className="px-3 pb-1.5 pt-1 text-[11px] font-black uppercase tracking-wider text-slate-400">Ver por farmacia</p>
+            {list}
+          </div>
+        )
+      ) : (
+        <BottomSheet open={open} title="Ver por farmacia" onClose={() => setOpen(false)}>{list}</BottomSheet>
+      )}
+    </div>
+  );
+};
+
 /* ---------------------------------------------------------------- Detalle de un establecimiento */
 
 export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; onClose: () => void; onSwitch: (code: string) => void }> = ({ ctx, code, onClose, onSwitch }) => {
@@ -654,24 +732,23 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
   const isPharmacy = code !== ipressCode;
   return (
     <div className="space-y-4">
-      {/* Ruta de regreso (en el celular lo hace la flecha de la cabecera) */}
-      <nav aria-label="Ruta" className="hidden items-center gap-1.5 text-[13px] md:flex">
-        <button type="button" onClick={onClose} className="flex items-center gap-1.5 rounded-lg px-2 py-1 font-bold text-teal-700 transition-colors hover:bg-teal-50">
-          <ArrowLeft className="h-4 w-4" />Establecimientos
+      <section className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5 md:pr-14">
+        <button type="button" onClick={onClose} aria-label="Cerrar" title="Cerrar" className="absolute right-3 top-3 hidden h-9 w-9 place-items-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 md:grid">
+          <X className="h-5 w-5" />
         </button>
-        {isPharmacy && parent && (
-          <>
-            <ChevronRight className="h-4 w-4 text-slate-300" />
-            <button type="button" onClick={() => onSwitch(parent.code)} className="rounded-lg px-2 py-1 font-semibold text-slate-600 transition-colors hover:bg-slate-100">{parent.name}</button>
-          </>
-        )}
-        <ChevronRight className="h-4 w-4 text-slate-300" />
-        <span className="truncate px-2 font-semibold text-slate-900">{e.name}</span>
-      </nav>
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2"><CodeChip code={e.code} /><LevelChip level={e.level} /><KindChip kind={pharmacyKind(e.code, ctx.facilityType(e.code))} /></div>
+            <div className="flex flex-wrap items-center gap-2">
+              <CodeChip code={e.code} /><LevelChip level={e.level} /><KindChip kind={pharmacyKind(e.code, ctx.facilityType(e.code))} />
+              {siblings.length > 0 && (
+                <PharmacyPicker
+                  current={code}
+                  options={[...(parent ? [{ code: parent.code, name: "Todo el establecimiento", hint: `${siblings.length} farmacias sumadas`, pct: parent.pct, level: parent.level }] : []),
+                    ...siblings.map((f) => ({ code: f.code, name: f.name, hint: [f.code, pharmacyKind(f.code, ctx.facilityType(f.code))].filter(Boolean).join(" · "), pct: f.pct, level: f.level }))]}
+                  onSelect={onSwitch}
+                />
+              )}
+            </div>
             <h2 className="mt-1 text-[20px] font-black text-slate-900">{e.name}</h2>
             <p className="text-[12.5px] text-slate-500">{isPharmacy && parent ? `${parent.name} · ` : ""}Microred {e.microred}{e.category ? ` · ${e.category}` : ""} · {e.total} ítems evaluados</p>
           </div>
@@ -680,32 +757,6 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
             <p className="text-[32px] font-black leading-none" style={{ color: LEVEL_COLOR[e.level] }}>{pctText(e.pct)}</p>
           </div>
         </div>
-        {siblings.length > 0 && (
-          <div className="mt-4 border-t border-slate-100 pt-3">
-            <p className="mb-2 text-[11px] font-black uppercase tracking-wider text-slate-400">Ver por farmacia</p>
-            <div className="hide-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1">
-              {[...(parent ? [parent] : []), ...siblings].map((f) => {
-                const on = f.code === code;
-                const kind = f.code === ipressCode ? "Todo el establecimiento" : pharmacyKind(f.code, ctx.facilityType(f.code));
-                return (
-                  <button
-                    key={f.code}
-                    type="button"
-                    onClick={() => onSwitch(f.code)}
-                    aria-pressed={on}
-                    className={`flex shrink-0 items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors ${on ? "border-teal-600 bg-teal-50 ring-1 ring-teal-600" : "border-slate-200 bg-white hover:bg-slate-50"}`}
-                  >
-                    <span className="min-w-0">
-                      <span className="block max-w-[220px] truncate text-[12.5px] font-bold text-slate-800">{f.code === ipressCode ? "Todo el establecimiento" : f.name}</span>
-                      <span className="block text-[11px] text-slate-500">{f.code === ipressCode ? `${siblings.length} farmacias sumadas` : `${f.code}${kind ? ` · ${kind}` : ""}`}</span>
-                    </span>
-                    <span className="font-mono text-[14px] font-black" style={{ color: LEVEL_COLOR[f.level] }}>{pctText(f.pct)}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </section>
 
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
