@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Info } from "lucide-react";
 import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
@@ -24,6 +25,56 @@ export const STATUS_COLOR: Record<StockStatus, string> = {
 };
 
 const pct1 = (v: number) => `${v.toFixed(1).replace(".", ",")} %`;
+
+/* ---------------------------------------------------------------- Recuadro al pasar el mouse */
+
+type TipState = { x: number; y: number; content: React.ReactNode } | null;
+
+/**
+ * Recuadro que sigue al mouse sobre un gráfico. `bind(contenido)` se pone en cada elemento
+ * (barra, segmento) y `layer` se dibuja una vez en el gráfico.
+ */
+export const useChartTip = () => {
+  const [tip, setTip] = useState<TipState>(null);
+  useEffect(() => {
+    if (!tip) return;
+    const hide = () => setTip(null);
+    window.addEventListener("scroll", hide, true);
+    return () => window.removeEventListener("scroll", hide, true);
+  }, [tip]);
+  const bind = (content: React.ReactNode) => ({
+    onMouseMove: (e: React.MouseEvent) => setTip({ x: e.clientX, y: e.clientY, content }),
+    onMouseLeave: () => setTip(null),
+  });
+  const flip = tip ? tip.x > window.innerWidth - 280 : false;
+  const layer = tip
+    ? createPortal(
+        <div
+          role="tooltip"
+          className="pointer-events-none fixed z-[100002] max-w-[260px] rounded-xl bg-slate-900 px-3 py-2 text-[12px] text-white shadow-xl"
+          style={{ left: tip.x + (flip ? -14 : 14), top: tip.y + 14, transform: flip ? "translateX(-100%)" : undefined }}
+        >
+          {tip.content}
+        </div>,
+        document.body,
+      )
+    : null;
+  return { bind, layer, hide: () => setTip(null) };
+};
+
+/** Contenido del recuadro: título con su color y filas etiqueta–valor. */
+export const TipBox: React.FC<{ title: string; color?: string; rows?: Array<[string, React.ReactNode]>; note?: string }> = ({ title, color, rows = [], note }) => (
+  <>
+    <span className="flex items-center gap-2 font-bold">
+      {color && <span className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ background: color }} />}
+      <span className="min-w-0">{title}</span>
+    </span>
+    {rows.map(([k, v]) => (
+      <span key={k} className="mt-0.5 flex justify-between gap-4 text-slate-300"><span>{k}</span><b className="font-mono text-white">{v}</b></span>
+    ))}
+    {note && <span className="mt-1 block text-[11px] text-slate-400">{note}</span>}
+  </>
+);
 
 /* ---------------------------------------------------------------- Tarjeta de gráfico */
 
@@ -99,11 +150,16 @@ export const Gauge: React.FC<{ pct: number; level: DmeLevel; levels: LevelThresh
   };
   const zones: Array<[number, number, DmeLevel]> = [[min, levels.regular, "BAJO"], [levels.regular, levels.alto, "REGULAR"], [levels.alto, levels.optimo, "ALTO"], [levels.optimo, 100, "OPTIMO"]];
   const [nx, ny] = point(pct, r - 30);
+  const tip = useChartTip();
+  const zoneLabel: Record<DmeLevel, string> = { OPTIMO: "Óptimo", ALTO: "Alto", REGULAR: "Regular", BAJO: "Bajo" };
+  const zoneRange = (a: number, b: number, l: DmeLevel) => (l === "BAJO" ? `menos de ${b} %` : l === "OPTIMO" ? `${a} % o más` : `${a} a ${b} %`);
   return (
     <div className="flex flex-col items-center">
+      {tip.layer}
       <svg viewBox="0 0 320 172" className="w-full max-w-[340px]" role="img" aria-label={`Disponibilidad ${pct1(pct)}`}>
         {zones.map(([a, b, l]) => (
-          <path key={l} d={arc(a, b)} stroke={LEVEL_COLOR[l]} strokeOpacity={l === level ? 1 : 0.28} strokeWidth={w} fill="none" />
+          <path key={l} d={arc(a, b)} stroke={LEVEL_COLOR[l]} strokeOpacity={l === level ? 1 : 0.28} strokeWidth={w} fill="none" className="cursor-default transition-[stroke-opacity] hover:[stroke-opacity:0.9]"
+            {...tip.bind(<TipBox title={`Nivel ${zoneLabel[l]}`} color={LEVEL_COLOR[l]} rows={[["Rango", zoneRange(a, b, l)]]} note={l === level ? `Aquí está la UNGET: ${pct1(pct)}` : undefined} />)} />
         ))}
         {[levels.regular, levels.alto, levels.optimo].map((v) => {
           const [tx, ty] = point(v, r + 24);
@@ -131,48 +187,65 @@ export const Donut: React.FC<{
 }> = ({ segments, centerValue, centerLabel, onSelect, selected }) => {
   const total = segments.reduce((a, s) => a + s.value, 0) || 1;
   const r = 70, c = 2 * Math.PI * r;
+  const [hover, setHover] = useState<string | null>(null);
+  const tip = useChartTip();
+  const focus = hover ?? selected ?? null;
+  const focused = segments.find((s) => s.key === focus);
   let offset = 0;
   return (
-    <div className="flex flex-col items-center gap-5 sm:flex-row sm:gap-8">
-      <div className="relative w-[190px] shrink-0">
-        <svg viewBox="0 0 180 180" className="w-full -rotate-90">
+    <div className="mx-auto flex max-w-[640px] flex-col items-center gap-5 sm:flex-row sm:justify-center sm:gap-10">
+      {tip.layer}
+      <div className="relative w-[200px] shrink-0">
+        <svg viewBox="0 0 180 180" className="w-full -rotate-90" onMouseLeave={() => setHover(null)}>
           {segments.map((s) => {
             const len = (s.value / total) * c;
+            const dim = focus && focus !== s.key;
             const el = (
               <circle
                 key={s.key}
-                cx={90} cy={90} r={r} fill="none" stroke={s.color} strokeWidth={selected && selected !== s.key ? 18 : 26}
+                cx={90} cy={90} r={r} fill="none" stroke={s.color} strokeWidth={focus === s.key ? 30 : dim ? 20 : 26}
                 strokeDasharray={`${len} ${c - len}`} strokeDashoffset={-offset}
-                className={onSelect ? "cursor-pointer transition-all" : ""}
-                opacity={selected && selected !== s.key ? 0.35 : 1}
+                className={`transition-all duration-150 ${onSelect ? "cursor-pointer" : ""}`}
+                opacity={dim ? 0.35 : 1}
+                onMouseEnter={() => setHover(s.key)}
                 onClick={onSelect ? () => onSelect(s.key) : undefined}
+                {...tip.bind(<TipBox title={s.label} color={s.color} rows={[["Ítems", formatNumber(s.value)], ["Del total", pct1((s.value / total) * 100)]]} />)}
               />
             );
             offset += len;
             return el;
           })}
         </svg>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-[26px] font-black leading-none text-slate-900">{centerValue}</span>
-          <span className="mt-1 text-[12px] font-semibold text-slate-500">{centerLabel}</span>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+          <span className="text-[26px] font-black leading-none" style={{ color: focused?.color ?? "#0f172a" }}>{focused ? formatNumber(focused.value) : centerValue}</span>
+          <span className="mt-1 max-w-[110px] text-[12px] font-semibold leading-tight text-slate-500">{focused ? focused.label : centerLabel}</span>
         </div>
       </div>
-      <ul className="w-full min-w-0 flex-1 space-y-1">
-        {segments.map((s) => (
-          <li key={s.key}>
-            <button
-              type="button"
-              disabled={!onSelect}
-              onClick={onSelect ? () => onSelect(s.key) : undefined}
-              className={`grid w-full grid-cols-[14px_1fr_auto_64px] items-center gap-3 rounded-lg px-2 py-1.5 text-left text-[13.5px] transition-colors ${onSelect ? "hover:bg-slate-50" : ""} ${selected === s.key ? "bg-slate-100" : ""}`}
-            >
-              <span className="h-3 w-3 rounded-[4px]" style={{ background: s.color }} />
-              <span className="truncate font-semibold text-slate-700">{s.label}</span>
-              <span className="font-mono font-bold text-slate-900">{formatNumber(s.value)}</span>
-              <span className="text-right font-mono text-slate-400">{pct1((s.value / total) * 100)}</span>
-            </button>
-          </li>
-        ))}
+      <ul className="w-full max-w-[340px] space-y-1">
+        {segments.map((s) => {
+          const share = (s.value / total) * 100;
+          return (
+            <li key={s.key}>
+              <button
+                type="button"
+                onMouseEnter={() => setHover(s.key)}
+                onMouseLeave={() => setHover(null)}
+                onClick={onSelect ? () => onSelect(s.key) : undefined}
+                className={`w-full rounded-lg px-2.5 py-1.5 text-left transition-colors ${onSelect ? "cursor-pointer" : "cursor-default"} ${focus === s.key ? "bg-slate-100" : "hover:bg-slate-50"} ${focus && focus !== s.key ? "opacity-60" : ""}`}
+              >
+                <span className="grid grid-cols-[12px_1fr_auto_52px] items-center gap-x-2.5 text-[13.5px]">
+                  <span className="h-3 w-3 rounded-[4px]" style={{ background: s.color }} />
+                  <span className="truncate font-semibold text-slate-700">{s.label}</span>
+                  <span className="font-mono font-bold text-slate-900">{formatNumber(s.value)}</span>
+                  <span className="text-right font-mono text-[12.5px] text-slate-400">{pct1(share)}</span>
+                </span>
+                <span className="ml-[22px] mt-1 block h-1 overflow-hidden rounded-full bg-slate-100">
+                  <span className="block h-full rounded-full" style={{ width: `${share}%`, background: s.color }} />
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -189,15 +262,22 @@ export const LevelColumns: React.FC<{
 }> = ({ counts, ranges, labels, onSelect, selected }) => {
   const levels: DmeLevel[] = ["OPTIMO", "ALTO", "REGULAR", "BAJO"];
   const max = Math.max(1, ...levels.map((l) => counts[l]));
+  const total = levels.reduce((a, l) => a + counts[l], 0) || 1;
+  const [hover, setHover] = useState<DmeLevel | null>(null);
+  const tip = useChartTip();
+  const focus = hover ?? selected ?? null;
   return (
     <div className="grid h-[230px] grid-cols-4 items-end gap-3 md:gap-6">
+      {tip.layer}
       {levels.map((l) => (
         <button
           key={l}
           type="button"
           disabled={!onSelect}
           onClick={onSelect ? () => onSelect(l) : undefined}
-          className={`group flex h-full flex-col items-center justify-end rounded-xl pb-1 transition-opacity ${selected && selected !== l ? "opacity-40" : ""}`}
+          onMouseEnter={() => setHover(l)}
+          {...(() => { const b = tip.bind(<TipBox title={`Nivel ${labels[l]}`} color={LEVEL_COLOR[l]} rows={[["Establecimientos", counts[l]], ["Del total", pct1((counts[l] / total) * 100)], ["Rango", ranges[l]]]} note={onSelect ? "Clic para ver la lista" : undefined} />); return { onMouseMove: b.onMouseMove, onMouseLeave: () => { b.onMouseLeave(); setHover(null); } }; })()}
+          className={`group flex h-full flex-col items-center justify-end rounded-xl pb-1 transition-opacity ${focus && focus !== l ? "opacity-40" : ""}`}
         >
           <span className="mb-1.5 text-[22px] font-black text-slate-900">{counts[l]}</span>
           <span
@@ -225,15 +305,18 @@ export const HBars: React.FC<{
   labelWidth?: string;
 }> = ({ rows, max, marks = [], onSelect, labelWidth = "w-28 md:w-40" }) => {
   const top = max ?? Math.max(1, ...rows.map((r) => r.value));
+  const tip = useChartTip();
   return (
     <div className="space-y-2">
+      {tip.layer}
       {rows.map((r) => (
         <button
           key={r.key}
           type="button"
           disabled={!onSelect}
           onClick={onSelect ? () => onSelect(r.key) : undefined}
-          className={`flex w-full items-center gap-3 rounded-lg py-0.5 text-left ${onSelect ? "hover:bg-slate-50" : ""}`}
+          {...tip.bind(<TipBox title={r.label} color={r.color} rows={[["Valor", r.text ?? r.value]]} note={[r.sub, onSelect ? "Clic para abrir" : ""].filter(Boolean).join(" · ") || undefined} />)}
+          className={`group flex w-full items-center gap-3 rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-slate-50 ${onSelect ? "cursor-pointer" : "cursor-default"}`}
         >
           <span className={`${labelWidth} shrink-0`}>
             <span className="block truncate text-[13px] font-semibold text-slate-700" title={r.label}>{r.label}</span>
@@ -243,7 +326,7 @@ export const HBars: React.FC<{
             {marks.map((m) => (
               <span key={m} className="absolute inset-y-[-3px] w-px border-l border-dashed border-slate-300" style={{ left: `${(m / top) * 100}%` }} />
             ))}
-            <span className="absolute inset-y-0 left-0 rounded-md" style={{ width: `${Math.max(1.5, Math.min(100, (r.value / top) * 100))}%`, background: r.color }} />
+            <span className="absolute inset-y-0 left-0 rounded-md transition-[filter] group-hover:brightness-110" style={{ width: `${Math.max(1.5, Math.min(100, (r.value / top) * 100))}%`, background: r.color }} />
           </span>
           <span className="w-16 shrink-0 text-right font-mono text-[12.5px] font-bold text-slate-800 md:w-20 md:text-[13px]">{r.text ?? r.value}</span>
         </button>
@@ -277,8 +360,11 @@ export const RankingChart: React.FC<{ rows: RankRow[]; levels: LevelThresholds; 
   const bands: Array<[number, number, DmeLevel]> = [[levels.optimo, 100, "OPTIMO"], [levels.alto, levels.optimo, "ALTO"], [levels.regular, levels.alto, "REGULAR"], [minPct, levels.regular, "BAJO"]];
   const ticks = [];
   for (let v = minPct; v <= 100; v += 10) ticks.push(v);
+  const [hover, setHover] = useState<string | null>(null);
+  const tip = useChartTip();
   return (
     <div className="scrollbar-x overflow-x-auto">
+      {tip.layer}
       <svg viewBox={`0 0 ${width} ${height}`} style={{ minWidth: Math.min(width, 900) }} className="w-full" role="img" aria-label="Ranking de establecimientos">
         {bands.map(([a, b, l]) => (
           <g key={l}>
@@ -293,9 +379,16 @@ export const RankingChart: React.FC<{ rows: RankRow[]; levels: LevelThresholds; 
           const x = left + i * slot + 5;
           const bw = slot - 10;
           return (
-            <g key={r.key} className={onSelect ? "cursor-pointer" : ""} onClick={onSelect ? () => onSelect(r.key) : undefined}>
-              <title>{`${r.label}: ${pct1(r.pct)}`}</title>
-              <rect x={x} y={y(r.pct)} width={bw} height={top + plotH - y(r.pct)} rx={3} fill={LEVEL_COLOR[r.level]} className="transition-opacity hover:opacity-80" />
+            <g
+              key={r.key}
+              className={onSelect ? "cursor-pointer" : ""}
+              onClick={onSelect ? () => onSelect(r.key) : undefined}
+              onMouseEnter={() => setHover(r.key)}
+              opacity={hover && hover !== r.key ? 0.45 : 1}
+              {...(() => { const b = tip.bind(<TipBox title={r.label} color={LEVEL_COLOR[r.level]} rows={[["Disponibilidad", pct1(r.pct)], ["Nivel", labels[r.level]], ["Puesto", `${i + 1} de ${sorted.length}`]]} note={onSelect ? "Clic para abrir el establecimiento" : undefined} />); return { onMouseMove: b.onMouseMove, onMouseLeave: () => { b.onMouseLeave(); setHover(null); } }; })()}
+            >
+              <rect x={x - 4} y={top} width={bw + 8} height={plotH} fill="transparent" />
+              <rect x={x} y={y(r.pct)} width={bw} height={top + plotH - y(r.pct)} rx={3} fill={LEVEL_COLOR[r.level]} />
               <text x={x + bw / 2} y={y(r.pct) - 6} textAnchor="middle" className="fill-slate-700 text-[11px] font-bold">{Math.round(r.pct)}</text>
               <text x={x + bw / 2} y={top + plotH + 10} transform={`rotate(-50 ${x + bw / 2} ${top + plotH + 10})`} textAnchor="end" className="fill-slate-600 text-[11px]">
                 {r.label.length > 22 ? `${r.label.slice(0, 21)}…` : r.label}
@@ -329,8 +422,12 @@ export const MonthlyBars: React.FC<{
   const plotH = height - top - bottom;
   const max = Math.max(1, cpa ?? 0, ...values) * 1.1;
   const y = (v: number) => top + plotH - (v / max) * plotH;
+  const [hover, setHover] = useState<number | null>(null);
+  const tip = useChartTip();
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label="Consumo mensual">
+    <>
+    {tip.layer}
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label="Consumo mensual" onMouseLeave={() => setHover(null)}>
       {[0, 0.5, 1].map((f) => (
         <g key={f}>
           <line x1={left} x2={width - right} y1={y(max * f / 1.1)} y2={y(max * f / 1.1)} stroke="#e2e8f0" />
@@ -342,21 +439,27 @@ export const MonthlyBars: React.FC<{
         const bw = slot - 18;
         const hl = highlight === i;
         return (
-          <g key={i}>
-            <rect x={x} y={y(v)} width={bw} height={Math.max(0, top + plotH - y(v))} rx={3} fill={hl ? "#dc2626" : color} opacity={highlight !== null && !hl ? 0.55 : 1} />
+          <g
+            key={i}
+            onMouseEnter={() => setHover(i)}
+            {...tip.bind(<TipBox title={labels[i]} color={hl ? "#dc2626" : color} rows={[["Valor", format(v)], ...(cpa ? [[lineLabel, cpa >= 100 ? format(cpa) : cpa.toFixed(1).replace(".", ",")] as [string, string], ["Frente al promedio", cpa > 0 ? `${v >= cpa ? "+" : ""}${Math.round(((v - cpa) / cpa) * 100)} %` : "—"] as [string, string]] : [])]} />)}
+          >
+            <rect x={left + i * slot + 2} y={top} width={slot - 4} height={plotH} rx={6} fill={hover === i ? "#f1f5f9" : "transparent"} />
+            <rect x={x} y={y(v)} width={bw} height={Math.max(0, top + plotH - y(v))} rx={3} fill={hl ? "#dc2626" : color} opacity={hover === i ? 1 : highlight !== null && !hl ? 0.8 : 1} />
             {v > 0 && <text x={x + bw / 2} y={y(v) - 4} textAnchor="middle" className="fill-slate-600 text-[10px] font-bold">{format(v)}</text>}
             <text x={x + bw / 2} y={height - 8} textAnchor="middle" className="fill-slate-500 text-[10px]">{labels[i]}</text>
           </g>
         );
       })}
       {cpa !== undefined && cpa > 0 && (
-        <g>
+        <g pointerEvents="none">
           <line x1={left} x2={width - right} y1={y(cpa)} y2={y(cpa)} stroke="#0f172a" strokeDasharray="5 4" strokeWidth={1.5} />
           <rect x={left + 2} y={y(cpa) - 9} width={(lineLabel.length + format(cpa).length + 2) * 6.2} height={18} rx={4} fill="#0f172a" />
           <text x={left + 8} y={y(cpa)} dominantBaseline="middle" className="fill-white text-[10.5px] font-bold">{lineLabel} {cpa >= 100 ? format(cpa) : cpa.toFixed(1).replace(".", ",")}</text>
         </g>
       )}
     </svg>
+    </>
   );
 };
 
@@ -376,9 +479,13 @@ export const Sparkline: React.FC<{ values: number[]; highlight?: number | null; 
 /** Barra apilada de situaciones (una fila de tabla). */
 export const StackBar: React.FC<{ parts: Array<{ value: number; color: string; label: string }>; className?: string }> = ({ parts, className = "h-2.5 w-40" }) => {
   const total = parts.reduce((a, p) => a + p.value, 0) || 1;
+  const tip = useChartTip();
   return (
-    <span className={`flex overflow-hidden rounded-full bg-slate-100 ${className}`}>
-      {parts.map((p) => p.value > 0 && <span key={p.label} title={`${p.label}: ${p.value}`} style={{ width: `${(p.value / total) * 100}%`, background: p.color }} />)}
+    <span className={`flex overflow-hidden rounded-full bg-slate-100 ${className}`} {...tip.bind(
+      <>{parts.map((p) => <span key={p.label} className="flex items-center justify-between gap-4"><span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: p.color }} />{p.label}</span><b className="font-mono">{formatNumber(p.value)} · {pct1((p.value / total) * 100)}</b></span>)}</>,
+    )}>
+      {tip.layer}
+      {parts.map((p) => p.value > 0 && <span key={p.label} style={{ width: `${(p.value / total) * 100}%`, background: p.color }} />)}
     </span>
   );
 };
