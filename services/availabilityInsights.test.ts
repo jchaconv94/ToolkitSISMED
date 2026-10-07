@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import type { AvailabilityItem } from "./availabilityReport";
 import {
-  abcXyzReport, consumptionReport, isSeparateSite, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
+  abcXyzReport, asSupplier, consumptionReport, isSeparateSite, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
 } from "./availabilityInsights";
 
 const today = new Date(2026, 9, 7);
@@ -136,5 +136,17 @@ describe("farmacias del hospital y puestos comunales", () => {
     expect(pharmacyKind("06528F02", "PUESTO_COMUNAL")).toBe("Puesto comunal");
     expect(pharmacyKind("06528F03")).toBe("Sin tipo");
     expect(pharmacyKind("06502")).toBeNull();
+  });
+
+  it("la F01 que abastece a sus puestos cuenta lo que les entrega en su ritmo de salida", () => {
+    // Dispensa 10 al mes y entrega 20 a sus puestos (OTRAS_SAL): para el vencimiento salen 30.
+    const f01 = item({ code: "06520F01", ipressCode: "06520", cpa: 10, otherOut: Array(12).fill(20), lots: [{ lot: "A", expiry: inMonths(3), balance: 90 }] });
+    expect(lotRiskOf(f01, today)[0].atRisk).toBe(60);
+    const supplier = asSupplier(f01);
+    expect(supplier.cpa).toBe(30);
+    expect(supplier.dispensedCpa).toBe(10);
+    expect(lotRiskOf(supplier, today)).toHaveLength(0);
+    // Sin otras salidas no cambia nada.
+    expect(asSupplier(item({ cpa: 10 }))).toEqual(item({ cpa: 10 }));
   });
 });

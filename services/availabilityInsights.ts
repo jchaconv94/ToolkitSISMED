@@ -1,5 +1,5 @@
 import { StockStatus } from "../types";
-import type { AvailabilityItem, Lot, WarehouseItem } from "./availabilityReport";
+import { averageConsumption, sumSeries, type AvailabilityItem, type Lot, type WarehouseItem } from "./availabilityReport";
 
 /**
  * Reportes de análisis del módulo Disponibilidad (2026-10-07), calculados en el navegador a
@@ -459,3 +459,15 @@ export const pharmacyKind = (code: string, type?: string): string | null => {
  * puesto comunal, para no esconder un riesgo (decisión del usuario, 2026-10-07).
  */
 export const isSeparateSite = (code: string, type?: string): boolean => /F\d{2}$/i.test(code) && !/F01$/i.test(code) && type !== "FARMACIA";
+
+/**
+ * La F01 que abastece a sus puestos comunales, para el riesgo de vencimiento (punto A de la
+ * auditoría, 2026-10-07). Lo que entrega a sus puestos lo registra como OTRAS_SAL, que no es
+ * consumo: con solo lo que dispensa, su ritmo parece mucho más lento y sus lotes salen «en
+ * riesgo» aunque se vayan a los puestos. Aquí su CPA es el de todo lo que sale (consumo +
+ * otras salidas); `dispensedCpa` guarda el de solo lo dispensado. La disponibilidad no cambia.
+ */
+export const asSupplier = (unit: AvailabilityItem): AvailabilityItem => {
+  if (!unit.otherOut?.some((v) => v > 0)) return unit;
+  return { ...unit, cpa: averageConsumption(sumSeries(unit.consumption, unit.otherOut)!), dispensedCpa: unit.cpa };
+};

@@ -14,7 +14,7 @@ import {
 import { monthLabel } from "../services/availabilityExport";
 import { exportAvailabilityExcel } from "../services/availabilityExportClient";
 import type { DmeLevel } from "../services/stockStatus";
-import { isSeparateSite, lotRiskReport, type ProductGap } from "../services/availabilityInsights";
+import { asSupplier, isSeparateSite, lotRiskReport, type ProductGap } from "../services/availabilityInsights";
 import { availabilityConfigApi, classifyOptionsOf, describeFormula, factoryConfig, summaryOptionsOf, vitalCodeSet, type AvailabilityConfig } from "../services/availabilityConfig";
 import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
 import { formatNumber } from "../services/numberFormat";
@@ -267,6 +267,9 @@ export const AvailabilityModule: React.FC = () => {
    * los puestos comunales (y las F02+ sin tipo en el registro, por prudencia) van separados,
    * cada uno con sus lotes y su consumo; la F01 y las farmacias del hospital (tipo FARMACIA)
    * se suman como una sola, porque el stock se mueve entre ellas dentro del mismo local.
+   * Una F01 sola (sin farmacias del hospital) con puestos los abastece: su ritmo de salida suma
+   * lo que les entrega (OTRAS_SAL, `asSupplier`). En el hospital no se suma, porque ahí las
+   * otras salidas de la F01 van sobre todo a sus propias farmacias, que ya están en la unidad.
    */
   const byPharmacy = useCallback((items: AvailabilityItem[]) => items.flatMap((it) => {
     if (it.code !== it.ipressCode) return [it];
@@ -275,7 +278,7 @@ export const AvailabilityModule: React.FC = () => {
     const separate = list.filter((p) => isSeparateSite(p.code, registry.get(p.code)?.type));
     if (!separate.length) return [it];
     const hospital = list.filter((p) => !separate.includes(p));
-    if (hospital.length <= 1) return [...separate, ...hospital];
+    if (hospital.length <= 1) return [...separate, ...hospital.map(asSupplier)];
     const consumption = it.consumption.map((_, i) => hospital.reduce((a, p) => a + (p.consumption[i] || 0), 0));
     const merged: AvailabilityItem = {
       ...hospital[0],
