@@ -47,6 +47,12 @@ export interface ReportContext {
   openEstablishment: (code: string) => void;
   /** Abre el panel de un producto; `list` es la lista en que está, para pasar al anterior o al siguiente. */
   openProduct: (item: AvailabilityItem, list?: AvailabilityItem[]) => void;
+  /**
+   * Cambia cada ítem de un establecimiento con farmacias por los de sus farmacias (F01, F02…):
+   * los lotes son de cada farmacia y se consumen al ritmo de cada una, así que el riesgo de
+   * vencimiento se calcula por farmacia, no sumado.
+   */
+  byPharmacy: (items: AvailabilityItem[]) => AvailabilityItem[];
   goTab: (tab: ReportTab) => void;
 }
 
@@ -377,7 +383,7 @@ const INFO = {
   ranking: <P>Cada barra es un establecimiento, de mayor a menor disponibilidad. El color de fondo marca el nivel. Al tocar una barra se abre el establecimiento.</P>,
   expiry: (
     <>
-      <P>Cada lote se revisa por separado. Los lotes se usan del que vence primero al último, al ritmo del consumo promedio mensual (CPA).</P>
+      <P>Cada lote se revisa por separado. Los lotes se usan del que vence primero al último, al ritmo del consumo promedio mensual (CPA). En un establecimiento con farmacias o puestos comunales, cada uno con sus propios lotes y su propio CPA.</P>
       <P>Lo que no alcanza a usarse antes de su fecha de vencimiento queda en riesgo, y se valoriza a su precio.</P>
       <Ex>CPA 10 al mes. Lote A: 40 unidades, vence en 2 meses → se usan 20, quedan <b>20 en riesgo</b>. Lote B: 30 unidades, vence en 12 meses → se usan las 30 (alcanza el tiempo).</Ex>
     </>
@@ -434,7 +440,7 @@ const INFO = {
 
 export const SummaryReport: React.FC<{ ctx: ReportContext; levelCounts: Record<DmeLevel, number>; onLevel: (l: DmeLevel) => void; onMicrored: (m: string) => void }> = ({ ctx, levelCounts, onLevel, onMicrored }) => {
   const { report, levels: lv } = ctx;
-  const risk = useMemo(() => lotRiskReport(report.items, ctx.today), [report.items, ctx.today]);
+  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(report.items), ctx.today), [ctx.byPharmacy, report.items, ctx.today]);
   const over = useMemo(() => overstockReport(report.items, ctx.sobreMin), [report.items, ctx.sobreMin]);
   const redis = useMemo(() => redistributionReport(report.items, ctx.subMax, ctx.sobreMin), [report.items, ctx.subMax, ctx.sobreMin]);
   const wh = useMemo(() => warehouseReport(ctx.warehouse, report.items, ctx.subMax), [ctx.warehouse, report.items, ctx.subMax]);
@@ -754,7 +760,7 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
   const siblings = useMemo(() => pharmacyGroups(ctx.pharmacy).get(ipressCode) ?? [], [ctx.pharmacy, ipressCode]);
   const parent = ctx.report.establishments.find((x) => x.code === ipressCode);
   const [status, setStatus] = useState<StockStatus | "ALL" | "RISK">("ALL");
-  const risk = useMemo(() => lotRiskReport(items, ctx.today), [items, ctx.today]);
+  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(items), ctx.today), [ctx.byPharmacy, items, ctx.today]);
   const riskKeys = useMemo(() => new Set(risk.rows.map((r) => r.item.medCode)), [risk]);
   const monthlyValue = useMemo(() => ctx.months.map((_, i) => items.reduce((a, it) => a + (it.consumption[i] || 0) * (it.price || 0), 0)), [items, ctx.months]);
   const avgValue = monthlyValue.filter((v) => v > 0).reduce((a, b) => a + b, 0) / Math.max(1, monthlyValue.filter((v) => v > 0).length);
@@ -901,8 +907,13 @@ const DrawerNavButtons: React.FC<{ nav?: DrawerNav }> = ({ nav }) => {
 export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityItem | null; onClose: () => void; nav?: DrawerNav }> = ({ ctx, item, onClose, nav }) => {
   useDrawerKeys(!!item, onClose, nav);
   if (!item) return null;
-  const lots = lotRiskOf(item, ctx.today);
-  const riskByLot = new Map(lots.map((l) => [l.lot.lot + "|" + l.lot.expiry?.getTime(), l]));
+  // Los lotes de un establecimiento con farmacias se muestran y evalúan por farmacia.
+  const sites = ctx.byPharmacy([item]);
+  const bySite = sites.length > 1 || sites[0] !== item;
+  const lotRows = sites.flatMap((site) => {
+    const risk = new Map(lotRiskOf(site, ctx.today).map((r) => [r.lot, r]));
+    return site.lots.map((lot) => ({ site, lot, risk: risk.get(lot) }));
+  }).sort((a, b) => (a.lot.expiry?.getTime() ?? Infinity) - (b.lot.expiry?.getTime() ?? Infinity));
   const others = ctx.report.items
     .filter((i) => i.medCode === item.medCode && i.code !== item.code && i.code !== item.code.slice(0, 5))
     .sort((a, b) => STATUS_ORDER.indexOf(b.status) - STATUS_ORDER.indexOf(a.status) || b.stock - a.stock);
@@ -945,19 +956,24 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
               <h4 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">Lotes, del que vence primero</h4>
               <InfoTip title="Lotes" align="right">{INFO.expiry}</InfoTip>
             </div>
-            {item.lots.length === 0 ? (
+            {lotRows.length === 0 ? (
               <p className="rounded-xl bg-slate-50 px-3 py-3 text-[13px] text-slate-500">Sin lotes con saldo.</p>
             ) : (
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-[12.5px]">
                   <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500">
-                    <tr><th className="px-3 py-2 text-center">Lote</th><th className="px-3 py-2 text-center">Vence</th><th className="px-3 py-2 text-center">Saldo</th><th className="px-3 py-2 text-center">Se usa</th><th className="px-3 py-2 text-center">En riesgo</th></tr>
+                    <tr>{bySite && <th className="px-3 py-2 text-left">Farmacia</th>}<th className="px-3 py-2 text-center">Lote</th><th className="px-3 py-2 text-center">Vence</th><th className="px-3 py-2 text-center">Saldo</th><th className="px-3 py-2 text-center">Se usa</th><th className="px-3 py-2 text-center">En riesgo</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {item.lots.map((l, i) => {
-                      const r = riskByLot.get(l.lot + "|" + l.expiry?.getTime());
+                    {lotRows.map(({ site, lot: l, risk: r }, i) => {
                       return (
                         <tr key={i} className={r ? "bg-red-50/50" : ""}>
+                          {bySite && (
+                            <td className="max-w-[150px] px-3 py-2" title={`${site.code} · ${site.name} · CPA ${dec(site.cpa)}`}>
+                              <span className="block font-mono text-[11px] font-bold text-slate-500">{site.code.length > 5 ? site.code.slice(5) : site.code}</span>
+                              <span className="block truncate text-[11.5px] text-slate-600">{site.name}</span>
+                            </td>
+                          )}
                           <td className="px-3 py-2 text-center font-mono">{l.lot || "—"}</td>
                           <td className="px-3 py-2 text-center">{dateText(l.expiry)}</td>
                           <td className="px-3 py-2 text-center font-mono">{formatNumber(l.balance)}</td>
@@ -1100,22 +1116,28 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
 
 export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const { anchor, toTable } = useTableAnchor();
-  const risk = useMemo(() => lotRiskReport(ctx.report.items, ctx.today), [ctx.report.items, ctx.today]);
+  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(ctx.report.items), ctx.today), [ctx.byPharmacy, ctx.report.items, ctx.today]);
   const [bucket, setBucket] = useState<"URGENT" | "ALL" | "NOUSE" | (typeof EXPIRY_BUCKETS)[number]>("URGENT");
   const byEst = useMemo(() => {
     const m = new Map<string, { name: string; value: number; lots: number }>();
     for (const r of risk.rows) {
       if (r.bucket === "LATER") continue;
-      const e = m.get(r.item.code) || { name: r.item.name, value: 0, lots: 0 };
+      const ipress = r.item.ipressCode;
+      const e = m.get(ipress) || { name: ctx.report.establishments.find((x) => x.code === ipress)?.name ?? r.item.name, value: 0, lots: 0 };
       e.value += r.value; e.lots++;
-      m.set(r.item.code, e);
+      m.set(ipress, e);
     }
     return [...m.entries()].sort((a, b) => b[1].value - a[1].value).slice(0, 10);
   }, [risk]);
   const rows = risk.rows.filter((r) => bucket === "ALL" || (bucket === "URGENT" ? r.bucket !== "LATER" : bucket === "NOUSE" ? r.item.cpa <= 0 : r.bucket === bucket));
   const bucketColor: Record<string, string> = { EXPIRED: "#7f1d1d", M3: "#dc2626", M6: "#f97316", M12: "#f59e0b", LATER: "#94a3b8" };
+  const whereOf = (it: AvailabilityItem) => {
+    if (it.code === it.ipressCode) return it.name;
+    const parent = ctx.report.establishments.find((x) => x.code === it.ipressCode)?.name;
+    return `${parent ?? it.ipressCode} › ${it.code.slice(5)} ${it.name}`;
+  };
   const columns: Column<LotRiskRow>[] = [
-    { key: "description", label: "Producto", sort: (r) => r.item.description, render: (r) => <ProductCell code={r.item.medCode} description={r.item.description} sub={r.item.name} /> },
+    { key: "description", label: "Producto", sort: (r) => r.item.description, render: (r) => <ProductCell code={r.item.medCode} description={r.item.description} sub={whereOf(r.item)} /> },
     { key: "lot", label: "Lote", render: (r) => <span className="font-mono text-[12px]">{r.lot.lot || "—"}</span> },
     { key: "expiry", label: "Vence", sort: (r) => r.lot.expiry?.getTime() ?? null, render: (r) => <span className="whitespace-nowrap">{dateText(r.lot.expiry)}<span className="block text-[11px] text-slate-400">{r.bucket === "EXPIRED" ? "vencido" : `en ${dec(r.monthsToExpiry)} meses`}</span></span> },
     { key: "balance", label: "Saldo", align: "right", sort: (r) => r.lot.balance, firstDir: "desc", render: (r) => <span className="font-mono">{formatNumber(r.lot.balance)}</span> },
@@ -1152,14 +1174,14 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         columns={columns}
         rowKey={(r) => `${r.item.code}|${r.item.medCode}|${r.lot.lot}|${r.lot.expiry?.getTime()}`}
         itemLabel="lotes"
-        searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name} ${r.lot.lot}`}
+        searchOf={(r) => `${r.item.medCode} ${r.item.description} ${whereOf(r.item)} ${r.lot.lot}`}
         placeholder="Buscar producto, lote o establecimiento…"
         onRowClick={(r, rows) => ctx.openProduct(r.item, rows.map((x) => x.item))}
         minWidth={1050}
         toolbar={<Pills value={bucket} onChange={setBucket} options={[{ value: "URGENT", label: "12 meses" }, ...EXPIRY_BUCKETS.map((b) => ({ value: b, label: EXPIRY_BUCKET_LABEL[b], count: risk.byBucket[b].lots })), { value: "NOUSE", label: "Sin consumo" }, { value: "ALL", label: "Todos" }]} />}
         card={(r) => (
           <>
-            <ProductCell code={r.item.medCode} description={r.item.description} sub={r.item.name} />
+            <ProductCell code={r.item.medCode} description={r.item.description} sub={whereOf(r.item)} />
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-slate-600">
               <span>Lote <b className="font-mono">{r.lot.lot}</b></span>
               <span>Vence <b>{dateText(r.lot.expiry)}</b></span>
