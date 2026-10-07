@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import type { AvailabilityItem } from "./availabilityReport";
 import {
-  abcXyzReport, asSupplier, consumptionReport, isSeparateSite, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
+  abcXyzReport, asSupplier, consumptionReport, internalTransfers, isSeparateSite, siteGapReport, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
 } from "./availabilityInsights";
 
 const today = new Date(2026, 9, 7);
@@ -148,5 +148,32 @@ describe("farmacias del hospital y puestos comunales", () => {
     expect(lotRiskOf(supplier, today)).toHaveLength(0);
     // Sin otras salidas no cambia nada.
     expect(asSupplier(item({ cpa: 10 }))).toEqual(item({ cpa: 10 }));
+  });
+});
+
+describe("puestos comunales escondidos en la cifra del establecimiento", () => {
+  const puesto = (code: string, over: Partial<AvailabilityItem>) => item({ code, ipressCode: code.slice(0, 5), medCode: "02149", ...over });
+  const isSeparate = (code: string) => isSeparateSite(code, undefined);
+  const f01 = puesto("06528F01", { stock: 586, cpa: 100, months: 5.86, status: StockStatus.NORMOSTOCK });
+  const f02 = puesto("06528F02", { stock: 0, cpa: 15, months: 0, status: StockStatus.DESABASTECIDO });
+  const f03 = puesto("06528F03", { stock: 10, cpa: 30, months: 0.33, status: StockStatus.SUBSTOCK });
+
+  it("encuentra el puesto desabastecido que la cifra sumada no muestra", () => {
+    const ipress = puesto("06528", { stock: 596, cpa: 145, months: 4.1, status: StockStatus.NORMOSTOCK });
+    const rows = siteGapReport([ipress], [f01, f02, f03], isSeparate);
+    // Solo el desabastecido (el substock no), con su F01 al lado.
+    expect(rows.map((r) => [r.item.code, r.main?.code])).toEqual([["06528F02", "06528F01"]]);
+    // Si el establecimiento ya figura como faltante, no se repite aquí.
+    expect(siteGapReport([{ ...ipress, status: StockStatus.SUBSTOCK }], [f01, f02], isSeparate)).toHaveLength(0);
+    // Las farmacias del hospital no son puestos.
+    expect(siteGapReport([ipress], [f01, f02], (c) => isSeparateSite(c, "FARMACIA"))).toHaveLength(0);
+  });
+
+  it("la F01 entrega a sus puestos lo justo para 2 meses y se queda con 2 meses de lo suyo", () => {
+    const rows = internalTransfers([f01, f02, f03], 2, isSeparate);
+    // Le sobran 586 − 100 × 2 = 386: primero al desabastecido (30), luego al substock (50).
+    expect(rows.map((r) => [r.to.code, r.quantity, r.internal])).toEqual([["06528F02", 30, true], ["06528F03", 50, true]]);
+    // Sin excedente en la F01 no hay sugerencia.
+    expect(internalTransfers([{ ...f01, stock: 150 }, f02], 2, isSeparate)).toHaveLength(0);
   });
 });
