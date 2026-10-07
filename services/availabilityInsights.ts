@@ -116,6 +116,15 @@ export const variationOf = (consumption: number[]): number => {
   return sd / mean;
 };
 
+/**
+ * Consumo desde el primer mes con consumo: un producto que se empezó a usar hace tres meses
+ * no es «irregular» por los meses previos en cero, cuando aún no se usaba.
+ */
+export const fromFirstUse = (consumption: number[]): number[] => {
+  const first = consumption.findIndex((v) => v > 0);
+  return first < 0 ? [] : consumption.slice(first);
+};
+
 export const xyzOf = (cv: number, hasUse = true): Xyz => (!hasUse ? "Z" : cv < 0.5 ? "X" : cv <= 1 ? "Y" : "Z");
 
 export const XYZ_LABEL: Record<Xyz, string> = { X: "Estable", Y: "Variable", Z: "Irregular" };
@@ -139,7 +148,12 @@ export const PEAK_MIN_UNITS = 20;
 export const PEAK_MIN_RATIO = 3;
 export const PEAK_MIN_MONTHS = 3;
 
-/** Pico de consumo: un mes con 3 veces o más el promedio de los demás, 20 unidades o más y al menos 3 meses con consumo. */
+/**
+ * Pico de consumo: un mes con 3 veces o más el promedio de los **otros meses con consumo**,
+ * 20 unidades o más y al menos 3 meses con consumo. Los meses en cero no bajan el promedio
+ * (así un producto que se usa 30, 30, 30 desde junio no es un pico), y si el máximo se repite
+ * no hay pico: es el consumo habitual.
+ */
 export const peakOf = (item: AvailabilityItem): PeakRow | null => {
   const c = item.consumption;
   if (c.length < 2) return null;
@@ -148,16 +162,27 @@ export const peakOf = (item: AvailabilityItem): PeakRow | null => {
   let peakIndex = 0;
   c.forEach((v, i) => { if (v > c[peakIndex]) peakIndex = i; });
   const peak = c[peakIndex];
-  const others = c.filter((_, i) => i !== peakIndex);
+  const others = c.filter((v, i) => i !== peakIndex && v > 0);
+  if (!others.length) return null;
   const othersAverage = sum(others) / others.length;
-  const ratio = othersAverage > 0 ? peak / othersAverage : Infinity;
+  const ratio = peak / othersAverage;
   if (peak < PEAK_MIN_UNITS || ratio < PEAK_MIN_RATIO) return null;
-  const cv = variationOf(c);
+  const cv = variationOf(fromFirstUse(c));
   return { item, peakIndex, peak, othersAverage, ratio, cv, xyz: xyzOf(cv), value: peak * (item.price || 0) };
 };
 
+export interface ClassifiedItem {
+  item: AvailabilityItem;
+  cv: number;
+  xyz: Xyz;
+  /** Meses con consumo en el periodo. */
+  monthsWithUse: number;
+}
+
 export interface ConsumptionReport {
   peaks: PeakRow[];
+  /** Cada ítem con consumo y su tipo X/Y/Z. */
+  classified: ClassifiedItem[];
   xyz: Record<Xyz, number>;
   /** Picos por mes, para ver si se concentran en un mes. */
   peaksByMonth: number[];
@@ -166,16 +191,21 @@ export interface ConsumptionReport {
 export const consumptionReport = (items: AvailabilityItem[]): ConsumptionReport => {
   const xyz: Record<Xyz, number> = { X: 0, Y: 0, Z: 0 };
   const peaks: PeakRow[] = [];
+  const classified: ClassifiedItem[] = [];
   const months = items[0]?.consumption.length ?? 0;
   const peaksByMonth = Array(months).fill(0);
   for (const it of items) {
     if (!it.consumption.some((v) => v > 0)) continue;
-    xyz[xyzOf(variationOf(it.consumption))]++;
+    const cv = variationOf(fromFirstUse(it.consumption));
+    const cls = xyzOf(cv);
+    xyz[cls]++;
+    classified.push({ item: it, cv, xyz: cls, monthsWithUse: it.consumption.filter((v) => v > 0).length });
     const p = peakOf(it);
     if (p) { peaks.push(p); peaksByMonth[p.peakIndex]++; }
   }
   peaks.sort((a, b) => b.value - a.value || b.ratio - a.ratio);
-  return { peaks, xyz, peaksByMonth };
+  classified.sort((a, b) => b.cv - a.cv);
+  return { peaks, classified, xyz, peaksByMonth };
 };
 
 /* ------------------------------------------------------------ ABC × XYZ */
@@ -224,7 +254,7 @@ export const abcXyzReport = (items: AvailabilityItem[]) => {
     p.abc = acc < 0.8 ? "A" : acc < 0.95 ? "B" : "C";
     acc += p.share;
     p.cumulative = acc;
-    p.cv = variationOf(p.consumption);
+    p.cv = variationOf(fromFirstUse(p.consumption));
     p.xyz = xyzOf(p.cv, p.units > 0);
     counts[p.abc].products++;
     counts[p.abc].value += p.value;
