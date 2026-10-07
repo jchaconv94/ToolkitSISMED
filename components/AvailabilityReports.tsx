@@ -6,7 +6,7 @@ import { formatOneDecimal } from "../services/stockStatus";
 import { formatNumber } from "../services/numberFormat";
 import { STATUS_LABEL, monthLabel } from "../services/availabilityExport";
 import {
-  DME_LEVEL_LABEL, type AvailabilityItem, type AvailabilityReport, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
+  DME_LEVEL_LABEL, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
   EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockReport, productGapReport, redistributionReport, warehouseReport,
@@ -138,6 +138,22 @@ export const pharmacyGroups = (pharmacy: AvailabilityReport | null): Map<string,
   }
   return map;
 };
+
+/** Las cinco situaciones como columnas (con su color) y el total de ítems: iguales en establecimientos y microredes. */
+function situationColumns<T>(countsOf: (row: T) => StatusCounts): Column<T>[] {
+  const col = (key: keyof StatusCounts, label: string, cls: string): Column<T> => ({
+    key, label, align: "right", firstDir: "desc", sort: (r) => countsOf(r)[key],
+    render: (r) => <span className={`font-mono ${cls}`}>{formatNumber(countsOf(r)[key])}</span>,
+  });
+  return [
+    col("desabastecido", "Desab.", "font-bold text-red-600"),
+    col("substock", "Sub", "text-amber-600"),
+    col("normostock", "Normo", "text-emerald-700"),
+    col("sobrestock", "Sobre", "text-blue-600"),
+    col("sinRotacion", "Sin rot.", "text-slate-500"),
+    col("total", "Ítems", "font-bold text-slate-800"),
+  ];
+}
 
 /* ---------------------------------------------------------------- Tabla de reporte */
 
@@ -515,10 +531,8 @@ export const EstablishmentsReport: React.FC<{
       </span>
     ) },
     { key: "microred", label: "Microred", sort: (r) => r.microred, render: (r) => <span className="text-[12.5px] text-slate-500">{r.microred}</span> },
-    { key: "mix", label: "Situación de los ítems", render: (r) => <StackBar parts={statusParts(r)} className="h-2.5 w-44" /> },
-    { key: "desabastecido", label: "Desab.", align: "right", sort: (r) => r.desabastecido, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-red-600">{r.desabastecido}</span> },
-    { key: "substock", label: "Sub", align: "right", sort: (r) => r.substock, firstDir: "desc", render: (r) => <span className="font-mono">{r.substock}</span> },
-    { key: "total", label: "Ítems", align: "right", sort: (r) => r.total, firstDir: "desc", render: (r) => <span className="font-mono text-slate-800">{r.total}</span> },
+    { key: "mix", label: "Situación", render: (r) => <StackBar parts={statusParts(r)} className="h-2.5 w-32" /> },
+    ...situationColumns<EstablishmentSummary>((r) => r),
     { key: "pct", label: "Disponibilidad", sort: (r) => r.pct, firstDir: "desc", render: (r) => <PctBar pct={r.pct} color={LEVEL_COLOR[r.level]} /> },
     { key: "level", label: "Nivel", render: (r) => <LevelChip level={r.level} /> },
     { key: "go", label: "", render: () => <ChevronRight className="h-4 w-4 text-slate-300" /> },
@@ -526,15 +540,15 @@ export const EstablishmentsReport: React.FC<{
   const mrColumns: Column<MicroredSummary>[] = [
     { key: "microred", label: "Microred", sort: (r) => r.microred, render: (r) => <span className="font-semibold text-slate-900">{r.microred}</span> },
     { key: "establishments", label: "Establec.", align: "right", sort: (r) => r.establishments, render: (r) => <span className="font-mono">{r.establishments}</span> },
-    { key: "mix", label: "Situación de los ítems", render: (r) => <StackBar parts={statusParts(r.counts)} className="h-2.5 w-52" /> },
-    { key: "desabastecido", label: "Desab.", align: "right", sort: (r) => r.counts.desabastecido, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-red-600">{r.counts.desabastecido}</span> },
-    { key: "total", label: "Ítems", align: "right", sort: (r) => r.counts.total, render: (r) => <span className="font-mono">{r.counts.total}</span> },
+    { key: "mix", label: "Situación", render: (r) => <StackBar parts={statusParts(r.counts)} className="h-2.5 w-32" /> },
+    ...situationColumns<MicroredSummary>((r) => r.counts),
     { key: "pct", label: "Disponibilidad", sort: (r) => r.pct, firstDir: "desc", render: (r) => <PctBar pct={r.pct} color={LEVEL_COLOR[r.level]} /> },
     { key: "level", label: "Nivel", render: (r) => <LevelChip level={r.level} /> },
   ];
   return view === "eess" ? (
     <ReportTable
       rows={eess}
+      minWidth={1150}
       subRows={(r) => pharmaciesOf.get(r.code)}
       subLabel="farmacias y puestos"
       columns={eessColumns}
@@ -568,6 +582,7 @@ export const EstablishmentsReport: React.FC<{
   ) : (
     <ReportTable
       rows={mrs}
+      minWidth={1100}
       columns={mrColumns}
       rowKey={(r) => r.microred}
       itemLabel="microredes"
