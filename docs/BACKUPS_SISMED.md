@@ -265,7 +265,10 @@ llegaba por error a la PC de la IPRESS B antes de que A la usara, la PC de B se 
 como A y el backup de A descargaba el SISMED de B. Ahora `app_backup_pc_auth` exige además
 que la PC sea la vinculada (`sync_send_keys.device_id`). La PC de B nunca se vincula a la
 clave de A, porque no tiene stock de A. Una PC con clave recién puesta aparece en Backups
-después de su primer envío de stock. `SUPABASE_BACKUPS_ABRIR_REGION.sql` ya trae esta
+después de su primer envío de stock. Desde el **Toolkit 2.2.8** (2026-10-07) aparece enseguida: si la
+conexión ya había sido rechazada por no estar vinculada, el primer envío aceptado la reintenta
+al momento (`retry_after_link`, una vez por rechazo); antes esperaba 30 minutos (caso P.S. Sion,
+06578). `SUPABASE_BACKUPS_ABRIR_REGION.sql` ya trae esta
 versión, así que volver a ejecutarlo no deshace el arreglo.
 
 **Cupo por usuario (2026-10-02, `SUPABASE_BACKUPS_CUPO_POR_USUARIO.sql`).** El cupo era por
