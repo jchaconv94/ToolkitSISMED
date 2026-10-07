@@ -90,7 +90,7 @@ export const CodeChip: React.FC<{ code: string }> = ({ code }) => (
   <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{code}</span>
 );
 const PctBar: React.FC<{ pct: number; color: string; text?: string; width?: string }> = ({ pct, color, text, width = "w-20" }) => (
-  <div className="flex items-center gap-2">
+  <div className="inline-flex items-center gap-2 align-middle">
     <div className={`h-1.5 ${width} overflow-hidden rounded-full bg-slate-100`}><div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: color }} /></div>
     <span className="w-14 text-right font-mono text-[13px] font-bold text-slate-800">{text ?? pctText(pct)}</span>
   </div>
@@ -180,6 +180,14 @@ export interface Column<T> {
  * Tabla de un reporte: buscador y filtros arriba; en escritorio, encabezado fijo, orden por
  * columnas y paginación; en el celular, tarjetas que cargan al bajar.
  */
+/**
+ * Alineación de todas las tablas de reportes (pedido del usuario, 2026-10-07): los nombres
+ * (producto, establecimiento, microred, quién entrega/recibe) a la izquierda; todo lo demás
+ * —números, códigos, fechas, estados, barras— centrado en su columna.
+ */
+const TEXT_COLUMNS = new Set(["description", "name", "microred", "from", "to"]);
+const alignOf = (key: string): HeadAlign => (TEXT_COLUMNS.has(key) ? "left" : "center");
+
 export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRowClick, itemLabel, searchOf, placeholder, toolbar, minWidth = 900, subRows, subLabel = "subregistros", anchorRef }: {
   title?: string;
   info?: React.ReactNode;
@@ -239,14 +247,14 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
         <div className="p-6"><EmptyState title="Sin resultados" description="Ningún registro coincide con la búsqueda o los filtros." /></div>
       ) : isDesktop ? (
         <>
-          <FloatingTableHead state={floating} padding="px-3" cells={[...(subRows ? [{ key: "__expand", index: 0, content: "" }] : []), ...columns.map((c, index) => ({ key: c.key, index: index + (subRows ? 1 : 0), content: head(c), align: c.align }))]} />
+          <FloatingTableHead state={floating} padding="px-3" cells={[...(subRows ? [{ key: "__expand", index: 0, content: "" }] : []), ...columns.map((c, index) => ({ key: c.key, index: index + (subRows ? 1 : 0), content: head(c), align: alignOf(c.key) }))]} />
           <div className="scrollbar-x overflow-x-auto">
             <table ref={tableRef} className="w-full" style={{ minWidth }}>
               <thead>
                 <tr>
                   {subRows && <th className={`${tableHeadCellClass} w-10 px-2 py-3`} aria-label="Desplegar" />}
                   {columns.map((c) => (
-                    <th key={c.key} aria-sort={c.sort ? ariaSort(headSort(c.key).dir) : undefined} className={`${tableHeadCellClass} ${tableHeadTextClass} px-3 py-3 ${headAlignClass(c.align)}`}>{head(c)}</th>
+                    <th key={c.key} aria-sort={c.sort ? ariaSort(headSort(c.key).dir) : undefined} className={`${tableHeadCellClass} ${tableHeadTextClass} px-3 py-3 ${headAlignClass(alignOf(c.key))}`}>{head(c)}</th>
                   ))}
                 </tr>
               </thead>
@@ -256,7 +264,7 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
                   const kids = subRows?.(row);
                   const open = !!kids?.length && openRows.has(key);
                   const cells = (r: T, child: boolean) => columns.map((c, ci) => (
-                    <td key={c.key} className={`px-3 py-2 text-[13px] text-slate-700 ${c.align === "right" ? "whitespace-nowrap text-right" : c.align === "center" ? "text-center" : ""} ${child && ci === 0 ? "pl-8" : ""}`}>{c.render(r)}</td>
+                    <td key={c.key} className={`px-3 py-2 text-[13px] text-slate-700 ${alignOf(c.key) === "center" ? "whitespace-nowrap text-center" : ""} ${child && ci === 0 ? "pl-8" : ""}`}>{c.render(r)}</td>
                   ));
                   return (
                     <React.Fragment key={key}>
@@ -906,18 +914,18 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-[12.5px]">
                   <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500">
-                    <tr><th className="px-3 py-2 text-left">Lote</th><th className="px-3 py-2 text-left">Vence</th><th className="px-3 py-2 text-right">Saldo</th><th className="px-3 py-2 text-right">Se usa</th><th className="px-3 py-2 text-right">En riesgo</th></tr>
+                    <tr><th className="px-3 py-2 text-center">Lote</th><th className="px-3 py-2 text-center">Vence</th><th className="px-3 py-2 text-center">Saldo</th><th className="px-3 py-2 text-center">Se usa</th><th className="px-3 py-2 text-center">En riesgo</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {item.lots.map((l, i) => {
                       const r = riskByLot.get(l.lot + "|" + l.expiry?.getTime());
                       return (
                         <tr key={i} className={r ? "bg-red-50/50" : ""}>
-                          <td className="px-3 py-2 font-mono">{l.lot || "—"}</td>
-                          <td className="px-3 py-2">{dateText(l.expiry)}</td>
-                          <td className="px-3 py-2 text-right font-mono">{formatNumber(l.balance)}</td>
-                          <td className="px-3 py-2 text-right font-mono">{formatNumber(r ? r.usable : l.balance)}</td>
-                          <td className="px-3 py-2 text-right font-mono font-bold text-red-700">{r ? formatNumber(r.atRisk) : "—"}</td>
+                          <td className="px-3 py-2 text-center font-mono">{l.lot || "—"}</td>
+                          <td className="px-3 py-2 text-center">{dateText(l.expiry)}</td>
+                          <td className="px-3 py-2 text-center font-mono">{formatNumber(l.balance)}</td>
+                          <td className="px-3 py-2 text-center font-mono">{formatNumber(r ? r.usable : l.balance)}</td>
+                          <td className="px-3 py-2 text-center font-mono font-bold text-red-700">{r ? formatNumber(r.atRisk) : "—"}</td>
                         </tr>
                       );
                     })}
@@ -1326,7 +1334,7 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
     { key: "cpa", label: "CPA", align: "right", sort: (r) => r.item.cpa, render: (r) => <span className="font-mono">{dec(r.item.cpa)}</span> },
     { key: "months", label: "Meses", align: "right", sort: (r) => r.item.months, firstDir: "desc", render: (r) => <span className="font-mono font-bold">{dec(r.item.months)}</span> },
     { key: "split", label: `Necesita ${ctx.sobreMin} meses · excedente`, render: (r) => (
-      <span className="flex h-2.5 w-44 overflow-hidden rounded-full bg-slate-100">
+      <span className="mx-auto flex h-2.5 w-44 overflow-hidden rounded-full bg-slate-100">
         <span className="bg-emerald-400" style={{ width: `${(r.needed / r.item.stock) * 100}%` }} />
         <span className="bg-blue-500" style={{ width: `${(r.excess / r.item.stock) * 100}%` }} />
       </span>
