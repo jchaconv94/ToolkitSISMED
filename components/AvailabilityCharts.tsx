@@ -499,7 +499,7 @@ export const StackBar: React.FC<{ parts: Array<{ value: number; color: string; l
   const total = parts.reduce((a, p) => a + p.value, 0) || 1;
   const tip = useChartTip();
   return (
-    <span className={`flex overflow-hidden rounded-full bg-slate-100 ${className}`} {...tip.bind(
+    <span className={`mx-auto flex overflow-hidden rounded-full bg-slate-100 ${className}`} {...tip.bind(
       <>{parts.map((p) => <span key={p.label} className="flex items-center justify-between gap-4"><span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: p.color }} />{p.label}</span><b className="font-mono">{formatNumber(p.value)} · {pct1((p.value / total) * 100)}</b></span>)}</>,
     )}>
       {tip.layer}
