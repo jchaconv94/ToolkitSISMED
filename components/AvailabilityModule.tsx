@@ -20,6 +20,7 @@ import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
 import { formatNumber } from "../services/numberFormat";
 import { tformdetFromSheet, type TformdetFileResult } from "../services/tformdetFile";
 import { BottomSheet } from "./ui/BottomSheet";
+import { useIsDesktop } from "./ui/useIsDesktop";
 import {
   AbcReport, ConsumptionReport, EstablishmentDetail, EstablishmentsReport, ExpiryReport, GapsReport, OverstockReport, ProductDrawer, ProductGapDrawer, RedistributionReport, SummaryReport, WarehouseReport,
   type ReportContext, type ReportTab,
@@ -151,6 +152,17 @@ export const AvailabilityModule: React.FC = () => {
   const [product, setProduct] = useState<AvailabilityItem | null>(null);
   const [gap, setGap] = useState<ProductGap | null>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const isDesktop = useIsDesktop();
+  const menuRef = useRef<HTMLDivElement>(null);
+  // En escritorio el menú ⋯ es un desplegable: se cierra al hacer clic fuera o con Esc.
+  useEffect(() => {
+    if (!actionsOpen || !isDesktop) return;
+    const close = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setActionsOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setActionsOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", onKey); };
+  }, [actionsOpen, isDesktop]);
   const [exporting, setExporting] = useState(false);
   const [config, setConfig] = useState<AvailabilityConfig>(() => factoryConfig());
   const [configOpen, setConfigOpen] = useState(false);
@@ -420,9 +432,16 @@ export const AvailabilityModule: React.FC = () => {
               {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}<span className="hidden sm:inline">{exporting ? "Generando…" : "Exportar"}</span>
             </button>
           )}
-          <button type="button" onClick={() => setActionsOpen(true)} aria-label="Más acciones" title="Más acciones" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50">
-            <MoreVertical className="h-4 w-4" />
-          </button>
+          <div ref={menuRef} className="relative">
+            <button type="button" onClick={() => setActionsOpen(!actionsOpen)} aria-label="Más acciones" title="Más acciones" aria-expanded={actionsOpen} className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border bg-white text-slate-600 transition-colors hover:bg-slate-50 ${actionsOpen ? "border-teal-300 ring-2 ring-teal-500/20" : "border-slate-200"}`}>
+              <MoreVertical className="h-4 w-4" />
+            </button>
+            {isDesktop && actionsOpen && (
+              <div role="menu" className="absolute right-0 top-12 z-40 w-[340px] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl animate-in fade-in zoom-in-95 duration-100">
+                {actionItems}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -431,7 +450,7 @@ export const AvailabilityModule: React.FC = () => {
         <EstablishmentDetail ctx={ctx} code={openCode} onClose={() => setOpenCode(null)} />
       ) : (
         <>
-          <nav aria-label="Reportes" className="sticky -top-2.5 z-20 -mx-3 mb-4 border-b border-slate-200 bg-slate-50/95 px-3 backdrop-blur sm:-mx-5 sm:px-5 2xl:-mx-6 2xl:px-6">
+          <nav aria-label="Reportes" className="sticky -top-2.5 z-20 -mx-3 mb-4 border-b border-slate-200 bg-slate-50 px-3 pt-0.5 sm:-top-3 sm:-mx-5 sm:px-5 2xl:-mx-6 2xl:px-6">
             <div ref={tabsRef} className="hide-scrollbar flex gap-1 overflow-x-auto">
               {TABS.map((t) => (
                 <button
@@ -470,7 +489,7 @@ export const AvailabilityModule: React.FC = () => {
 
       <ProductGapDrawer ctx={ctx} gap={product ? null : gap} onClose={() => setGap(null)} />
       <ProductDrawer ctx={ctx} item={product} onClose={() => setProduct(null)} />
-      <BottomSheet open={actionsOpen} title="Acciones" onClose={() => setActionsOpen(false)}>
+      <BottomSheet open={actionsOpen && !isDesktop} title="Acciones" onClose={() => setActionsOpen(false)}>
         {actionItems}
       </BottomSheet>
       <AvailabilityConfigDialog
