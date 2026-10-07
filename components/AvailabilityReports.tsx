@@ -1573,7 +1573,9 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   const { planEdits: edits, setPlanEdits: setEdits } = ctx;
   const views: PlanView[] = useMemo(() => plan.rows.map((r) => {
     const e = edits[r.key];
-    const sources = r.sources.map((x) => ({ ...x, qty: e?.qty?.[x.pool] ?? x.qty }));
+    // Fuentes de la sugerencia más las que el usuario agregó desde el panel.
+    const extra = Object.keys(e?.qty ?? {}).filter((k) => !r.sources.some((x) => x.pool === k)).map((k) => ({ pool: k, qty: 0 }));
+    const sources = [...r.sources, ...extra].map((x) => ({ ...x, qty: e?.qty?.[x.pool] ?? x.qty }));
     const covered = sources.reduce((a, x) => a + x.qty, 0);
     return { ...r, sources, excluded: !!e?.excluded, covered, short: Math.max(0, r.need - covered) };
   }), [plan, edits]);
@@ -1583,7 +1585,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   const roomFor = (v: PlanView, x: PlanSource) => Math.max(0, v.need - (v.covered - x.qty));
   const setQty = (v: PlanView, pool: string, n: number) => {
     const x = v.sources.find((s) => s.pool === pool);
-    const value = x ? Math.min(n, roomFor(v, x)) : n;
+    const value = Math.min(n, x ? roomFor(v, x) : Math.max(0, v.need - v.covered));
     setEdits((cur) => ({ ...cur, [v.key]: { ...cur[v.key], qty: { ...cur[v.key]?.qty, [pool]: value } } }));
   };
   const setExcluded = (row: string, v: boolean) => setEdits((cur) => ({ ...cur, [row]: { ...cur[row], excluded: v } }));
@@ -1614,28 +1616,23 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   }, [active]);
 
   const whereOf = (it: AvailabilityItem) => siteLabel(ctx, it);
-  const sourceLine = (v: PlanView, x: PlanSource) => {
-    const pool = plan.pools[x.pool];
-    const left = leftOf(x.pool);
-    return (
-      <span key={x.pool} className="flex items-center gap-2 py-0.5">
-        <span className="min-w-0 flex-1">
-          <span className="block max-w-[200px] truncate text-[12.5px] font-semibold text-slate-800">{pool.kind === "internal" ? `${whereOf(pool.item).split(" › ")[0]} · F01` : pool.item.name}</span>
-          <span className={`block text-[11px] ${left < 0 ? "font-bold text-red-600" : "text-slate-400"}`}>{left < 0 ? `se pasa por ${formatNumber(-left)}` : `le quedan ${formatNumber(left)}`}</span>
-        </span>
-        <PlanQty value={x.qty} max={roomFor(v, x)} over={left < 0} disabled={v.excluded} onChange={(n) => setQty(v, x.pool, n)} />
-      </span>
-    );
-  };
+  const units = (v: PlanView, kind: string) => v.sources.filter((x) => plan.pools[x.pool]?.kind === kind).reduce((a, x) => a + x.qty, 0);
+  const stateOf = (v: PlanView): [string, string] => v.excluded ? ["No se distribuye", "bg-slate-100 text-slate-500"] : v.short === 0 ? ["Cubierto", "bg-emerald-50 text-emerald-700"] : v.covered > 0 ? ["Parcial", "bg-amber-50 text-amber-700"] : ["Sin cubrir", "bg-red-50 text-red-700"];
+  const overRow = (v: PlanView) => !v.excluded && v.sources.some((x) => x.qty > 0 && leftOf(x.pool) < 0);
+  // Una fila, un dato por celda (NN/g, Carbon, PatternFly): el detalle y la edición, en el panel.
   const columns: Column<PlanView>[] = [
     { key: "description", label: "Producto", sort: (r) => r.to.description, render: (r) => <ProductCell code={r.to.medCode} description={r.to.description} /> },
-    { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className="block max-w-[220px]"><span className="block truncate font-semibold text-slate-800">{r.site ? whereOf(r.to) : r.to.name}</span><span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-slate-500"><StatusPill status={r.to.status} />{formatNumber(r.to.stock)} u · CPA {dec(r.to.cpa)}</span></span> },
-    { key: "need", label: "Necesita", sort: (r) => r.need, firstDir: "desc", render: (r) => <span className="font-mono text-[14px] font-black text-slate-900">{formatNumber(r.need)}</span> },
-    { key: "from", label: "De otro establecimiento", render: (r) => { const list = r.sources.filter((x) => plan.pools[x.pool].kind !== "warehouse"); return list.length ? <span className="block">{list.map((x) => sourceLine(r, x))}</span> : <span className="text-[12px] text-slate-300">nadie tiene excedente</span>; } },
-    { key: "warehouse", label: "Del almacén", sort: (r) => r.sources.filter((x) => plan.pools[x.pool].kind === "warehouse").reduce((a, x) => a + x.qty, 0), firstDir: "desc", render: (r) => { const x = r.sources.find((s) => plan.pools[s.pool].kind === "warehouse"); if (!x) return <span className="text-[12px] text-slate-300">{r.site ? "—" : "no tiene"}</span>; const left = leftOf(x.pool); return <span className="inline-flex flex-col items-center gap-0.5"><PlanQty value={x.qty} max={roomFor(r, x)} over={left < 0} disabled={r.excluded} onChange={(n) => setQty(r, x.pool, n)} /><span className={`text-[11px] ${left < 0 ? "font-bold text-red-600" : "text-slate-400"}`}>{left < 0 ? `se pasa por ${formatNumber(-left)}` : `quedan ${formatNumber(left)}`}</span></span>; } },
-    { key: "short", label: "Falta", sort: (r) => r.short, firstDir: "desc", render: (r) => (r.excluded ? <span className="text-slate-300">—</span> : r.short > 0 ? <span className="font-mono font-bold text-red-600">{formatNumber(r.short)}</span> : <span className="text-[12px] font-bold text-emerald-600">Cubierto</span>) },
+    { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className="block max-w-[240px]"><span className="block truncate font-semibold text-slate-800">{r.site ? whereOf(r.to) : r.to.name}</span><span className="block text-[11.5px] text-slate-500">{formatNumber(r.to.stock)} u · CPA {dec(r.to.cpa)}</span></span> },
+    { key: "status", label: "Situación", sort: (r) => STATUS_ORDER.indexOf(r.to.status), render: (r) => <StatusPill status={r.to.status} /> },
+    { key: "need", label: "Necesita", sort: (r) => r.need, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-slate-900">{formatNumber(r.need)}</span> },
+    { key: "others", label: "De otros", sort: (r) => units(r, "donor") + units(r, "internal"), firstDir: "desc", render: (r) => { const n = units(r, "donor") + units(r, "internal"); return <span className={`font-mono ${n ? "font-bold text-blue-700" : "text-slate-300"}`}>{formatNumber(n)}</span>; } },
+    { key: "warehouse", label: "Del almacén", sort: (r) => units(r, "warehouse"), firstDir: "desc", render: (r) => { const n = units(r, "warehouse"); return <span className={`font-mono ${n ? "font-bold text-amber-700" : "text-slate-300"}`}>{formatNumber(n)}</span>; } },
+    { key: "short", label: "Falta", sort: (r) => (r.excluded ? -1 : r.short), firstDir: "desc", render: (r) => <span className={`font-mono ${!r.excluded && r.short ? "font-bold text-red-600" : "text-slate-300"}`}>{r.excluded ? "—" : formatNumber(r.short)}</span> },
+    { key: "state", label: "Estado", sort: (r) => (r.excluded ? 3 : r.short === 0 ? 0 : r.covered > 0 ? 1 : 2), render: (r) => { const [label, cls] = stateOf(r); return <span className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-bold ${overRow(r) ? "bg-red-600 text-white" : cls}`}>{overRow(r) ? "Revisar" : label}</span>; } },
     { key: "include", label: "Distribuir", sort: (r) => Number(!r.excluded), render: (r) => <input type="checkbox" checked={!r.excluded} onClick={(e) => e.stopPropagation()} onChange={(e) => setExcluded(r.key, !e.target.checked)} className="h-4 w-4 accent-teal-600" aria-label="Distribuir" /> },
   ];
+  const [openKey, setOpenKey] = useState<{ key: string; list: string[] } | null>(null);
+  const openView = openKey ? views.find((v) => v.key === openKey.key) ?? null : null;
 
   const download = async () => {
     const lines = active.flatMap((v) => v.sources.filter((x) => x.qty > 0).map((x) => ({ v, x, pool: plan.pools[x.pool] })));
@@ -1694,8 +1691,8 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         itemLabel="necesidades"
         searchOf={(r) => `${r.to.medCode} ${r.to.description} ${r.to.name} ${r.sources.map((x) => plan.pools[x.pool]?.item.name).join(" ")}`}
         placeholder="Buscar producto o establecimiento…"
-        onRowClick={(r, list) => ctx.openProduct(r.to, list.map((x) => x.to))}
-        minWidth={1180}
+        onRowClick={(r, list) => setOpenKey({ key: r.key, list: list.map((x) => x.key) })}
+        minWidth={1100}
         toolbar={(
           <div className="flex shrink-0 items-center gap-2">
             <Pills value={filter === "EXCLUDED" ? "EXCLUDED" : "PLAN"} onChange={(v) => setFilter(v === "EXCLUDED" ? "EXCLUDED" : "ALL")} options={[{ value: "PLAN", label: "En el plan", count: active.length }, { value: "EXCLUDED", label: "No distribuir", count: views.length - active.length }]} />
@@ -1709,28 +1706,123 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
             </button>
           </div>
         )}
-        card={(r) => (
-          <>
-            <div className="flex items-start gap-2">
-              <span className="min-w-0 flex-1"><ProductCell code={r.to.medCode} description={r.to.description} /></span>
-              <input type="checkbox" checked={!r.excluded} onClick={(e) => e.stopPropagation()} onChange={(e) => setExcluded(r.key, !e.target.checked)} className="mt-1 h-5 w-5 accent-teal-600" aria-label="Distribuir" />
-            </div>
-            <p className="mt-1.5 text-[12px] text-slate-500"><b className="text-slate-700">{r.site ? whereOf(r.to) : r.to.name}</b> · necesita <b className="text-slate-900">{formatNumber(r.need)}</b>{r.short > 0 && !r.excluded ? <> · falta <b className="text-red-600">{formatNumber(r.short)}</b></> : null}</p>
-            <div className="mt-2 space-y-1.5" onClick={(e) => e.stopPropagation()}>
-              {r.sources.map((x) => {
-                const pool = plan.pools[x.pool];
-                const left = leftOf(x.pool);
-                return (
-                  <div key={x.pool} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5">
-                    <span className="min-w-0 flex-1 text-[12px]"><span className="block truncate font-semibold text-slate-700">{pool.kind === "warehouse" ? "Almacén" : pool.kind === "internal" ? "Su F01" : pool.item.name}</span><span className={left < 0 ? "font-bold text-red-600" : "text-slate-400"}>{left < 0 ? `se pasa por ${formatNumber(-left)}` : `quedan ${formatNumber(left)}`}</span></span>
-                    <PlanQty value={x.qty} max={roomFor(r, x)} over={left < 0} disabled={r.excluded} onChange={(n) => setQty(r, x.pool, n)} />
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
+        card={(r) => {
+          const [label, cls] = stateOf(r);
+          return (
+            <>
+              <div className="flex items-start gap-2">
+                <span className="min-w-0 flex-1"><ProductCell code={r.to.medCode} description={r.to.description} /></span>
+                <input type="checkbox" checked={!r.excluded} onClick={(e) => e.stopPropagation()} onChange={(e) => setExcluded(r.key, !e.target.checked)} className="mt-1 h-5 w-5 accent-teal-600" aria-label="Distribuir" />
+              </div>
+              <p className="mt-1.5 truncate text-[12px] font-semibold text-slate-700">{r.site ? whereOf(r.to) : r.to.name}</p>
+              <div className="mt-1.5 flex items-center gap-2 text-[12px] text-slate-500">
+                <span>Necesita <b className="text-slate-900">{formatNumber(r.need)}</b></span>
+                <span className={`ml-auto whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-bold ${overRow(r) ? "bg-red-600 text-white" : cls}`}>{overRow(r) ? "Revisar" : label}</span>
+              </div>
+            </>
+          );
+        }}
       />
+      {openView && (
+        <PlanDrawer
+          ctx={ctx}
+          view={openView}
+          plan={plan}
+          leftOf={leftOf}
+          onQty={(pool, n) => setQty(openView, pool, n)}
+          onExcluded={(v) => setExcluded(openView.key, v)}
+          onReset={() => setEdits((cur) => { const next = { ...cur }; delete next[openView.key]; return next; })}
+          edited={!!edits[openView.key]}
+          onClose={() => setOpenKey(null)}
+          nav={openKey ? drawerNav(openKey.key, openKey.list, (key) => setOpenKey({ key, list: openKey.list })) : undefined}
+        />
+      )}
+    </div>
+  );
+};
+
+/** Panel de una necesidad del plan: de dónde sale cada parte y quién más puede dar. */
+const PlanDrawer: React.FC<{
+  ctx: ReportContext;
+  view: PlanView;
+  plan: ReturnType<typeof redistributionPlan>;
+  leftOf: (pool: string) => number;
+  onQty: (pool: string, n: number) => void;
+  onExcluded: (v: boolean) => void;
+  onReset: () => void;
+  edited: boolean;
+  onClose: () => void;
+  nav?: DrawerNav;
+}> = ({ ctx, view: v, plan, leftOf, onQty, onExcluded, onReset, edited, onClose, nav }) => {
+  useDrawerKeys(true, onClose, nav);
+  const assigned = new Map(v.sources.map((x) => [x.pool, x.qty]));
+  // Quién puede dar: su F01 si es un puesto; si no, todos los establecimientos con excedente de ese producto y el almacén.
+  const candidates = Object.values(plan.pools)
+    .filter((p) => p.medCode === v.to.medCode && (v.site ? p.kind === "internal" && p.item.ipressCode === v.to.ipressCode : p.kind !== "internal" && p.item.code !== v.to.code))
+    .sort((a, b) => Number((assigned.get(b.key) ?? 0) > 0) - Number((assigned.get(a.key) ?? 0) > 0) || Number(a.kind === "warehouse") - Number(b.kind === "warehouse") || Number(b.item.microred === v.to.microred) - Number(a.item.microred === v.to.microred) || leftOf(b.key) - leftOf(a.key));
+  const where = v.site ? siteLabel(ctx, v.to) : v.to.name;
+  return (
+    <div className="fixed inset-0 z-[100000] flex justify-end bg-slate-900/40" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <aside role="dialog" aria-label={v.to.description} className="flex h-full w-full flex-col bg-white shadow-2xl animate-in slide-in-from-right duration-200 md:w-[620px]">
+        <div className="flex items-start gap-3 border-b border-slate-200 px-4 py-3.5 md:px-5">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2"><CodeChip code={v.to.medCode} /><StatusPill status={v.to.status} /></div>
+            <h3 className="mt-1 text-[16px] font-black leading-snug text-slate-900">{v.to.description}</h3>
+            <p className="truncate text-[12.5px] text-slate-500">Recibe: {where}{v.to.microred ? ` · ${v.to.microred}` : ""}</p>
+          </div>
+          <DrawerNavButtons nav={nav} />
+          <button type="button" onClick={onClose} aria-label="Cerrar" className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 md:px-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[["Stock", formatNumber(v.to.stock)], ["CPA", dec(v.to.cpa)], ["Necesita", formatNumber(v.need)], [v.excluded ? "No se distribuye" : v.short ? "Falta" : "Cubierto", v.excluded ? "—" : formatNumber(v.short || v.covered)]].map(([label, value]) => (
+              <div key={label} className="rounded-xl bg-slate-50 px-3 py-2.5">
+                <p className="text-[10.5px] font-black uppercase tracking-wider text-slate-400">{label}</p>
+                <p className="mt-0.5 font-mono text-[17px] font-black text-slate-900">{value}</p>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="mb-2 flex items-center gap-1.5">
+              <h4 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">De dónde sale</h4>
+              <InfoTip title="De dónde sale"><P>Viene calculado. Primero, el excedente de otros establecimientos (lo que les sobra por encima de {ctx.sobreMin} meses, primero de la misma microred); lo que falte, del almacén. Un puesto comunal recibe de su F01.</P><P>Se puede cambiar cualquier cantidad o elegir a otro que también tenga excedente. «Le queda» descuenta lo que ya se le asignó en todo el plan.</P></InfoTip>
+            </div>
+            {candidates.length ? (
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <table className="w-full text-[12.5px]">
+                  <thead className="bg-slate-50 text-[10.5px] font-black uppercase tracking-wider text-slate-500">
+                    <tr><th className="px-3 py-2 text-left">Quién entrega</th><th className="px-2 py-2 text-center">Puede dar</th><th className="px-2 py-2 text-center">Le queda</th><th className="px-3 py-2 text-center">Asignado</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {candidates.map((p) => {
+                      const qty = assigned.get(p.key) ?? 0;
+                      const left = leftOf(p.key);
+                      return (
+                        <tr key={p.key} className={qty > 0 ? "bg-teal-50/40" : ""}>
+                          <td className="px-3 py-2">
+                            <span className="block font-semibold text-slate-800">{p.kind === "warehouse" ? `Almacén · ${p.item.name}` : p.kind === "internal" ? `${siteLabel(ctx, p.item).split(" › ")[0]} · F01` : p.item.name}</span>
+                            <span className="block text-[11px] text-slate-400">{p.kind === "warehouse" ? "almacén" : p.kind === "internal" ? "su farmacia principal" : `${p.item.microred || "—"}${p.item.microred === v.to.microred ? " · misma microred" : ""} · ${dec(p.item.months)} meses de stock`}</span>
+                          </td>
+                          <td className="px-2 py-2 text-center font-mono text-slate-600">{formatNumber(p.capacity)}</td>
+                          <td className={`px-2 py-2 text-center font-mono ${left < 0 ? "font-bold text-red-600" : "text-slate-500"}`}>{formatNumber(left)}</td>
+                          <td className="px-3 py-2 text-center"><PlanQty value={qty} max={Math.max(0, v.need - (v.covered - qty))} over={left < 0 && qty > 0} disabled={v.excluded} onChange={(n) => onQty(p.key, n)} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="rounded-xl bg-slate-50 px-3 py-3 text-[12.5px] text-slate-500">Ningún establecimiento tiene excedente de este producto y el almacén no tiene stock.</p>
+            )}
+            {candidates.some((p) => leftOf(p.key) < 0 && (assigned.get(p.key) ?? 0) > 0) && <p className="mt-2 text-[12px] font-semibold text-red-600">Se asigna más de lo que le queda a alguien (en rojo). Baje esa cantidad.</p>}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 border-t border-slate-200 px-4 py-3 md:px-5">
+          <label className="flex items-center gap-2 text-[13px] font-semibold text-slate-700"><input type="checkbox" checked={!v.excluded} onChange={(e) => onExcluded(!e.target.checked)} className="h-4 w-4 accent-teal-600" />Distribuir</label>
+          {edited && <button type="button" onClick={onReset} className="ml-auto flex h-9 items-center gap-1.5 rounded-full border border-slate-200 px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50"><RotateCcw className="h-4 w-4" />Volver a la sugerencia</button>}
+        </div>
+      </aside>
     </div>
   );
 };
