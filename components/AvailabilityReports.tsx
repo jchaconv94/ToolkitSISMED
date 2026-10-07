@@ -427,6 +427,7 @@ const INFO = {
     <>
       <P>Para cada establecimiento desabastecido o en substock (con consumo), busca otro que tenga el mismo producto con excedente (más de {sobreMin} meses), primero en la misma microred.</P>
       <P>La cantidad es lo justo para llegar a {subMax} meses de consumo, sin dejar al que entrega por debajo de {sobreMin} meses.</P>
+      <P><b>Almacén:</b> con «Cubrir primero desde el almacén», cada establecimiento recibe primero del almacén lo que necesita para llegar a {subMax} meses; lo que el almacén no alcanza, de otro establecimiento con excedente. La columna Almacén es el stock del almacén de ese producto.</P>
       <P><b>Internas:</b> dentro de un mismo establecimiento, la F01 abastece a sus puestos comunales. Le da a cada puesto lo justo para llegar a {subMax} meses, y la F01 se queda con {subMax} meses de lo que ella dispensa.</P>
     </>
   ),
@@ -1528,47 +1529,57 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
 
 export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const { anchor, toTable } = useTableAnchor();
+  const [useWarehouse, setUseWarehouse] = useState(true);
+  const hasWarehouse = ctx.warehouse.some((w) => w.stock > 0);
+  const warehouseStock = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const w of ctx.warehouse) m.set(w.medCode, (m.get(w.medCode) || 0) + w.stock);
+    return m;
+  }, [ctx.warehouse]);
   const data = useMemo(() => {
-    const external = redistributionReport(ctx.report.items, ctx.subMax, ctx.sobreMin);
+    const external = redistributionReport(ctx.report.items, ctx.subMax, ctx.sobreMin, useWarehouse ? ctx.warehouse : []);
     // Las internas (F01 → puesto comunal) van primero dentro de cada grupo: es el movimiento más fácil.
     const internal = internalTransfers(ctx.pharmacy?.items ?? [], ctx.subMax, separateOf(ctx));
     const rows = [...internal, ...external.rows].sort((a, b) => Number(b.to.status === StockStatus.DESABASTECIDO) - Number(a.to.status === StockStatus.DESABASTECIDO) || Number(!!b.internal) - Number(!!a.internal) || b.value - a.value);
     return {
       rows,
-      external: external.rows.length,
+      external: external.rows.length - external.fromWarehouse,
+      fromWarehouse: external.fromWarehouse,
       internal: internal.length,
       internalDesab: internal.filter((r) => r.to.status === StockStatus.DESABASTECIDO).length,
       value: external.value + internal.reduce((a, r) => a + r.value, 0),
       sameMicrored: external.sameMicrored,
-      covered: rows.filter((r) => r.to.status === StockStatus.DESABASTECIDO).length,
+      // Un desabastecido que recibe del almacén y de otro establecimiento cuenta una vez.
+      covered: new Set(rows.filter((r) => r.to.status === StockStatus.DESABASTECIDO).map((r) => `${r.to.code}|${r.to.medCode}`)).size,
     };
-  }, [ctx]);
+  }, [ctx, useWarehouse]);
   const [filter, setFilter] = useState<"ALL" | "DESAB" | "SAME" | "INTERNAL">("ALL");
-  const rows = data.rows.filter((r) => filter === "ALL" || (filter === "DESAB" ? r.to.status === StockStatus.DESABASTECIDO : filter === "INTERNAL" ? r.internal : r.sameMicrored && !r.internal));
+  const rows = data.rows.filter((r) => filter === "ALL" || (filter === "DESAB" ? r.to.status === StockStatus.DESABASTECIDO : filter === "INTERNAL" ? r.internal : r.sameMicrored && !r.internal && !r.warehouse));
   const byDonor = useMemo(() => {
     const m = new Map<string, { name: string; n: number; value: number }>();
-    for (const r of data.rows) { if (r.internal) continue; const e = m.get(r.from.code) || { name: r.from.name, n: 0, value: 0 }; e.n++; e.value += r.value; m.set(r.from.code, e); }
+    for (const r of data.rows) { if (r.internal || r.warehouse) continue; const e = m.get(r.from.code) || { name: r.from.name, n: 0, value: 0 }; e.n++; e.value += r.value; m.set(r.from.code, e); }
     return [...m.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 8);
   }, [data]);
   const byReceiver = useMemo(() => {
     const m = new Map<string, { name: string; n: number }>();
-    for (const r of data.rows) { if (r.internal) continue; const e = m.get(r.to.code) || { name: r.to.name, n: 0 }; e.n++; m.set(r.to.code, e); }
+    for (const r of data.rows) { if (r.internal || r.warehouse) continue; const e = m.get(r.to.code) || { name: r.to.name, n: 0 }; e.n++; m.set(r.to.code, e); }
     return [...m.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 8);
   }, [data]);
   const columns: Column<TransferRow>[] = [
     { key: "description", label: "Producto", sort: (r) => r.to.description, render: (r) => <ProductCell code={r.to.medCode} description={r.to.description} /> },
-    { key: "from", label: "Entrega", sort: (r) => r.from.name, render: (r) => <span className="block max-w-[220px]"><span className="block truncate font-semibold text-slate-800">{r.internal ? `${siteLabel(ctx, r.from).split(" › ")[0]} · F01` : r.from.name}</span><span className="block text-[11.5px] text-blue-700">{formatNumber(r.from.stock)} u · {dec(r.from.months)} meses</span></span> },
+    { key: "from", label: "Entrega", sort: (r) => r.from.name, render: (r) => <span className="block max-w-[220px]"><span className="block truncate font-semibold text-slate-800">{r.internal ? `${siteLabel(ctx, r.from).split(" › ")[0]} · F01` : r.from.name}</span><span className="block text-[11.5px] text-blue-700">{r.warehouse ? `almacén · ${formatNumber(r.from.stock)} u` : `${formatNumber(r.from.stock)} u · ${dec(r.from.months)} meses`}</span></span> },
     { key: "arrow", label: "", render: () => <ArrowRight className="h-4 w-4 text-slate-300" /> },
     { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className="block max-w-[220px]"><span className="block truncate font-semibold text-slate-800">{r.to.name}</span><span className="block truncate text-[11.5px] text-slate-500">{r.internal ? `${r.to.code.slice(5)} · ` : ""}{formatNumber(r.to.stock)} u · CPA {dec(r.to.cpa)}</span></span> },
     { key: "status", label: "Situación", sort: (r) => STATUS_ORDER.indexOf(r.to.status), render: (r) => <StatusPill status={r.to.status} /> },
     { key: "quantity", label: "Cantidad", align: "right", sort: (r) => r.quantity, firstDir: "desc", render: (r) => <span className="font-mono text-[14px] font-black text-teal-700">{formatNumber(r.quantity)}</span> },
-    { key: "same", label: "Tipo", sort: (r) => (r.internal ? 2 : Number(r.sameMicrored)), render: (r) => <span title={r.internal ? "De la F01 a su puesto comunal" : r.sameMicrored ? "Misma microred" : "Otra microred"} className={`whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-bold ${r.internal ? "bg-teal-50 text-teal-700" : r.sameMicrored ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{r.internal ? "Interna" : r.sameMicrored ? "Misma" : "Otra"}</span> },
+    { key: "same", label: "Tipo", sort: (r) => (r.warehouse ? 3 : r.internal ? 2 : Number(r.sameMicrored)), render: (r) => <span title={r.warehouse ? "Desde el almacén" : r.internal ? "De la F01 a su puesto comunal" : r.sameMicrored ? "Misma microred" : "Otra microred"} className={`whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-bold ${r.warehouse ? "bg-amber-50 text-amber-700" : r.internal ? "bg-teal-50 text-teal-700" : r.sameMicrored ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{r.warehouse ? "Almacén" : r.internal ? "Interna" : r.sameMicrored ? "Misma" : "Otra"}</span> },
+    ...(hasWarehouse ? [{ key: "whStock", label: "Almacén", sort: (r: TransferRow) => warehouseStock.get(r.to.medCode) || 0, firstDir: "desc" as const, render: (r: TransferRow) => { const st = warehouseStock.get(r.to.medCode) || 0; return <span className={`font-mono ${st ? "font-bold text-amber-700" : "text-slate-300"}`}>{formatNumber(st)}</span>; } }] : []),
     { key: "value", label: "Valor", align: "right", sort: (r) => r.value, firstDir: "desc", render: (r) => <span className="font-mono">{money(r.value)}</span> },
   ];
   return (
     <div className="space-y-4">
       <KpiStrip cols={ctx.pharmacy ? "md:grid-cols-3 xl:grid-cols-5" : "md:grid-cols-2 xl:grid-cols-4"}>
-        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Redistribuciones sugeridas" value={formatNumber(data.rows.length)} hint={data.internal ? `${formatNumber(data.external)} entre establecimientos · ${formatNumber(data.internal)} internas` : "de excedente a donde falta"} onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
+        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Redistribuciones sugeridas" value={formatNumber(data.rows.length)} hint={[data.fromWarehouse ? `${formatNumber(data.fromWarehouse)} desde el almacén` : "", `${formatNumber(data.external)} entre establecimientos`, data.internal ? `${formatNumber(data.internal)} internas` : ""].filter(Boolean).join(" · ")} onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
         <KpiCard watermark tone="danger" icon={<PackageX />} label="Cubren un desabastecido" value={formatNumber(data.covered)} hint="el que recibe tiene stock 0" onClick={() => { setFilter("DESAB"); toTable(); }} active={filter === "DESAB"} />
         <KpiCard watermark tone="success" icon={<Building2 />} label="Dentro de la misma microred" value={formatNumber(data.sameMicrored)} hint={`${pctText(data.external ? (data.sameMicrored / data.external) * 100 : 0)} de las de entre establecimientos`} onClick={() => { setFilter("SAME"); toTable(); }} active={filter === "SAME"} />
         {ctx.pharmacy && <KpiCard watermark tone="success" icon={<Store />} label="Internas F01 → puesto" value={formatNumber(data.internal)} hint={`del mismo establecimiento · ${formatNumber(data.internalDesab)} a desabastecidos`} onClick={() => { setFilter("INTERNAL"); toTable(); }} active={filter === "INTERNAL"} />}
@@ -1590,6 +1601,12 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         columns={columns}
         rowKey={(r) => `${r.from.code}|${r.to.code}|${r.to.medCode}`}
         itemLabel="sugerencias"
+        toolbar={hasWarehouse ? (
+          <label className="flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50">
+            <input type="checkbox" checked={useWarehouse} onChange={(e) => setUseWarehouse(e.target.checked)} className="h-4 w-4 accent-teal-600" />
+            Cubrir primero desde el almacén
+          </label>
+        ) : undefined}
         searchOf={(r) => `${r.to.medCode} ${r.to.description} ${r.from.name} ${r.to.name}`}
         placeholder="Buscar producto o establecimiento…"
         onRowClick={(r, rows) => ctx.openProduct(r.to, rows.map((x) => x.to))}
@@ -1602,6 +1619,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
               <span className="flex shrink-0 items-center gap-1 rounded-lg bg-teal-50 px-2 py-1 font-mono font-black text-teal-700">{formatNumber(r.quantity)}<ArrowRight className="h-3.5 w-3.5" /></span>
               <span className="min-w-0 flex-1 truncate text-right font-semibold text-slate-700">{r.to.name}</span>
             </div>
+            {r.warehouse && <p className="mt-1.5 text-[11.5px] text-slate-500"><span className="rounded-md bg-amber-50 px-1.5 py-0.5 font-bold text-amber-700">Almacén</span> sale del almacén</p>}
             {r.internal && <p className="mt-1.5 text-[11.5px] text-slate-500"><span className="rounded-md bg-teal-50 px-1.5 py-0.5 font-bold text-teal-700">Interna</span> de la F01 a su puesto {r.to.code.slice(5)}</p>}
           </>
         )}

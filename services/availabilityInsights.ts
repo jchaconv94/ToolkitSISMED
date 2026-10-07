@@ -310,14 +310,33 @@ export interface TransferRow {
   value: number;
   /** Dentro del mismo establecimiento: de su F01 a uno de sus puestos comunales. */
   internal?: boolean;
+  /** Sale del almacén (030S05…): `from` es el almacén visto como un ítem más. */
+  warehouse?: boolean;
 }
+
+/** Un producto del almacén con la forma de un ítem, para que entregue en Redistribución. */
+const warehouseAsItem = (w: WarehouseItem): AvailabilityItem => ({
+  red: "", microred: "", code: w.code, ipressCode: w.code, name: w.name || w.code, category: "",
+  medCode: w.medCode, description: w.description, form: "", price: w.price, medtip: "", medpet: "", medest: "",
+  consumption: [], stock: w.stock, cpa: 0, months: Infinity, status: StockStatus.SIN_ROTACION,
+  nearestExpiry: w.lots.find((l) => l.expiry)?.expiry ?? null, lots: w.lots, monthsToExpiry: null, expiryRisk: false,
+});
 
 /**
  * Sugerencias de redistribución: a cada establecimiento desabastecido o en substock (con
  * consumo) le da el excedente de otro que tenga el mismo producto en sobrestock, prefiriendo
  * la misma microred. Lleva lo justo para llegar al mínimo (CPA × límite de substock).
  */
-export const redistributionReport = (items: AvailabilityItem[], subMax: number, sobreMin: number) => {
+export const redistributionReport = (items: AvailabilityItem[], subMax: number, sobreMin: number, warehouse: WarehouseItem[] = []) => {
+  // Con almacén: cubre primero desde él (punto C de la auditoría), y lo que falte, de otro
+  // establecimiento. Sin almacén, como antes.
+  const stores = new Map<string, Array<{ item: AvailabilityItem; left: number }>>();
+  for (const w of warehouse) {
+    if (w.stock <= 0) continue;
+    const list = stores.get(w.medCode) || [];
+    list.push({ item: warehouseAsItem(w), left: Math.floor(w.stock) });
+    stores.set(w.medCode, list);
+  }
   const donors = new Map<string, Array<{ item: AvailabilityItem; left: number }>>();
   for (const it of items) {
     if (it.status !== StockStatus.SOBRESTOCK) continue;
@@ -332,8 +351,16 @@ export const redistributionReport = (items: AvailabilityItem[], subMax: number, 
     .sort((a, b) => a.months - b.months || b.cpa - a.cpa);
   const rows: TransferRow[] = [];
   for (const need of needs) {
-    const want = Math.ceil(need.cpa * subMax - need.stock);
+    let want = Math.ceil(need.cpa * subMax - need.stock);
     if (want <= 0) continue;
+    const store = (stores.get(need.medCode) || []).filter((d) => d.left > 0).sort((a, b) => b.left - a.left)[0];
+    if (store) {
+      const quantity = Math.min(store.left, want);
+      store.left -= quantity;
+      want -= quantity;
+      rows.push({ from: store.item, to: need, quantity, sameMicrored: false, value: quantity * (need.price || 0), warehouse: true });
+      if (want <= 0) continue;
+    }
     const pool = (donors.get(need.medCode) || []).filter((d) => d.left > 0 && d.item.code !== need.code);
     if (!pool.length) continue;
     pool.sort((a, b) => Number(b.item.microred === need.microred) - Number(a.item.microred === need.microred) || b.left - a.left);
@@ -348,6 +375,7 @@ export const redistributionReport = (items: AvailabilityItem[], subMax: number, 
     value: sum(rows.map((r) => r.value)),
     sameMicrored: rows.filter((r) => r.sameMicrored).length,
     covered: rows.filter((r) => r.to.status === StockStatus.DESABASTECIDO).length,
+    fromWarehouse: rows.filter((r) => r.warehouse).length,
   };
 };
 
