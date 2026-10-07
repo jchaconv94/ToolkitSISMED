@@ -155,6 +155,16 @@ function situationColumns<T>(countsOf: (row: T) => StatusCounts): Column<T>[] {
   ];
 }
 
+/**
+ * Al tocar un indicador o un gráfico que filtra la tabla, la pantalla baja hasta la tabla para
+ * que se vea lo filtrado (pedido del usuario: «presiono y no pasa nada»).
+ */
+export const useTableAnchor = () => {
+  const anchor = React.useRef<HTMLElement>(null);
+  const toTable = () => requestAnimationFrame(() => anchor.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  return { anchor, toTable };
+};
+
 /* ---------------------------------------------------------------- Tabla de reporte */
 
 export interface Column<T> {
@@ -170,7 +180,7 @@ export interface Column<T> {
  * Tabla de un reporte: buscador y filtros arriba; en escritorio, encabezado fijo, orden por
  * columnas y paginación; en el celular, tarjetas que cargan al bajar.
  */
-export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRowClick, itemLabel, searchOf, placeholder, toolbar, minWidth = 900, subRows, subLabel = "subregistros" }: {
+export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRowClick, itemLabel, searchOf, placeholder, toolbar, minWidth = 900, subRows, subLabel = "subregistros", anchorRef }: {
   title?: string;
   info?: React.ReactNode;
   rows: T[];
@@ -187,6 +197,8 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
   subRows?: (row: T) => T[] | undefined;
   /** Cómo se llaman las filas hijas en el celular («farmacias»). */
   subLabel?: string;
+  /** Para bajar hasta la tabla cuando un indicador la filtra (`useTableAnchor`). */
+  anchorRef?: React.RefObject<HTMLElement | null>;
 }) {
   const isDesktop = useIsDesktop();
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
@@ -211,7 +223,7 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
   };
   const pageRows = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   return (
-    <section className="border-y border-slate-200 bg-white md:overflow-hidden md:rounded-2xl md:border md:shadow-sm">
+    <section ref={anchorRef} className="scroll-mt-14 border-y border-slate-200 bg-white md:overflow-hidden md:rounded-2xl md:border md:shadow-sm">
       <div className="flex flex-col gap-2 border-b border-slate-100 p-3 md:flex-row md:flex-wrap md:items-center">
         {title && (
           <div className="flex items-center gap-1.5 md:mr-2">
@@ -395,7 +407,9 @@ const INFO = {
   gaps: (subMax: number) => (
     <>
       <P>Por cada producto: en cuántos establecimientos está desabastecido o con menos de {subMax} meses de stock.</P>
-      <P><b>Con excedente</b> son los establecimientos que lo tienen en sobrestock y podrían cederlo. <b>Almacén</b> es el stock del almacén al cierre del mes.</P>
+      <P><b>Les sobra:</b> cuántos establecimientos tienen ese producto en sobrestock (más de lo que usan en 6 meses) y podrían pasar una parte a donde falta.</P>
+      <P><b>Almacén:</b> el stock del almacén al cierre del mes.</P>
+      <P><b>Se pueden cubrir:</b> productos desabastecidos que tienen de dónde sacarse: algún establecimiento al que le sobra o stock en el almacén.</P>
     </>
   ),
   warehouse: (subMax: number) => (
@@ -721,6 +735,7 @@ const PharmacyTitleMenu: React.FC<{
 /* ---------------------------------------------------------------- Detalle de un establecimiento */
 
 export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; onClose: () => void; onSwitch: (code: string) => void }> = ({ ctx, code, onClose, onSwitch }) => {
+  const { anchor, toTable } = useTableAnchor();
   // Un establecimiento (06502) o una de sus farmacias o puestos comunales (06502F02).
   const source = ctx.report.establishments.some((x) => x.code === code) ? ctx.report : ctx.pharmacy ?? ctx.report;
   const e = source.establishments.find((x) => x.code === code);
@@ -779,10 +794,10 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
       </section>
 
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="danger" label="Desabastecidos" value={formatNumber(e.desabastecido)} hint={`de ${e.total} ítems`} onClick={() => setStatus(StockStatus.DESABASTECIDO)} active={status === StockStatus.DESABASTECIDO} />
-        <KpiCard watermark tone="warning" label="Substock" value={formatNumber(e.substock)} hint={`menos de ${ctx.subMax} meses`} onClick={() => setStatus(StockStatus.SUBSTOCK)} active={status === StockStatus.SUBSTOCK} />
-        <KpiCard watermark tone="info" label="Sobrestock" value={formatNumber(e.sobrestock)} hint={`más de ${ctx.sobreMin} meses`} onClick={() => setStatus(StockStatus.SOBRESTOCK)} active={status === StockStatus.SOBRESTOCK} />
-        <KpiCard watermark tone="danger" icon={<CalendarClock />} label="Vence sin usarse" value={money(risk.value)} hint={`${risk.rows.length} lotes`} onClick={() => setStatus("RISK")} active={status === "RISK"} />
+        <KpiCard watermark tone="danger" label="Desabastecidos" value={formatNumber(e.desabastecido)} hint={`de ${e.total} ítems`} onClick={() => { setStatus(StockStatus.DESABASTECIDO); toTable(); }} active={status === StockStatus.DESABASTECIDO} />
+        <KpiCard watermark tone="warning" label="Substock" value={formatNumber(e.substock)} hint={`menos de ${ctx.subMax} meses`} onClick={() => { setStatus(StockStatus.SUBSTOCK); toTable(); }} active={status === StockStatus.SUBSTOCK} />
+        <KpiCard watermark tone="info" label="Sobrestock" value={formatNumber(e.sobrestock)} hint={`más de ${ctx.sobreMin} meses`} onClick={() => { setStatus(StockStatus.SOBRESTOCK); toTable(); }} active={status === StockStatus.SOBRESTOCK} />
+        <KpiCard watermark tone="danger" icon={<CalendarClock />} label="Vence sin usarse" value={money(risk.value)} hint={`${risk.rows.length} lotes`} onClick={() => { setStatus("RISK"); toTable(); }} active={status === "RISK"} />
       </KpiStrip>
 
       <div className="grid gap-4 lg:grid-cols-12">
@@ -794,12 +809,13 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
             parts={STATUS_ORDER.map((st) => ({ key: st, label: STATUS_LABEL[st], value: items.filter((i) => i.status === st).length, color: STATUS_COLOR[st] }))}
             total={e.total}
             active={status}
-            onSelect={(k) => setStatus(status === k ? "ALL" : (k as StockStatus))}
+            onSelect={(k) => { setStatus(status === k ? "ALL" : (k as StockStatus)); toTable(); }}
           />
         </ChartCard>
       </div>
 
       <ReportTable
+        anchorRef={anchor}
         rows={rows}
         columns={columns}
         rowKey={(r) => r.medCode}
@@ -933,38 +949,43 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
 /* ---------------------------------------------------------------- ¿Dónde falta? */
 
 export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap) => void }> = ({ ctx, onProduct }) => {
+  const { anchor, toTable } = useTableAnchor();
   const products = useMemo(() => productGapReport(ctx.report.items, ctx.warehouse), [ctx.report.items, ctx.warehouse]);
-  const [filter, setFilter] = useState<"ALL" | "DESAB" | "DONOR" | "WH">("DESAB");
+  const [filter, setFilter] = useState<"ALL" | "DESAB" | "WIDE" | "DONOR" | "COVER">("DESAB");
   const withDesab = products.filter((p) => p.desabastecido > 0);
   const solvable = withDesab.filter((p) => p.donors > 0 || p.warehouseStock > 0);
   const n = ctx.report.establishments.length;
   const wide = withDesab.filter((p) => p.desabastecido >= Math.max(2, n * 0.25));
-  const rows = products.filter((p) => filter === "ALL" || (filter === "DESAB" ? p.desabastecido > 0 : filter === "DONOR" ? p.desabastecido + p.substock > 0 && p.donors > 0 : p.desabastecido + p.substock > 0 && p.warehouseStock > 0));
+  const donorsDesab = withDesab.filter((p) => p.donors > 0);
+  // Los indicadores y las pastillas filtran lo mismo, y siempre sobre los productos desabastecidos.
+  const byFilter = { ALL: products, DESAB: withDesab, WIDE: wide, DONOR: donorsDesab, COVER: solvable };
+  const rows = byFilter[filter];
   const columns: Column<ProductGap>[] = [
     { key: "description", label: "Producto", sort: (r) => r.description, render: (r) => <ProductCell code={r.medCode} description={r.description} /> },
     { key: "mix", label: "En los establecimientos", render: (r) => <StackBar parts={statusParts(r)} className="h-2.5 w-44" /> },
     { key: "desabastecido", label: "Desab.", align: "right", sort: (r) => r.desabastecido, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-red-600">{r.desabastecido}</span> },
     { key: "substock", label: "Sub", align: "right", sort: (r) => r.substock, firstDir: "desc", render: (r) => <span className="font-mono">{r.substock}</span> },
-    { key: "establishments", label: "De", align: "right", sort: (r) => r.establishments, firstDir: "desc", render: (r) => <span className="font-mono text-slate-500">{r.establishments}</span> },
-    { key: "donors", label: "Con excedente", align: "right", sort: (r) => r.donors, firstDir: "desc", render: (r) => <span className={`font-mono ${r.donors ? "font-bold text-blue-700" : "text-slate-300"}`}>{r.donors}</span> },
+    { key: "establishments", label: "Establec.", align: "right", sort: (r) => r.establishments, firstDir: "desc", render: (r) => <span className="font-mono text-slate-500">{r.establishments}</span> },
+    { key: "donors", label: "Les sobra", align: "right", sort: (r) => r.donors, firstDir: "desc", render: (r) => <span className={`font-mono ${r.donors ? "font-bold text-blue-700" : "text-slate-300"}`}>{r.donors}</span> },
     { key: "warehouseStock", label: "Almacén", align: "right", sort: (r) => r.warehouseStock, firstDir: "desc", render: (r) => <span className={`font-mono ${r.warehouseStock ? "font-bold text-amber-700" : "text-slate-300"}`}>{formatNumber(r.warehouseStock)}</span> },
   ];
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="danger" icon={<PackageX />} label="Productos desabastecidos" value={formatNumber(withDesab.length)} hint="en al menos un establecimiento" onClick={() => setFilter("DESAB")} active={filter === "DESAB"} />
-        <KpiCard watermark tone="warning" icon={<Building2 />} label="Faltan en 1 de cada 4" value={formatNumber(wide.length)} hint="desabastecidos en el 25 % o más" />
-        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Hay quien los cede" value={formatNumber(withDesab.filter((p) => p.donors > 0).length)} hint="otro establecimiento con excedente" onClick={() => setFilter("DONOR")} active={filter === "DONOR"} />
-        <KpiCard watermark tone="success" icon={<Warehouse />} label="Se pueden cubrir" value={formatNumber(solvable.length)} hint="con excedente o con almacén" onClick={() => setFilter("WH")} active={filter === "WH"} />
+        <KpiCard watermark tone="danger" icon={<PackageX />} label="Productos desabastecidos" value={formatNumber(withDesab.length)} hint="faltan en al menos un establecimiento" onClick={() => { setFilter("DESAB"); toTable(); }} active={filter === "DESAB"} />
+        <KpiCard watermark tone="warning" icon={<Building2 />} label="Faltan en muchos" value={formatNumber(wide.length)} hint="en 1 de cada 4 establecimientos o más" onClick={() => { setFilter("WIDE"); toTable(); }} active={filter === "WIDE"} />
+        <KpiCard watermark tone="info" icon={<Repeat2 />} label="A otro le sobra" value={formatNumber(donorsDesab.length)} hint="otro establecimiento tiene de más y puede pasarlo" onClick={() => { setFilter("DONOR"); toTable(); }} active={filter === "DONOR"} />
+        <KpiCard watermark tone="success" icon={<Warehouse />} label="Se pueden cubrir" value={formatNumber(solvable.length)} hint="con lo que le sobra a otro o con el almacén" onClick={() => { setFilter("COVER"); toTable(); }} active={filter === "COVER"} />
       </KpiStrip>
       <ChartCard title="Productos que faltan en más establecimientos" info={INFO.gaps(ctx.subMax)}>
         <HBars
           labelWidth="w-44 md:w-80"
-          rows={withDesab.slice(0, 12).map((p) => ({ key: p.medCode, label: p.description, sub: p.donors || p.warehouseStock ? `${p.donors} con excedente · almacén ${formatNumber(p.warehouseStock)}` : "nadie con excedente", value: p.desabastecido, color: STATUS_COLOR[StockStatus.DESABASTECIDO], text: `${p.desabastecido} de ${p.establishments}` }))}
+          rows={withDesab.slice(0, 12).map((p) => ({ key: p.medCode, label: p.description, sub: p.donors || p.warehouseStock ? `a ${p.donors} les sobra · almacén ${formatNumber(p.warehouseStock)}` : "a ningún establecimiento le sobra · sin almacén", value: p.desabastecido, color: STATUS_COLOR[StockStatus.DESABASTECIDO], text: `${p.desabastecido} de ${p.establishments}` }))}
           onSelect={(k) => { const p = products.find((x) => x.medCode === k); if (p) onProduct(p); }}
         />
       </ChartCard>
       <ReportTable
+        anchorRef={anchor}
         title="Productos"
         info={INFO.gaps(ctx.subMax)}
         rows={rows}
@@ -974,12 +995,12 @@ export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGa
         searchOf={(r) => `${r.medCode} ${r.description}`}
         placeholder="Buscar producto o código…"
         onRowClick={onProduct}
-        toolbar={<Pills value={filter} onChange={setFilter} options={[{ value: "DESAB", label: "Desabastecidos" }, { value: "DONOR", label: "Con quien ceda" }, { value: "WH", label: "Con stock en almacén" }, { value: "ALL", label: "Todos" }]} />}
+        toolbar={<Pills value={filter} onChange={setFilter} options={[{ value: "DESAB", label: "Desabastecidos", count: withDesab.length }, { value: "WIDE", label: "Faltan en muchos", count: wide.length }, { value: "DONOR", label: "A otro le sobra", count: donorsDesab.length }, { value: "COVER", label: "Se pueden cubrir", count: solvable.length }, { value: "ALL", label: "Todos", count: products.length }]} />}
         card={(p) => (
           <>
             <ProductCell code={p.medCode} description={p.description} />
             <StackBar parts={statusParts(p)} className="mt-2 h-2 w-full" />
-            <p className="mt-1.5 text-[12px] text-slate-500"><b className="text-red-600">{p.desabastecido}</b> desab. · {p.substock} sub · de {p.establishments} · <b className="text-blue-700">{p.donors}</b> con excedente · almacén {formatNumber(p.warehouseStock)}</p>
+            <p className="mt-1.5 text-[12px] text-slate-500"><b className="text-red-600">{p.desabastecido}</b> desab. · {p.substock} sub · de {p.establishments} · a <b className="text-blue-700">{p.donors}</b> les sobra · almacén {formatNumber(p.warehouseStock)}</p>
           </>
         )}
       />
@@ -1027,6 +1048,7 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
 /* ---------------------------------------------------------------- Riesgo de vencimiento */
 
 export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
+  const { anchor, toTable } = useTableAnchor();
   const risk = useMemo(() => lotRiskReport(ctx.report.items, ctx.today), [ctx.report.items, ctx.today]);
   const [bucket, setBucket] = useState<"URGENT" | "ALL" | "NOUSE" | (typeof EXPIRY_BUCKETS)[number]>("URGENT");
   const byEst = useMemo(() => {
@@ -1054,17 +1076,17 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="danger" icon={<CalendarClock />} label="Vence sin usarse en 12 meses" value={money(risk.urgentValue)} hint={`${formatNumber(risk.urgentLots)} lotes`} onClick={() => setBucket("URGENT")} active={bucket === "URGENT"} />
-        <KpiCard watermark tone="danger" label="En los próximos 3 meses" value={money(risk.byBucket.M3.value + risk.byBucket.EXPIRED.value)} hint={`${risk.byBucket.M3.lots + risk.byBucket.EXPIRED.lots} lotes, incluye vencidos`} onClick={() => setBucket("M3")} active={bucket === "M3"} />
-        <KpiCard watermark tone="neutral" label="De productos sin consumo" value={money(risk.noUseValue)} hint={`${formatNumber(risk.noUseLots)} lotes sin rotación`} onClick={() => setBucket("NOUSE")} active={bucket === "NOUSE"} />
-        <KpiCard watermark tone="warning" label="Total en riesgo" value={money(risk.value)} hint={`${formatNumber(risk.units)} unidades · ${formatNumber(risk.rows.length)} lotes`} onClick={() => setBucket("ALL")} active={bucket === "ALL"} />
+        <KpiCard watermark tone="danger" icon={<CalendarClock />} label="Vence sin usarse en 12 meses" value={money(risk.urgentValue)} hint={`${formatNumber(risk.urgentLots)} lotes`} onClick={() => { setBucket("URGENT"); toTable(); }} active={bucket === "URGENT"} />
+        <KpiCard watermark tone="danger" label="En los próximos 3 meses" value={money(risk.byBucket.M3.value + risk.byBucket.EXPIRED.value)} hint={`${risk.byBucket.M3.lots + risk.byBucket.EXPIRED.lots} lotes, incluye vencidos`} onClick={() => { setBucket("M3"); toTable(); }} active={bucket === "M3"} />
+        <KpiCard watermark tone="neutral" label="De productos sin consumo" value={money(risk.noUseValue)} hint={`${formatNumber(risk.noUseLots)} lotes sin rotación`} onClick={() => { setBucket("NOUSE"); toTable(); }} active={bucket === "NOUSE"} />
+        <KpiCard watermark tone="warning" label="Total en riesgo" value={money(risk.value)} hint={`${formatNumber(risk.units)} unidades · ${formatNumber(risk.rows.length)} lotes`} onClick={() => { setBucket("ALL"); toTable(); }} active={bucket === "ALL"} />
       </KpiStrip>
       <div className="grid gap-4 lg:grid-cols-12">
         <ChartCard title="Valor en riesgo según cuándo vence" info={INFO.expiry} className="lg:col-span-5">
           <HBars
             labelWidth="w-28"
             rows={EXPIRY_BUCKETS.map((b) => ({ key: b, label: EXPIRY_BUCKET_LABEL[b], sub: `${risk.byBucket[b].lots} lotes`, value: risk.byBucket[b].value, color: bucketColor[b], text: money(risk.byBucket[b].value) }))}
-            onSelect={(k) => setBucket(k as (typeof EXPIRY_BUCKETS)[number])}
+            onSelect={(k) => { setBucket(k as (typeof EXPIRY_BUCKETS)[number]); toTable(); }}
           />
         </ChartCard>
         <ChartCard title="Establecimientos con más valor en riesgo (12 meses)" className="lg:col-span-7">
@@ -1072,6 +1094,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         </ChartCard>
       </div>
       <ReportTable
+        anchorRef={anchor}
         title="Lotes en riesgo"
         info={INFO.expiry}
         rows={rows}
@@ -1101,6 +1124,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
 /* ---------------------------------------------------------------- Consumos irregulares */
 
 export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
+  const { anchor, toTable } = useTableAnchor();
   const data = useMemo(() => consumptionReport(ctx.report.items), [ctx.report.items]);
   const [xyz, setXyz] = useState<"ALL" | "X" | "Y" | "Z">("ALL");
   const totalXyz = data.xyz.X + data.xyz.Y + data.xyz.Z;
@@ -1128,10 +1152,10 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="danger" icon={<TrendingUp />} label="Picos de consumo" value={formatNumber(data.peaks.length)} hint="un mes con 3 veces lo habitual" onClick={() => setXyz("ALL")} active={xyz === "ALL"} />
-        <KpiCard watermark tone="success" label="Consumo estable (X)" value={formatNumber(data.xyz.X)} hint={`${pctText(totalXyz ? (data.xyz.X / totalXyz) * 100 : 0)} de los ítems con consumo`} onClick={() => setXyz("X")} active={xyz === "X"} />
-        <KpiCard watermark tone="warning" label="Consumo variable (Y)" value={formatNumber(data.xyz.Y)} hint={`${pctText(totalXyz ? (data.xyz.Y / totalXyz) * 100 : 0)} de los ítems con consumo`} onClick={() => setXyz("Y")} active={xyz === "Y"} />
-        <KpiCard watermark tone="danger" label="Consumo irregular (Z)" value={formatNumber(data.xyz.Z)} hint={`${pctText(totalXyz ? (data.xyz.Z / totalXyz) * 100 : 0)} de los ítems con consumo`} onClick={() => setXyz("Z")} active={xyz === "Z"} />
+        <KpiCard watermark tone="danger" icon={<TrendingUp />} label="Picos de consumo" value={formatNumber(data.peaks.length)} hint="un mes con 3 veces lo habitual" onClick={() => { setXyz("ALL"); toTable(); }} active={xyz === "ALL"} />
+        <KpiCard watermark tone="success" label="Consumo estable (X)" value={formatNumber(data.xyz.X)} hint={`${pctText(totalXyz ? (data.xyz.X / totalXyz) * 100 : 0)} de los ítems con consumo`} onClick={() => { setXyz("X"); toTable(); }} active={xyz === "X"} />
+        <KpiCard watermark tone="warning" label="Consumo variable (Y)" value={formatNumber(data.xyz.Y)} hint={`${pctText(totalXyz ? (data.xyz.Y / totalXyz) * 100 : 0)} de los ítems con consumo`} onClick={() => { setXyz("Y"); toTable(); }} active={xyz === "Y"} />
+        <KpiCard watermark tone="danger" label="Consumo irregular (Z)" value={formatNumber(data.xyz.Z)} hint={`${pctText(totalXyz ? (data.xyz.Z / totalXyz) * 100 : 0)} de los ítems con consumo`} onClick={() => { setXyz("Z"); toTable(); }} active={xyz === "Z"} />
       </KpiStrip>
       <div className="grid gap-4 lg:grid-cols-12">
         <ChartCard title="Picos por mes" info={INFO.peaks} className="lg:col-span-7">
@@ -1142,7 +1166,7 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
             centerValue={formatNumber(totalXyz)}
             centerLabel="ítems con consumo"
             selected={xyz === "ALL" ? null : xyz}
-            onSelect={(k) => setXyz(xyz === k ? "ALL" : (k as "X" | "Y" | "Z"))}
+            onSelect={(k) => { setXyz(xyz === k ? "ALL" : (k as "X" | "Y" | "Z")); toTable(); }}
             segments={[
               { key: "X", label: "X · Estable", value: data.xyz.X, color: "#10b981" },
               { key: "Y", label: "Y · Variable", value: data.xyz.Y, color: "#f59e0b" },
@@ -1153,6 +1177,7 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
       </div>
       {xyz !== "ALL" ? (
         <ReportTable
+        anchorRef={anchor}
           key={xyz}
           title={xyzTitle[xyz]}
           info={INFO.xyz}
@@ -1174,6 +1199,7 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
         />
       ) : (
         <ReportTable
+        anchorRef={anchor}
         title="Picos de consumo"
         info={INFO.peaks}
         rows={rows}
@@ -1199,6 +1225,7 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
 /* ---------------------------------------------------------------- ABC × XYZ */
 
 export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
+  const { anchor, toTable } = useTableAnchor();
   const data = useMemo(() => abcXyzReport(ctx.report.items), [ctx.report.items]);
   const [cell, setCell] = useState<string | null>(null);
   const rows = data.products.filter((p) => !cell || `${p.abc}${p.xyz}` === cell);
@@ -1226,7 +1253,7 @@ export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="info" icon={<Boxes />} label="Valor consumido" value={money(data.total)} hint={`${formatNumber(data.products.length)} productos en ${ctx.months.length} meses`} onClick={() => setCell(null)} active={!cell} />
+        <KpiCard watermark tone="info" icon={<Boxes />} label="Valor consumido" value={money(data.total)} hint={`${formatNumber(data.products.length)} productos en ${ctx.months.length} meses`} onClick={() => { setCell(null); toTable(); }} active={!cell} />
         <KpiCard watermark tone="danger" label="Clase A" value={formatNumber(data.counts.A.products)} hint={`productos · ${pctText(share("A"))} del valor`} />
         <KpiCard watermark tone="warning" label="Clase B" value={formatNumber(data.counts.B.products)} hint={`productos · ${pctText(share("B"))} del valor`} />
         <KpiCard watermark tone="neutral" label="Clase C" value={formatNumber(data.counts.C.products)} hint={`productos · ${pctText(share("C"))} del valor`} />
@@ -1249,7 +1276,7 @@ export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
                     <button
                       key={k}
                       type="button"
-                      onClick={() => setCell(cell === k ? null : k)}
+                      onClick={() => { setCell(cell === k ? null : k); toTable(); }}
                       className={`rounded-xl px-4 py-4 text-left transition-transform hover:scale-[1.02] ${cell === k ? "ring-2 ring-slate-900" : ""}`}
                       style={{ background: heat(n) }}
                     >
@@ -1265,6 +1292,7 @@ export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         </div>
       </ChartCard>
       <ReportTable
+        anchorRef={anchor}
         title={cell ? `Productos ${cell}` : "Productos por valor consumido"}
         info={INFO.abc}
         rows={rows}
@@ -1365,6 +1393,7 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
 /* ---------------------------------------------------------------- Redistribución */
 
 export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
+  const { anchor, toTable } = useTableAnchor();
   const data = useMemo(() => redistributionReport(ctx.report.items, ctx.subMax, ctx.sobreMin), [ctx.report.items, ctx.subMax, ctx.sobreMin]);
   const [filter, setFilter] = useState<"ALL" | "DESAB" | "SAME">("ALL");
   const rows = data.rows.filter((r) => filter === "ALL" || (filter === "DESAB" ? r.to.status === StockStatus.DESABASTECIDO : r.sameMicrored));
@@ -1391,9 +1420,9 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Redistribuciones sugeridas" value={formatNumber(data.rows.length)} hint="de excedente a donde falta" onClick={() => setFilter("ALL")} active={filter === "ALL"} />
-        <KpiCard watermark tone="danger" icon={<PackageX />} label="Cubren un desabastecido" value={formatNumber(data.covered)} hint="el que recibe tiene stock 0" onClick={() => setFilter("DESAB")} active={filter === "DESAB"} />
-        <KpiCard watermark tone="success" icon={<Building2 />} label="Dentro de la misma microred" value={formatNumber(data.sameMicrored)} hint={`${pctText(data.rows.length ? (data.sameMicrored / data.rows.length) * 100 : 0)} del total`} onClick={() => setFilter("SAME")} active={filter === "SAME"} />
+        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Redistribuciones sugeridas" value={formatNumber(data.rows.length)} hint="de excedente a donde falta" onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
+        <KpiCard watermark tone="danger" icon={<PackageX />} label="Cubren un desabastecido" value={formatNumber(data.covered)} hint="el que recibe tiene stock 0" onClick={() => { setFilter("DESAB"); toTable(); }} active={filter === "DESAB"} />
+        <KpiCard watermark tone="success" icon={<Building2 />} label="Dentro de la misma microred" value={formatNumber(data.sameMicrored)} hint={`${pctText(data.rows.length ? (data.sameMicrored / data.rows.length) * 100 : 0)} del total`} onClick={() => { setFilter("SAME"); toTable(); }} active={filter === "SAME"} />
         <KpiCard watermark tone="neutral" label="Valor a mover" value={money(data.value)} hint="a precio del producto" />
       </KpiStrip>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -1405,6 +1434,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         </ChartCard>
       </div>
       <ReportTable
+        anchorRef={anchor}
         title="Sugerencias"
         info={INFO.redistribution(ctx.subMax, ctx.sobreMin)}
         rows={rows}
@@ -1433,6 +1463,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
 /* ---------------------------------------------------------------- Almacén */
 
 export const WarehouseReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
+  const { anchor, toTable } = useTableAnchor();
   const data = useMemo(() => warehouseReport(ctx.warehouse, ctx.report.items, ctx.subMax), [ctx.warehouse, ctx.report.items, ctx.subMax]);
   const [filter, setFilter] = useState<"NEED" | "ALL" | "NODEMAND" | "EXPIRY">("NEED");
   const soon = (r: WarehouseRow) => !!r.nearestExpiry && r.nearestExpiry.getTime() - ctx.today.getTime() < 183 * 86400000;
@@ -1454,10 +1485,10 @@ export const WarehouseReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="info" icon={<Warehouse />} label="Stock en almacén" value={money(data.value)} hint={`${formatNumber(data.products)} productos al cierre del mes`} onClick={() => setFilter("ALL")} active={filter === "ALL"} />
-        <KpiCard watermark tone="success" icon={<Repeat2 />} label="Puede cubrir faltantes" value={formatNumber(data.canCover)} hint="productos que algún establecimiento necesita" onClick={() => setFilter("NEED")} active={filter === "NEED"} />
-        <KpiCard watermark tone="danger" icon={<CalendarClock />} label="Vence en 6 meses" value={money(soonValue)} hint={`${data.rows.filter(soon).length} productos`} onClick={() => setFilter("EXPIRY")} active={filter === "EXPIRY"} />
-        <KpiCard watermark tone="neutral" label="Sin consumo en la red" value={formatNumber(data.withoutDemand)} hint="ningún establecimiento lo usa" onClick={() => setFilter("NODEMAND")} active={filter === "NODEMAND"} />
+        <KpiCard watermark tone="info" icon={<Warehouse />} label="Stock en almacén" value={money(data.value)} hint={`${formatNumber(data.products)} productos al cierre del mes`} onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
+        <KpiCard watermark tone="success" icon={<Repeat2 />} label="Puede cubrir faltantes" value={formatNumber(data.canCover)} hint="productos que algún establecimiento necesita" onClick={() => { setFilter("NEED"); toTable(); }} active={filter === "NEED"} />
+        <KpiCard watermark tone="danger" icon={<CalendarClock />} label="Vence en 6 meses" value={money(soonValue)} hint={`${data.rows.filter(soon).length} productos`} onClick={() => { setFilter("EXPIRY"); toTable(); }} active={filter === "EXPIRY"} />
+        <KpiCard watermark tone="neutral" label="Sin consumo en la red" value={formatNumber(data.withoutDemand)} hint="ningún establecimiento lo usa" onClick={() => { setFilter("NODEMAND"); toTable(); }} active={filter === "NODEMAND"} />
       </KpiStrip>
       <ChartCard title="Productos del almacén que más establecimientos necesitan" info={INFO.warehouse(ctx.subMax)}>
         <HBars
@@ -1466,6 +1497,7 @@ export const WarehouseReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         />
       </ChartCard>
       <ReportTable
+        anchorRef={anchor}
         title="Stock del almacén"
         info={INFO.warehouse(ctx.subMax)}
         rows={rows}
