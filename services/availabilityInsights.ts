@@ -308,6 +308,8 @@ export interface TransferRow {
   quantity: number;
   sameMicrored: boolean;
   value: number;
+  /** Dentro del mismo establecimiento: de su F01 a uno de sus puestos comunales. */
+  internal?: boolean;
 }
 
 /**
@@ -347,6 +349,64 @@ export const redistributionReport = (items: AvailabilityItem[], subMax: number, 
     sameMicrored: rows.filter((r) => r.sameMicrored).length,
     covered: rows.filter((r) => r.to.status === StockStatus.DESABASTECIDO).length,
   };
+};
+
+/**
+ * Sugerencias internas (punto B de la auditoría, 2026-10-07): la F01 abastece a sus puestos
+ * comunales. A cada puesto desabastecido o en substock (con consumo) le da lo justo para llegar
+ * al mínimo (CPA × límite de substock), y la F01 se queda con ese mismo mínimo de lo que ella
+ * dispensa. Trabaja sobre los ítems por farmacia; `isSeparate` dice qué código es un puesto.
+ */
+export const internalTransfers = (pharmacyItems: AvailabilityItem[], subMax: number, isSeparate: (code: string) => boolean): TransferRow[] => {
+  const mains = new Map<string, { item: AvailabilityItem; left: number }>();
+  for (const it of pharmacyItems) {
+    if (!/F01$/i.test(it.code)) continue;
+    mains.set(`${it.ipressCode}|${it.medCode}`, { item: it, left: Math.floor(it.stock - it.cpa * subMax) });
+  }
+  const needs = pharmacyItems
+    .filter((i) => isSeparate(i.code) && (i.status === StockStatus.DESABASTECIDO || i.status === StockStatus.SUBSTOCK) && i.cpa > 0)
+    .sort((a, b) => a.months - b.months || b.cpa - a.cpa);
+  const rows: TransferRow[] = [];
+  for (const need of needs) {
+    const main = mains.get(`${need.ipressCode}|${need.medCode}`);
+    const want = Math.ceil(need.cpa * subMax - need.stock);
+    if (!main || main.left <= 0 || want <= 0) continue;
+    const quantity = Math.min(main.left, want);
+    main.left -= quantity;
+    rows.push({ from: main.item, to: need, quantity, sameMicrored: true, value: quantity * (need.price || 0), internal: true });
+  }
+  return rows;
+};
+
+/* ------------------------------------------------------------ Faltan en un puesto */
+
+export interface SiteGapRow {
+  /** El puesto comunal desabastecido. */
+  item: AvailabilityItem;
+  /** El establecimiento con todas sus farmacias sumadas, que no figura como faltante. */
+  establishment: AvailabilityItem;
+  /** La F01 del establecimiento, si tiene el producto. */
+  main: AvailabilityItem | null;
+}
+
+/**
+ * Puestos comunales desabastecidos (con consumo) de un producto que su establecimiento, sumando
+ * todas sus farmacias, no tiene desabastecido ni en substock: la cifra sumada esconde el
+ * faltante del puesto (punto B de la auditoría). La disponibilidad oficial no cambia.
+ */
+export const siteGapReport = (items: AvailabilityItem[], pharmacyItems: AvailabilityItem[], isSeparate: (code: string) => boolean): SiteGapRow[] => {
+  const byKey = new Map(items.map((i) => [`${i.code}|${i.medCode}`, i]));
+  const mains = new Map(pharmacyItems.filter((i) => /F01$/i.test(i.code)).map((i) => [`${i.ipressCode}|${i.medCode}`, i]));
+  const rows: SiteGapRow[] = [];
+  for (const it of pharmacyItems) {
+    if (!isSeparate(it.code) || it.status !== StockStatus.DESABASTECIDO || it.cpa <= 0) continue;
+    const key = `${it.ipressCode}|${it.medCode}`;
+    const establishment = byKey.get(key);
+    if (!establishment || establishment.status === StockStatus.DESABASTECIDO || establishment.status === StockStatus.SUBSTOCK) continue;
+    rows.push({ item: it, establishment, main: mains.get(key) ?? null });
+  }
+  rows.sort((a, b) => b.item.cpa * (b.item.price || 0) - a.item.cpa * (a.item.price || 0) || a.item.description.localeCompare(b.item.description, "es"));
+  return rows;
 };
 
 /* ------------------------------------------------------------ Dónde falta (por producto) */

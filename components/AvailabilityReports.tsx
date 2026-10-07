@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight, ChevronDown, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Repeat2, TrendingUp, Warehouse, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, ChevronDown, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Repeat2, Store, TrendingUp, Warehouse, X } from "lucide-react";
 import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
 import { formatOneDecimal } from "../services/stockStatus";
@@ -9,8 +9,8 @@ import {
   DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
-  EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockReport, productGapReport, redistributionReport, warehouseReport,
-  type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type ProductGap, type TransferRow, type WarehouseRow,
+  EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, internalTransfers, lotRiskOf, lotRiskReport, overstockReport, productGapReport, redistributionReport, siteGapReport, warehouseReport,
+  type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type ProductGap, type SiteGapRow, type TransferRow, type WarehouseRow,
 } from "../services/availabilityInsights";
 import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, useTableSort, type Tone } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
@@ -102,6 +102,16 @@ const PctBar: React.FC<{ pct: number; color: string; text?: string; width?: stri
     <span className="w-14 text-right font-mono text-[13px] font-bold text-slate-800">{text ?? pctText(pct)}</span>
   </div>
 );
+/** «Establecimiento › F02 Puesto» para una farmacia o puesto comunal; el nombre, para el establecimiento. */
+const siteLabel = (ctx: ReportContext, it: AvailabilityItem) => {
+  if (it.code === it.ipressCode) return it.name;
+  const parent = ctx.report.establishments.find((x) => x.code === it.ipressCode)?.name;
+  return `${parent ?? it.ipressCode} › ${it.code.slice(5)} ${it.name}`;
+};
+
+/** ¿Es un puesto comunal (o una F02+ sin tipo)? Se evalúa aparte de la F01. */
+const separateOf = (ctx: ReportContext) => (code: string) => isSeparateSite(code, ctx.facilityType(code));
+
 const ProductCell: React.FC<{ code: string; description: string; sub?: string }> = ({ code, description, sub }) => (
   <span className="flex min-w-0 items-start gap-2">
     <CodeChip code={code} />
@@ -190,7 +200,7 @@ export interface Column<T> {
  * (producto, establecimiento, microred, quién entrega/recibe) a la izquierda; todo lo demás
  * —números, códigos, fechas, estados, barras— centrado en su columna.
  */
-const TEXT_COLUMNS = new Set(["description", "name", "microred", "from", "to"]);
+const TEXT_COLUMNS = new Set(["description", "name", "microred", "from", "to", "site"]);
 const alignOf = (key: string): HeadAlign => (TEXT_COLUMNS.has(key) ? "left" : "center");
 
 export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRowClick, itemLabel, searchOf, placeholder, toolbar, minWidth = 900, subRows, subLabel = "subregistros", anchorRef }: {
@@ -417,6 +427,7 @@ const INFO = {
     <>
       <P>Para cada establecimiento desabastecido o en substock (con consumo), busca otro que tenga el mismo producto con excedente (más de {sobreMin} meses), primero en la misma microred.</P>
       <P>La cantidad es lo justo para llegar a {subMax} meses de consumo, sin dejar al que entrega por debajo de {sobreMin} meses.</P>
+      <P><b>Internas:</b> dentro de un mismo establecimiento, la F01 abastece a sus puestos comunales. Le da a cada puesto lo justo para llegar a {subMax} meses, y la F01 se queda con {subMax} meses de lo que ella dispensa.</P>
     </>
   ),
   gaps: (subMax: number) => (
@@ -425,6 +436,7 @@ const INFO = {
       <P><b>Les sobra:</b> cuántos establecimientos tienen ese producto en sobrestock (más de lo que usan en 6 meses) y podrían pasar una parte a donde falta.</P>
       <P><b>Almacén:</b> el stock del almacén al cierre del mes.</P>
       <P><b>Se pueden cubrir:</b> productos desabastecidos que tienen de dónde sacarse: algún establecimiento al que le sobra o stock en el almacén.</P>
+      <P><b>Faltan en un puesto:</b> puestos comunales desabastecidos de un producto que su establecimiento, sumando todas sus farmacias, no tiene como faltante. No bajan la disponibilidad del establecimiento, pero el puesto no lo tiene.</P>
     </>
   ),
   warehouse: (subMax: number) => (
@@ -1030,15 +1042,26 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
 export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap, list?: ProductGap[]) => void }> = ({ ctx, onProduct }) => {
   const { anchor, toTable } = useTableAnchor();
   const products = useMemo(() => productGapReport(ctx.report.items, ctx.warehouse), [ctx.report.items, ctx.warehouse]);
-  const [filter, setFilter] = useState<"ALL" | "DESAB" | "WIDE" | "DONOR" | "COVER">("DESAB");
+  const [filter, setFilter] = useState<"ALL" | "DESAB" | "WIDE" | "DONOR" | "COVER" | "SITE">("DESAB");
+  const siteGaps = useMemo(() => siteGapReport(ctx.report.items, ctx.pharmacy?.items ?? [], separateOf(ctx)), [ctx]);
+  const siteWithMain = siteGaps.filter((r) => (r.main?.stock ?? 0) > 0).length;
   const withDesab = products.filter((p) => p.desabastecido > 0);
   const solvable = withDesab.filter((p) => p.donors > 0 || p.warehouseStock > 0);
   const n = ctx.report.establishments.length;
   const wide = withDesab.filter((p) => p.desabastecido >= Math.max(2, n * 0.25));
   const donorsDesab = withDesab.filter((p) => p.donors > 0);
   // Los indicadores y las pastillas filtran lo mismo, y siempre sobre los productos desabastecidos.
-  const byFilter = { ALL: products, DESAB: withDesab, WIDE: wide, DONOR: donorsDesab, COVER: solvable };
+  const byFilter = { ALL: products, DESAB: withDesab, WIDE: wide, DONOR: donorsDesab, COVER: solvable, SITE: [] };
   const rows = byFilter[filter];
+  const siteColumns: Column<SiteGapRow>[] = [
+    { key: "description", label: "Producto", sort: (r) => r.item.description, render: (r) => <ProductCell code={r.item.medCode} description={r.item.description} /> },
+    { key: "site", label: "Puesto comunal", sort: (r) => r.item.name, render: (r) => <span className="block max-w-[260px]"><span className="block truncate font-semibold text-slate-800">{r.item.name}</span><span className="block truncate text-[11.5px] text-slate-400">{siteLabel(ctx, r.establishment)} › {r.item.code.slice(5)}</span></span> },
+    { key: "stock", label: "Stock", sort: (r) => r.item.stock, render: (r) => <span className="font-mono font-bold text-red-600">{formatNumber(r.item.stock)}</span> },
+    { key: "cpa", label: "CPA", sort: (r) => r.item.cpa, firstDir: "desc", render: (r) => <span className="font-mono">{dec(r.item.cpa)}</span> },
+    { key: "main", label: "Su F01 tiene", sort: (r) => r.main?.stock ?? 0, firstDir: "desc", render: (r) => (r.main?.stock ? <span className="whitespace-nowrap"><span className="block font-mono font-bold text-blue-700">{formatNumber(r.main.stock)} u</span><span className="block text-[11px] text-slate-400">{dec(r.main.months)} meses</span></span> : <span className="text-slate-300">0</span>) },
+    { key: "status", label: "Establecimiento", sort: (r) => STATUS_ORDER.indexOf(r.establishment.status), render: (r) => <StatusPill status={r.establishment.status} /> },
+  ];
+  const pills = <Pills value={filter} onChange={setFilter} options={[{ value: "DESAB", label: "Desabastecidos", count: withDesab.length }, { value: "WIDE", label: "Faltan en muchos", count: wide.length }, { value: "DONOR", label: "A otro le sobra", count: donorsDesab.length }, { value: "COVER", label: "Se pueden cubrir", count: solvable.length }, ...(ctx.pharmacy ? [{ value: "SITE" as const, label: "Faltan en un puesto", count: siteGaps.length }] : []), { value: "ALL", label: "Todos", count: products.length }]} />;
   const columns: Column<ProductGap>[] = [
     { key: "description", label: "Producto", sort: (r) => r.description, render: (r) => <ProductCell code={r.medCode} description={r.description} /> },
     { key: "mix", label: "En los establecimientos", render: (r) => <StackBar parts={statusParts(r)} className="h-2.5 w-44" /> },
@@ -1050,11 +1073,12 @@ export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGa
   ];
   return (
     <div className="space-y-4">
-      <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
+      <KpiStrip cols={ctx.pharmacy ? "md:grid-cols-3 xl:grid-cols-5" : "md:grid-cols-2 xl:grid-cols-4"}>
         <KpiCard watermark tone="danger" icon={<PackageX />} label="Productos desabastecidos" value={formatNumber(withDesab.length)} hint="faltan en al menos un establecimiento" onClick={() => { setFilter("DESAB"); toTable(); }} active={filter === "DESAB"} />
         <KpiCard watermark tone="warning" icon={<Building2 />} label="Faltan en muchos" value={formatNumber(wide.length)} hint="en 1 de cada 4 establecimientos o más" onClick={() => { setFilter("WIDE"); toTable(); }} active={filter === "WIDE"} />
         <KpiCard watermark tone="info" icon={<Repeat2 />} label="A otro le sobra" value={formatNumber(donorsDesab.length)} hint="otro establecimiento tiene de más y puede pasarlo" onClick={() => { setFilter("DONOR"); toTable(); }} active={filter === "DONOR"} />
         <KpiCard watermark tone="success" icon={<Warehouse />} label="Se pueden cubrir" value={formatNumber(solvable.length)} hint="con lo que le sobra a otro o con el almacén" onClick={() => { setFilter("COVER"); toTable(); }} active={filter === "COVER"} />
+        {ctx.pharmacy && <KpiCard watermark tone="info" icon={<Store />} label="Faltan en un puesto" value={formatNumber(siteGaps.length)} hint={`el establecimiento sí los tiene · ${formatNumber(siteWithMain)} los tiene su F01`} onClick={() => { setFilter("SITE"); toTable(); }} active={filter === "SITE"} />}
       </KpiStrip>
       <ChartCard title="Productos que faltan en más establecimientos" info={INFO.gaps(ctx.subMax)}>
         <HBars
@@ -1063,26 +1087,49 @@ export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGa
           onSelect={(k) => { const p = products.find((x) => x.medCode === k); if (p) onProduct(p); }}
         />
       </ChartCard>
-      <ReportTable
-        anchorRef={anchor}
-        title="Productos"
-        info={INFO.gaps(ctx.subMax)}
-        rows={rows}
-        columns={columns}
-        rowKey={(r) => r.medCode}
-        itemLabel="productos"
-        searchOf={(r) => `${r.medCode} ${r.description}`}
-        placeholder="Buscar producto o código…"
-        onRowClick={(r, rows) => onProduct(r, rows)}
-        toolbar={<Pills value={filter} onChange={setFilter} options={[{ value: "DESAB", label: "Desabastecidos", count: withDesab.length }, { value: "WIDE", label: "Faltan en muchos", count: wide.length }, { value: "DONOR", label: "A otro le sobra", count: donorsDesab.length }, { value: "COVER", label: "Se pueden cubrir", count: solvable.length }, { value: "ALL", label: "Todos", count: products.length }]} />}
-        card={(p) => (
-          <>
-            <ProductCell code={p.medCode} description={p.description} />
-            <StackBar parts={statusParts(p)} className="mt-2 h-2 w-full" />
-            <p className="mt-1.5 text-[12px] text-slate-500"><b className="text-red-600">{p.desabastecido}</b> desab. · {p.substock} sub · de {p.establishments} · a <b className="text-blue-700">{p.donors}</b> les sobra · almacén {formatNumber(p.warehouseStock)}</p>
-          </>
-        )}
-      />
+      {filter === "SITE" ? (
+        <ReportTable
+          anchorRef={anchor}
+          title="Faltan en un puesto"
+          info={INFO.gaps(ctx.subMax)}
+          rows={siteGaps}
+          columns={siteColumns}
+          rowKey={(r) => `${r.item.code}|${r.item.medCode}`}
+          itemLabel="puestos"
+          searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name} ${r.establishment.name}`}
+          placeholder="Buscar producto o puesto…"
+          onRowClick={(r, rows) => ctx.openProduct(r.establishment, rows.map((x) => x.establishment))}
+          toolbar={pills}
+          card={(r) => (
+            <>
+              <ProductCell code={r.item.medCode} description={r.item.description} />
+              <p className="mt-1.5 text-[12px] text-slate-500"><b className="text-slate-700">{r.item.name}</b> · stock <b className="text-red-600">{formatNumber(r.item.stock)}</b> · CPA {dec(r.item.cpa)}</p>
+              <p className="text-[12px] text-slate-500">Su F01 tiene <b className="text-blue-700">{formatNumber(r.main?.stock ?? 0)} u</b> · establecimiento en {STATUS_LABEL[r.establishment.status].toLowerCase()}</p>
+            </>
+          )}
+        />
+      ) : (
+        <ReportTable
+          anchorRef={anchor}
+          title="Productos"
+          info={INFO.gaps(ctx.subMax)}
+          rows={rows}
+          columns={columns}
+          rowKey={(r) => r.medCode}
+          itemLabel="productos"
+          searchOf={(r) => `${r.medCode} ${r.description}`}
+          placeholder="Buscar producto o código…"
+          onRowClick={(r, rows) => onProduct(r, rows)}
+          toolbar={pills}
+          card={(p) => (
+            <>
+              <ProductCell code={p.medCode} description={p.description} />
+              <StackBar parts={statusParts(p)} className="mt-2 h-2 w-full" />
+              <p className="mt-1.5 text-[12px] text-slate-500"><b className="text-red-600">{p.desabastecido}</b> desab. · {p.substock} sub · de {p.establishments} · a <b className="text-blue-700">{p.donors}</b> les sobra · almacén {formatNumber(p.warehouseStock)}</p>
+            </>
+          )}
+        />
+      )}
     </div>
   );
 };
@@ -1149,11 +1196,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   }, [risk]);
   const rows = risk.rows.filter((r) => bucket === "ALL" || (bucket === "URGENT" ? r.bucket !== "LATER" : bucket === "NOUSE" ? r.item.cpa <= 0 : r.bucket === bucket));
   const bucketColor: Record<string, string> = { EXPIRED: "#7f1d1d", M3: "#dc2626", M6: "#f97316", M12: "#f59e0b", LATER: "#94a3b8" };
-  const whereOf = (it: AvailabilityItem) => {
-    if (it.code === it.ipressCode) return it.name;
-    const parent = ctx.report.establishments.find((x) => x.code === it.ipressCode)?.name;
-    return `${parent ?? it.ipressCode} › ${it.code.slice(5)} ${it.name}`;
-  };
+  const whereOf = (it: AvailabilityItem) => siteLabel(ctx, it);
   const columns: Column<LotRiskRow>[] = [
     { key: "description", label: "Producto", sort: (r) => r.item.description, render: (r) => <ProductCell code={r.item.medCode} description={r.item.description} sub={whereOf(r.item)} /> },
     { key: "lot", label: "Lote", render: (r) => <span className="font-mono text-[12px]">{r.lot.lot || "—"}</span> },
@@ -1485,35 +1528,50 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
 
 export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const { anchor, toTable } = useTableAnchor();
-  const data = useMemo(() => redistributionReport(ctx.report.items, ctx.subMax, ctx.sobreMin), [ctx.report.items, ctx.subMax, ctx.sobreMin]);
-  const [filter, setFilter] = useState<"ALL" | "DESAB" | "SAME">("ALL");
-  const rows = data.rows.filter((r) => filter === "ALL" || (filter === "DESAB" ? r.to.status === StockStatus.DESABASTECIDO : r.sameMicrored));
+  const data = useMemo(() => {
+    const external = redistributionReport(ctx.report.items, ctx.subMax, ctx.sobreMin);
+    // Las internas (F01 → puesto comunal) van primero dentro de cada grupo: es el movimiento más fácil.
+    const internal = internalTransfers(ctx.pharmacy?.items ?? [], ctx.subMax, separateOf(ctx));
+    const rows = [...internal, ...external.rows].sort((a, b) => Number(b.to.status === StockStatus.DESABASTECIDO) - Number(a.to.status === StockStatus.DESABASTECIDO) || Number(!!b.internal) - Number(!!a.internal) || b.value - a.value);
+    return {
+      rows,
+      external: external.rows.length,
+      internal: internal.length,
+      internalDesab: internal.filter((r) => r.to.status === StockStatus.DESABASTECIDO).length,
+      value: external.value + internal.reduce((a, r) => a + r.value, 0),
+      sameMicrored: external.sameMicrored,
+      covered: rows.filter((r) => r.to.status === StockStatus.DESABASTECIDO).length,
+    };
+  }, [ctx]);
+  const [filter, setFilter] = useState<"ALL" | "DESAB" | "SAME" | "INTERNAL">("ALL");
+  const rows = data.rows.filter((r) => filter === "ALL" || (filter === "DESAB" ? r.to.status === StockStatus.DESABASTECIDO : filter === "INTERNAL" ? r.internal : r.sameMicrored && !r.internal));
   const byDonor = useMemo(() => {
     const m = new Map<string, { name: string; n: number; value: number }>();
-    for (const r of data.rows) { const e = m.get(r.from.code) || { name: r.from.name, n: 0, value: 0 }; e.n++; e.value += r.value; m.set(r.from.code, e); }
+    for (const r of data.rows) { if (r.internal) continue; const e = m.get(r.from.code) || { name: r.from.name, n: 0, value: 0 }; e.n++; e.value += r.value; m.set(r.from.code, e); }
     return [...m.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 8);
   }, [data]);
   const byReceiver = useMemo(() => {
     const m = new Map<string, { name: string; n: number }>();
-    for (const r of data.rows) { const e = m.get(r.to.code) || { name: r.to.name, n: 0 }; e.n++; m.set(r.to.code, e); }
+    for (const r of data.rows) { if (r.internal) continue; const e = m.get(r.to.code) || { name: r.to.name, n: 0 }; e.n++; m.set(r.to.code, e); }
     return [...m.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 8);
   }, [data]);
   const columns: Column<TransferRow>[] = [
     { key: "description", label: "Producto", sort: (r) => r.to.description, render: (r) => <ProductCell code={r.to.medCode} description={r.to.description} /> },
-    { key: "from", label: "Entrega", sort: (r) => r.from.name, render: (r) => <span className="block max-w-[220px]"><span className="block truncate font-semibold text-slate-800">{r.from.name}</span><span className="block text-[11.5px] text-blue-700">{formatNumber(r.from.stock)} u · {dec(r.from.months)} meses</span></span> },
+    { key: "from", label: "Entrega", sort: (r) => r.from.name, render: (r) => <span className="block max-w-[220px]"><span className="block truncate font-semibold text-slate-800">{r.internal ? `${siteLabel(ctx, r.from).split(" › ")[0]} · F01` : r.from.name}</span><span className="block text-[11.5px] text-blue-700">{formatNumber(r.from.stock)} u · {dec(r.from.months)} meses</span></span> },
     { key: "arrow", label: "", render: () => <ArrowRight className="h-4 w-4 text-slate-300" /> },
-    { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className="block max-w-[220px]"><span className="block truncate font-semibold text-slate-800">{r.to.name}</span><span className="block text-[11.5px] text-slate-500">{formatNumber(r.to.stock)} u · CPA {dec(r.to.cpa)}</span></span> },
+    { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className="block max-w-[220px]"><span className="block truncate font-semibold text-slate-800">{r.to.name}</span><span className="block truncate text-[11.5px] text-slate-500">{r.internal ? `${r.to.code.slice(5)} · ` : ""}{formatNumber(r.to.stock)} u · CPA {dec(r.to.cpa)}</span></span> },
     { key: "status", label: "Situación", sort: (r) => STATUS_ORDER.indexOf(r.to.status), render: (r) => <StatusPill status={r.to.status} /> },
     { key: "quantity", label: "Cantidad", align: "right", sort: (r) => r.quantity, firstDir: "desc", render: (r) => <span className="font-mono text-[14px] font-black text-teal-700">{formatNumber(r.quantity)}</span> },
-    { key: "same", label: "Microred", sort: (r) => Number(r.sameMicrored), render: (r) => <span className={`whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-bold ${r.sameMicrored ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{r.sameMicrored ? "Misma" : "Otra"}</span> },
+    { key: "same", label: "Tipo", sort: (r) => (r.internal ? 2 : Number(r.sameMicrored)), render: (r) => <span title={r.internal ? "De la F01 a su puesto comunal" : r.sameMicrored ? "Misma microred" : "Otra microred"} className={`whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-bold ${r.internal ? "bg-teal-50 text-teal-700" : r.sameMicrored ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{r.internal ? "Interna" : r.sameMicrored ? "Misma" : "Otra"}</span> },
     { key: "value", label: "Valor", align: "right", sort: (r) => r.value, firstDir: "desc", render: (r) => <span className="font-mono">{money(r.value)}</span> },
   ];
   return (
     <div className="space-y-4">
-      <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Redistribuciones sugeridas" value={formatNumber(data.rows.length)} hint="de excedente a donde falta" onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
+      <KpiStrip cols={ctx.pharmacy ? "md:grid-cols-3 xl:grid-cols-5" : "md:grid-cols-2 xl:grid-cols-4"}>
+        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Redistribuciones sugeridas" value={formatNumber(data.rows.length)} hint={data.internal ? `${formatNumber(data.external)} entre establecimientos · ${formatNumber(data.internal)} internas` : "de excedente a donde falta"} onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
         <KpiCard watermark tone="danger" icon={<PackageX />} label="Cubren un desabastecido" value={formatNumber(data.covered)} hint="el que recibe tiene stock 0" onClick={() => { setFilter("DESAB"); toTable(); }} active={filter === "DESAB"} />
-        <KpiCard watermark tone="success" icon={<Building2 />} label="Dentro de la misma microred" value={formatNumber(data.sameMicrored)} hint={`${pctText(data.rows.length ? (data.sameMicrored / data.rows.length) * 100 : 0)} del total`} onClick={() => { setFilter("SAME"); toTable(); }} active={filter === "SAME"} />
+        <KpiCard watermark tone="success" icon={<Building2 />} label="Dentro de la misma microred" value={formatNumber(data.sameMicrored)} hint={`${pctText(data.external ? (data.sameMicrored / data.external) * 100 : 0)} de las de entre establecimientos`} onClick={() => { setFilter("SAME"); toTable(); }} active={filter === "SAME"} />
+        {ctx.pharmacy && <KpiCard watermark tone="success" icon={<Store />} label="Internas F01 → puesto" value={formatNumber(data.internal)} hint={`del mismo establecimiento · ${formatNumber(data.internalDesab)} a desabastecidos`} onClick={() => { setFilter("INTERNAL"); toTable(); }} active={filter === "INTERNAL"} />}
         <KpiCard watermark tone="neutral" label="Valor a mover" value={money(data.value)} hint="a precio del producto" />
       </KpiStrip>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -1544,6 +1602,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
               <span className="flex shrink-0 items-center gap-1 rounded-lg bg-teal-50 px-2 py-1 font-mono font-black text-teal-700">{formatNumber(r.quantity)}<ArrowRight className="h-3.5 w-3.5" /></span>
               <span className="min-w-0 flex-1 truncate text-right font-semibold text-slate-700">{r.to.name}</span>
             </div>
+            {r.internal && <p className="mt-1.5 text-[11.5px] text-slate-500"><span className="rounded-md bg-teal-50 px-1.5 py-0.5 font-bold text-teal-700">Interna</span> de la F01 a su puesto {r.to.code.slice(5)}</p>}
           </>
         )}
       />

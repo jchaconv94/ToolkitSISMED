@@ -74,9 +74,12 @@ sus farmacias sumadas.
 - **308 casos:** el establecimiento está en sobrestock, pero alguna de sus farmacias no. El
   excedente está en otra farmacia.
 
-**Propuesta:**
-- sugerencias internas (F01 → puesto) en Redistribución;
-- una pastilla «Faltan en un puesto» en «¿Dónde falta?».
+**Resuelto (2026-10-07, aprobado con prototipo):**
+- «¿Dónde falta?»: tarjeta y pastilla «Faltan en un puesto», con el stock de la F01 al lado
+  (`siteGapReport`). Con este TFORMDET: 80 puestos, 71 con stock en su F01.
+- Redistribución: sugerencias internas F01 → puesto (`internalTransfers`). La F01 se queda con
+  2 meses de lo que dispensa; cada puesto recibe lo justo para 2 meses. Con este TFORMDET: 170,
+  62 a puestos desabastecidos.
 
 ### C. Redistribución sin mirar el almacén
 
