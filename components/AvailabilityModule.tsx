@@ -20,7 +20,6 @@ import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
 import { formatNumber } from "../services/numberFormat";
 import { tformdetFromSheet, type TformdetFileResult } from "../services/tformdetFile";
 import { BottomSheet } from "./ui/BottomSheet";
-import { ModuleHeaderPortal } from "./ui/ModuleHeaderSlot";
 import {
   AbcReport, ConsumptionReport, EstablishmentDetail, EstablishmentsReport, ExpiryReport, GapsReport, OverstockReport, ProductDrawer, ProductGapDrawer, RedistributionReport, SummaryReport, WarehouseReport,
   type ReportContext, type ReportTab,
@@ -382,27 +381,13 @@ export const AvailabilityModule: React.FC = () => {
           onClick={() => setScope(id)}
           className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-[12.5px] font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${compact ? "flex-1" : ""} ${scope === id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
         >
-          <span title={label}>{short}</span>
+          <span className="md:hidden">{short}</span><span className="hidden md:inline">{label}</span>
         </button>
       ))}
     </div>
   );
-  const contextChip = (
-    <span className="flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[12.5px]">
-      <CalendarClock className="h-4 w-4 shrink-0 text-teal-700" />
-      <span className="truncate font-bold text-slate-900">{title.replace(/^UNGET /, "")}</span>
-      <span className="shrink-0 text-slate-300">·</span>
-      <span className="shrink-0 font-semibold capitalize text-slate-600">{cut ? monthLabel(cut) : ""}</span>
-      <span className="shrink-0 text-slate-400">{months.length} {months.length === 1 ? "mes" : "meses"}</span>
-    </span>
-  );
   const actionItems = (
     <>
-      {can("AVAILABILITY", "export") && (
-        <button type="button" onClick={() => { setActionsOpen(false); handleExport(); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 hover:bg-slate-50 md:hidden">
-          <Download className="h-5 w-5" />Exportar Excel
-        </button>
-      )}
       <button type="button" onClick={() => { setActionsOpen(false); setCalculated(false); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 hover:bg-slate-50">
         <RefreshCw className="h-5 w-5" />Cargar otro TFORMDET
       </button>
@@ -417,26 +402,34 @@ export const AvailabilityModule: React.FC = () => {
 
   return (
     <div className="pb-24 md:pb-8">
-      <ModuleHeaderPortal>
-        <div className="hidden items-center gap-2 lg:flex">{contextChip}</div>
-        <div className="hidden md:block">{scopeSwitch()}</div>
-        {can("AVAILABILITY", "export") && (
-          <button type="button" onClick={handleExport} disabled={exporting} className="hidden h-9 items-center gap-2 rounded-xl bg-teal-600 px-3.5 text-[13px] font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60 md:flex">
-            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{exporting ? "Generando…" : "Exportar"}
+      {/* Título del reporte: UNGET y corte a la izquierda; alcance, Exportar y Configuración a la derecha */}
+      <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <span className="hidden h-11 w-11 shrink-0 place-items-center rounded-2xl bg-teal-50 text-teal-700 sm:grid"><CalendarClock className="h-5 w-5" /></span>
+          <div className="min-w-0">
+            <h2 className="truncate text-[18px] font-black text-slate-900 md:text-[20px]">{title}</h2>
+            <p className="truncate text-[12.5px] text-slate-500">
+              Datos al corte de <b className="font-bold text-slate-700">{cut ? monthLabel(cut) : "—"}</b> · {months.length} {months.length === 1 ? "mes" : "meses"} de consumo{months.length > 1 ? ` (${monthLabel(months[0])} a ${monthLabel(cut)})` : ""}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 md:flex-none">{scopeSwitch(true)}</div>
+          {can("AVAILABILITY", "export") && (
+            <button type="button" onClick={handleExport} disabled={exporting} aria-label="Exportar Excel" className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-teal-600 px-3 text-[13px] font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60 md:px-4">
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}<span className="hidden sm:inline">{exporting ? "Generando…" : "Exportar"}</span>
+            </button>
+          )}
+          {isAdmin && (
+            <button type="button" onClick={() => setConfigOpen(true)} title="Configuración de la fórmula" aria-label="Configuración de la fórmula" className="hidden h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50 md:flex">
+              <Settings2 className="h-4 w-4" /><span className="hidden xl:inline">Configuración</span>
+            </button>
+          )}
+          <button type="button" onClick={() => setActionsOpen(true)} aria-label="Más acciones" title="Más acciones" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50">
+            <MoreVertical className="h-4 w-4" />
           </button>
-        )}
-        <button type="button" onClick={() => setActionsOpen(true)} aria-label="Más acciones" title="Más acciones" className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900">
-          <MoreVertical className="h-5 w-5" />
-        </button>
-      </ModuleHeaderPortal>
-
-      {/* Celular: contexto y alcance arriba del contenido */}
-      <div className="mb-3 space-y-2 md:hidden">
-        {contextChip}
-        {scopeSwitch(true)}
+        </div>
       </div>
-      {/* Escritorio mediano: el contexto no cabe en la cabecera */}
-      <div className="mb-3 hidden md:flex lg:hidden">{contextChip}</div>
 
       <div ref={scroller} />
       {openCode ? (
