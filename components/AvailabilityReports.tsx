@@ -6,7 +6,7 @@ import { formatOneDecimal } from "../services/stockStatus";
 import { formatNumber } from "../services/numberFormat";
 import { STATUS_LABEL, monthLabel } from "../services/availabilityExport";
 import {
-  DME_LEVEL_LABEL, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
+  DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
   EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockReport, productGapReport, redistributionReport, warehouseReport,
@@ -45,7 +45,8 @@ export interface ReportContext {
   scopeLabel: string;
   otherLabel: string;
   openEstablishment: (code: string) => void;
-  openProduct: (item: AvailabilityItem) => void;
+  /** Abre el panel de un producto; `list` es la lista en que está, para pasar al anterior o al siguiente. */
+  openProduct: (item: AvailabilityItem, list?: AvailabilityItem[]) => void;
   goTab: (tab: ReportTab) => void;
 }
 
@@ -195,7 +196,8 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
   columns: Column<T>[];
   rowKey: (row: T) => string;
   card: (row: T) => React.ReactNode;
-  onRowClick?: (row: T) => void;
+  /** Recibe también todas las filas filtradas y ordenadas, para recorrerlas desde el detalle. */
+  onRowClick?: (row: T, rows: T[]) => void;
   itemLabel: string;
   searchOf?: (row: T) => string;
   placeholder?: string;
@@ -268,7 +270,7 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
                   ));
                   return (
                     <React.Fragment key={key}>
-                      <tr onClick={onRowClick ? () => onRowClick(row) : undefined} className={`h-14 ${onRowClick ? "cursor-pointer hover:bg-slate-50" : ""} ${open ? "bg-teal-50/40" : ""}`}>
+                      <tr onClick={onRowClick ? () => onRowClick(row, sorted) : undefined} className={`h-14 ${onRowClick ? "cursor-pointer hover:bg-slate-50" : ""} ${open ? "bg-teal-50/40" : ""}`}>
                         {subRows && (
                           <td className="w-10 px-2 py-2">
                             {kids?.length ? (
@@ -288,7 +290,7 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
                         {cells(row, false)}
                       </tr>
                       {open && kids!.map((kid) => (
-                        <tr key={rowKey(kid)} onClick={onRowClick ? () => onRowClick(kid) : undefined} className={`h-12 bg-slate-50/70 ${onRowClick ? "cursor-pointer hover:bg-teal-50/60" : ""}`}>
+                        <tr key={rowKey(kid)} onClick={onRowClick ? () => onRowClick(kid, kids!) : undefined} className={`h-12 bg-slate-50/70 ${onRowClick ? "cursor-pointer hover:bg-teal-50/60" : ""}`}>
                           <td className="relative w-10 px-2"><span className="absolute inset-y-0 left-1/2 w-px bg-teal-200" /></td>
                           {cells(kid, true)}
                         </tr>
@@ -309,7 +311,7 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
             const open = !!kids?.length && openRows.has(key);
             return (
               <div key={key} className="rounded-2xl border border-slate-200 bg-white">
-                <div onClick={onRowClick ? () => onRowClick(row) : undefined} className={`p-3.5 ${onRowClick ? "cursor-pointer active:bg-slate-50" : ""}`}>
+                <div onClick={onRowClick ? () => onRowClick(row, sorted) : undefined} className={`p-3.5 ${onRowClick ? "cursor-pointer active:bg-slate-50" : ""}`}>
                   {card(row)}
                 </div>
                 {!!kids?.length && (
@@ -320,7 +322,7 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
                     {open && (
                       <div className="space-y-2 border-t border-slate-100 bg-slate-50 p-2.5">
                         {kids.map((kid) => (
-                          <div key={rowKey(kid)} onClick={onRowClick ? () => onRowClick(kid) : undefined} className="rounded-xl border border-slate-200 bg-white p-3 active:bg-slate-50">{card(kid)}</div>
+                          <div key={rowKey(kid)} onClick={onRowClick ? () => onRowClick(kid, kids!) : undefined} className="rounded-xl border border-slate-200 bg-white p-3 active:bg-slate-50">{card(kid)}</div>
                         ))}
                       </div>
                     )}
@@ -830,7 +832,7 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
         itemLabel="productos"
         searchOf={(r) => `${r.medCode} ${r.description}`}
         placeholder="Buscar producto o código…"
-        onRowClick={ctx.openProduct}
+        onRowClick={(r, rows) => ctx.openProduct(r, rows)}
         toolbar={
           <Pills<StockStatus | "ALL" | "RISK">
             value={status}
@@ -855,15 +857,49 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
   );
 };
 
-/* ---------------------------------------------------------------- Detalle de un producto (panel lateral) */
+/* ---------------------------------------------------------------- Recorrer la tabla desde un panel */
 
-export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityItem | null; onClose: () => void }> = ({ ctx, item, onClose }) => {
+export interface DrawerNav { index: number; total: number; prev: () => void; next: () => void }
+
+/** Arma la navegación anterior/siguiente de un panel sobre la lista de la tabla de donde se abrió. */
+export function drawerNav<T>(current: T, list: T[], open: (item: T) => void): DrawerNav | undefined {
+  const index = list.indexOf(current);
+  if (index < 0 || list.length < 2) return undefined;
+  return { index, total: list.length, prev: () => index > 0 && open(list[index - 1]), next: () => index < list.length - 1 && open(list[index + 1]) };
+}
+
+/** Teclas del panel: Esc cierra; ← y → pasan al registro anterior o siguiente (no mientras se escribe). */
+const useDrawerKeys = (active: boolean, onClose: () => void, nav?: DrawerNav) => {
   useEffect(() => {
-    if (!item) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      const typing = (e.target as HTMLElement)?.closest?.("input, textarea, select");
+      if (e.key === "Escape") onClose();
+      else if (!typing && nav && e.key === "ArrowLeft") { e.preventDefault(); nav.prev(); }
+      else if (!typing && nav && e.key === "ArrowRight") { e.preventDefault(); nav.next(); }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [item, onClose]);
+  }, [active, onClose, nav]);
+};
+
+/** Botones ‹ 3 de 112 › del encabezado de un panel. */
+const DrawerNavButtons: React.FC<{ nav?: DrawerNav }> = ({ nav }) => {
+  if (!nav) return null;
+  const btn = "grid h-9 w-9 place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent";
+  return (
+    <div className="flex shrink-0 items-center gap-0.5" title="También con las flechas ← y → del teclado">
+      <button type="button" onClick={nav.prev} disabled={nav.index === 0} aria-label="Anterior" className={btn}><ChevronRight className="h-5 w-5 rotate-180" /></button>
+      <span className="min-w-[64px] text-center font-mono text-[12px] font-bold text-slate-500">{formatNumber(nav.index + 1)} de {formatNumber(nav.total)}</span>
+      <button type="button" onClick={nav.next} disabled={nav.index === nav.total - 1} aria-label="Siguiente" className={btn}><ChevronRight className="h-5 w-5" /></button>
+    </div>
+  );
+};
+
+/* ---------------------------------------------------------------- Detalle de un producto (panel lateral) */
+
+export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityItem | null; onClose: () => void; nav?: DrawerNav }> = ({ ctx, item, onClose, nav }) => {
+  useDrawerKeys(!!item, onClose, nav);
   if (!item) return null;
   const lots = lotRiskOf(item, ctx.today);
   const riskByLot = new Map(lots.map((l) => [l.lot.lot + "|" + l.lot.expiry?.getTime(), l]));
@@ -887,6 +923,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
             <h3 className="mt-1 text-[16px] font-black leading-snug text-slate-900">{item.description}</h3>
             <p className="truncate text-[12.5px] text-slate-500">{item.name} · {item.microred}</p>
           </div>
+          <DrawerNavButtons nav={nav} />
           <button type="button" onClick={onClose} aria-label="Cerrar" className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button>
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 md:px-5">
@@ -956,7 +993,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
 
 /* ---------------------------------------------------------------- ¿Dónde falta? */
 
-export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap) => void }> = ({ ctx, onProduct }) => {
+export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap, list?: ProductGap[]) => void }> = ({ ctx, onProduct }) => {
   const { anchor, toTable } = useTableAnchor();
   const products = useMemo(() => productGapReport(ctx.report.items, ctx.warehouse), [ctx.report.items, ctx.warehouse]);
   const [filter, setFilter] = useState<"ALL" | "DESAB" | "WIDE" | "DONOR" | "COVER">("DESAB");
@@ -1002,7 +1039,7 @@ export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGa
         itemLabel="productos"
         searchOf={(r) => `${r.medCode} ${r.description}`}
         placeholder="Buscar producto o código…"
-        onRowClick={onProduct}
+        onRowClick={(r, rows) => onProduct(r, rows)}
         toolbar={<Pills value={filter} onChange={setFilter} options={[{ value: "DESAB", label: "Desabastecidos", count: withDesab.length }, { value: "WIDE", label: "Faltan en muchos", count: wide.length }, { value: "DONOR", label: "A otro le sobra", count: donorsDesab.length }, { value: "COVER", label: "Se pueden cubrir", count: solvable.length }, { value: "ALL", label: "Todos", count: products.length }]} />}
         card={(p) => (
           <>
@@ -1017,11 +1054,13 @@ export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGa
 };
 
 /** Panel de un producto en todos los establecimientos (desde «¿Dónde falta?»). */
-export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | null; onClose: () => void }> = ({ ctx, gap, onClose }) => {
+export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | null; onClose: () => void; nav?: DrawerNav }> = ({ ctx, gap, onClose, nav }) => {
+  useDrawerKeys(!!gap, onClose, nav);
   if (!gap) return null;
   const rows = [...gap.items].sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) || a.months - b.months);
   const total = gap.items[0]?.consumption.map((_, i) => gap.items.reduce((a, it) => a + (it.consumption[i] || 0), 0)) ?? [];
-  const cpa = gap.items.reduce((a, it) => a + it.cpa, 0);
+  // CPA de la red: el promedio de los totales mensuales (meses con consumo), comparable con las barras.
+  const cpa = averageConsumption(total);
   return (
     <div className="fixed inset-0 z-[100000] flex justify-end bg-slate-900/40" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <aside role="dialog" aria-label={gap.description} className="flex h-full w-full flex-col bg-white shadow-2xl animate-in slide-in-from-right duration-200 md:w-[620px]">
@@ -1031,16 +1070,20 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
             <h3 className="mt-1 text-[16px] font-black leading-snug text-slate-900">{gap.description}</h3>
             <p className="text-[12.5px] text-slate-500">{gap.establishments} establecimientos · almacén {formatNumber(gap.warehouseStock)}</p>
           </div>
+          <DrawerNavButtons nav={nav} />
           <button type="button" onClick={onClose} aria-label="Cerrar" className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button>
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 md:px-5">
           <div>
-            <h4 className="mb-2 text-[11.5px] font-black uppercase tracking-wider text-slate-500">Consumo de la red</h4>
-            <MonthlyBars values={total} labels={ctx.months.map(monthShort)} cpa={cpa} height={170} />
+            <div className="mb-2 flex items-center gap-1.5">
+              <h4 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">Consumo de la red</h4>
+              <InfoTip title="Consumo de la red"><P>Cada barra es el total de unidades consumidas en el mes, sumando todos los establecimientos que tienen el producto.</P><P>La línea es el CPA de la red: el promedio de esos totales en los meses con consumo.</P></InfoTip>
+            </div>
+            <MonthlyBars values={total} labels={ctx.months.map(monthShort)} cpa={cpa} lineLabel="CPA de la red" height={170} />
           </div>
           <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
             {rows.map((o) => (
-              <button key={o.code} type="button" onClick={() => ctx.openProduct(o)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[12.5px] hover:bg-slate-50">
+              <button key={o.code} type="button" onClick={() => ctx.openProduct(o, rows)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[12.5px] hover:bg-slate-50">
                 <span className="min-w-0 flex-1"><span className="block truncate font-semibold text-slate-800">{o.name}</span><span className="block text-[11.5px] text-slate-400">{o.microred}</span></span>
                 <span className="text-right font-mono text-slate-600">{formatNumber(o.stock)} u<br /><span className="text-[11px] text-slate-400">{dec(o.months)} meses</span></span>
                 <StatusPill status={o.status} />
@@ -1111,7 +1154,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         itemLabel="lotes"
         searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name} ${r.lot.lot}`}
         placeholder="Buscar producto, lote o establecimiento…"
-        onRowClick={(r) => ctx.openProduct(r.item)}
+        onRowClick={(r, rows) => ctx.openProduct(r.item, rows.map((x) => x.item))}
         minWidth={1050}
         toolbar={<Pills value={bucket} onChange={setBucket} options={[{ value: "URGENT", label: "12 meses" }, ...EXPIRY_BUCKETS.map((b) => ({ value: b, label: EXPIRY_BUCKET_LABEL[b], count: risk.byBucket[b].lots })), { value: "NOUSE", label: "Sin consumo" }, { value: "ALL", label: "Todos" }]} />}
         card={(r) => (
@@ -1195,7 +1238,7 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
           itemLabel="ítems"
           searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name}`}
           placeholder="Buscar producto o establecimiento…"
-          onRowClick={(r) => ctx.openProduct(r.item)}
+          onRowClick={(r, rows) => ctx.openProduct(r.item, rows.map((x) => x.item))}
           toolbar={<button type="button" onClick={() => setXyz("ALL")} className="h-9 shrink-0 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50">Volver a los picos</button>}
           minWidth={1000}
           card={(r) => (
@@ -1216,7 +1259,7 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
         itemLabel="picos"
         searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name}`}
         placeholder="Buscar producto o establecimiento…"
-        onRowClick={(r) => ctx.openProduct(r.item)}
+        onRowClick={(r, rows) => ctx.openProduct(r.item, rows.map((x) => x.item))}
         minWidth={1050}
         card={(r) => (
           <>
@@ -1385,7 +1428,7 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         itemLabel="productos"
         searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name}`}
         placeholder="Buscar producto o establecimiento…"
-        onRowClick={(r) => ctx.openProduct(r.item)}
+        onRowClick={(r, rows) => ctx.openProduct(r.item, rows.map((x) => x.item))}
         minWidth={1050}
         card={(r) => (
           <>
@@ -1451,7 +1494,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         itemLabel="sugerencias"
         searchOf={(r) => `${r.to.medCode} ${r.to.description} ${r.from.name} ${r.to.name}`}
         placeholder="Buscar producto o establecimiento…"
-        onRowClick={(r) => ctx.openProduct(r.to)}
+        onRowClick={(r, rows) => ctx.openProduct(r.to, rows.map((x) => x.to))}
         minWidth={1100}
         card={(r) => (
           <>
