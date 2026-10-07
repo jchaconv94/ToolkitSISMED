@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import type { AvailabilityItem } from "./availabilityReport";
 import {
-  abcXyzReport, lotRiskOf, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
+  abcXyzReport, consumptionReport, lotRiskOf, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
 } from "./availabilityInsights";
 
 const today = new Date(2026, 9, 7);
@@ -49,6 +49,20 @@ describe("consumo irregular", () => {
     const p = peakOf(item({ consumption: [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 60] }));
     expect(p?.peakIndex).toBe(11);
     expect(p?.ratio).toBe(6);
+  });
+
+  it("un consumo parejo desde que empezó a usarse no es pico ni irregular", () => {
+    const it = item({ consumption: [0, 0, 0, 0, 0, 0, 0, 0, 0, 30, 30, 30] });
+    expect(peakOf(it)).toBeNull();
+    const r = consumptionReport([it]);
+    expect(r.peaks).toHaveLength(0);
+    expect(r.classified[0].xyz).toBe("X");
+  });
+
+  it("los meses en cero no bajan el promedio de comparación", () => {
+    const p = peakOf(item({ consumption: [0, 0, 5, 0, 5, 0, 5, 0, 0, 0, 0, 40] }));
+    expect(p?.othersAverage).toBe(5);
+    expect(p?.ratio).toBe(8);
   });
 
   it("no marca pico con pocos meses de consumo o pocas unidades", () => {

@@ -10,7 +10,7 @@ import {
 } from "../services/availabilityReport";
 import {
   EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockReport, productGapReport, redistributionReport, warehouseReport,
-  type AbcProduct, type LotRiskRow, type OverstockRow, type PeakRow, type ProductGap, type TransferRow, type WarehouseRow,
+  type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type ProductGap, type TransferRow, type WarehouseRow,
 } from "../services/availabilityInsights";
 import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, useTableSort, type Tone } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
@@ -345,13 +345,13 @@ const INFO = {
   ),
   peaks: (
     <>
-      <P>Un <b>pico</b> es un mes cuyo consumo es 3 veces o más el promedio de los demás meses (con 20 unidades o más y al menos 3 meses con consumo).</P>
+      <P>Un <b>pico</b> es un mes cuyo consumo es 3 veces o más el promedio de los <b>otros meses con consumo</b> (con 20 unidades o más y al menos 3 meses con consumo). Los meses en cero no cuentan, y si el consumo más alto se repite en varios meses no es un pico: es lo habitual.</P>
       <P>Puede ser un brote, una campaña, una salida grande o un error de registro. Un pico sube el CPA y puede hacer pedir de más.</P>
     </>
   ),
   xyz: (
     <>
-      <P>Mide qué tan parejo es el consumo mes a mes (coeficiente de variación: desviación ÷ promedio).</P>
+      <P>Mide qué tan parejo es el consumo mes a mes (coeficiente de variación: desviación ÷ promedio), contando desde el primer mes con consumo: un producto que se empezó a usar hace poco no es irregular por los meses en que aún no se usaba.</P>
       <P><b>X, estable:</b> menos de 0,5. <b>Y, variable:</b> de 0,5 a 1. <b>Z, irregular:</b> más de 1. En los Z el CPA predice mal lo que se va a usar.</P>
     </>
   ),
@@ -1034,13 +1034,23 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
   const data = useMemo(() => consumptionReport(ctx.report.items), [ctx.report.items]);
   const [xyz, setXyz] = useState<"ALL" | "X" | "Y" | "Z">("ALL");
   const totalXyz = data.xyz.X + data.xyz.Y + data.xyz.Z;
-  const rows = data.peaks.filter((p) => xyz === "ALL" || p.xyz === xyz);
+  const rows = data.peaks;
+  const classRows = useMemo(() => data.classified.filter((c) => c.xyz === xyz), [data, xyz]);
+  const classColumns: Column<ClassifiedItem>[] = [
+    { key: "description", label: "Producto", sort: (r) => r.item.description, render: (r) => <ProductCell code={r.item.medCode} description={r.item.description} sub={r.item.name} /> },
+    { key: "trend", label: "Consumo mensual", render: (r) => <Sparkline values={r.item.consumption} width={140} /> },
+    { key: "months", label: "Meses con consumo", align: "right", sort: (r) => r.monthsWithUse, firstDir: "desc", render: (r) => <span className="font-mono">{r.monthsWithUse} de {r.item.consumption.length}</span> },
+    { key: "cpa", label: "CPA", align: "right", sort: (r) => r.item.cpa, firstDir: "desc", render: (r) => <span className="font-mono">{dec(r.item.cpa)}</span> },
+    { key: "cv", label: "Variación", align: "right", sort: (r) => r.cv, firstDir: "desc", render: (r) => <span className="font-mono font-bold">{(Math.floor(r.cv * 100) / 100).toFixed(2).replace(".", ",")}</span> },
+    { key: "status", label: "Situación", sort: (r) => STATUS_ORDER.indexOf(r.item.status), render: (r) => <StatusPill status={r.item.status} /> },
+  ];
+  const xyzTitle: Record<"X" | "Y" | "Z", string> = { X: "Consumo estable (X)", Y: "Consumo variable (Y)", Z: "Consumo irregular (Z)" };
   const columns: Column<PeakRow>[] = [
     { key: "description", label: "Producto", sort: (r) => r.item.description, render: (r) => <ProductCell code={r.item.medCode} description={r.item.description} sub={r.item.name} /> },
     { key: "trend", label: "Consumo mensual", render: (r) => <Sparkline values={r.item.consumption} highlight={r.peakIndex} width={140} /> },
     { key: "month", label: "Mes del pico", sort: (r) => r.peakIndex, render: (r) => <span className="whitespace-nowrap">{monthLabel(ctx.months[r.peakIndex])}</span> },
     { key: "peak", label: "Pico", align: "right", sort: (r) => r.peak, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-red-700">{formatNumber(r.peak)}</span> },
-    { key: "avg", label: "Otros meses", align: "right", sort: (r) => r.othersAverage, render: (r) => <span className="font-mono">{dec(r.othersAverage)}</span> },
+    { key: "avg", label: "Otros meses con consumo", align: "right", sort: (r) => r.othersAverage, render: (r) => <span className="font-mono">{dec(r.othersAverage)}</span> },
     { key: "ratio", label: "Veces", align: "right", sort: (r) => (Number.isFinite(r.ratio) ? r.ratio : 1e9), firstDir: "desc", render: (r) => <span className="font-mono font-bold">{Number.isFinite(r.ratio) ? `×${dec(r.ratio)}` : "—"}</span> },
     { key: "xyz", label: "Tipo", sort: (r) => r.xyz, render: (r) => <span className="whitespace-nowrap rounded-md bg-slate-100 px-2 py-0.5 text-[11.5px] font-bold text-slate-600">{r.xyz} · {XYZ_LABEL[r.xyz]}</span> },
     { key: "value", label: "Valor del pico", align: "right", sort: (r) => r.value, firstDir: "desc", render: (r) => <span className="font-mono">{money(r.value)}</span> },
@@ -1071,7 +1081,29 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
           />
         </ChartCard>
       </div>
-      <ReportTable
+      {xyz !== "ALL" ? (
+        <ReportTable
+          key={xyz}
+          title={xyzTitle[xyz]}
+          info={INFO.xyz}
+          rows={classRows}
+          columns={classColumns}
+          rowKey={(r) => `${r.item.code}|${r.item.medCode}`}
+          itemLabel="ítems"
+          searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name}`}
+          placeholder="Buscar producto o establecimiento…"
+          onRowClick={(r) => ctx.openProduct(r.item)}
+          toolbar={<button type="button" onClick={() => setXyz("ALL")} className="h-9 shrink-0 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50">Volver a los picos</button>}
+          minWidth={1000}
+          card={(r) => (
+            <>
+              <ProductCell code={r.item.medCode} description={r.item.description} sub={r.item.name} />
+              <div className="mt-2 flex items-center gap-3"><Sparkline values={r.item.consumption} width={150} /><span className="text-[12px] text-slate-600">{r.monthsWithUse} meses con consumo · variación {(Math.floor(r.cv * 100) / 100).toFixed(2).replace(".", ",")}</span></div>
+            </>
+          )}
+        />
+      ) : (
+        <ReportTable
         title="Picos de consumo"
         info={INFO.peaks}
         rows={rows}
@@ -1089,6 +1121,7 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
           </>
         )}
       />
+      )}
     </div>
   );
 };
