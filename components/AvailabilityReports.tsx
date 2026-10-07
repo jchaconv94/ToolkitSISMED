@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Repeat2, TrendingUp, Warehouse, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, ChevronDown, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Repeat2, TrendingUp, Warehouse, X } from "lucide-react";
 import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
 import { formatOneDecimal } from "../services/stockStatus";
@@ -626,16 +626,20 @@ const SituationBars: React.FC<{
   );
 };
 
+
+
+
 /**
- * Selector compacto de farmacia de un establecimiento (todo el establecimiento, F01, F02…): un
- * botón pequeño que abre la lista; en escritorio un desplegable con buscador si son muchas, en
- * el celular un panel inferior. No ocupa espacio aunque el establecimiento tenga muchas.
+ * Título del detalle que es a la vez la lista desplegable de sus farmacias (todo el
+ * establecimiento, F01, F02…): la cabecera queda igual que la de cualquier establecimiento.
+ * En escritorio un desplegable (con buscador si son más de 6); en el celular, panel inferior.
  */
-const PharmacyPicker: React.FC<{
+const PharmacyTitleMenu: React.FC<{
+  title: string;
   current: string;
   options: Array<{ code: string; name: string; hint: string; pct: number; level: DmeLevel }>;
   onSelect: (code: string) => void;
-}> = ({ current, options, onSelect }) => {
+}> = ({ title, current, options, onSelect }) => {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const isDesktop = useIsDesktop();
@@ -648,16 +652,11 @@ const PharmacyPicker: React.FC<{
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", onKey); };
   }, [open, isDesktop]);
-  const selected = options.find((o) => o.code === current);
   const nq = norm(q.trim());
   const shown = nq ? options.filter((o) => norm(`${o.name} ${o.hint}`).includes(nq)) : options;
   const list = (
     <div className="space-y-0.5">
-      {options.length > 6 && (
-        <div className="relative mb-2">
-          <TableSearch value={q} onChange={setQ} placeholder="Buscar farmacia…" className="!max-w-none" />
-        </div>
-      )}
+      {options.length > 6 && <div className="mb-2"><TableSearch value={q} onChange={setQ} placeholder="Buscar farmacia…" className="!max-w-none" /></div>}
       {shown.map((o) => {
         const on = o.code === current;
         return (
@@ -678,20 +677,21 @@ const PharmacyPicker: React.FC<{
     </div>
   );
   return (
-    <div ref={box} className="relative">
+    <div ref={box} className="relative mt-1">
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className={`flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-bold transition-colors ${open ? "border-teal-300 bg-teal-50 text-teal-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+        aria-haspopup="listbox"
+        title="Ver por farmacia"
+        className="group -ml-1.5 flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-0.5 text-left transition-colors hover:bg-slate-100"
       >
-        <Building2 className="h-3.5 w-3.5" />
-        <span className="max-w-[200px] truncate">{current.length > 5 ? `${current.slice(5)} · ${selected?.name ?? ""}` : `Ver por farmacia (${options.length - 1})`}</span>
-        <ChevronRight className={`h-3.5 w-3.5 transition-transform ${open ? "-rotate-90" : "rotate-90"}`} />
+        <h2 className="truncate text-[20px] font-black text-slate-900">{title}</h2>
+        <ChevronDown className={`h-5 w-5 shrink-0 text-slate-400 transition-transform group-hover:text-slate-700 ${open ? "rotate-180" : ""}`} />
       </button>
       {isDesktop ? (
         open && (
-          <div className="absolute left-0 top-9 z-40 max-h-[360px] w-[340px] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+          <div role="listbox" className="absolute left-0 top-10 z-40 max-h-[380px] w-[360px] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
             <p className="px-3 pb-1.5 pt-1 text-[11px] font-black uppercase tracking-wider text-slate-400">Ver por farmacia</p>
             {list}
           </div>
@@ -729,7 +729,6 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
     { key: "status", label: "Situación", sort: (r) => STATUS_ORDER.indexOf(r.status), render: (r) => <StatusPill status={r.status} /> },
     { key: "expiry", label: "Vence primero", sort: (r) => r.nearestExpiry?.getTime() ?? null, render: (r) => <span className="whitespace-nowrap text-slate-600">{dateText(r.nearestExpiry)}{riskKeys.has(r.medCode) && <AlertTriangle className="ml-1.5 inline h-3.5 w-3.5 text-red-600" />}</span> },
   ];
-  const isPharmacy = code !== ipressCode;
   return (
     <div className="space-y-4">
       <section className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5 md:pr-14">
@@ -738,19 +737,24 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
         </button>
         <div className="flex flex-col gap-4 md:flex-row md:items-center">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <CodeChip code={e.code} /><LevelChip level={e.level} /><KindChip kind={pharmacyKind(e.code, ctx.facilityType(e.code))} />
-              {siblings.length > 0 && (
-                <PharmacyPicker
-                  current={code}
-                  options={[...(parent ? [{ code: parent.code, name: "Todo el establecimiento", hint: `${siblings.length} farmacias sumadas`, pct: parent.pct, level: parent.level }] : []),
-                    ...siblings.map((f) => ({ code: f.code, name: f.name, hint: [f.code, pharmacyKind(f.code, ctx.facilityType(f.code))].filter(Boolean).join(" · "), pct: f.pct, level: f.level }))]}
-                  onSelect={onSwitch}
-                />
-              )}
-            </div>
-            <h2 className="mt-1 text-[20px] font-black text-slate-900">{e.name}</h2>
-            <p className="text-[12.5px] text-slate-500">{isPharmacy && parent ? `${parent.name} · ` : ""}Microred {e.microred}{e.category ? ` · ${e.category}` : ""} · {e.total} ítems evaluados</p>
+            <div className="flex flex-wrap items-center gap-2"><CodeChip code={e.code} /><LevelChip level={e.level} /><KindChip kind={pharmacyKind(e.code, ctx.facilityType(e.code))} /></div>
+            {siblings.length > 0 && parent ? (
+              <PharmacyTitleMenu
+                title={e.name}
+                current={code}
+                options={[parent, ...siblings].map((f) => ({
+                  code: f.code,
+                  name: f.code === ipressCode ? "Todo el establecimiento" : f.name,
+                  hint: f.code === ipressCode ? `${f.name} · ${siblings.length} farmacias sumadas` : [f.code, pharmacyKind(f.code, ctx.facilityType(f.code))].filter(Boolean).join(" · "),
+                  pct: f.pct,
+                  level: f.level,
+                }))}
+                onSelect={onSwitch}
+              />
+            ) : (
+              <h2 className="mt-1 text-[20px] font-black text-slate-900">{e.name}</h2>
+            )}
+            <p className="text-[12.5px] text-slate-500">{code !== ipressCode && parent ? `${parent.name} · ` : ""}Microred {e.microred}{e.category ? ` · ${e.category}` : ""} · {e.total} ítems evaluados</p>
           </div>
           <div className="text-left md:text-right">
             <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Disponibilidad</p>
