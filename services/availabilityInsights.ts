@@ -441,3 +441,21 @@ export const warehouseReport = (warehouse: WarehouseItem[], items: AvailabilityI
     withoutDemand: rows.filter((r) => !byMed.has(r.item.medCode)).length,
   };
 };
+
+/* ------------------------------------------------------------ Farmacias y puestos comunales */
+
+/** Qué es una farmacia de un establecimiento: F01 es la principal; las demás, según el registro. */
+export const pharmacyKind = (code: string, type?: string): string | null => {
+  if (!/F\d{2}$/i.test(code)) return null;
+  if (/F01$/i.test(code)) return "Principal";
+  if (type === "PUESTO_COMUNAL") return "Puesto comunal";
+  if (type === "FARMACIA") return "Farmacia del hospital";
+  return "Sin tipo";
+};
+
+/**
+ * ¿Se evalúa por separado? Los puestos comunales sí (otro local, su propio stock); la F01 y
+ * las farmacias del hospital no (se suman). Una F02+ sin tipo en el registro se trata como
+ * puesto comunal, para no esconder un riesgo (decisión del usuario, 2026-10-07).
+ */
+export const isSeparateSite = (code: string, type?: string): boolean => /F\d{2}$/i.test(code) && !/F01$/i.test(code) && type !== "FARMACIA";

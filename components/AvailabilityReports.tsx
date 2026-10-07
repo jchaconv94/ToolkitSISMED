@@ -9,7 +9,7 @@ import {
   DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
-  EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockReport, productGapReport, redistributionReport, warehouseReport,
+  EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockReport, productGapReport, redistributionReport, warehouseReport,
   type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type ProductGap, type TransferRow, type WarehouseRow,
 } from "../services/availabilityInsights";
 import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, useTableSort, type Tone } from "./ui/kit";
@@ -119,16 +119,14 @@ const statusParts = (c: { desabastecido: number; substock: number; normostock: n
   { label: "Sin rotación", value: c.sinRotacion, color: STATUS_COLOR[StockStatus.SIN_ROTACION] },
 ];
 
-/** Qué es una farmacia de un establecimiento: F01 es la principal; las demás, según el registro. */
-export const pharmacyKind = (code: string, type?: string): string | null => {
-  if (!/F\d{2}$/i.test(code)) return null;
-  if (/F01$/i.test(code)) return "Principal";
-  if (type === "PUESTO_COMUNAL") return "Puesto comunal";
-  if (type === "FARMACIA") return "Farmacia";
-  return null;
+const KIND_CHIP: Record<string, string> = {
+  Principal: "bg-teal-50 text-teal-700",
+  "Puesto comunal": "bg-cyan-50 text-cyan-700",
+  "Farmacia del hospital": "bg-slate-100 text-slate-600",
+  "Sin tipo": "bg-amber-50 text-amber-700",
 };
 const KindChip: React.FC<{ kind: string | null }> = ({ kind }) =>
-  kind ? <span className={`whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10.5px] font-bold ${kind === "Principal" ? "bg-teal-50 text-teal-700" : "bg-cyan-50 text-cyan-700"}`}>{kind}</span> : null;
+  kind ? <span title={kind === "Sin tipo" ? "No tiene tipo en el registro de Establecimientos: se evalúa como puesto comunal" : undefined} className={`whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10.5px] font-bold ${KIND_CHIP[kind] ?? "bg-cyan-50 text-cyan-700"}`}>{kind}</span> : null;
 
 /** Farmacias y puestos comunales de cada establecimiento, solo donde hay más de una (F01, F02…). */
 export const pharmacyGroups = (pharmacy: AvailabilityReport | null): Map<string, EstablishmentSummary[]> => {
@@ -383,7 +381,7 @@ const INFO = {
   ranking: <P>Cada barra es un establecimiento, de mayor a menor disponibilidad. El color de fondo marca el nivel. Al tocar una barra se abre el establecimiento.</P>,
   expiry: (
     <>
-      <P>Cada lote se revisa por separado. Los lotes se usan del que vence primero al último, al ritmo del consumo promedio mensual (CPA). En un establecimiento con farmacias o puestos comunales, cada uno con sus propios lotes y su propio CPA.</P>
+      <P>Cada lote se revisa por separado. Los lotes se usan del que vence primero al último, al ritmo del consumo promedio mensual (CPA). Los puestos comunales se evalúan cada uno con sus propios lotes y su propio CPA; las farmacias del hospital (F01 y las de tipo farmacia) se suman, porque el stock se mueve entre ellas dentro del mismo local.</P>
       <P>Lo que no alcanza a usarse antes de su fecha de vencimiento queda en riesgo, y se valoriza a su precio.</P>
       <Ex>CPA 10 al mes. Lote A: 40 unidades, vence en 2 meses → se usan 20, quedan <b>20 en riesgo</b>. Lote B: 30 unidades, vence en 12 meses → se usan las 30 (alcanza el tiempo).</Ex>
     </>
@@ -536,6 +534,7 @@ export const EstablishmentsReport: React.FC<{
   const microreds = useMemo(() => [...new Set(report.establishments.map((e) => e.microred))].sort((a, b) => a.localeCompare(b, "es")), [report]);
   const eess = report.establishments.filter((e) => (level === "ALL" || e.level === level) && (microred === "ALL" || e.microred === microred));
   const pharmaciesOf = useMemo(() => pharmacyGroups(ctx.pharmacy), [ctx.pharmacy]);
+  const untyped = useMemo(() => (ctx.pharmacy?.establishments ?? []).filter((p) => pharmacyKind(p.code, ctx.facilityType(p.code)) === "Sin tipo"), [ctx]);
   const mrs = report.microredes.filter((m) => level === "ALL" || m.level === level);
   const switcher = (
     <div className="flex shrink-0 rounded-xl bg-slate-100 p-1">
@@ -575,7 +574,19 @@ export const EstablishmentsReport: React.FC<{
     { key: "pct", label: "Disponibilidad", sort: (r) => r.pct, firstDir: "desc", render: (r) => <PctBar pct={r.pct} color={LEVEL_COLOR[r.level]} /> },
     { key: "level", label: "Nivel", render: (r) => <LevelChip level={r.level} /> },
   ];
-  return view === "eess" ? (
+  const untypedBanner = untyped.length > 0 && (
+    <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[12.5px] text-amber-800">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>
+        <b>{untyped.length} {untyped.length === 1 ? "farmacia no tiene" : "farmacias no tienen"} tipo en el registro de Establecimientos</b> y se evalúan como puestos comunales:{" "}
+        {untyped.slice(0, 8).map((p) => `${p.code} ${p.name}`).join(" · ")}{untyped.length > 8 ? ` y ${untyped.length - 8} más` : ""}. Regístrelas como puesto comunal o farmacia para que el cálculo sea exacto.
+      </span>
+    </div>
+  );
+  return (
+    <div className="space-y-3">
+      {untypedBanner}
+      {view === "eess" ? (
     <ReportTable
       rows={eess}
       minWidth={1150}
@@ -628,6 +639,8 @@ export const EstablishmentsReport: React.FC<{
         </>
       )}
     />
+      )}
+    </div>
   );
 };
 
@@ -908,12 +921,13 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
   useDrawerKeys(!!item, onClose, nav);
   if (!item) return null;
   // Los lotes de un establecimiento con farmacias se muestran y evalúan por farmacia.
-  const sites = ctx.byPharmacy([item]);
-  const bySite = sites.length > 1 || sites[0] !== item;
-  const lotRows = sites.flatMap((site) => {
-    const risk = new Map(lotRiskOf(site, ctx.today).map((r) => [r.lot, r]));
-    return site.lots.map((lot) => ({ site, lot, risk: risk.get(lot) }));
+  const units = ctx.byPharmacy([item]);
+  const lotRows = units.flatMap((unit) => {
+    const risk = new Map(lotRiskOf(unit, ctx.today).map((r) => [r.lot, r]));
+    return unit.lots.map((lot) => ({ unit, lot, risk: risk.get(lot) }));
   }).sort((a, b) => (a.lot.expiry?.getTime() ?? Infinity) - (b.lot.expiry?.getTime() ?? Infinity));
+  const bySite = new Set(lotRows.map((r) => r.lot.site ?? r.unit.code)).size > 1;
+  const siteName = (code: string) => ctx.pharmacy?.establishments.find((x) => x.code === code)?.name ?? code;
   const others = ctx.report.items
     .filter((i) => i.medCode === item.medCode && i.code !== item.code && i.code !== item.code.slice(0, 5))
     .sort((a, b) => STATUS_ORDER.indexOf(b.status) - STATUS_ORDER.indexOf(a.status) || b.stock - a.stock);
@@ -965,13 +979,14 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
                     <tr>{bySite && <th className="px-3 py-2 text-left">Farmacia</th>}<th className="px-3 py-2 text-center">Lote</th><th className="px-3 py-2 text-center">Vence</th><th className="px-3 py-2 text-center">Saldo</th><th className="px-3 py-2 text-center">Se usa</th><th className="px-3 py-2 text-center">En riesgo</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {lotRows.map(({ site, lot: l, risk: r }, i) => {
+                    {lotRows.map(({ unit, lot: l, risk: r }, i) => {
+                      const site = l.site ?? unit.code;
                       return (
                         <tr key={i} className={r ? "bg-red-50/50" : ""}>
                           {bySite && (
-                            <td className="max-w-[150px] px-3 py-2" title={`${site.code} · ${site.name} · CPA ${dec(site.cpa)}`}>
-                              <span className="block font-mono text-[11px] font-bold text-slate-500">{site.code.length > 5 ? site.code.slice(5) : site.code}</span>
-                              <span className="block truncate text-[11.5px] text-slate-600">{site.name}</span>
+                            <td className="max-w-[150px] px-3 py-2" title={`${site} · ${siteName(site)} · se evalúa con el CPA de ${unit.name} (${dec(unit.cpa)})`}>
+                              <span className="block font-mono text-[11px] font-bold text-slate-500">{site.length > 5 ? site.slice(5) : site}</span>
+                              <span className="block truncate text-[11.5px] text-slate-600">{siteName(site)}</span>
                             </td>
                           )}
                           <td className="px-3 py-2 text-center font-mono">{l.lot || "—"}</td>

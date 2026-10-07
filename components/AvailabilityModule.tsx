@@ -8,13 +8,13 @@ import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
 import { userFullName } from "../services/sessionDisplay";
 import { api } from "../services/api";
 import {
-  buildItems, essentialRows, groupByIpress, summarize,
+  averageConsumption, buildItems, essentialRows, groupByIpress, summarize,
   type EstablishmentInfo, type AvailabilityItem, type AvailabilityScope, type Lot, type TformdetMonthSheet, type WarehouseItem, type ParsedAvailability,
 } from "../services/availabilityReport";
 import { monthLabel } from "../services/availabilityExport";
 import { exportAvailabilityExcel } from "../services/availabilityExportClient";
 import type { DmeLevel } from "../services/stockStatus";
-import type { ProductGap } from "../services/availabilityInsights";
+import { isSeparateSite, type ProductGap } from "../services/availabilityInsights";
 import { availabilityConfigApi, classifyOptionsOf, describeFormula, factoryConfig, summaryOptionsOf, vitalCodeSet, type AvailabilityConfig } from "../services/availabilityConfig";
 import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
 import { formatNumber } from "../services/numberFormat";
@@ -262,7 +262,32 @@ export const AvailabilityModule: React.FC = () => {
     }
     return m;
   }, [pharmacyItems]);
-  const byPharmacy = useCallback((items: AvailabilityItem[]) => items.flatMap((it) => (it.code === it.ipressCode ? pharmacyIndex.get(`${it.code}|${it.medCode}`) ?? [it] : [it])), [pharmacyIndex]);
+  /**
+   * Unidades para el riesgo de vencimiento de un establecimiento con farmacias (2026-10-07):
+   * los puestos comunales (y las F02+ sin tipo en el registro, por prudencia) van separados,
+   * cada uno con sus lotes y su consumo; la F01 y las farmacias del hospital (tipo FARMACIA)
+   * se suman como una sola, porque el stock se mueve entre ellas dentro del mismo local.
+   */
+  const byPharmacy = useCallback((items: AvailabilityItem[]) => items.flatMap((it) => {
+    if (it.code !== it.ipressCode) return [it];
+    const list = pharmacyIndex.get(`${it.code}|${it.medCode}`);
+    if (!list?.length) return [it];
+    const separate = list.filter((p) => isSeparateSite(p.code, registry.get(p.code)?.type));
+    if (!separate.length) return [it];
+    const hospital = list.filter((p) => !separate.includes(p));
+    if (hospital.length <= 1) return [...separate, ...hospital];
+    const consumption = it.consumption.map((_, i) => hospital.reduce((a, p) => a + (p.consumption[i] || 0), 0));
+    const merged: AvailabilityItem = {
+      ...hospital[0],
+      code: it.ipressCode,
+      name: `${it.name} · farmacias ${hospital.map((p) => p.code.slice(5)).join(", ")}`,
+      consumption,
+      stock: hospital.reduce((a, p) => a + p.stock, 0),
+      cpa: averageConsumption(consumption),
+      lots: hospital.flatMap((p) => p.lots).sort((a, b) => (a.expiry?.getTime() ?? Infinity) - (b.expiry?.getTime() ?? Infinity)),
+    };
+    return [...separate, merged];
+  }), [pharmacyIndex, registry]);
   // Disponibilidad de cada farmacia y puesto comunal (F01, F02…), para abrir un establecimiento por farmacia.
   const pharmacyReport = useMemo(() => (pharmacyItems ? summarize(pharmacyItems, summaryOptionsOf(config.formula, scope, vitalCodes)) : null), [pharmacyItems, config.formula, scope, vitalCodes]);
   const report = useMemo(() => summarize(ipressItems, summaryOptionsOf(config.formula, scope, vitalCodes)), [ipressItems, config.formula, scope, vitalCodes]);

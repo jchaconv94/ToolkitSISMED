@@ -67,6 +67,8 @@ export interface Lot {
   lot: string;
   expiry: Date | null;
   balance: number;
+  /** Farmacia o establecimiento donde está el lote (06502F02), si se conoce. */
+  site?: string;
 }
 
 export interface AvailabilityItem extends AvailabilityRow {
@@ -680,7 +682,7 @@ export const parseTformdetHistory = (
     const stock = Math.max(0, toNumber(raw[cStock]));
     g.stock.set(month, (g.stock.get(month) || 0) + stock);
     if (cPrice >= 0) g.price.set(month, toNumber(raw[cPrice]));
-    if (stock > 0 && cLot >= 0) lotRows.push({ month, key, lot: { lot: text(raw[cLot]), expiry: cExp >= 0 ? parseExpiry(raw[cExp]) : null, balance: stock } });
+    if (stock > 0 && cLot >= 0) lotRows.push({ month, key, lot: { lot: text(raw[cLot]), expiry: cExp >= 0 ? parseExpiry(raw[cExp]) : null, balance: stock, site: code } });
   }
   if (!groups.size) throw new Error("El TFORMDET no trae productos de establecimientos.");
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import type { AvailabilityItem } from "./availabilityReport";
 import {
-  abcXyzReport, consumptionReport, lotRiskOf, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
+  abcXyzReport, consumptionReport, isSeparateSite, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
 } from "./availabilityInsights";
 
 const today = new Date(2026, 9, 7);
@@ -118,5 +118,23 @@ describe("sobrestock, redistribución y faltantes", () => {
     expect(r.rows[0].inNeed).toBe(2);
     expect(r.rows[0].needUnits).toBe(30);
     expect(r.rows[0].coverage).toBe(50);
+  });
+});
+
+describe("farmacias del hospital y puestos comunales", () => {
+  it("F01 y las farmacias del hospital se suman; los puestos comunales y las sin tipo van aparte", () => {
+    expect(isSeparateSite("06502F01", undefined)).toBe(false);
+    expect(isSeparateSite("06502F02", "FARMACIA")).toBe(false);
+    expect(isSeparateSite("06528F02", "PUESTO_COMUNAL")).toBe(true);
+    expect(isSeparateSite("06528F03", undefined)).toBe(true);
+    expect(isSeparateSite("06502", undefined)).toBe(false);
+  });
+
+  it("nombra el tipo de cada farmacia", () => {
+    expect(pharmacyKind("06502F01")).toBe("Principal");
+    expect(pharmacyKind("06502F02", "FARMACIA")).toBe("Farmacia del hospital");
+    expect(pharmacyKind("06528F02", "PUESTO_COMUNAL")).toBe("Puesto comunal");
+    expect(pharmacyKind("06528F03")).toBe("Sin tipo");
+    expect(pharmacyKind("06502")).toBeNull();
   });
 });
