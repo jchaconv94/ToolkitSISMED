@@ -407,23 +407,31 @@ export const MonthlyBars: React.FC<{
   values: number[];
   labels: string[];
   cpa?: number;
-  highlight?: number | null;
+  /** Meses resaltados en rojo (todos los que empatan en el máximo, por ejemplo). */
+  highlight?: number[] | null;
   height?: number;
   color?: string;
   /** Texto de la línea punteada (por omisión «CPA»). */
   lineLabel?: string;
-  /** Formato de los valores (por omisión, número entero). */
+  /** Formato corto de las etiquetas sobre las barras y del eje. */
   format?: (v: number) => string;
-}> = ({ values, labels, cpa, highlight = null, height = 190, color = "#0d9488", lineLabel = "CPA", format = (v) => formatNumber(Math.round(v)) }) => {
+  /** Formato completo para el recuadro del mouse (por omisión, `format`). */
+  fullFormat?: (v: number) => string;
+  /** Ancho de cada mes en el dibujo (más ancho si las etiquetas son largas). */
+  slot?: number;
+}> = ({ values, labels, cpa, highlight = null, height = 200, color = "#0d9488", lineLabel = "CPA", format = (v) => formatNumber(Math.round(v)), fullFormat, slot = 48 }) => {
   const n = values.length;
-  const left = 44, right = 12, top = 18, bottom = 26;
-  const slot = 48;
+  const full = fullFormat ?? format;
+  const left = 52, right = 12, top = 30, bottom = 26;
   const width = left + right + n * slot;
   const plotH = height - top - bottom;
   const max = Math.max(1, cpa ?? 0, ...values) * 1.1;
   const y = (v: number) => top + plotH - (v / max) * plotH;
   const [hover, setHover] = useState<number | null>(null);
   const tip = useChartTip();
+  if (!values.some((v) => v > 0)) {
+    return <p className="grid place-items-center rounded-xl bg-slate-50 text-[13px] text-slate-500" style={{ height: height - 40 }}>Sin consumo en el periodo.</p>;
+  }
   return (
     <>
     {tip.layer}
@@ -434,30 +442,32 @@ export const MonthlyBars: React.FC<{
           <text x={left - 6} y={y(max * f / 1.1)} textAnchor="end" dominantBaseline="middle" className="fill-slate-400 text-[10px]">{format(max * f / 1.1)}</text>
         </g>
       ))}
+      {cpa !== undefined && cpa > 0 && (
+        <g pointerEvents="none">
+          <line x1={left} x2={width - right} y1={y(cpa)} y2={y(cpa)} stroke="#0f172a" strokeDasharray="5 4" strokeWidth={1.5} />
+          {/* La línea va detrás de las barras y la leyenda arriba, fuera de ellas, para no tapar sus valores. */}
+          {/* La leyenda de la línea va arriba, fuera de las barras, para no tapar sus valores. */}
+          <line x1={width - right - 150} x2={width - right - 128} y1={10} y2={10} stroke="#0f172a" strokeDasharray="5 4" strokeWidth={1.5} />
+          <text x={width - right} y={10} textAnchor="end" dominantBaseline="middle" className="fill-slate-700 text-[10.5px] font-bold">{lineLabel} {cpa >= 100 ? full(cpa) : cpa.toFixed(1).replace(".", ",")}</text>
+        </g>
+      )}
       {values.map((v, i) => {
         const x = left + i * slot + 9;
         const bw = slot - 18;
-        const hl = highlight === i;
+        const hl = !!highlight?.includes(i);
         return (
           <g
             key={i}
             onMouseEnter={() => setHover(i)}
-            {...tip.bind(<TipBox title={labels[i]} color={hl ? "#dc2626" : color} rows={[["Valor", format(v)], ...(cpa ? [[lineLabel, cpa >= 100 ? format(cpa) : cpa.toFixed(1).replace(".", ",")] as [string, string], ["Frente al promedio", cpa > 0 ? `${v >= cpa ? "+" : ""}${Math.round(((v - cpa) / cpa) * 100)} %` : "—"] as [string, string]] : [])]} />)}
+            {...tip.bind(<TipBox title={labels[i]} color={hl ? "#dc2626" : color} rows={[["Valor", full(v)], ...(cpa ? [[lineLabel, cpa >= 100 ? full(cpa) : cpa.toFixed(1).replace(".", ",")] as [string, string], ["Frente a la línea", cpa > 0 ? `${v >= cpa ? "+" : ""}${Math.round(((v - cpa) / cpa) * 100)} %` : "—"] as [string, string]] : [])]} note={hl ? "Mes de mayor consumo" : undefined} />)}
           >
             <rect x={left + i * slot + 2} y={top} width={slot - 4} height={plotH} rx={6} fill={hover === i ? "#f1f5f9" : "transparent"} />
-            <rect x={x} y={y(v)} width={bw} height={Math.max(0, top + plotH - y(v))} rx={3} fill={hl ? "#dc2626" : color} opacity={hover === i ? 1 : highlight !== null && !hl ? 0.8 : 1} />
-            {v > 0 && <text x={x + bw / 2} y={y(v) - 4} textAnchor="middle" className="fill-slate-600 text-[10px] font-bold">{format(v)}</text>}
+            <rect x={x} y={y(v)} width={bw} height={Math.max(0, top + plotH - y(v))} rx={3} fill={hl ? "#dc2626" : color} opacity={hover === i ? 1 : highlight?.length && !hl ? 0.8 : 1} />
+            {v > 0 && <text x={x + bw / 2} y={y(v) - 4} textAnchor="middle" stroke="#ffffff" strokeWidth={3} paintOrder="stroke" strokeLinejoin="round" className="fill-slate-600 text-[10px] font-bold">{format(v)}</text>}
             <text x={x + bw / 2} y={height - 8} textAnchor="middle" className="fill-slate-500 text-[10px]">{labels[i]}</text>
           </g>
         );
       })}
-      {cpa !== undefined && cpa > 0 && (
-        <g pointerEvents="none">
-          <line x1={left} x2={width - right} y1={y(cpa)} y2={y(cpa)} stroke="#0f172a" strokeDasharray="5 4" strokeWidth={1.5} />
-          <rect x={left + 2} y={y(cpa) - 9} width={(lineLabel.length + format(cpa).length + 2) * 6.2} height={18} rx={4} fill="#0f172a" />
-          <text x={left + 8} y={y(cpa)} dominantBaseline="middle" className="fill-white text-[10.5px] font-bold">{lineLabel} {cpa >= 100 ? format(cpa) : cpa.toFixed(1).replace(".", ",")}</text>
-        </g>
-      )}
     </svg>
     </>
   );

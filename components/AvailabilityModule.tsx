@@ -261,10 +261,18 @@ export const AvailabilityModule: React.FC = () => {
     return c;
   }, [report]);
 
-  const openEstablishment = (code: string) => { setGap(null); setProduct(null); setOpenCode(code); };
+  const mainScroll = useRef(0);
+  const scrollMain = (top: number) => { const m = document.querySelector("main"); if (m) m.scrollTop = top; };
+  const openEstablishment = (code: string) => {
+    mainScroll.current = document.querySelector("main")?.scrollTop ?? 0;
+    setGap(null); setProduct(null); setOpenCode(code);
+    requestAnimationFrame(() => scrollMain(0));
+  };
+  // Al cerrar el detalle se vuelve a la misma página de la tabla y al mismo punto de la pantalla.
+  const closeEstablishment = () => { setOpenCode(null); requestAnimationFrame(() => scrollMain(mainScroll.current)); };
   const goTab = (t: ReportTab) => { setOpenCode(null); setTab(t); scroller.current?.scrollIntoView({ block: "start" }); };
   const openEstablishmentName = openCode ? report.establishments.find((e) => e.code === openCode)?.name : undefined;
-  useModuleHeaderOverride(calculated && openCode ? { title: openEstablishmentName || openCode, subtitle: "Disponibilidad", onBack: () => setOpenCode(null) } : null);
+  useModuleHeaderOverride(calculated && openCode ? { title: openEstablishmentName || openCode, subtitle: "Disponibilidad", onBack: closeEstablishment } : null);
 
   /** Profesión de quien genera el reporte, para la portada del Excel. */
   const professionOf = async (): Promise<string | undefined> => {
@@ -446,10 +454,9 @@ export const AvailabilityModule: React.FC = () => {
       </div>
 
       <div ref={scroller} />
-      {openCode ? (
-        <EstablishmentDetail ctx={ctx} code={openCode} onClose={() => setOpenCode(null)} />
-      ) : (
-        <>
+      {openCode && <EstablishmentDetail ctx={ctx} code={openCode} onClose={closeEstablishment} />}
+      {/* Los reportes siguen montados (ocultos) mientras el detalle está abierto: así conservan página, filtros y búsqueda. */}
+      <div className={openCode ? "hidden" : undefined}>
           <nav aria-label="Reportes" className="sticky -top-2.5 z-20 -mx-3 mb-4 border-b border-slate-200 bg-slate-50 px-3 pt-0.5 sm:-top-3 sm:-mx-5 sm:px-5 2xl:-mx-6 2xl:px-6">
             <div ref={tabsRef} className="hide-scrollbar flex gap-1 overflow-x-auto">
               {TABS.map((t) => (
@@ -484,8 +491,7 @@ export const AvailabilityModule: React.FC = () => {
           {tab === "overstock" && <OverstockReport ctx={ctx} />}
           {tab === "redistribution" && <RedistributionReport ctx={ctx} />}
           {tab === "warehouse" && <WarehouseReport ctx={ctx} />}
-        </>
-      )}
+      </div>
 
       <ProductGapDrawer ctx={ctx} gap={product ? null : gap} onClose={() => setGap(null)} />
       <ProductDrawer ctx={ctx} item={product} onClose={() => setProduct(null)} />
