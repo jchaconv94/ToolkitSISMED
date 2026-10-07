@@ -748,7 +748,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   meTable(["", "Columna", "Qué significa"], [1, 1, 2], [
     ["", "Cubrir 2 meses (unid.)", "Hoja «Atención»: unidades que le faltan al establecimiento para tener 2 meses de stock (CPA × 2 − stock)."],
     ["", "Riesgo de vencimiento", p.expiryRisk
-      ? "Cada lote por separado: se usan del que vence primero al último al ritmo del CPA; lo que no alcanza a usarse antes de su fecha queda en riesgo (unidades en la columna). Los puestos comunales se evalúan con sus propios lotes y CPA; las farmacias del hospital, sumadas."
+      ? "Cada lote por separado: se usan del que vence primero al último al ritmo del CPA; lo que no alcanza a usarse antes de su fecha queda en riesgo (unidades en la columna). Los puestos comunales se evalúan con sus propios lotes y CPA; las farmacias del hospital, sumadas. La F01 que abastece a sus puestos suma a su CPA lo que les entrega (otras salidas)."
       : "El producto vencería antes de consumirse: sus meses de provisión superan los meses que faltan para el vencimiento más próximo."],
     ["", "Valor del stock (S/)", "Stock × precio del producto."],
     ["", "Stock en almacén", "Stock del almacén al cierre del mes de corte. No cuenta en la disponibilidad; sirve para ver qué se puede cubrir."],

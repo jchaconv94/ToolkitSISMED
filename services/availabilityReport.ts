@@ -52,6 +52,11 @@ export interface AvailabilityRow {
   medest: string;
   /** Consumo de los 12 meses, del más antiguo al mes de corte. */
   consumption: number[];
+  /**
+   * Otras salidas (OTRAS_SAL del TFORMDET) por mes, alineadas con `consumption`. No son consumo:
+   * en una F01 son, sobre todo, lo que entrega a sus puestos comunales. Solo las trae el TFORMDET.
+   */
+  otherOut?: number[];
   stock: number;
 }
 
@@ -81,6 +86,11 @@ export interface AvailabilityItem extends AvailabilityRow {
   monthsToExpiry: number | null;
   /** Los meses de provisión pasan el vencimiento más próximo: se vencería antes de usarse. */
   expiryRisk: boolean;
+  /**
+   * Solo en el riesgo de vencimiento de una F01 que abastece a sus puestos (`asSupplier`): el CPA
+   * de lo dispensado; `cpa` lleva entonces también lo que entrega a sus puestos.
+   */
+  dispensedCpa?: number;
 }
 
 export interface StatusCounts {
@@ -301,9 +311,11 @@ export const groupByIpress = (rows: AvailabilityRow[], nameOf?: (code: string) =
         code: r.ipressCode,
         name: nameOf?.(r.ipressCode) || names.get(r.ipressCode) || r.ipressCode,
         consumption: [...r.consumption],
+        otherOut: r.otherOut && [...r.otherOut],
       });
     } else {
       g.consumption = g.consumption.map((v, i) => v + (r.consumption[i] || 0));
+      g.otherOut = sumSeries(g.otherOut, r.otherOut);
       g.stock += r.stock;
     }
   }
@@ -311,6 +323,10 @@ export const groupByIpress = (rows: AvailabilityRow[], nameOf?: (code: string) =
 };
 
 /** CPA de la ficha 28: consumo ÷ meses con consumo (sin consumo, 0). */
+/** Suma mes a mes dos series (otras salidas); si falta una, queda la otra. */
+export const sumSeries = (a?: number[], b?: number[]): number[] | undefined =>
+  !a ? b && [...b] : !b ? a : a.map((v, i) => v + (b[i] || 0));
+
 export const averageConsumption = (consumption: number[]): number => {
   const withUse = consumption.filter((v) => v > 0);
   return withUse.length ? withUse.reduce((a, b) => a + b, 0) / withUse.length : 0;
@@ -510,10 +526,12 @@ export const essentialRows = (
         description: target && target !== r.medCode ? groups[target].name : r.description,
         medpet: "P",
         consumption: [...r.consumption],
+        otherOut: r.otherOut && [...r.otherOut],
         fusedFrom: target ? [r.medCode] : [],
       });
     } else {
       g.consumption = g.consumption.map((v, i) => v + (r.consumption[i] || 0));
+      g.otherOut = sumSeries(g.otherOut, r.otherOut);
       g.stock += r.stock;
       if (target) {
         g.fusedFrom = [...(g.fusedFrom || []), r.medCode];
@@ -529,10 +547,11 @@ export const essentialRows = (
 
 /**
  * Consumo del mes, igual que el reporte de Disponibilidad del Toolkit de escritorio
- * (`disponibilidad_report_manager.py`): VENTA + SIS + INTERSAN + SOAT + CREDHOSP + OTR_CONV.
- * REINGRE, EXO y DEFNAC no cuentan. Comprobado contra el archivo de disponibilidad del usuario.
+ * (`disponibilidad_report_manager.py`): VENTA + SIS + INTERSAN + EXO + SOAT + CREDHOSP + OTR_CONV.
+ * EXO es lo que se entregó exonerado de pago: es consumo (decisión del usuario del 2026-10-07).
+ * REINGRE, DEFNAC y OTRAS_SAL no cuentan.
  */
-export const TFORMDET_CONSUMPTION_COLUMNS = ["VENTA", "SIS", "INTERSAN", "SOAT", "CREDHOSP", "OTR_CONV"] as const;
+export const TFORMDET_CONSUMPTION_COLUMNS = ["VENTA", "SIS", "INTERSAN", "EXO", "SOAT", "CREDHOSP", "OTR_CONV"] as const;
 
 export interface EstablishmentInfo {
   name?: string;
@@ -633,6 +652,7 @@ export const parseTformdetHistory = (
   const cLot = at("MEDLOTE"), cExp = at("FEC EXP");
   const cTip = at("MEDTIP"), cPet = at("MEDPET"), cEst = at("MEDEST"), cFf = at("MEDFF");
   const cCons = TFORMDET_CONSUMPTION_COLUMNS.map((c) => at(normHeader(c)));
+  const cOther = at("OTRAS SAL");
   if (cMonth < 0 && !options.fallbackMonth) {
     throw new Error("El TFORMDET no trae la columna ANNOMES y no se pudo saber de qué mes es. Descárguelo con un rango de meses en el Toolkit.");
   }
@@ -640,6 +660,7 @@ export const parseTformdetHistory = (
   interface Acc {
     row: Omit<AvailabilityRow, "consumption" | "stock">;
     consumption: Map<string, number>;
+    otherOut: Map<string, number>;
     stock: Map<string, number>;
     price: Map<string, number>;
   }
@@ -673,12 +694,13 @@ export const parseTformdetHistory = (
           medpet: cPet >= 0 ? text(raw[cPet]).toUpperCase() : "",
           medest: cEst >= 0 ? text(raw[cEst]).toUpperCase() : "",
         },
-        consumption: new Map(), stock: new Map(), price: new Map(),
+        consumption: new Map(), otherOut: new Map(), stock: new Map(), price: new Map(),
       };
       groups.set(key, g);
     }
     const used = cCons.reduce((sum, i) => sum + (i >= 0 ? Math.max(0, toNumber(raw[i])) : 0), 0);
     g.consumption.set(month, (g.consumption.get(month) || 0) + used);
+    if (cOther >= 0) g.otherOut.set(month, (g.otherOut.get(month) || 0) + Math.max(0, toNumber(raw[cOther])));
     const stock = Math.max(0, toNumber(raw[cStock]));
     g.stock.set(month, (g.stock.get(month) || 0) + stock);
     if (cPrice >= 0) g.price.set(month, toNumber(raw[cPrice]));
@@ -706,6 +728,7 @@ export const parseTformdetHistory = (
       category: info?.category || "",
       price: priceMonth ? g.price.get(priceMonth) || 0 : 0,
       consumption,
+      otherOut: cOther >= 0 ? months.map((m) => g.otherOut.get(m) || 0) : undefined,
       stock,
     });
   }

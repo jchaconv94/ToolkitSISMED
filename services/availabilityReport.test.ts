@@ -146,17 +146,32 @@ describe("disponibilidad", () => {
     expect(parsed.warehouse[0].lots.map((l) => l.lot)).toEqual(["L9"]);
     expect(parsed.hasClassification).toBe(true);
     const f1 = parsed.rows.find((x) => x.code === "06502F01")!;
-    // Consumo sin EXO ni REINGRE; stock del último mes.
-    expect(f1.consumption).toEqual([10, 4]);
+    // EXO es consumo (entregado exonerado de pago); REINGRE no. Stock del último mes.
+    expect(f1.consumption).toEqual([17, 4]);
     expect(f1.stock).toBe(20);
     expect(parsed.rows.find((x) => x.code === "06503")).toBeUndefined();
     expect(parsed.rows.find((x) => x.code === "06504")!.stock).toBe(0);
     const ipress = groupByIpress(parsed.rows).find((x) => x.code === "06502")!;
-    expect(ipress.consumption).toEqual([10, 6]);
+    expect(ipress.consumption).toEqual([17, 6]);
     expect(ipress.stock).toBe(30);
     expect(parsed.lots.get("06502F02|00143")!.map((l) => l.lot)).toEqual(["L2"]);
+    // Sin la columna OTRAS_SAL no hay otras salidas.
+    expect(f1.otherOut).toBeUndefined();
     expect(isEstablishmentCode("06502F01")).toBe(true);
     expect(isEstablishmentCode("030S05")).toBe(false);
+  });
+
+  it("guarda las otras salidas (OTRAS_SAL) aparte del consumo y las suma por IPRESS", () => {
+    const H = ["ANNOMES", "CODIGO_PRE", "EESS", "CODIGO_MED", "DESCRIPCION MED", "VENTA", "EXO", "OTRAS_SAL", "STOCK_FIN"];
+    const parsed = parseTformdetHistory([H,
+      ["202608", "06520F01", "FARM", "143", "P", 5, 1, 40, 100],
+      ["202609", "06520F01", "FARM", "143", "P", 6, 0, 30, 80],
+      ["202609", "06520F02", "PUESTO", "143", "P", 9, 0, 0, 20],
+    ]);
+    const f1 = parsed.rows.find((x) => x.code === "06520F01")!;
+    expect(f1.consumption).toEqual([6, 6]);
+    expect(f1.otherOut).toEqual([40, 30]);
+    expect(groupByIpress(parsed.rows)[0].otherOut).toEqual([40, 30]);
   });
 
   it("guarda los registros del último mes del TFORMDET para el Excel", () => {

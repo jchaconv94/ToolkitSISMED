@@ -382,6 +382,7 @@ const INFO = {
   expiry: (
     <>
       <P>Cada lote se revisa por separado. Los lotes se usan del que vence primero al último, al ritmo del consumo promedio mensual (CPA). Los puestos comunales se evalúan cada uno con sus propios lotes y su propio CPA; las farmacias del hospital (F01 y las de tipo farmacia) se suman, porque el stock se mueve entre ellas dentro del mismo local.</P>
+      <P>Una F01 que abastece a sus puestos comunales entrega parte de su stock como <b>otras salidas</b>, que no son consumo. Para el vencimiento, su CPA suma lo que dispensa y lo que entrega a sus puestos, porque ese stock también sale de ella.</P>
       <P>Lo que no alcanza a usarse antes de su fecha de vencimiento queda en riesgo, y se valoriza a su precio.</P>
       <Ex>CPA 10 al mes. Lote A: 40 unidades, vence en 2 meses → se usan 20, quedan <b>20 en riesgo</b>. Lote B: 30 unidades, vence en 12 meses → se usan las 30 (alcanza el tiempo).</Ex>
     </>
@@ -986,7 +987,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
                       return (
                         <tr key={i} className={r ? "bg-red-50/50" : ""}>
                           {bySite && (
-                            <td className="max-w-[150px] px-3 py-2" title={`${site} · ${siteName(site)} · se evalúa con el CPA de ${unit.name} (${dec(unit.cpa)})`}>
+                            <td className="max-w-[150px] px-3 py-2" title={`${site} · ${siteName(site)} · se evalúa con el CPA de ${unit.name} (${dec(unit.cpa)}${unit.dispensedCpa !== undefined ? `, con lo que entrega a sus puestos; solo dispensado ${dec(unit.dispensedCpa)}` : ""})`}>
                               <span className="block font-mono text-[11px] font-bold text-slate-500">{site.length > 5 ? site.slice(5) : site}</span>
                               <span className="block truncate text-[11.5px] text-slate-600">{siteName(site)}</span>
                             </td>
@@ -1158,7 +1159,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
     { key: "lot", label: "Lote", render: (r) => <span className="font-mono text-[12px]">{r.lot.lot || "—"}</span> },
     { key: "expiry", label: "Vence", sort: (r) => r.lot.expiry?.getTime() ?? null, render: (r) => <span className="whitespace-nowrap">{dateText(r.lot.expiry)}<span className="block text-[11px] text-slate-400">{r.bucket === "EXPIRED" ? "vencido" : `en ${dec(r.monthsToExpiry)} meses`}</span></span> },
     { key: "balance", label: "Saldo", align: "right", sort: (r) => r.lot.balance, firstDir: "desc", render: (r) => <span className="font-mono">{formatNumber(r.lot.balance)}</span> },
-    { key: "cpa", label: "CPA", align: "right", sort: (r) => r.item.cpa, render: (r) => <span className="font-mono">{dec(r.item.cpa)}</span> },
+    { key: "cpa", label: "CPA", align: "right", sort: (r) => r.item.cpa, render: (r) => <span className="font-mono">{dec(r.item.cpa)}{r.item.dispensedCpa !== undefined && <span className="block font-sans text-[11px] text-slate-400" title={`Solo dispensado: ${dec(r.item.dispensedCpa)}`}>con entregas a puestos</span>}</span> },
     { key: "usable", label: "Se usa", align: "right", render: (r) => <span className="font-mono text-slate-500">{formatNumber(r.usable)}</span> },
     { key: "atRisk", label: "En riesgo", align: "right", sort: (r) => r.atRisk, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-red-700">{formatNumber(r.atRisk)}</span> },
     { key: "value", label: "Valor", align: "right", sort: (r) => r.value, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-slate-900">{money(r.value)}</span> },

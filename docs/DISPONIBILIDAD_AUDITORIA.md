@@ -52,8 +52,13 @@ La F01 entrega a sus puestos comunales y lo registra como **OTRAS_SAL**, que no 
 Establecimientos), su CPA solo cuenta lo que dispensa. Por eso aparece con sobrestock y con
 lotes «en riesgo» que en realidad se irán a sus puestos.
 
-**Propuesta:** para la F01 de un establecimiento con puestos comunales, contar también sus
-OTRAS_SAL como salida en el riesgo de vencimiento. La disponibilidad oficial no cambia.
+**Resuelto (2026-10-07, opción 1 elegida por el usuario):** para la F01 de un establecimiento
+con puestos comunales, el riesgo de vencimiento usa como ritmo consumo + OTRAS_SAL
+(`asSupplier`). La disponibilidad oficial no cambia. No se aplica a la F01 de un hospital con
+farmacias (06502), porque sus otras salidas van a esas farmacias, que ya se suman con ella.
+
+Al revisarlo, el usuario pidió además contar **EXO** (entregado exonerado de pago) como
+consumo, en la web y en el Toolkit de escritorio (PR #16 de Toolkit-OGM).
 
 La 06502F01 (Almacén del hospital) tiene 837 259 en otras salidas, pero como sus farmacias se
 suman con ella no le afecta.
