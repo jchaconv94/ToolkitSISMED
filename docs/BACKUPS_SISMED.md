@@ -268,7 +268,16 @@ clave de A, porque no tiene stock de A. Una PC con clave recién puesta aparece 
 después de su primer envío de stock. Desde el **Toolkit 2.2.8** (2026-10-07) aparece enseguida: si la
 conexión ya había sido rechazada por no estar vinculada, el primer envío aceptado la reintenta
 al momento (`retry_after_link`, una vez por rechazo); antes esperaba 30 minutos (caso P.S. Sion,
-06578). `SUPABASE_BACKUPS_ABRIR_REGION.sql` ya trae esta
+06578).
+
+**PC que envía stock pero no aparece en Backups (2026-10-07, P.S. Sion 06578).** La consola
+del Toolkit 2.3.0 mostró `CERTIFICATE_VERIFY_FAILED`: la conexión de backups (websocket-client)
+solo usaba los certificados de Windows y a esa PC le faltaba la raíz del certificado de
+Cloudflare; el stock sí salía porque `requests` usa certifi. Se resolvió al **activar la licencia
+de Windows** (con eso Windows pudo actualizar sus certificados). Desde el **Toolkit 2.3.1** la
+conexión usa certifi además de los de Windows, así que ya no depende de eso. Otras ayudas de
+esa tanda: 2.2.9 escribe en la consola por qué no se conecta, 2.2.10 usa el proxy del sistema y
+2.3.0 toma la clave nueva sin esperar 30 minutos. `SUPABASE_BACKUPS_ABRIR_REGION.sql` ya trae esta
 versión, así que volver a ejecutarlo no deshace el arreglo.
 
 **Cupo por usuario (2026-10-02, `SUPABASE_BACKUPS_CUPO_POR_USUARIO.sql`).** El cupo era por
