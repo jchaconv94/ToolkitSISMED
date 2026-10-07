@@ -774,3 +774,55 @@ export const availabilityFileName = (params: Pick<AvailabilityExportParams, "mon
   const slug = params.title.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "");
   return `DISPONIBILIDAD_${params.scope === "essential" ? "DME" : "PRODUCTOS"}_${slug}_${cut}.xlsx`;
 };
+
+/* ------------------------------------------------------------------ Excel de una tabla */
+
+export interface TableSheetColumn {
+  header: string;
+  width: number;
+  /** "int", "dec1", "money", "date" o un formato de Excel. */
+  fmt?: keyof typeof FMT | string;
+  align?: "left" | "right" | "center";
+}
+
+export interface TableSheet {
+  /** Nombre de la pestaña (máximo 31 caracteres, sin / \ ? * [ ]). */
+  name: string;
+  title: string;
+  subtitle?: string;
+  columns: TableSheetColumn[];
+  rows: unknown[][];
+}
+
+/**
+ * Libro sencillo para descargar lo que muestra una pestaña del tablero o el plan de
+ * redistribución: por hoja, un título, una línea de contexto y la tabla con el mismo estilo del
+ * reporte completo (cabecera teal, filas alternadas, filtro y cabecera fija).
+ */
+export const buildTableWorkbook = (sheets: TableSheet[]): ExcelJS.Workbook => {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "ToolKit SISMED";
+  wb.created = new Date();
+  for (const sheet of sheets) {
+    const name = sheet.name.replace(/[\\/?*[\]:]/g, "-").slice(0, 31) || "Hoja";
+    const ws = wb.addWorksheet(name);
+    ws.getCell(1, 1).value = sheet.title;
+    ws.getCell(1, 1).font = { name: FONT, bold: true, size: 14, color: { argb: C.ink } };
+    if (sheet.subtitle) {
+      ws.getCell(2, 1).value = sheet.subtitle;
+      ws.getCell(2, 1).font = { name: FONT, size: 10, color: { argb: C.muted } };
+    }
+    const cols: Col[] = sheet.columns.map((c) => ({
+      header: c.header,
+      width: c.width,
+      align: c.align,
+      fmt: c.fmt ? (FMT as Record<string, string>)[c.fmt] ?? c.fmt : undefined,
+    }));
+    writeTable(ws, 4, cols, sheet.rows);
+    if (!sheet.rows.length) {
+      ws.getCell(5, 1).value = "Sin registros.";
+      ws.getCell(5, 1).font = { name: FONT, italic: true, size: 10, color: { argb: C.muted } };
+    }
+  }
+  return wb;
+};
