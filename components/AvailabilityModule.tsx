@@ -187,7 +187,7 @@ export const AvailabilityModule: React.FC = () => {
         setRegistry(new Map(facilities.map((f) => {
           const m = f.microredId ? mr.get(f.microredId) : undefined;
           const unget = f.ungetId || m?.ungetId;
-          return [String(f.code).trim(), { name: f.name, microred: m?.name || "", red: (unget && ug.get(unget)) || "", category: f.category || "" }];
+          return [String(f.code).trim(), { name: f.name, type: f.type || "", microred: m?.name || "", red: (unget && ug.get(unget)) || "", category: f.category || "" }];
         })));
       })
       .catch(() => undefined);
@@ -222,7 +222,8 @@ export const AvailabilityModule: React.FC = () => {
     });
     return {
       ipress: groupByIpress(rows, (code) => registry.get(code)?.name),
-      pharmacy: dispFile.data.hasPharmacies ? rows : null,
+      // Cada farmacia o puesto comunal con su nombre del registro, si está registrado.
+      pharmacy: dispFile.data.hasPharmacies ? rows.map((r) => (r.code !== r.ipressCode && registry.get(r.code)?.name ? { ...r, name: registry.get(r.code)!.name! } : r)) : null,
     };
   }, [dispFile, calculated, registry]);
 
@@ -244,6 +245,8 @@ export const AvailabilityModule: React.FC = () => {
 
   const ipressItems = useMemo<AvailabilityItem[]>(() => (computed ? (scope === "all" ? computed.all : computed.essential) : []), [computed, scope]);
   const pharmacyItems = computed ? (scope === "all" ? computed.pharmacyAll : computed.pharmacyEssential) : null;
+  // Disponibilidad de cada farmacia y puesto comunal (F01, F02…), para abrir un establecimiento por farmacia.
+  const pharmacyReport = useMemo(() => (pharmacyItems ? summarize(pharmacyItems, summaryOptionsOf(config.formula, scope, vitalCodes)) : null), [pharmacyItems, config.formula, scope, vitalCodes]);
   const report = useMemo(() => summarize(ipressItems, summaryOptionsOf(config.formula, scope, vitalCodes)), [ipressItems, config.formula, scope, vitalCodes]);
   const otherScope: AvailabilityScope = scope === "all" ? "essential" : "all";
   const otherPct = useMemo(() => {
@@ -271,7 +274,7 @@ export const AvailabilityModule: React.FC = () => {
   // Al cerrar el detalle se vuelve a la misma página de la tabla y al mismo punto de la pantalla.
   const closeEstablishment = () => { setOpenCode(null); requestAnimationFrame(() => scrollMain(mainScroll.current)); };
   const goTab = (t: ReportTab) => { setOpenCode(null); setTab(t); scroller.current?.scrollIntoView({ block: "start" }); };
-  const openEstablishmentName = openCode ? report.establishments.find((e) => e.code === openCode)?.name : undefined;
+  const openEstablishmentName = openCode ? (report.establishments.find((e) => e.code === openCode) ?? pharmacyReport?.establishments.find((e) => e.code === openCode))?.name : undefined;
   useModuleHeaderOverride(calculated && openCode ? { title: openEstablishmentName || openCode, subtitle: "Disponibilidad", onBack: closeEstablishment } : null);
 
   /** Profesión de quien genera el reporte, para la portada del Excel. */
@@ -374,6 +377,8 @@ export const AvailabilityModule: React.FC = () => {
   /* ------------------------------------------------------------ Resultados */
   const ctx: ReportContext = {
     report,
+    pharmacy: pharmacyReport,
+    facilityType: (code) => registry.get(code)?.type || undefined,
     months,
     levels: config.formula.levels,
     subMax: config.formula.subMax,
@@ -454,7 +459,7 @@ export const AvailabilityModule: React.FC = () => {
       </div>
 
       <div ref={scroller} />
-      {openCode && <EstablishmentDetail ctx={ctx} code={openCode} onClose={closeEstablishment} />}
+      {openCode && <EstablishmentDetail ctx={ctx} code={openCode} onClose={closeEstablishment} onSwitch={(c) => { setProduct(null); setOpenCode(c); requestAnimationFrame(() => scrollMain(0)); }} />}
       {/* Los reportes siguen montados (ocultos) mientras el detalle está abierto: así conservan página, filtros y búsqueda. */}
       <div className={openCode ? "hidden" : undefined}>
           <nav aria-label="Reportes" className="sticky -top-2.5 z-20 -mx-3 mb-4 border-b border-slate-200 bg-slate-50 px-3 pt-0.5 sm:-top-3 sm:-mx-5 sm:px-5 2xl:-mx-6 2xl:px-6">

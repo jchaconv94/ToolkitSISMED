@@ -447,8 +447,16 @@ export const MonthlyBars: React.FC<{
           <line x1={left} x2={width - right} y1={y(cpa)} y2={y(cpa)} stroke="#0f172a" strokeDasharray="5 4" strokeWidth={1.5} />
           {/* La línea va detrás de las barras y la leyenda arriba, fuera de ellas, para no tapar sus valores. */}
           {/* La leyenda de la línea va arriba, fuera de las barras, para no tapar sus valores. */}
-          <line x1={width - right - 150} x2={width - right - 128} y1={10} y2={10} stroke="#0f172a" strokeDasharray="5 4" strokeWidth={1.5} />
-          <text x={width - right} y={10} textAnchor="end" dominantBaseline="middle" className="fill-slate-700 text-[10.5px] font-bold">{lineLabel} {cpa >= 100 ? full(cpa) : cpa.toFixed(1).replace(".", ",")}</text>
+          {(() => {
+            const text = `${lineLabel} ${cpa >= 100 ? full(cpa) : cpa.toFixed(1).replace(".", ",")}`;
+            const x0 = width - right - text.length * 6.1 - 30;
+            return (
+              <>
+                <line x1={x0} x2={x0 + 22} y1={10} y2={10} stroke="#0f172a" strokeDasharray="5 4" strokeWidth={1.5} />
+                <text x={x0 + 28} y={10} dominantBaseline="middle" className="fill-slate-700 text-[10.5px] font-bold">{text}</text>
+              </>
+            );
+          })()}
         </g>
       )}
       {values.map((v, i) => {

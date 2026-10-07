@@ -534,6 +534,8 @@ export const TFORMDET_CONSUMPTION_COLUMNS = ["VENTA", "SIS", "INTERSAN", "SOAT",
 
 export interface EstablishmentInfo {
   name?: string;
+  /** Tipo del registro de Establecimientos (PUESTO_COMUNAL, FARMACIA…). */
+  type?: string;
   microred?: string;
   red?: string;
   category?: string;

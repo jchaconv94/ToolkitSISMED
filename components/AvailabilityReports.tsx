@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Repeat2, TrendingUp, Warehouse, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Repeat2, TrendingUp, Warehouse, X } from "lucide-react";
 import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
 import { formatOneDecimal } from "../services/stockStatus";
@@ -29,6 +29,10 @@ import {
 
 export interface ReportContext {
   report: AvailabilityReport;
+  /** Disponibilidad por farmacia y puesto comunal (F01, F02…), si el archivo los trae. */
+  pharmacy: AvailabilityReport | null;
+  /** Tipo del registro de Establecimientos (PUESTO_COMUNAL, FARMACIA…). */
+  facilityType: (code: string) => string | undefined;
   months: string[];
   levels: LevelThresholds;
   subMax: number;
@@ -107,6 +111,33 @@ const statusParts = (c: { desabastecido: number; substock: number; normostock: n
   { label: "Sin rotación", value: c.sinRotacion, color: STATUS_COLOR[StockStatus.SIN_ROTACION] },
 ];
 
+/** Qué es una farmacia de un establecimiento: F01 es la principal; las demás, según el registro. */
+export const pharmacyKind = (code: string, type?: string): string | null => {
+  if (!/F\d{2}$/i.test(code)) return null;
+  if (/F01$/i.test(code)) return "Principal";
+  if (type === "PUESTO_COMUNAL") return "Puesto comunal";
+  if (type === "FARMACIA") return "Farmacia";
+  return null;
+};
+const KindChip: React.FC<{ kind: string | null }> = ({ kind }) =>
+  kind ? <span className={`whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10.5px] font-bold ${kind === "Principal" ? "bg-teal-50 text-teal-700" : "bg-cyan-50 text-cyan-700"}`}>{kind}</span> : null;
+
+/** Farmacias y puestos comunales de cada establecimiento, solo donde hay más de una (F01, F02…). */
+export const pharmacyGroups = (pharmacy: AvailabilityReport | null): Map<string, EstablishmentSummary[]> => {
+  const map = new Map<string, EstablishmentSummary[]>();
+  if (!pharmacy) return map;
+  for (const p of pharmacy.establishments) {
+    const ipress = p.code.slice(0, 5);
+    if (p.code === ipress) continue;
+    map.set(ipress, [...(map.get(ipress) || []), p]);
+  }
+  for (const [k, list] of map) {
+    if (list.length < 2) map.delete(k);
+    else list.sort((a, b) => a.code.localeCompare(b.code));
+  }
+  return map;
+};
+
 /* ---------------------------------------------------------------- Tabla de reporte */
 
 export interface Column<T> {
@@ -122,7 +153,7 @@ export interface Column<T> {
  * Tabla de un reporte: buscador y filtros arriba; en escritorio, encabezado fijo, orden por
  * columnas y paginación; en el celular, tarjetas que cargan al bajar.
  */
-export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRowClick, itemLabel, searchOf, placeholder, toolbar, minWidth = 900 }: {
+export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRowClick, itemLabel, searchOf, placeholder, toolbar, minWidth = 900, subRows, subLabel = "subregistros" }: {
   title?: string;
   info?: React.ReactNode;
   rows: T[];
@@ -135,8 +166,14 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
   placeholder?: string;
   toolbar?: React.ReactNode;
   minWidth?: number;
+  /** Filas hijas que se despliegan bajo una fila (las farmacias de un establecimiento). */
+  subRows?: (row: T) => T[] | undefined;
+  /** Cómo se llaman las filas hijas en el celular («farmacias»). */
+  subLabel?: string;
 }) {
   const isDesktop = useIsDesktop();
+  const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
+  const toggleRow = (key: string) => setOpenRows((cur) => { const next = new Set(cur); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   const [search, setSearch] = useState("");
   const q = norm(search.trim());
   const filtered = useMemo(() => (q && searchOf ? rows.filter((r) => norm(searchOf(r)).includes(q)) : rows), [rows, q, searchOf]);
@@ -173,24 +210,55 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
         <div className="p-6"><EmptyState title="Sin resultados" description="Ningún registro coincide con la búsqueda o los filtros." /></div>
       ) : isDesktop ? (
         <>
-          <FloatingTableHead state={floating} padding="px-3" cells={columns.map((c, index) => ({ key: c.key, index, content: head(c), align: c.align }))} />
+          <FloatingTableHead state={floating} padding="px-3" cells={[...(subRows ? [{ key: "__expand", index: 0, content: "" }] : []), ...columns.map((c, index) => ({ key: c.key, index: index + (subRows ? 1 : 0), content: head(c), align: c.align }))]} />
           <div className="scrollbar-x overflow-x-auto">
             <table ref={tableRef} className="w-full" style={{ minWidth }}>
               <thead>
                 <tr>
+                  {subRows && <th className={`${tableHeadCellClass} w-10 px-2 py-3`} aria-label="Desplegar" />}
                   {columns.map((c) => (
                     <th key={c.key} aria-sort={c.sort ? ariaSort(headSort(c.key).dir) : undefined} className={`${tableHeadCellClass} ${tableHeadTextClass} px-3 py-3 ${headAlignClass(c.align)}`}>{head(c)}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {pageRows.map((row) => (
-                  <tr key={rowKey(row)} onClick={onRowClick ? () => onRowClick(row) : undefined} className={`h-14 ${onRowClick ? "cursor-pointer hover:bg-slate-50" : ""}`}>
-                    {columns.map((c) => (
-                      <td key={c.key} className={`px-3 py-2 text-[13px] text-slate-700 ${c.align === "right" ? "whitespace-nowrap text-right" : c.align === "center" ? "text-center" : ""}`}>{c.render(row)}</td>
-                    ))}
-                  </tr>
-                ))}
+                {pageRows.map((row) => {
+                  const key = rowKey(row);
+                  const kids = subRows?.(row);
+                  const open = !!kids?.length && openRows.has(key);
+                  const cells = (r: T, child: boolean) => columns.map((c, ci) => (
+                    <td key={c.key} className={`px-3 py-2 text-[13px] text-slate-700 ${c.align === "right" ? "whitespace-nowrap text-right" : c.align === "center" ? "text-center" : ""} ${child && ci === 0 ? "pl-8" : ""}`}>{c.render(r)}</td>
+                  ));
+                  return (
+                    <React.Fragment key={key}>
+                      <tr onClick={onRowClick ? () => onRowClick(row) : undefined} className={`h-14 ${onRowClick ? "cursor-pointer hover:bg-slate-50" : ""} ${open ? "bg-teal-50/40" : ""}`}>
+                        {subRows && (
+                          <td className="w-10 px-2 py-2">
+                            {kids?.length ? (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); toggleRow(key); }}
+                                aria-expanded={open}
+                                aria-label={open ? "Ocultar farmacias" : "Ver farmacias"}
+                                title={open ? "Ocultar" : `Ver sus ${kids.length} ${subLabel}`}
+                                className={`grid h-8 w-8 place-items-center rounded-lg transition-colors ${open ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-teal-50 hover:text-teal-700"}`}
+                              >
+                                <ChevronRight className={`h-4 w-4 transition-transform ${open ? "rotate-90" : ""}`} />
+                              </button>
+                            ) : null}
+                          </td>
+                        )}
+                        {cells(row, false)}
+                      </tr>
+                      {open && kids!.map((kid) => (
+                        <tr key={rowKey(kid)} onClick={onRowClick ? () => onRowClick(kid) : undefined} className={`h-12 bg-slate-50/70 ${onRowClick ? "cursor-pointer hover:bg-teal-50/60" : ""}`}>
+                          <td className="relative w-10 px-2"><span className="absolute inset-y-0 left-1/2 w-px bg-teal-200" /></td>
+                          {cells(kid, true)}
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -198,11 +266,32 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
         </>
       ) : (
         <div className="space-y-2.5 p-3">
-          {sorted.slice(0, mobile.count).map((row) => (
-            <div key={rowKey(row)} onClick={onRowClick ? () => onRowClick(row) : undefined} className={`rounded-2xl border border-slate-200 bg-white p-3.5 ${onRowClick ? "cursor-pointer active:bg-slate-50" : ""}`}>
-              {card(row)}
-            </div>
-          ))}
+          {sorted.slice(0, mobile.count).map((row) => {
+            const key = rowKey(row);
+            const kids = subRows?.(row);
+            const open = !!kids?.length && openRows.has(key);
+            return (
+              <div key={key} className="rounded-2xl border border-slate-200 bg-white">
+                <div onClick={onRowClick ? () => onRowClick(row) : undefined} className={`p-3.5 ${onRowClick ? "cursor-pointer active:bg-slate-50" : ""}`}>
+                  {card(row)}
+                </div>
+                {!!kids?.length && (
+                  <>
+                    <button type="button" onClick={() => toggleRow(key)} aria-expanded={open} className="flex w-full items-center justify-center gap-1.5 border-t border-slate-100 py-2.5 text-[12.5px] font-bold text-teal-700">
+                      {open ? "Ocultar" : `Ver sus ${kids.length} ${subLabel}`}<ChevronRight className={`h-4 w-4 transition-transform ${open ? "-rotate-90" : "rotate-90"}`} />
+                    </button>
+                    {open && (
+                      <div className="space-y-2 border-t border-slate-100 bg-slate-50 p-2.5">
+                        {kids.map((kid) => (
+                          <div key={rowKey(kid)} onClick={onRowClick ? () => onRowClick(kid) : undefined} className="rounded-xl border border-slate-200 bg-white p-3 active:bg-slate-50">{card(kid)}</div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
           <LoadMoreSentinel hasMore={mobile.hasMore} onLoadMore={mobile.loadMore} shown={mobile.count} total={sorted.length} itemLabel={itemLabel} />
         </div>
       )}
@@ -399,6 +488,7 @@ export const EstablishmentsReport: React.FC<{
   const { report } = ctx;
   const microreds = useMemo(() => [...new Set(report.establishments.map((e) => e.microred))].sort((a, b) => a.localeCompare(b, "es")), [report]);
   const eess = report.establishments.filter((e) => (level === "ALL" || e.level === level) && (microred === "ALL" || e.microred === microred));
+  const pharmaciesOf = useMemo(() => pharmacyGroups(ctx.pharmacy), [ctx.pharmacy]);
   const mrs = report.microredes.filter((m) => level === "ALL" || m.level === level);
   const switcher = (
     <div className="flex shrink-0 rounded-xl bg-slate-100 p-1">
@@ -415,7 +505,14 @@ export const EstablishmentsReport: React.FC<{
     />
   );
   const eessColumns: Column<EstablishmentSummary>[] = [
-    { key: "name", label: "Establecimiento", sort: (r) => r.name, render: (r) => <span className="flex items-center gap-2"><CodeChip code={r.code} /><span className="font-semibold text-slate-900">{r.name}</span></span> },
+    { key: "name", label: "Establecimiento", sort: (r) => r.name, render: (r) => (
+      <span className="flex items-center gap-2">
+        <CodeChip code={r.code} />
+        <span className="font-semibold text-slate-900">{r.name}</span>
+        <KindChip kind={pharmacyKind(r.code, ctx.facilityType(r.code))} />
+        {pharmaciesOf.get(r.code) && <span className="whitespace-nowrap text-[11.5px] font-semibold text-slate-400">{pharmaciesOf.get(r.code)!.length} farmacias</span>}
+      </span>
+    ) },
     { key: "microred", label: "Microred", sort: (r) => r.microred, render: (r) => <span className="text-[12.5px] text-slate-500">{r.microred}</span> },
     { key: "mix", label: "Situación de los ítems", render: (r) => <StackBar parts={statusParts(r)} className="h-2.5 w-44" /> },
     { key: "desabastecido", label: "Desab.", align: "right", sort: (r) => r.desabastecido, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-red-600">{r.desabastecido}</span> },
@@ -437,6 +534,8 @@ export const EstablishmentsReport: React.FC<{
   return view === "eess" ? (
     <ReportTable
       rows={eess}
+      subRows={(r) => pharmaciesOf.get(r.code)}
+      subLabel="farmacias y puestos"
       columns={eessColumns}
       rowKey={(r) => r.code}
       itemLabel="establecimientos"
@@ -458,7 +557,7 @@ export const EstablishmentsReport: React.FC<{
       card={(e) => (
         <>
           <div className="flex items-center gap-2"><p className="min-w-0 flex-1 truncate text-[14px] font-bold text-slate-900">{e.name}</p><LevelChip level={e.level} /><ChevronRight className="h-4 w-4 text-slate-300" /></div>
-          <p className="text-[12px] text-slate-500">{e.code} · {e.microred}</p>
+          <p className="flex items-center gap-1.5 text-[12px] text-slate-500">{e.code} · {e.microred}<KindChip kind={pharmacyKind(e.code, ctx.facilityType(e.code))} /></p>
           <div className="mt-2"><PctBar pct={e.pct} color={LEVEL_COLOR[e.level]} width="flex-1" /></div>
           <StackBar parts={statusParts(e)} className="mt-2 h-2 w-full" />
           <p className="mt-1.5 text-[11.5px] text-slate-500"><b className="text-red-600">{e.desabastecido}</b> desabastecidos · {e.substock} en substock · {e.total} ítems</p>
@@ -528,9 +627,14 @@ const SituationBars: React.FC<{
 
 /* ---------------------------------------------------------------- Detalle de un establecimiento */
 
-export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; onClose: () => void }> = ({ ctx, code, onClose }) => {
-  const e = ctx.report.establishments.find((x) => x.code === code);
-  const items = useMemo(() => ctx.report.items.filter((i) => i.code === code), [ctx.report.items, code]);
+export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; onClose: () => void; onSwitch: (code: string) => void }> = ({ ctx, code, onClose, onSwitch }) => {
+  // Un establecimiento (06502) o una de sus farmacias o puestos comunales (06502F02).
+  const source = ctx.report.establishments.some((x) => x.code === code) ? ctx.report : ctx.pharmacy ?? ctx.report;
+  const e = source.establishments.find((x) => x.code === code);
+  const items = useMemo(() => source.items.filter((i) => i.code === code), [source.items, code]);
+  const ipressCode = code.slice(0, 5);
+  const siblings = useMemo(() => pharmacyGroups(ctx.pharmacy).get(ipressCode) ?? [], [ctx.pharmacy, ipressCode]);
+  const parent = ctx.report.establishments.find((x) => x.code === ipressCode);
   const [status, setStatus] = useState<StockStatus | "ALL" | "RISK">("ALL");
   const risk = useMemo(() => lotRiskReport(items, ctx.today), [items, ctx.today]);
   const riskKeys = useMemo(() => new Set(risk.rows.map((r) => r.item.medCode)), [risk]);
@@ -547,23 +651,61 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
     { key: "status", label: "Situación", sort: (r) => STATUS_ORDER.indexOf(r.status), render: (r) => <StatusPill status={r.status} /> },
     { key: "expiry", label: "Vence primero", sort: (r) => r.nearestExpiry?.getTime() ?? null, render: (r) => <span className="whitespace-nowrap text-slate-600">{dateText(r.nearestExpiry)}{riskKeys.has(r.medCode) && <AlertTriangle className="ml-1.5 inline h-3.5 w-3.5 text-red-600" />}</span> },
   ];
+  const isPharmacy = code !== ipressCode;
   return (
     <div className="space-y-4">
-      <section className="relative flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:p-5 md:pr-14">
-        <button type="button" onClick={onClose} aria-label="Cerrar" title="Cerrar" className="absolute right-3 top-3 hidden h-9 w-9 place-items-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 md:grid">
-          <X className="h-5 w-5" />
+      {/* Ruta de regreso (en el celular lo hace la flecha de la cabecera) */}
+      <nav aria-label="Ruta" className="hidden items-center gap-1.5 text-[13px] md:flex">
+        <button type="button" onClick={onClose} className="flex items-center gap-1.5 rounded-lg px-2 py-1 font-bold text-teal-700 transition-colors hover:bg-teal-50">
+          <ArrowLeft className="h-4 w-4" />Establecimientos
         </button>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2"><CodeChip code={e.code} /><LevelChip level={e.level} /></div>
-          <h2 className="mt-1 text-[20px] font-black text-slate-900">{e.name}</h2>
-          <p className="text-[12.5px] text-slate-500">Microred {e.microred}{e.category ? ` · ${e.category}` : ""} · {e.total} ítems evaluados</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="text-right">
+        {isPharmacy && parent && (
+          <>
+            <ChevronRight className="h-4 w-4 text-slate-300" />
+            <button type="button" onClick={() => onSwitch(parent.code)} className="rounded-lg px-2 py-1 font-semibold text-slate-600 transition-colors hover:bg-slate-100">{parent.name}</button>
+          </>
+        )}
+        <ChevronRight className="h-4 w-4 text-slate-300" />
+        <span className="truncate px-2 font-semibold text-slate-900">{e.name}</span>
+      </nav>
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2"><CodeChip code={e.code} /><LevelChip level={e.level} /><KindChip kind={pharmacyKind(e.code, ctx.facilityType(e.code))} /></div>
+            <h2 className="mt-1 text-[20px] font-black text-slate-900">{e.name}</h2>
+            <p className="text-[12.5px] text-slate-500">{isPharmacy && parent ? `${parent.name} · ` : ""}Microred {e.microred}{e.category ? ` · ${e.category}` : ""} · {e.total} ítems evaluados</p>
+          </div>
+          <div className="text-left md:text-right">
             <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Disponibilidad</p>
             <p className="text-[32px] font-black leading-none" style={{ color: LEVEL_COLOR[e.level] }}>{pctText(e.pct)}</p>
           </div>
         </div>
+        {siblings.length > 0 && (
+          <div className="mt-4 border-t border-slate-100 pt-3">
+            <p className="mb-2 text-[11px] font-black uppercase tracking-wider text-slate-400">Ver por farmacia</p>
+            <div className="hide-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1">
+              {[...(parent ? [parent] : []), ...siblings].map((f) => {
+                const on = f.code === code;
+                const kind = f.code === ipressCode ? "Todo el establecimiento" : pharmacyKind(f.code, ctx.facilityType(f.code));
+                return (
+                  <button
+                    key={f.code}
+                    type="button"
+                    onClick={() => onSwitch(f.code)}
+                    aria-pressed={on}
+                    className={`flex shrink-0 items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors ${on ? "border-teal-600 bg-teal-50 ring-1 ring-teal-600" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block max-w-[220px] truncate text-[12.5px] font-bold text-slate-800">{f.code === ipressCode ? "Todo el establecimiento" : f.name}</span>
+                      <span className="block text-[11px] text-slate-500">{f.code === ipressCode ? `${siblings.length} farmacias sumadas` : `${f.code}${kind ? ` · ${kind}` : ""}`}</span>
+                    </span>
+                    <span className="font-mono text-[14px] font-black" style={{ color: LEVEL_COLOR[f.level] }}>{pctText(f.pct)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </section>
 
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
@@ -632,7 +774,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
   const lots = lotRiskOf(item, ctx.today);
   const riskByLot = new Map(lots.map((l) => [l.lot.lot + "|" + l.lot.expiry?.getTime(), l]));
   const others = ctx.report.items
-    .filter((i) => i.medCode === item.medCode && i.code !== item.code)
+    .filter((i) => i.medCode === item.medCode && i.code !== item.code && i.code !== item.code.slice(0, 5))
     .sort((a, b) => STATUS_ORDER.indexOf(b.status) - STATUS_ORDER.indexOf(a.status) || b.stock - a.stock);
   const peak = Math.max(...item.consumption);
   const peakMonths = peak > 0 ? item.consumption.map((v, i) => (v === peak ? i : -1)).filter((i) => i >= 0) : null;
