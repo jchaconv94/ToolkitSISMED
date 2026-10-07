@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Activity, AlertTriangle, BarChart3, Building2, CalendarClock, CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, Loader2, MoreVertical, PackageX, RefreshCw, Repeat2, SearchX, Settings2, TrendingUp, Upload, Warehouse, X,
@@ -22,7 +22,7 @@ import { tformdetFromSheet, type TformdetFileResult } from "../services/tformdet
 import { BottomSheet } from "./ui/BottomSheet";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import {
-  AbcReport, ConsumptionReport, EstablishmentDetail, EstablishmentsReport, ExpiryReport, GapsReport, OverstockReport, ProductDrawer, ProductGapDrawer, RedistributionReport, SummaryReport, WarehouseReport,
+  AbcReport, ConsumptionReport, drawerNav, EstablishmentDetail, EstablishmentsReport, ExpiryReport, GapsReport, OverstockReport, ProductDrawer, ProductGapDrawer, RedistributionReport, SummaryReport, WarehouseReport,
   type ReportContext, type ReportTab,
 } from "./AvailabilityReports";
 
@@ -149,8 +149,13 @@ export const AvailabilityModule: React.FC = () => {
   const [level, setLevel] = useState<DmeLevel | "ALL">("ALL");
   const [microred, setMicrored] = useState("ALL");
   const [openCode, setOpenCode] = useState<string | null>(null);
-  const [product, setProduct] = useState<AvailabilityItem | null>(null);
-  const [gap, setGap] = useState<ProductGap | null>(null);
+  // Panel abierto y la lista de la tabla de donde se abrió, para pasar al anterior o al siguiente.
+  const [productState, setProductState] = useState<{ item: AvailabilityItem; list: AvailabilityItem[] } | null>(null);
+  const [gapState, setGapState] = useState<{ gap: ProductGap; list: ProductGap[] } | null>(null);
+  const product = productState?.item ?? null;
+  const gap = gapState?.gap ?? null;
+  const setProduct = (item: AvailabilityItem | null, list?: AvailabilityItem[]) => setProductState((cur) => (item ? { item, list: list ?? cur?.list ?? [] } : null));
+  const setGap = (g: ProductGap | null, list?: ProductGap[]) => setGapState((cur) => (g ? { gap: g, list: list ?? cur?.list ?? [] } : null));
   const [actionsOpen, setActionsOpen] = useState(false);
   const isDesktop = useIsDesktop();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -274,6 +279,8 @@ export const AvailabilityModule: React.FC = () => {
   // Al cerrar el detalle se vuelve a la misma página de la tabla y al mismo punto de la pantalla.
   const closeEstablishment = () => { setOpenCode(null); requestAnimationFrame(() => scrollMain(mainScroll.current)); };
   const goTab = (t: ReportTab) => { setOpenCode(null); setTab(t); scroller.current?.scrollIntoView({ block: "start" }); };
+  const closeProduct = useCallback(() => setProductState(null), []);
+  const closeGap = useCallback(() => setGapState(null), []);
   const openEstablishmentName = openCode ? (report.establishments.find((e) => e.code === openCode) ?? pharmacyReport?.establishments.find((e) => e.code === openCode))?.name : undefined;
   useModuleHeaderOverride(calculated && openCode ? { title: openEstablishmentName || openCode, subtitle: "Disponibilidad", onBack: closeEstablishment } : null);
 
@@ -389,7 +396,7 @@ export const AvailabilityModule: React.FC = () => {
     scopeLabel: scope === "all" ? "todos los productos" : "medicamentos esenciales",
     otherLabel: scope === "all" ? "Medicamentos esenciales (DME)" : "Todos los productos",
     openEstablishment,
-    openProduct: (item) => setProduct(item),
+    openProduct: (item, list) => setProduct(item, list ?? [item]),
     goTab,
   };
   const classifiedOff = source?.classified === false;
@@ -489,7 +496,7 @@ export const AvailabilityModule: React.FC = () => {
           {tab === "establishments" && (
             <EstablishmentsReport ctx={ctx} view={eessView} onView={setEessView} level={level} onLevel={setLevel} microred={microred} onMicrored={setMicrored} levelCounts={levelCounts} />
           )}
-          {tab === "gaps" && <GapsReport ctx={ctx} onProduct={setGap} />}
+          {tab === "gaps" && <GapsReport ctx={ctx} onProduct={(g, list) => setGap(g, list ?? [g])} />}
           {tab === "expiry" && <ExpiryReport ctx={ctx} />}
           {tab === "consumption" && <ConsumptionReport ctx={ctx} />}
           {tab === "abc" && <AbcReport ctx={ctx} />}
@@ -498,8 +505,8 @@ export const AvailabilityModule: React.FC = () => {
           {tab === "warehouse" && <WarehouseReport ctx={ctx} />}
       </div>
 
-      <ProductGapDrawer ctx={ctx} gap={product ? null : gap} onClose={() => setGap(null)} />
-      <ProductDrawer ctx={ctx} item={product} onClose={() => setProduct(null)} />
+      <ProductGapDrawer ctx={ctx} gap={product ? null : gap} onClose={closeGap} nav={gapState ? drawerNav(gapState.gap, gapState.list, (g) => setGap(g)) : undefined} />
+      <ProductDrawer ctx={ctx} item={product} onClose={closeProduct} nav={productState ? drawerNav(productState.item, productState.list, (i) => setProduct(i)) : undefined} />
       <BottomSheet open={actionsOpen && !isDesktop} title="Acciones" onClose={() => setActionsOpen(false)}>
         {actionItems}
       </BottomSheet>
