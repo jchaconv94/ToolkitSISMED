@@ -18,7 +18,7 @@ import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type HeadAlign } from "./ui/FloatingTableHead";
 import {
-  ChartCard, Donut, Gauge, HBars, InfoTip, LEVEL_COLOR, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar,
+  ChartCard, Donut, Gauge, HBars, InfoTip, LEVEL_COLOR, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar, TipBox, useChartTip,
 } from "./AvailabilityCharts";
 
 /**
@@ -69,6 +69,8 @@ const LEVEL_CHIP: Record<DmeLevel, string> = {
 
 export const pctText = (pct: number) => `${pct.toFixed(1).replace(".", ",")} %`;
 export const money = (v: number) => `S/ ${formatNumber(Math.round(v))}`;
+/** Soles en corto para etiquetas de gráficos: S/ 398 mil, S/ 1,2 M. */
+export const moneyShort = (v: number) => (Math.abs(v) >= 1e6 ? `S/ ${formatNumber(v / 1e6, 1)} M` : Math.abs(v) >= 1e5 ? `S/ ${formatNumber(v / 1e3)} mil` : `S/ ${formatNumber(Math.round(v))}`);
 const dec = (v: number) => (Number.isFinite(v) ? formatOneDecimal(v).replace(".", ",") : "—");
 export const dateText = (d: Date | null) => (d ? `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}` : "—");
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -142,8 +144,11 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
   const firstDir = useMemo(() => Object.fromEntries(columns.filter((c) => c.firstDir).map((c) => [c.key, c.firstDir!])), [columns]);
   const { sorted, headSort } = useTableSort(filtered, getters, { firstDir });
   const [page, setPage] = useState(1);
-  useEffect(() => setPage(1), [filtered]);
-  const mobile = useIncrementalCount(sorted.length, filtered);
+  // La página vuelve a 1 solo si cambian de verdad las filas (búsqueda, filtro u orden), no
+  // cuando la pantalla se vuelve a dibujar al abrir un detalle.
+  const signature = `${q}|${sorted.length}|${sorted.length ? rowKey(sorted[0]) : ""}|${sorted.length ? rowKey(sorted[sorted.length - 1]) : ""}`;
+  useEffect(() => setPage(1), [signature]);
+  const mobile = useIncrementalCount(sorted.length, signature);
   const { tableRef, floating } = useFloatingTableHead([page, sorted.length, isDesktop]);
   const head = (c: Column<T>) => {
     if (!c.sort) return c.label;
@@ -481,6 +486,46 @@ export const EstablishmentsReport: React.FC<{
   );
 };
 
+/** Barras de situaciones: al pasar el mouse muestran su parte del total y al tocarlas filtran la tabla. */
+const SituationBars: React.FC<{
+  parts: Array<{ key: string; label: string; value: number; color: string }>;
+  total: number;
+  active: string;
+  onSelect: (key: string) => void;
+}> = ({ parts, total, active, onSelect }) => {
+  const tip = useChartTip();
+  const any = parts.some((p) => p.key === active);
+  return (
+    <div className="space-y-1">
+      {tip.layer}
+      {parts.map((p) => {
+        const share = (p.value / Math.max(1, total)) * 100;
+        const on = active === p.key;
+        return (
+          <button
+            key={p.key}
+            type="button"
+            onClick={() => onSelect(p.key)}
+            aria-pressed={on}
+            {...tip.bind(<TipBox title={p.label} color={p.color} rows={[["Ítems", formatNumber(p.value)], ["Del total", pctText(share)]]} note={on ? "Clic para quitar el filtro" : "Clic para ver estos productos"} />)}
+            className={`group block w-full rounded-lg px-2.5 py-2 text-left transition-colors ${on ? "bg-slate-100 ring-1 ring-slate-300" : "hover:bg-slate-50"} ${any && !on ? "opacity-55" : ""}`}
+          >
+            <span className="flex items-center gap-2 text-[12.5px]">
+              <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: p.color }} />
+              <span className="flex-1 font-semibold text-slate-700">{p.label}</span>
+              <span className="font-mono font-bold text-slate-900">{formatNumber(p.value)}</span>
+              <span className="w-12 text-right font-mono text-[11.5px] text-slate-400">{pctText(share)}</span>
+            </span>
+            <span className="mt-1.5 block h-2 overflow-hidden rounded-full bg-slate-100">
+              <span className="block h-full rounded-full transition-[filter] group-hover:brightness-110" style={{ width: `${share}%`, background: p.color }} />
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
 /* ---------------------------------------------------------------- Detalle de un establecimiento */
 
 export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; onClose: () => void }> = ({ ctx, code, onClose }) => {
@@ -504,9 +549,9 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
   ];
   return (
     <div className="space-y-4">
-      <section className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:p-5">
-        <button type="button" onClick={onClose} className="hidden h-9 items-center gap-1.5 self-start rounded-xl border border-slate-200 px-3 text-[13px] font-bold text-slate-600 hover:bg-slate-50 md:flex">
-          <X className="h-4 w-4" />Cerrar
+      <section className="relative flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:p-5 md:pr-14">
+        <button type="button" onClick={onClose} aria-label="Cerrar" title="Cerrar" className="absolute right-3 top-3 hidden h-9 w-9 place-items-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 md:grid">
+          <X className="h-5 w-5" />
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2"><CodeChip code={e.code} /><LevelChip level={e.level} /></div>
@@ -530,17 +575,15 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
 
       <div className="grid gap-4 lg:grid-cols-12">
         <ChartCard title="Consumo mensual valorizado" info={<P>Suma de lo consumido cada mes por todos los productos del establecimiento, en soles (unidades × precio). La línea es el promedio de los meses con consumo.</P>} className="lg:col-span-8">
-          <MonthlyBars values={monthlyValue} labels={ctx.months.map(monthShort)} cpa={avgValue} lineLabel="Promedio S/" />
+          <MonthlyBars values={monthlyValue} labels={ctx.months.map(monthShort)} cpa={avgValue} lineLabel="Promedio" format={moneyShort} fullFormat={money} slot={60} />
         </ChartCard>
         <ChartCard title="Situación de los ítems" info={INFO.situations(ctx.subMax, ctx.sobreMin)} className="lg:col-span-4">
-          <div className="space-y-2.5">
-            {statusParts(e).map((p) => (
-              <div key={p.label}>
-                <div className="flex justify-between text-[12.5px]"><span className="font-semibold text-slate-700">{p.label}</span><span className="font-mono font-bold text-slate-900">{p.value}</span></div>
-                <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${(p.value / Math.max(1, e.total)) * 100}%`, background: p.color }} /></div>
-              </div>
-            ))}
-          </div>
+          <SituationBars
+            parts={STATUS_ORDER.map((st) => ({ key: st, label: STATUS_LABEL[st], value: items.filter((i) => i.status === st).length, color: STATUS_COLOR[st] }))}
+            total={e.total}
+            active={status}
+            onSelect={(k) => setStatus(status === k ? "ALL" : (k as StockStatus))}
+          />
         </ChartCard>
       </div>
 
@@ -591,7 +634,8 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
   const others = ctx.report.items
     .filter((i) => i.medCode === item.medCode && i.code !== item.code)
     .sort((a, b) => STATUS_ORDER.indexOf(b.status) - STATUS_ORDER.indexOf(a.status) || b.stock - a.stock);
-  const peakIdx = item.consumption.indexOf(Math.max(...item.consumption));
+  const peak = Math.max(...item.consumption);
+  const peakMonths = peak > 0 ? item.consumption.map((v, i) => (v === peak ? i : -1)).filter((i) => i >= 0) : null;
   const stat = (label: string, value: React.ReactNode) => (
     <div className="rounded-xl bg-slate-50 px-3 py-2.5">
       <p className="text-[10.5px] font-black uppercase tracking-wider text-slate-400">{label}</p>
@@ -619,9 +663,9 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
           <div>
             <div className="mb-2 flex items-center gap-1.5">
               <h4 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">Consumo mensual</h4>
-              <InfoTip title="Consumo mensual"><P>Unidades consumidas cada mes. La línea punteada es el CPA: el promedio de los meses con consumo. En rojo, el mes de mayor consumo.</P></InfoTip>
+              <InfoTip title="Consumo mensual"><P>Unidades consumidas cada mes. La línea punteada es el CPA: el promedio de los meses con consumo. En rojo, el mes (o los meses) de mayor consumo.</P></InfoTip>
             </div>
-            <MonthlyBars values={item.consumption} labels={ctx.months.map(monthShort)} cpa={item.cpa} highlight={item.consumption[peakIdx] > 0 ? peakIdx : null} height={180} />
+            <MonthlyBars values={item.consumption} labels={ctx.months.map(monthShort)} cpa={item.cpa} highlight={peakMonths} height={190} />
           </div>
           <div>
             <div className="mb-2 flex items-center gap-1.5">
