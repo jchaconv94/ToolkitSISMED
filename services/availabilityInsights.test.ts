@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import type { AvailabilityItem } from "./availabilityReport";
 import {
-  abcXyzReport, asSupplier, consumptionReport, isSeparateSite, planUsage, redistributionPlan, siteGapReport, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
+  abcXyzReport, asSupplier, overstockAtRisk, consumptionReport, isSeparateSite, planUsage, redistributionPlan, siteGapReport, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, variationOf, warehouseReport, xyzOf,
 } from "./availabilityInsights";
 
 const today = new Date(2026, 9, 7);
@@ -101,9 +101,9 @@ describe("sobrestock, redistribución y faltantes", () => {
   });
 
   it("redistribuye lo justo para llegar al mínimo sin bajar del límite al que entrega", () => {
-    const r = redistributionReport([donor, needy, far], 2, 6);
-    expect(r.rows.map((t) => [t.to.name, t.quantity])).toEqual([["RECIBE", 20], ["OTRA MICRORED", 10]]);
-    expect(r.sameMicrored).toBe(1);
+    const plan = redistributionPlan({ items: [donor, needy, far], subMax: 2, sobreMin: 6 });
+    // Primero la misma microred; el donante no baja de su límite (le sobran 40 y entrega 30).
+    expect(plan.rows.map((r) => [r.to.name, r.sources.reduce((a, x) => a + x.qty, 0)])).toEqual([["RECIBE", 20], ["OTRA MICRORED", 10]]);
   });
 
   it("cuenta dónde falta y quién tiene excedente", () => {
@@ -203,5 +203,18 @@ describe("plan de redistribución", () => {
     const plan = redistributionPlan({ items: [donor], pharmacyItems: [f01, f02], warehouse: wh, subMax: 2, sobreMin: 6, isSeparate: (c) => isSeparateSite(c, undefined) });
     const row = plan.rows.find((r) => r.site)!;
     expect(row.sources.map((x) => [plan.pools[x.pool].kind, x.qty])).toEqual([["internal", 30]]);
+  });
+});
+
+describe("sobrestock que ya vence", () => {
+  it("no cuenta dos veces las unidades que son excedente y vencen en 12 meses", () => {
+    const it = item({ code: "06502", ipressCode: "06502", stock: 100, cpa: 5, months: 20, price: 2, status: StockStatus.SOBRESTOCK,
+      lots: [{ lot: "A", expiry: inMonths(4), balance: 100 }] });
+    const over = overstockReport([it], 6);
+    const risk = lotRiskOf(it, today);
+    // Excedente 100 − 5 × 6 = 70; en 4 meses se usan 20 y vencen 80. Se repiten 70.
+    expect(over.rows[0].excess).toBe(70);
+    expect(risk[0].atRisk).toBe(80);
+    expect(overstockAtRisk(over.rows, risk)).toEqual({ units: 70, value: 140 });
   });
 });

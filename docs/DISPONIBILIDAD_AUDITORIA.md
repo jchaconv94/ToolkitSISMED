@@ -100,8 +100,12 @@ internas 3 088 u; 1 822 quedan sin cubrir.
 393 productos en sobrestock también tienen lotes que vencerán sin usarse. Parte del dinero
 aparece a la vez en «Sobrestock inmovilizado» y en «Vence sin usarse».
 
-**Propuesta:** aclararlo en la explicación «i», o mostrar el sobrestock sin la parte que ya
-cuenta como riesgo.
+**Resuelto (2026-10-08):** en el Resumen, «Sobrestock inmovilizado» se muestra sin la parte que
+ya cuenta en «Vence sin usarse en 12 meses» (`overstockAtRisk`: por producto y establecimiento,
+lo menor entre el excedente y lo que vence en 12 meses). Con este TFORMDET eran S/ 36 432
+repetidos (S/ 551 804 de sobrestock pasan a S/ 515 373). La pestaña Sobrestock conserva el total
+y lo indica («de ello S/ 36 432 vence en 12 meses»). Su tarjeta «Se puede mover a donde falta»
+usa ahora el plan de redistribución.
 
 ### E. Desde qué fecha se cuentan los meses al vencimiento
 
