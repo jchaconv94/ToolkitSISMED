@@ -134,6 +134,7 @@ cerrar el panel vuelves a la página donde estabas.
 
 - Este TFORMDET no trae MEDTIP/MEDPET/MEDEST, así que «Medicamentos esenciales» queda apagado.
   Hay que descargarlo con el Toolkit 2.2.5 o posterior.
-- Hay 13 farmacias F02 o posteriores sin tipo en el registro. Se tratan como puestos comunales
-  hasta que se registren.
-- 06520 (Nuevo Tarapoto) sigue sin red, microred ni categoría en el registro.
+- **Corrección (2026-10-08):** aquí decía que había 13 farmacias F02 o posteriores sin tipo y que
+  06520 no tenía red ni microred en el registro. Eso salió del registro de prueba con que se
+  revisó la auditoría (34 establecimientos y ninguna farmacia), no del registro real del usuario,
+  que tiene todas sus farmacias registradas. No había que registrar nada.
