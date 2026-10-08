@@ -206,6 +206,61 @@ export interface Column<T> {
   render: (row: T) => React.ReactNode;
 }
 
+/* ---------------------------------------------------------------- Excel de una tabla */
+
+/** Columna del Excel de una tabla: un dato por celda (código y nombre por separado). */
+export interface ExcelColumn<T> {
+  header: string;
+  width?: number;
+  /** "int", "dec1", "pct", "money", "date" o un formato de Excel. */
+  fmt?: string;
+  align?: "left" | "center" | "right";
+  value: (row: T) => unknown;
+}
+export interface ExcelSpec<T> {
+  /** Nombre de la hoja y del archivo. */
+  name: string;
+  title: string;
+  subtitle?: string;
+  columns: ExcelColumn<T>[];
+}
+
+/** Infinito (sin consumo) va vacío en el Excel. */
+const xNum = (v: number) => (Number.isFinite(v) ? v : "");
+const xProduct = <T,>(get: (r: T) => { medCode: string; description: string }): ExcelColumn<T>[] => [
+  { header: "Código SISMED", width: 13, value: (r) => get(r).medCode },
+  { header: "Producto", width: 50, align: "left", value: (r) => get(r).description },
+];
+const xSite = <T,>(ctx: ReportContext, get: (r: T) => AvailabilityItem): ExcelColumn<T>[] => [
+  { header: "Cód. establecimiento", width: 14, value: (r) => get(r).code },
+  { header: "Establecimiento", width: 40, align: "left", value: (r) => siteLabel(ctx, get(r)) },
+  { header: "Microred", width: 22, align: "left", value: (r) => get(r).microred },
+];
+const xMonths = <T,>(ctx: ReportContext, get: (r: T) => number[]): ExcelColumn<T>[] =>
+  ctx.months.map((m, i) => ({ header: monthLabel(m), width: 10, fmt: "int", value: (r: T) => get(r)[i] ?? 0 }));
+const xCounts = <T,>(get: (r: T) => Pick<StatusCounts, "desabastecido" | "substock" | "normostock" | "sobrestock" | "sinRotacion" | "total">): ExcelColumn<T>[] => [
+  { header: "Desabastecido", width: 13, fmt: "int", value: (r) => get(r).desabastecido },
+  { header: "Substock", width: 10, fmt: "int", value: (r) => get(r).substock },
+  { header: "Normostock", width: 11, fmt: "int", value: (r) => get(r).normostock },
+  { header: "Sobrestock", width: 11, fmt: "int", value: (r) => get(r).sobrestock },
+  { header: "Sin rotación", width: 11, fmt: "int", value: (r) => get(r).sinRotacion },
+  { header: "Ítems", width: 9, fmt: "int", value: (r) => get(r).total },
+];
+
+/** Descarga lo que muestra la tabla (con su búsqueda, filtro y orden) en un Excel de una hoja. */
+const downloadTableExcel = async <T,>(spec: ExcelSpec<T>, rows: T[]) => {
+  const wb = buildTableWorkbook([{
+    name: spec.name,
+    title: spec.title,
+    subtitle: [spec.subtitle, `${formatNumber(rows.length)} registros`, `descargado el ${new Date().toLocaleDateString("es-PE")}`].filter(Boolean).join(" · "),
+    columns: spec.columns.map((c) => ({ header: c.header, width: c.width ?? 12, fmt: c.fmt, align: c.align })),
+    rows: rows.map((r) => spec.columns.map((c) => c.value(r))),
+  }]);
+  const buffer = await wb.xlsx.writeBuffer();
+  const file = [spec.name, spec.subtitle].filter(Boolean).join("_").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w]+/g, "_");
+  saveAs(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `${file}.xlsx`);
+};
+
 /**
  * Tabla de un reporte: buscador y filtros arriba; en escritorio, encabezado fijo, orden por
  * columnas y paginación; en el celular, tarjetas que cargan al bajar.
@@ -218,7 +273,7 @@ export interface Column<T> {
 const TEXT_COLUMNS = new Set(["description", "name", "microred", "from", "to", "site"]);
 const alignOf = (key: string): HeadAlign => (TEXT_COLUMNS.has(key) ? "left" : "center");
 
-export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRowClick, itemLabel, searchOf, placeholder, toolbar, minWidth = 900, subRows, subLabel = "subregistros", anchorRef }: {
+export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRowClick, itemLabel, searchOf, placeholder, toolbar, minWidth = 900, subRows, subLabel = "subregistros", anchorRef, excel }: {
   title?: string;
   info?: React.ReactNode;
   rows: T[];
@@ -238,6 +293,8 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
   subLabel?: string;
   /** Para bajar hasta la tabla cuando un indicador la filtra (`useTableAnchor`). */
   anchorRef?: React.RefObject<HTMLElement | null>;
+  /** Botón «Excel»: descarga lo que muestra la tabla (pedido del usuario: un Excel por pestaña). */
+  excel?: ExcelSpec<T>;
 }) {
   const isDesktop = useIsDesktop();
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
@@ -272,6 +329,11 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
         )}
         {searchOf && <TableSearch value={search} onChange={setSearch} placeholder={placeholder || "Buscar…"} className="md:min-w-[280px]" />}
         {toolbar}
+        {excel && (
+          <button type="button" onClick={() => downloadTableExcel(excel, sorted)} disabled={!sorted.length} title="Descargar en Excel lo que muestra la tabla" className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            <Download className="h-4 w-4 text-teal-700" />Excel
+          </button>
+        )}
         <span className="text-[12px] font-semibold text-slate-400 md:ml-auto">{formatNumber(sorted.length)} {itemLabel}</span>
       </div>
       {sorted.length === 0 ? (
@@ -368,7 +430,20 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
 }
 
 /** Opciones en pastillas para filtrar una tabla. */
+/**
+ * Filtro de una tabla. En escritorio es un combo, para que buscador, filtro y botones queden en
+ * una sola línea (pedido del usuario del 2026-10-08: «no bajes a la segunda fila»); en el
+ * celular, pastillas que se deslizan.
+ */
 export function Pills<V extends string>({ value, options, onChange }: { value: V; options: Array<{ value: V; label: string; count?: number }>; onChange: (v: V) => void }) {
+  const isDesktop = useIsDesktop();
+  if (isDesktop) {
+    return (
+      <select value={value} onChange={(e) => onChange(e.target.value as V)} aria-label="Filtrar" className={`${filterInputClass} !w-auto min-w-[150px] shrink-0 cursor-pointer`}>
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}{o.count !== undefined ? ` (${formatNumber(o.count)})` : ""}</option>)}
+      </select>
+    );
+  }
   return (
     <div className="hide-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
       {options.map((o) => (
@@ -580,7 +655,7 @@ export const EstablishmentsReport: React.FC<{
     <Pills<DmeLevel | "ALL">
       value={level}
       onChange={onLevel}
-      options={[{ value: "ALL", label: "Todos" }, ...LEVELS.map((l) => ({ value: l, label: DME_LEVEL_LABEL[l], count: view === "eess" ? levelCounts[l] : undefined }))]}
+      options={[{ value: "ALL", label: "Todos los niveles" }, ...LEVELS.map((l) => ({ value: l, label: `Nivel ${DME_LEVEL_LABEL[l].toLowerCase()}`, count: view === "eess" ? levelCounts[l] : undefined }))]}
     />
   );
   const eessColumns: Column<EstablishmentSummary>[] = [
@@ -627,6 +702,10 @@ export const EstablishmentsReport: React.FC<{
       subRows={(r) => pharmaciesOf.get(r.code)}
       subLabel="farmacias y puestos"
       columns={eessColumns}
+      excel={{ name: "Establecimientos", title: "Disponibilidad por establecimiento", subtitle: ctx.reportTitle, columns: [
+          { header: "Código", width: 10, value: (r) => r.code }, { header: "Establecimiento", width: 40, align: "left", value: (r) => r.name }, { header: "Microred", width: 24, align: "left", value: (r) => r.microred },
+          ...xCounts((r: EstablishmentSummary) => r), { header: "Disponibilidad", width: 13, fmt: "pct", value: (r) => r.pct / 100 }, { header: "Nivel", width: 11, value: (r) => DME_LEVEL_LABEL[r.level] },
+        ] }}
       rowKey={(r) => r.code}
       itemLabel="establecimientos"
       searchOf={(r) => `${r.code} ${r.name} ${r.microred}`}
@@ -659,6 +738,10 @@ export const EstablishmentsReport: React.FC<{
       rows={mrs}
       minWidth={1100}
       columns={mrColumns}
+      excel={{ name: "Microredes", title: "Disponibilidad por microred", subtitle: ctx.reportTitle, columns: [
+          { header: "Microred", width: 28, align: "left", value: (r) => r.microred }, { header: "Establecimientos", width: 14, fmt: "int", value: (r) => r.establishments },
+          ...xCounts((r: MicroredSummary) => r.counts), { header: "Disponibilidad", width: 13, fmt: "pct", value: (r) => r.pct / 100 }, { header: "Nivel", width: 11, value: (r) => DME_LEVEL_LABEL[r.level] },
+        ] }}
       rowKey={(r) => r.microred}
       itemLabel="microredes"
       searchOf={(r) => r.microred}
@@ -881,6 +964,11 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
         anchorRef={anchor}
         rows={rows}
         columns={columns}
+        excel={{ name: "Productos", title: `Productos de ${e.name}`, subtitle: ctx.reportTitle, columns: [
+          ...xProduct((r: AvailabilityItem) => r), { header: "Stock", width: 10, fmt: "int", value: (r) => r.stock }, { header: "CPA", width: 9, fmt: "dec1", value: (r) => r.cpa },
+          { header: "Meses", width: 9, fmt: "dec1", value: (r) => xNum(r.months) }, { header: "Situación", width: 14, value: (r) => STATUS_LABEL[r.status] }, { header: "Vence primero", width: 13, fmt: "date", value: (r) => r.nearestExpiry ?? "" },
+          ...xMonths(ctx, (r: AvailabilityItem) => r.consumption),
+        ] }}
         rowKey={(r) => r.medCode}
         itemLabel="productos"
         searchOf={(r) => `${r.medCode} ${r.description}`}
@@ -1113,6 +1201,11 @@ export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGa
           info={INFO.gaps(ctx.subMax)}
           rows={siteGaps}
           columns={siteColumns}
+          excel={{ name: "Faltan en un puesto", title: "Puestos comunales desabastecidos que su establecimiento no muestra", subtitle: ctx.reportTitle, columns: [
+          ...xProduct((r: SiteGapRow) => r.item), { header: "Cód. puesto", width: 12, value: (r) => r.item.code }, { header: "Puesto comunal", width: 36, align: "left", value: (r) => r.item.name },
+          { header: "Establecimiento", width: 34, align: "left", value: (r) => r.establishment.name }, { header: "Stock", width: 9, fmt: "int", value: (r) => r.item.stock }, { header: "CPA", width: 9, fmt: "dec1", value: (r) => r.item.cpa },
+          { header: "Stock en su F01", width: 13, fmt: "int", value: (r) => r.main?.stock ?? 0 }, { header: "Meses en su F01", width: 13, fmt: "dec1", value: (r) => (r.main ? xNum(r.main.months) : "") }, { header: "Situación del establecimiento", width: 18, value: (r) => STATUS_LABEL[r.establishment.status] },
+        ] }}
           rowKey={(r) => `${r.item.code}|${r.item.medCode}`}
           itemLabel="puestos"
           searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name} ${r.establishment.name}`}
@@ -1134,6 +1227,10 @@ export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGa
           info={INFO.gaps(ctx.subMax)}
           rows={rows}
           columns={columns}
+          excel={{ name: "Dónde falta", title: "Productos que faltan en los establecimientos", subtitle: ctx.reportTitle, columns: [
+          ...xProduct((r: ProductGap) => r), ...xCounts((r: ProductGap) => ({ ...r, total: r.establishments })),
+          { header: "Les sobra", width: 10, fmt: "int", value: (r) => r.donors }, { header: "Stock en almacén", width: 14, fmt: "int", value: (r) => r.warehouseStock },
+        ] }}
           rowKey={(r) => r.medCode}
           itemLabel="productos"
           searchOf={(r) => `${r.medCode} ${r.description}`}
@@ -1252,13 +1349,19 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         info={INFO.expiry}
         rows={rows}
         columns={columns}
+        excel={{ name: "Vencimientos", title: "Lotes en riesgo de vencer sin usarse", subtitle: ctx.reportTitle, columns: [
+          ...xSite(ctx, (r: LotRiskRow) => r.item), ...xProduct((r: LotRiskRow) => r.item), { header: "Lote", width: 14, value: (r) => r.lot.lot },
+          { header: "Vence", width: 12, fmt: "date", value: (r) => r.lot.expiry ?? "" }, { header: "Meses al vencimiento", width: 12, fmt: "dec1", value: (r) => r.monthsToExpiry },
+          { header: "Saldo", width: 10, fmt: "int", value: (r) => r.lot.balance }, { header: "CPA", width: 9, fmt: "dec1", value: (r) => r.item.cpa }, { header: "Se usa", width: 10, fmt: "int", value: (r) => r.usable },
+          { header: "En riesgo", width: 10, fmt: "int", value: (r) => r.atRisk }, { header: "Precio", width: 10, fmt: "money", value: (r) => r.item.price || 0 }, { header: "Valor en riesgo", width: 13, fmt: "money", value: (r) => r.value },
+        ] }}
         rowKey={(r) => `${r.item.code}|${r.item.medCode}|${r.lot.lot}|${r.lot.expiry?.getTime()}`}
         itemLabel="lotes"
         searchOf={(r) => `${r.item.medCode} ${r.item.description} ${whereOf(r.item)} ${r.lot.lot}`}
         placeholder="Buscar producto, lote o establecimiento…"
         onRowClick={(r, rows) => ctx.openProduct(r.item, rows.map((x) => x.item))}
         minWidth={1050}
-        toolbar={<Pills value={bucket} onChange={setBucket} options={[{ value: "URGENT", label: "12 meses" }, ...EXPIRY_BUCKETS.map((b) => ({ value: b, label: EXPIRY_BUCKET_LABEL[b], count: risk.byBucket[b].lots })), { value: "NOUSE", label: "Sin consumo" }, { value: "ALL", label: "Todos" }]} />}
+        toolbar={<Pills value={bucket} onChange={setBucket} options={[{ value: "URGENT", label: "Próximos 12 meses" }, ...EXPIRY_BUCKETS.map((b) => ({ value: b, label: EXPIRY_BUCKET_LABEL[b], count: risk.byBucket[b].lots })), { value: "NOUSE", label: "Sin consumo" }, { value: "ALL", label: "Todos" }]} />}
         card={(r) => (
           <>
             <ProductCell code={r.item.medCode} description={r.item.description} sub={whereOf(r.item)} />
@@ -1336,6 +1439,11 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
           info={INFO.xyz}
           rows={classRows}
           columns={classColumns}
+          excel={{ name: "Consumo por tipo", title: xyzTitle[xyz], subtitle: ctx.reportTitle, columns: [
+          ...xSite(ctx, (r: ClassifiedItem) => r.item), ...xProduct((r: ClassifiedItem) => r.item), { header: "Tipo", width: 10, value: (r) => `${r.xyz} · ${XYZ_LABEL[r.xyz]}` },
+          { header: "Meses con consumo", width: 12, fmt: "int", value: (r) => r.monthsWithUse }, { header: "CPA", width: 9, fmt: "dec1", value: (r) => r.item.cpa }, { header: "Variación", width: 10, fmt: "0.00", value: (r) => r.cv },
+          { header: "Situación", width: 14, value: (r) => STATUS_LABEL[r.item.status] }, ...xMonths(ctx, (r: ClassifiedItem) => r.item.consumption),
+        ] }}
           rowKey={(r) => `${r.item.code}|${r.item.medCode}`}
           itemLabel="ítems"
           searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name}`}
@@ -1357,6 +1465,11 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
         info={INFO.peaks}
         rows={rows}
         columns={columns}
+        excel={{ name: "Picos de consumo", title: "Picos de consumo", subtitle: ctx.reportTitle, columns: [
+          ...xSite(ctx, (r: PeakRow) => r.item), ...xProduct((r: PeakRow) => r.item), { header: "Mes del pico", width: 12, value: (r) => monthLabel(ctx.months[r.peakIndex]) },
+          { header: "Pico", width: 10, fmt: "int", value: (r) => r.peak }, { header: "Promedio otros meses", width: 13, fmt: "dec1", value: (r) => r.othersAverage }, { header: "Veces", width: 9, fmt: "dec1", value: (r) => xNum(r.ratio) },
+          { header: "Tipo", width: 10, value: (r) => `${r.xyz} · ${XYZ_LABEL[r.xyz]}` }, { header: "Valor del pico", width: 13, fmt: "money", value: (r) => r.value }, ...xMonths(ctx, (r: PeakRow) => r.item.consumption),
+        ] }}
         rowKey={(r) => `${r.item.code}|${r.item.medCode}`}
         itemLabel="picos"
         searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name}`}
@@ -1450,6 +1563,11 @@ export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         info={INFO.abc}
         rows={rows}
         columns={columns}
+        excel={{ name: "Clasificación ABC", title: cell ? `Productos ${cell}` : "Productos por valor consumido (ABC × XYZ)", subtitle: ctx.reportTitle, columns: [
+          ...xProduct((r: AbcProduct) => r), { header: "Clase", width: 8, value: (r) => `${r.abc}${r.xyz}` }, { header: "Unidades", width: 11, fmt: "int", value: (r) => r.units },
+          { header: "Valor consumido", width: 14, fmt: "money", value: (r) => r.value }, { header: "% del valor", width: 11, fmt: "pct", value: (r) => r.share }, { header: "Acumulado", width: 11, fmt: "pct", value: (r) => r.cumulative },
+          { header: "Establecimientos", width: 13, fmt: "int", value: (r) => r.establishments }, ...xMonths(ctx, (r: AbcProduct) => r.consumption),
+        ] }}
         rowKey={(r) => r.medCode}
         itemLabel="productos"
         searchOf={(r) => `${r.medCode} ${r.description}`}
@@ -1526,6 +1644,11 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         info={INFO.overstock(ctx.sobreMin)}
         rows={data.rows}
         columns={columns}
+        excel={{ name: "Sobrestock", title: "Productos con excedente (sobrestock inmovilizado)", subtitle: ctx.reportTitle, columns: [
+          ...xSite(ctx, (r: OverstockRow) => r.item), ...xProduct((r: OverstockRow) => r.item), { header: "Stock", width: 10, fmt: "int", value: (r) => r.item.stock },
+          { header: "CPA", width: 9, fmt: "dec1", value: (r) => r.item.cpa }, { header: "Meses", width: 9, fmt: "dec1", value: (r) => xNum(r.item.months) }, { header: `Necesita (${ctx.sobreMin} meses)`, width: 13, fmt: "int", value: (r) => r.needed },
+          { header: "Excedente", width: 11, fmt: "int", value: (r) => r.excess }, { header: "Precio", width: 10, fmt: "money", value: (r) => r.item.price || 0 }, { header: "Inmovilizado", width: 13, fmt: "money", value: (r) => r.value },
+        ] }}
         rowKey={(r) => `${r.item.code}|${r.item.medCode}`}
         itemLabel="productos"
         searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name}`}
@@ -1893,6 +2016,12 @@ export const WarehouseReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         info={INFO.warehouse(ctx.subMax)}
         rows={rows}
         columns={columns}
+        excel={{ name: "Almacén", title: "Stock del almacén y cuánto cubre", subtitle: ctx.reportTitle, columns: [
+          { header: "Almacén", width: 12, value: (r) => r.item.code }, ...xProduct((r: WarehouseRow) => r.item), { header: "Stock", width: 10, fmt: "int", value: (r) => r.item.stock },
+          { header: "Valor", width: 12, fmt: "money", value: (r) => r.value }, { header: "Vence primero", width: 13, fmt: "date", value: (r) => r.nearestExpiry ?? "" }, { header: "Lo necesitan", width: 12, fmt: "int", value: (r) => r.inNeed },
+          { header: "Desabastecidos", width: 13, fmt: "int", value: (r) => r.desabastecido }, { header: "Necesitan (unid.)", width: 13, fmt: "int", value: (r) => r.needUnits }, { header: "Cobertura", width: 11, fmt: "pct", value: (r) => (r.inNeed ? r.coverage / 100 : "") },
+          { header: "Meses para la red", width: 13, fmt: "dec1", value: (r) => xNum(r.networkMonths) },
+        ] }}
         rowKey={(r) => `${r.item.code}|${r.item.medCode}`}
         itemLabel="productos"
         searchOf={(r) => `${r.item.medCode} ${r.item.description}`}
