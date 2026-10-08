@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, ChevronRight, Database, LayoutGrid, Pill, RefreshCw } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Database, LayoutGrid, Pill, RefreshCw, WifiOff } from "lucide-react";
+import { useOnline } from "./ui/useOnline";
 import { AppModule } from "../types";
 import { useAuth } from "../contexts/AuthContext";
 import { useNotifications } from "../contexts/NotificationsContext";
@@ -132,8 +133,15 @@ const SummaryCard: React.FC<{
   );
 };
 
+/** Sin internet: marca de las herramientas que lo necesitan. */
+const NeedsInternetTag: React.FC<{ className?: string; compact?: boolean }> = ({ className = "", compact = false }) => (
+  <span title="Necesita internet" aria-label="Necesita internet" className={`inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500 ${className}`}>
+    <WifiOff aria-hidden="true" className="h-3 w-3" /><span className={compact ? "hidden md:inline" : ""}>Necesita internet</span>
+  </span>
+);
+
 /** Recuadro de acceso frecuente: al pasar el mouse sube, se marca y aparece su flecha. */
-const FrequentCard: React.FC<{ item: NavItem; tint: NavTint; onClick: () => void; delay: number }> = ({ item, tint, onClick, delay }) => {
+const FrequentCard: React.FC<{ item: NavItem; tint: NavTint; onClick: () => void; delay: number; needsInternet?: boolean }> = ({ item, tint, onClick, delay, needsInternet }) => {
   const Icon = item.icon;
   const classes = NAV_TINT_CLASSES[tint];
   return (
@@ -143,15 +151,16 @@ const FrequentCard: React.FC<{ item: NavItem; tint: NavTint; onClick: () => void
       className="group relative flex min-h-[140px] flex-col justify-between gap-4 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all duration-200 animate-in fade-in slide-in-from-bottom-2 fill-mode-both hover:-translate-y-1 hover:border-teal-300 hover:shadow-lg hover:shadow-slate-900/5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2 md:min-h-[164px] md:p-5"
       style={{ animationDelay: `${delay}ms` }}
     >
-      <span className={`grid h-11 w-11 place-items-center rounded-2xl transition-all duration-200 group-hover:scale-110 ${classes.chip} ${classes.chipHover}`}>
+      <span className={`grid h-11 w-11 place-items-center rounded-2xl transition-all duration-200 group-hover:scale-110 ${needsInternet ? "bg-slate-100 text-slate-400" : `${classes.chip} ${classes.chipHover}`}`}>
         <Icon className="h-5 w-5" />
       </span>
+      {needsInternet && <NeedsInternetTag compact className="absolute right-3 top-3 py-1 md:right-4 md:top-4 md:py-0.5" />}
       <span className="absolute right-4 top-4 grid h-8 w-8 translate-x-1 -translate-y-1 place-items-center rounded-full bg-teal-600 text-white opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:opacity-100">
         <ArrowUpRight className="h-4 w-4" />
       </span>
       <span>
-        <span className="block text-[15px] font-bold leading-snug text-slate-900">{item.label}</span>
-        <span className="mt-0.5 line-clamp-2 block text-[13px] leading-snug text-slate-500">{item.description}</span>
+        <span className={`block text-[15px] font-bold leading-snug ${needsInternet ? "text-slate-400" : "text-slate-900"}`}>{item.label}</span>
+        <span className={`mt-0.5 line-clamp-2 block text-[13px] leading-snug ${needsInternet ? "text-slate-400" : "text-slate-500"}`}>{item.description}</span>
       </span>
     </button>
   );
@@ -162,6 +171,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
   const { network, networkPending, networkChecking, refreshNetwork, pharmacySummary } = useNotifications();
   const now = useNow();
   const sections = visibleNavSections(hasPermission);
+  const online = useOnline();
 
   // Herramienta → su sección, para el color de los recuadros frecuentes.
   const items = useMemo(() => sections.flatMap(section => section.items.map(item => ({ item, tint: section.tint }))), [sections]);
@@ -236,7 +246,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
               <h2 id="inicio-frecuentes" className="mb-3 text-[16px] font-black text-slate-900">Accesos frecuentes</h2>
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-5">
                 {frequent.map(({ item, tint }, index) => (
-                  <FrequentCard key={item.module} item={item} tint={tint} delay={index * 50} onClick={() => onNavigate(item.module)} />
+                  <FrequentCard key={item.module} item={item} tint={tint} delay={index * 50} needsInternet={!online && !item.offline} onClick={() => onNavigate(item.module)} />
                 ))}
               </div>
             </section>
@@ -263,6 +273,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
                         <div className="divide-y divide-slate-100">
                           {section.items.map(item => {
                             const Icon = item.icon;
+                            const needsInternet = !online && !item.offline;
                             return (
                               <button
                                 key={item.module}
@@ -270,14 +281,16 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
                                 onClick={() => onNavigate(item.module)}
                                 className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none md:px-5"
                               >
-                                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl transition-colors ${tint.chip} ${tint.chipHover}`}>
+                                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl transition-colors ${needsInternet ? "bg-slate-100 text-slate-400" : `${tint.chip} ${tint.chipHover}`}`}>
                                   <Icon className="h-[18px] w-[18px]" />
                                 </span>
                                 <span className="min-w-0 flex-1">
-                                  <span className="block text-[14.5px] font-bold text-slate-900">{item.label}</span>
-                                  <span className="block truncate text-[13px] text-slate-500">{item.description}</span>
+                                  <span className={`block text-[14.5px] font-bold ${needsInternet ? "text-slate-400" : "text-slate-900"}`}>{item.label}</span>
+                                  <span className={`block truncate text-[13px] ${needsInternet ? "text-slate-400" : "text-slate-500"}`}>{item.description}</span>
                                 </span>
-                                <ChevronRight className="h-4 w-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-teal-600" />
+                                {needsInternet
+                                  ? <NeedsInternetTag />
+                                  : <ChevronRight className="h-4 w-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-teal-600" />}
                               </button>
                             );
                           })}

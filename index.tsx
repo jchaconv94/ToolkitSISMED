@@ -16,7 +16,7 @@ window.addEventListener('vite:preloadError', (event) => {
   }
 });
 
-// Service worker mínimo (public/sw.js): permite instalar la app; no guarda caché.
+// Service worker (public/sw.js): permite instalar la app y guarda sus archivos para abrir sin internet.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL }).catch(() => {});

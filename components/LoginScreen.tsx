@@ -12,16 +12,22 @@ import {
   Lock,
   ShieldCheck,
   User,
+  WifiOff,
 } from 'lucide-react';
 import { BrandMark } from './ui/BrandLogo';
 import { PinLogin } from './PinLogin';
 import { FingerprintLogin } from './FingerprintLogin';
 import { isDesktopPointer, readStoredDevice, type StoredDevice } from '../services/deviceAccess';
+import { useOnline } from './ui/useOnline';
+import { OFFLINE_SESSION_DAYS, takeLoginNotice } from '../services/sessionStore';
+import { InfoTip } from './ui/InfoTip';
 
-/** Solo se recuerda el usuario. La contraseña nunca se guarda en el navegador. */
-const USUARIO_RECORDADO_KEY = 'aura_saved_username';
-/** Clave antigua que guardaba la contraseña en texto plano: se borra al abrir el login. */
-const CLAVE_ANTIGUA_KEY = 'aura_saved_password';
+/**
+ * Claves antiguas que se borran al abrir el login: «Recordar mi usuario» (retirado el
+ * 2026-10-08: el usuario se recuerda con «Mantener sesión iniciada», el PIN o la huella) y la
+ * que guardaba la contraseña en texto plano.
+ */
+const CLAVES_ANTIGUAS = ['aura_saved_username', 'aura_saved_password'];
 
 /** Enlace directo a WhatsApp del administrador, con el mensaje ya escrito. */
 const WHATSAPP_SOPORTE = `https://wa.me/51956606972?text=${encodeURIComponent(
@@ -33,6 +39,14 @@ const WhatsAppIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className={className}>
     <path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.61-.92-2.21-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.21 3.08c.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.08 1.76-.72 2.01-1.42.25-.7.25-1.29.17-1.42-.07-.12-.27-.2-.57-.35zM12.04 21.5h-.01a9.43 9.43 0 0 1-4.81-1.32l-.34-.2-3.58.94.96-3.49-.23-.36a9.42 9.42 0 0 1-1.44-5.02c0-5.21 4.24-9.45 9.46-9.45 2.52 0 4.9.99 6.68 2.77a9.39 9.39 0 0 1 2.77 6.69c0 5.21-4.24 9.45-9.46 9.45zm8.05-17.5A11.32 11.32 0 0 0 12.04.67C5.77.67.66 5.77.66 12.04c0 2 .52 3.96 1.52 5.69L.57 23.33l5.73-1.5a11.36 11.36 0 0 0 5.74 1.46h.01c6.27 0 11.38-5.1 11.38-11.38 0-3.04-1.18-5.9-3.34-8.04z" />
   </svg>
+);
+
+/** Lo que explica la «i» de «Mantener sesión iniciada». */
+const KEEP_SESSION_HELP = (
+  <>
+    La sesión sigue abierta aunque cierre el navegador, no se cierra por inactividad y la app funciona sin
+    internet hasta {OFFLINE_SESSION_DAYS} días. Desmárquela en una PC compartida.
+  </>
 );
 
 const VENTAJAS = [
@@ -53,7 +67,11 @@ export const LoginScreen: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberUser, setRememberUser] = useState(false);
+  // Marcada por omisión (decisión del usuario del 2026-10-08).
+  const [keepSession, setKeepSession] = useState(true);
+  // «Su sesión venció», si se llegó aquí por eso.
+  const [notice] = useState(() => takeLoginNotice());
+  const online = useOnline();
   const [error, setError] = useState('');
   const [tried, setTried] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
@@ -78,18 +96,9 @@ export const LoginScreen: React.FC = () => {
 
   useEffect(() => {
     try {
-      // Antes «Recordar mis credenciales» guardaba también la contraseña, sin cifrar.
-      localStorage.removeItem(CLAVE_ANTIGUA_KEY);
-      const guardado = localStorage.getItem(USUARIO_RECORDADO_KEY);
-      if (guardado) {
-        setUsername(guardado);
-        setRememberUser(true);
-        // Con el usuario ya puesto, lo siguiente que se escribe es la contraseña.
-        claveRef.current?.focus();
-        return;
-      }
+      CLAVES_ANTIGUAS.forEach((clave) => localStorage.removeItem(clave));
     } catch {
-      // Sin almacenamiento local solo se pierde recordar el usuario.
+      // Sin almacenamiento local no hay nada que borrar.
     }
     usuarioRef.current?.focus();
   }, []);
@@ -105,17 +114,11 @@ export const LoginScreen: React.FC = () => {
     if (!username.trim() || !password) return;
 
     setIsSubmitting(true);
-    const result = await login(username, password);
+    const result = await login(username, password, keepSession);
     if (!result.success) {
       setError(result.message || 'No se pudo iniciar sesión.');
       setIsSubmitting(false);
       return;
-    }
-    try {
-      if (rememberUser) localStorage.setItem(USUARIO_RECORDADO_KEY, username.trim());
-      else localStorage.removeItem(USUARIO_RECORDADO_KEY);
-    } catch {
-      // Sin almacenamiento local, simplemente no se recuerda.
     }
     setIsSubmitting(false);
   };
@@ -242,6 +245,20 @@ export const LoginScreen: React.FC = () => {
             <p className="text-[15px] font-medium text-[#4E5F5C]">Ingrese con su cuenta institucional.</p>
           </div>
 
+          {notice && online && !error && (
+            <div role="status" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm font-semibold text-amber-800">
+              <AlertCircle className="mt-0.5 h-[18px] w-[18px] shrink-0" />
+              <span>{notice}</span>
+            </div>
+          )}
+
+          {!online && (
+            <div role="status" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm font-semibold text-amber-800">
+              <WifiOff className="mt-0.5 h-[18px] w-[18px] shrink-0" />
+              <span>Sin conexión a internet. Para iniciar sesión se necesita internet.</span>
+            </div>
+          )}
+
           {error && (
             <div role="alert" className="mb-5 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm font-semibold text-red-700 animate-in fade-in slide-in-from-top-1">
               <AlertCircle className="mt-0.5 h-[18px] w-[18px] shrink-0" />
@@ -272,7 +289,17 @@ export const LoginScreen: React.FC = () => {
             </div>
 
             <div className="flex flex-col gap-2">
-              <label htmlFor="login-clave" className="text-sm font-bold">Contraseña</label>
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="login-clave" className="text-sm font-bold">Contraseña</label>
+                <button
+                  type="button"
+                  onClick={() => setShowHelp((v) => !v)}
+                  aria-expanded={showHelp}
+                  className="text-[13px] font-bold text-teal-700 hover:underline"
+                >
+                  ¿Olvidó su contraseña?
+                </button>
+              </div>
               <div className={`${campo(claveVacia)} pr-1.5`}>
                 <Lock className="h-5 w-5 shrink-0 text-[#4E5F5C]" />
                 <input
@@ -304,24 +331,20 @@ export const LoginScreen: React.FC = () => {
               )}
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-2.5 text-sm font-medium">
+            {/* Una sola casilla: mantener la sesión también recuerda el usuario. Marcada por
+                omisión (decisión del usuario del 2026-10-08: quien no sabe de tecnología no la
+                marcaría nunca). La explicación va detrás de la «i». */}
+            <div className="-my-1 flex min-h-[44px] items-center gap-1">
+              <label className="flex cursor-pointer items-center gap-2.5 text-sm font-medium">
                 <input
                   type="checkbox"
-                  checked={rememberUser}
-                  onChange={(e) => setRememberUser(e.target.checked)}
+                  checked={keepSession}
+                  onChange={(e) => setKeepSession(e.target.checked)}
                   className="h-[18px] w-[18px] accent-teal-700"
                 />
-                Recordar mi usuario
+                Mantener sesión iniciada
               </label>
-              <button
-                type="button"
-                onClick={() => setShowHelp((v) => !v)}
-                aria-expanded={showHelp}
-                className="min-h-[44px] text-sm font-bold text-teal-700 hover:underline"
-              >
-                ¿Olvidó su contraseña?
-              </button>
+              <InfoTip title="Mantener sesión iniciada" hover size="sm">{KEEP_SESSION_HELP}</InfoTip>
             </div>
 
             {showHelp && (

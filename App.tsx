@@ -36,7 +36,11 @@ import { HomeModule } from './components/HomeModule';
 import { recordToolUse } from './services/frequentTools';
 import { UserMenu } from './components/UserMenu';
 import { ToolSearchDialog, ToolSearchTrigger, useToolSearchShortcut } from './components/ToolSearch';
-import { findNavItem, findNavSection, findVisibleNavSection, NAV_TINT_CLASSES, visibleNavSections } from './components/navigation';
+import { findNavItem, findNavSection, findVisibleNavSection, NAV_SECTIONS, NAV_TINT_CLASSES, visibleNavSections, worksOffline } from './components/navigation';
+import { OfflineIndicator, OfflineToolNotice } from './components/OfflineIndicator';
+import { useOnline } from './components/ui/useOnline';
+import { isOnline } from './services/connectivity';
+import { warmOfflineCopies } from './services/offlineWarmup';
 import { BrandBootScreen, BrandLogo } from './components/ui/BrandLogo';
 import { UserProfile } from './components/UserProfile';
 import { showWelcomeToast } from './components/WelcomeToast';
@@ -109,6 +113,18 @@ const AuthenticatedApp: React.FC = () => {
     const setCurrentView = useCallback((module: AppModule) => setNav({ module, section: null }), []);
     const openSectionScreen = useCallback((section: string) => setNav({ module: 'HOME', section }), []);
 
+    // Sin internet, una herramienta que lo necesita no se abre: se muestra el aviso con las que
+    // sí funcionan. Si la conexión se cae con ella abierta, se queda como está (lo que ya cargó
+    // sigue a la vista). Al volver la conexión se abre sola.
+    const online = useOnline();
+    const [blockedView, setBlockedView] = useState<AppModule | null>(null);
+    useEffect(() => { setBlockedView(!isOnline() && !worksOffline(currentView) ? currentView : null); }, [currentView]);
+    useEffect(() => { if (online) setBlockedView(null); }, [online]);
+    const offlineBlocked = !online && blockedView === currentView;
+    // Con internet, se dejan guardadas por detrás las copias que usan las herramientas sin internet.
+    const hasOfflineTool = Boolean(user) && NAV_SECTIONS.some(section => section.items.some(item => item.offline && hasPermission(item.module)));
+    useEffect(() => { if (isAuthenticated && online && hasOfflineTool) void warmOfflineCopies(); }, [isAuthenticated, online, hasOfflineTool]);
+
     // Cada herramienta que se abre suma para «Accesos frecuentes» de Inicio (en el navegador).
     useEffect(() => {
         if (isAuthenticated && user?.username) recordToolUse(user.username, currentView);
@@ -136,8 +152,10 @@ const AuthenticatedApp: React.FC = () => {
     useEffect(() => {
         if (isAuthenticated || isLoading) return;
         setCurrentView('HOME');
-        if (window.location.pathname !== APP_BASE) {
-            window.history.replaceState({}, '', APP_BASE);
+        // Con la barra final: sin ella la dirección queda fuera del service worker
+        // (`/ToolkitSISMED/`) y, sin internet, recargar el login daba la página de error.
+        if (window.location.pathname !== `${APP_BASE}/`) {
+            window.history.replaceState({}, '', `${APP_BASE}/`);
         }
     }, [isAuthenticated, isLoading]);
 
@@ -348,6 +366,7 @@ const AuthenticatedApp: React.FC = () => {
                             >
                                 <Search className="h-5 w-5" />
                             </button>
+                        {user && <OfflineIndicator onNavigate={setCurrentView} />}
                         {user && <NotificationBell onNavigate={setCurrentView} />}
                         {user && (
                             <UserMenu user={user} onOpenProfile={() => setCurrentView('PROFILE')} onLogout={logout} />
@@ -366,6 +385,9 @@ const AuthenticatedApp: React.FC = () => {
                     <div className="mx-auto max-w-[1600px] h-full">
                         <ErrorBoundary>
                             <Suspense fallback={<SuspenseFallback />}>
+                                {offlineBlocked ? (
+                                    <OfflineToolNotice label={headerTitle} onNavigate={setCurrentView} />
+                                ) : (<>
                                 {currentView === 'HOME' && openSection && (
                                     <div className="md:hidden">
                                         <MobileSectionScreen section={openSection} onNavigate={setCurrentView} />
@@ -387,6 +409,7 @@ const AuthenticatedApp: React.FC = () => {
                                 {currentView === 'ADMIN_BACKUPS' && <BackupsSismedModule />}
                                 {currentView.startsWith('ADMIN') && !['ADMIN_STOCK_ASSIGN', 'ADMIN_SEND_KEYS', 'ADMIN_BACKUPS'].includes(currentView) && <AdminPanel currentView={currentView} />}
                                 {currentView === 'PROFILE' && <UserProfile />}
+                                </>)}
                             </Suspense>
                         </ErrorBoundary>
                     </div>

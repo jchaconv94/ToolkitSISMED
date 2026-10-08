@@ -1,4 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
+import { SESSION_TOKEN_KEY, readSessionToken } from "./sessionStore";
+import { isOnline, reportNetworkFailure, reportNetworkSuccess, setConnectivityProbe } from "./connectivity";
 import {
   STOCK_SNAPSHOT_VERSION,
   STOCK_SYNC_LIGHT_COLUMNS,
@@ -21,8 +23,8 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 // @ts-ignore
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
-/** Clave donde vive el token de sesión emitido por `app_login`. */
-export const SESSION_TOKEN_KEY = "aura_session_token";
+/** Clave donde vive el token de sesión emitido por `app_login` (ver `services/sessionStore.ts`). */
+export { SESSION_TOKEN_KEY };
 
 /**
  * Adjunta el token de sesión a todas las peticiones.
@@ -33,22 +35,57 @@ export const SESSION_TOKEN_KEY = "aura_session_token";
  *
  * Se hace con un `fetch` propio y no con `global.headers` porque el token cambia al
  * iniciar y cerrar sesión, y las cabeceras fijas se congelan al crear el cliente.
+ *
+ * De paso, cada respuesta o fallo de red le dice a `connectivity` si hay internet (modo sin
+ * internet, 2026-10-08): es la única forma de notar una red conectada sin salida a internet.
  */
-const fetchWithSessionToken: typeof fetch = (input, init) => {
+/**
+ * Respuesta inmediata cuando ya se sabe que no hay internet. No se lanza un error a propósito:
+ * la librería de Supabase reintenta los errores de red tres veces, con esperas de 1, 2 y 4
+ * segundos, y cada pantalla tardaba 7 s en pasar a su copia guardada (la app se quedaba en la
+ * pantalla de carga). Un código 599 no se reintenta y llega como error con `code: "OFFLINE"`.
+ */
+const offlineResponse = () =>
+  new Response(JSON.stringify({ code: "OFFLINE", message: "Failed to fetch: sin conexión a internet", details: null, hint: null }), {
+    status: 599,
+    headers: { "content-type": "application/json" },
+  });
+
+const fetchWithSessionToken: typeof fetch = async (input, init) => {
+  if (!isOnline()) return offlineResponse();
   const headers = new Headers(init?.headers);
+  const token = readSessionToken();
+  if (token) headers.set("x-session-token", token);
   try {
-    const token = sessionStorage.getItem(SESSION_TOKEN_KEY);
-    if (token) headers.set("x-session-token", token);
-  } catch {
-    // Sin sessionStorage la petición sale sin token y las políticas la rechazarán.
+    const response = await fetch(input, { ...init, headers });
+    reportNetworkSuccess();
+    return response;
+  } catch (error) {
+    if ((error as { name?: string } | null)?.name !== "AbortError") void reportNetworkFailure();
+    throw error;
   }
-  return fetch(input, { ...init, headers });
 };
 
 export const supabase =
   supabaseUrl && supabaseAnonKey
     ? createClient(supabaseUrl, supabaseAnonKey, { global: { fetch: fetchWithSessionToken } })
     : null;
+
+/** Comprobación corta de conexión: cualquier respuesta del servidor cuenta, aunque sea un error. */
+if (supabaseUrl && supabaseAnonKey) {
+  setConnectivityProbe(async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    try {
+      await fetch(`${supabaseUrl}/rest/v1/`, { method: "HEAD", headers: { apikey: supabaseAnonKey }, cache: "no-store", signal: controller.signal });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+}
 
 /**
  * Programmatically computes a quick, non-cryptographic checksum/hash representing

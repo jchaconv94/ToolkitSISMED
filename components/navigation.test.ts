@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AVAILABLE_MODULES, AppModule } from "../types";
-import { NAV_SECTIONS, findNavItem, findNavSection, findVisibleNavSection, visibleNavSections } from "./navigation";
+import { NAV_SECTIONS, findNavItem, findNavSection, findVisibleNavSection, offlineNavItems, visibleNavSections, worksOffline } from "./navigation";
 
 describe("mapa de navegación", () => {
   const enMenu = NAV_SECTIONS.flatMap(section => section.items.map(item => item.module));
@@ -45,5 +45,20 @@ describe("mapa de navegación", () => {
     expect(findVisibleNavSection("administracion", puede)).toBeNull();
     expect(findVisibleNavSection("no-existe", puede)).toBeNull();
     expect(findVisibleNavSection(null, puede)).toBeNull();
+  });
+});
+
+describe("herramientas sin internet", () => {
+  it("funcionan sin internet las que trabajan con lo que se sube al navegador", () => {
+    const offline = NAV_SECTIONS.flatMap(s => s.items).filter(i => i.offline).map(i => i.module);
+    expect(offline).toEqual(["DASHBOARD", "AVAILABILITY", "REDISTRIBUTION"]);
+    expect(worksOffline("HOME")).toBe(true);
+    expect(worksOffline("SIG_SEARCH")).toBe(false);
+    expect(worksOffline("PROFILE")).toBe(false);
+  });
+
+  it("el aviso solo ofrece las que el usuario puede abrir", () => {
+    const items = offlineNavItems(m => m === "AVAILABILITY" || m === "SIG_SEARCH");
+    expect(items.map(i => i.module)).toEqual(["AVAILABILITY"]);
   });
 });

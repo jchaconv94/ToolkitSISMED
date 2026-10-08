@@ -11,6 +11,7 @@
 import { callSendKeysRpc } from "./sendKeys";
 import { FUSED_CODE_GROUPS, FUSED_CODES_VERSION } from "./fusedCodes";
 import { DEFAULT_VITAL_PRODUCTS, type VitalProduct } from "./vitalProducts";
+import { withOfflineCache } from "./offlineCache";
 
 const SQL = "SUPABASE_DISPONIBILIDAD_CONFIGURACION.sql";
 
@@ -194,11 +195,15 @@ export const diffFusedGroups = (before: FusedGroups, after: FusedGroups) => {
 type Stored = Record<string, { value: unknown; updatedBy?: string | null; updatedAt?: string | null }>;
 
 export const availabilityConfigApi = {
-  /** Nunca falla: si no hay SQL o no hay red, devuelve la de fábrica. */
+  /**
+   * Nunca falla. Sin internet usa la última configuración leída en este equipo (modo sin
+   * internet: el cálculo debe dar lo mismo que con internet); si nunca se leyó o no hay SQL,
+   * la de fábrica.
+   */
   load: async (): Promise<AvailabilityConfig> => {
     const base = factoryConfig();
     try {
-      const data = (await callSendKeysRpc<Stored | null>("app_availability_config_get", {}, SQL)) || {};
+      const data = (await withOfflineCache("disponibilidad:configuracion", () => callSendKeysRpc<Stored | null>("app_availability_config_get", {}, SQL))) || {};
       const fused = normalizeFusedCatalog(data.fused_codes?.value);
       const vitals = normalizeVitals(data.vital_products?.value);
       return {
