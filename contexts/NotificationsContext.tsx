@@ -23,6 +23,7 @@ import { loadAssignedIpressStock } from "../services/assignedIpressStock";
 import { noticeSettingsApi } from "../services/noticeSettings";
 import { type PharmacySummary, buildPharmacySummary } from "../services/homeSummary";
 import { NETWORK_LEVELS, type NetworkStockStatus, loadNetworkStockStatus, readCachedNetworkStatus, saveCachedNetworkStatus } from "../services/networkStockStatus";
+import { isOnline, subscribeConnectivity } from "../services/connectivity";
 import { resolveStockLevel } from "../services/stockConnectionScope";
 import {
   EMPTY_MEMORY, NOTICE_SOURCE_FAILURE, NOTICE_SOURCE_OF, Notice, NoticeId, NoticeMemory, NoticeSource,
@@ -144,7 +145,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // --- Revisión ----------------------------------------------------------------------------
   const refresh = useCallback(async () => {
-    if (!enabled || running.current) return;
+    // Sin internet no se revisa: los avisos de la última revisión se quedan como estaban.
+    if (!enabled || running.current || !isOnline()) return;
     running.current = true;
     const gen = generation.current;
     setChecking(true);
@@ -213,7 +215,9 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!enabled) return;
     void refresh();
     const timer = window.setInterval(() => void refresh(), NOTICES_REFRESH_MS);
-    return () => window.clearInterval(timer);
+    // Al volver la conexión se revisa de inmediato.
+    const unsubscribe = subscribeConnectivity((online) => { if (online) void refresh(); });
+    return () => { window.clearInterval(timer); unsubscribe(); };
   }, [enabled, refresh]);
 
   // --- Estado de la red para Inicio ------------------------------------------------------
@@ -238,6 +242,11 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     let loading = false;
     const load = async () => {
       if (loading) return;
+      // Sin internet se queda lo último guardado (antes se reemplazaba por ceros).
+      if (!isOnline()) {
+        setNetworkPending(false);
+        return;
+      }
       loading = true;
       setNetworkChecking(true);
       try {
@@ -246,7 +255,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
         const status = await loadNetworkStockStatus(user, Date.now(), (partial) => {
           if (run === networkRun.current && !readCachedNetworkStatus(username)) setNetwork(partial);
         });
-        if (run !== networkRun.current) return;
+        // Si la conexión se cayó a medio cálculo, el resultado está incompleto: no se usa.
+        if (run !== networkRun.current || !isOnline()) return;
         setNetwork(status);
         saveCachedNetworkStatus(username, status);
       } catch (error) {
@@ -262,7 +272,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     networkLoad.current = () => void load();
     void load();
     const timer = window.setInterval(() => void load(), NOTICES_REFRESH_MS);
-    return () => window.clearInterval(timer);
+    const unsubscribe = subscribeConnectivity((online) => { if (online) void load(); });
+    return () => { window.clearInterval(timer); unsubscribe(); };
     // `user` cambia de identidad al refrescar sus datos; basta con la cuenta y el permiso.
   }, [canNetwork, username]);
 

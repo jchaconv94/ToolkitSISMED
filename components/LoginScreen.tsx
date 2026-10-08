@@ -19,12 +19,15 @@ import { PinLogin } from './PinLogin';
 import { FingerprintLogin } from './FingerprintLogin';
 import { isDesktopPointer, readStoredDevice, type StoredDevice } from '../services/deviceAccess';
 import { useOnline } from './ui/useOnline';
+import { OFFLINE_SESSION_DAYS, takeLoginNotice } from '../services/sessionStore';
 import { InfoTip } from './ui/InfoTip';
 
-/** Solo se recuerda el usuario. La contraseña nunca se guarda en el navegador. */
-const USUARIO_RECORDADO_KEY = 'aura_saved_username';
-/** Clave antigua que guardaba la contraseña en texto plano: se borra al abrir el login. */
-const CLAVE_ANTIGUA_KEY = 'aura_saved_password';
+/**
+ * Claves antiguas que se borran al abrir el login: «Recordar mi usuario» (retirado el
+ * 2026-10-08: el usuario se recuerda con «Mantener sesión iniciada», el PIN o la huella) y la
+ * que guardaba la contraseña en texto plano.
+ */
+const CLAVES_ANTIGUAS = ['aura_saved_username', 'aura_saved_password'];
 
 /** Enlace directo a WhatsApp del administrador, con el mensaje ya escrito. */
 const WHATSAPP_SOPORTE = `https://wa.me/51956606972?text=${encodeURIComponent(
@@ -42,7 +45,7 @@ const WhatsAppIcon: React.FC<{ className?: string }> = ({ className }) => (
 const KEEP_SESSION_HELP = (
   <>
     La sesión sigue abierta aunque cierre el navegador, no se cierra por inactividad y la app funciona sin
-    internet hasta 45 días. Desmárquela en una PC compartida.
+    internet hasta {OFFLINE_SESSION_DAYS} días. Desmárquela en una PC compartida.
   </>
 );
 
@@ -64,8 +67,10 @@ export const LoginScreen: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberUser, setRememberUser] = useState(false);
+  // Marcada por omisión (decisión del usuario del 2026-10-08).
   const [keepSession, setKeepSession] = useState(true);
+  // «Su sesión venció», si se llegó aquí por eso.
+  const [notice] = useState(() => takeLoginNotice());
   const online = useOnline();
   const [error, setError] = useState('');
   const [tried, setTried] = useState(false);
@@ -91,18 +96,9 @@ export const LoginScreen: React.FC = () => {
 
   useEffect(() => {
     try {
-      // Antes «Recordar mis credenciales» guardaba también la contraseña, sin cifrar.
-      localStorage.removeItem(CLAVE_ANTIGUA_KEY);
-      const guardado = localStorage.getItem(USUARIO_RECORDADO_KEY);
-      if (guardado) {
-        setUsername(guardado);
-        setRememberUser(true);
-        // Con el usuario ya puesto, lo siguiente que se escribe es la contraseña.
-        claveRef.current?.focus();
-        return;
-      }
+      CLAVES_ANTIGUAS.forEach((clave) => localStorage.removeItem(clave));
     } catch {
-      // Sin almacenamiento local solo se pierde recordar el usuario.
+      // Sin almacenamiento local no hay nada que borrar.
     }
     usuarioRef.current?.focus();
   }, []);
@@ -118,17 +114,11 @@ export const LoginScreen: React.FC = () => {
     if (!username.trim() || !password) return;
 
     setIsSubmitting(true);
-    const result = await login(username, password);
+    const result = await login(username, password, keepSession);
     if (!result.success) {
       setError(result.message || 'No se pudo iniciar sesión.');
       setIsSubmitting(false);
       return;
-    }
-    try {
-      if (rememberUser) localStorage.setItem(USUARIO_RECORDADO_KEY, username.trim());
-      else localStorage.removeItem(USUARIO_RECORDADO_KEY);
-    } catch {
-      // Sin almacenamiento local, simplemente no se recuerda.
     }
     setIsSubmitting(false);
   };
@@ -255,6 +245,13 @@ export const LoginScreen: React.FC = () => {
             <p className="text-[15px] font-medium text-[#4E5F5C]">Ingrese con su cuenta institucional.</p>
           </div>
 
+          {notice && online && !error && (
+            <div role="status" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm font-semibold text-amber-800">
+              <AlertCircle className="mt-0.5 h-[18px] w-[18px] shrink-0" />
+              <span>{notice}</span>
+            </div>
+          )}
+
           {!online && (
             <div role="status" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm font-semibold text-amber-800">
               <WifiOff className="mt-0.5 h-[18px] w-[18px] shrink-0" />
@@ -337,21 +334,6 @@ export const LoginScreen: React.FC = () => {
             {/* Una sola casilla: mantener la sesión también recuerda el usuario. Marcada por
                 omisión (decisión del usuario del 2026-10-08: quien no sabe de tecnología no la
                 marcaría nunca). La explicación va detrás de la «i». */}
-            {(window as any).__loginVariant === 'B' ? (
-            <div className="-my-1 flex flex-wrap items-center gap-x-6">
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-2.5 text-sm font-medium">
-                <input type="checkbox" checked={rememberUser} onChange={(e) => setRememberUser(e.target.checked)} className="h-[18px] w-[18px] accent-teal-700" />
-                Recordar usuario
-              </label>
-              <span className="flex min-h-[44px] items-center gap-1">
-                <label className="flex cursor-pointer items-center gap-2.5 text-sm font-medium">
-                  <input type="checkbox" checked={keepSession} onChange={(e) => setKeepSession(e.target.checked)} className="h-[18px] w-[18px] accent-teal-700" />
-                  Mantener sesión
-                </label>
-                <InfoTip title="Mantener sesión iniciada" hover size="sm">{KEEP_SESSION_HELP}</InfoTip>
-              </span>
-            </div>
-            ) : (
             <div className="-my-1 flex min-h-[44px] items-center gap-1">
               <label className="flex cursor-pointer items-center gap-2.5 text-sm font-medium">
                 <input
@@ -364,7 +346,6 @@ export const LoginScreen: React.FC = () => {
               </label>
               <InfoTip title="Mantener sesión iniciada" hover size="sm">{KEEP_SESSION_HELP}</InfoTip>
             </div>
-            )}
 
             {showHelp && (
               // Tarjeta de contacto: quién restablece la contraseña y un acceso discreto a

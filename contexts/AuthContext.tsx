@@ -1,12 +1,18 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { User, AuthState, AppModule, SystemConfig } from '../types';
-import { api } from '../services/api';
+import { api, getSessionToken } from '../services/api';
 import { isActionAllowed } from '../services/moduleActions';
 import type { DeviceLoginResult } from '../services/deviceAccess';
+import { isOnline, subscribeConnectivity } from '../services/connectivity';
+import {
+  clearStoredSession, keptSession, keptSessionUsable, markSessionValidated, pendingLogoutToken, readStoredUser,
+  setLoginNotice, setPendingLogoutToken, startStoredSession, writeStoredUser,
+} from '../services/sessionStore';
 
 interface AuthContextType extends AuthState {
-  login: (u: string, p: string) => Promise<{ success: boolean; message?: string }>;
+  /** `keep`: «Mantener sesión iniciada» (ver services/sessionStore.ts). */
+  login: (u: string, p: string, keep?: boolean) => Promise<{ success: boolean; message?: string }>;
   /** Entrar con el PIN o la huella de este equipo (ver services/deviceAccess.ts). */
   loginWithDevice: (deviceId: string, secret: string, pin: string | null) => Promise<{ success: boolean; message?: string; result?: DeviceLoginResult }>;
   logout: () => void;
@@ -19,6 +25,15 @@ interface AuthContextType extends AuthState {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const SESSION_EXPIRED_NOTICE = 'Su sesión venció. Ingrese de nuevo.';
+
+/** Avisa al servidor de una sesión que se cerró sin internet, en cuanto hay conexión. */
+const flushPendingLogout = () => {
+  const token = pendingLogoutToken();
+  if (!token || !isOnline()) return;
+  void api.endSessionToken(token).then((ok) => { if (ok) setPendingLogoutToken(null); });
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<AuthState>({
@@ -37,12 +52,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const freshData = await api.refreshSession(targetUsername);
           if (freshData.success && freshData.user) {
               const updatedUser = freshData.user as User;
-              sessionStorage.setItem('aura_auth_user', JSON.stringify(updatedUser));
+              writeStoredUser(JSON.stringify(updatedUser));
               setState(prev => ({ ...prev, user: updatedUser }));
               console.log("Datos de usuario sincronizados con BD");
           }
       } catch (e) {
           console.error("Error refreshing user data:", e);
+      }
+  };
+
+  /** La sesión ya no vale en el servidor (token vencido o cuenta borrada): se vuelve al inicio de sesión. */
+  const expireSession = () => {
+      clearStoredSession();
+      setLoginNotice(SESSION_EXPIRED_NOTICE);
+      setState(prev => ({ ...prev, user: null, isAuthenticated: false, isLoading: false }));
+  };
+
+  /**
+   * Comprueba la sesión con el servidor y relee la cuenta. Sin internet no hace nada (se sigue
+   * con lo guardado). Con la sesión mantenida, además renueva el plazo en el servidor y en el
+   * equipo.
+   */
+  const validateSession = async (username: string) => {
+      if (!isOnline()) return;
+      const fresh = await api.refreshSession(username);
+      if (fresh.success && fresh.user) {
+          writeStoredUser(JSON.stringify(fresh.user));
+          setState(prev => ({ ...prev, user: fresh.user as User }));
+          if (keptSession()) {
+              const stillValid = await api.keepSession();
+              if (stillValid === false) return expireSession();
+              markSessionValidated();
+          }
+      } else if (fresh.expired) {
+          expireSession();
       }
   };
 
@@ -56,33 +99,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             console.warn("Failed to load system config (using defaults)", e);
         }
 
-        // 2. Check session storage for persisted session
-        const savedUser = sessionStorage.getItem('aura_auth_user');
-        
-        if (savedUser) {
+        // 2. Sesión guardada: en la pestaña o, con «Mantener sesión iniciada», en el equipo.
+        flushPendingLogout();
+        const savedUser = readStoredUser();
+        const kept = keptSession();
+
+        if (savedUser && kept && !keptSessionUsable(kept, new Date())) {
+            // Pasaron más días sin internet de los que se permiten: hay que volver a entrar.
+            clearStoredSession();
+            setLoginNotice('Su sesión guardada en este equipo venció. Ingrese de nuevo.');
+            setState(prev => ({ ...prev, user: null, isAuthenticated: false, isLoading: false }));
+        } else if (savedUser) {
             try {
                 const parsedUser = JSON.parse(savedUser) as User;
-                
-                // 2a. Optimistic UI: Set state immediately
+                // 2a. Se muestra de inmediato; sin internet, se sigue con lo guardado.
                 setState(prev => ({ ...prev, user: parsedUser, isAuthenticated: true, isLoading: false }));
-                
-                // 2b. Silent Refresh: Check with DB immediately
-                try {
-                    const freshData = await api.refreshSession(parsedUser.username);
-                    
-                    if (freshData.success && freshData.user) {
-                        sessionStorage.setItem('aura_auth_user', JSON.stringify(freshData.user));
-                        setState(prev => ({ ...prev, user: freshData.user as User }));
-                    } else if (freshData.message === 'Usuario no encontrado o eliminado') {
-                         sessionStorage.removeItem('aura_auth_user');
-                         setState(prev => ({ ...prev, user: null, isAuthenticated: false }));
-                    }
-                } catch (refreshError) {
-                    console.warn("Could not refresh session (Offline?), using cached data.", refreshError);
-                }
-
+                // 2b. Con internet, se comprueba con el servidor.
+                await validateSession(parsedUser.username);
             } catch {
-                sessionStorage.removeItem('aura_auth_user');
+                clearStoredSession();
                 setState(prev => ({ ...prev, user: null, isAuthenticated: false, isLoading: false }));
             }
         } else {
@@ -100,7 +135,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
   }, [state.isAuthenticated, state.user?.role]); // Fix dependency
 
-  const login = async (u: string, p: string) => {
+  const login = async (u: string, p: string, keep = true) => {
     // NOTA IMPORTANTE: No establecemos isLoading: true aquí.
     // Si lo hacemos, App.tsx desmontará LoginScreen para mostrar el spinner global,
     // lo que provocará que se pierda el estado local del error (mensaje) cuando falle el login.
@@ -109,7 +144,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const result = await api.login(u, p);
     
     if (result.success && result.user) {
-        sessionStorage.setItem('aura_auth_user', JSON.stringify(result.user));
+        startStoredSession(JSON.stringify(result.user), keep);
+        if (keep) void api.keepSession();
         // Reset welcome flag on new login
         sessionStorage.removeItem('aura_welcome_shown_session');
         
@@ -125,7 +161,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginWithDevice = async (deviceId: string, secret: string, pin: string | null) => {
     const result = await api.loginWithDevice(deviceId, secret, pin);
     if (result.success && result.user) {
-        sessionStorage.setItem('aura_auth_user', JSON.stringify(result.user));
+        // El PIN o la huella son de un equipo personal: la sesión se mantiene.
+        startStoredSession(JSON.stringify(result.user), true);
+        void api.keepSession();
         sessionStorage.removeItem('aura_welcome_shown_session');
         setState(prev => ({ ...prev, user: result.user as User, isAuthenticated: true, isLoading: false }));
     }
@@ -133,9 +171,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
-    // Invalida el token en el servidor antes de olvidarlo aquí.
-    void api.endSession();
-    sessionStorage.removeItem('aura_auth_user');
+    // Invalida el token en el servidor antes de olvidarlo aquí. Sin internet, se anota y se
+    // avisa al servidor cuando vuelva la conexión.
+    if (isOnline()) void api.endSession();
+    else setPendingLogoutToken(getSessionToken());
+    clearStoredSession();
     sessionStorage.removeItem('aura_welcome_shown_session');
     setState(prev => ({ ...prev, user: null, isAuthenticated: false, isLoading: false }));
   };
@@ -166,8 +206,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [state.user]);
 
   // --- INACTIVITY TIMEOUT ---
+  // Con «Mantener sesión iniciada» no se cierra por inactividad (decisión del usuario del 2026-10-08).
   useEffect(() => {
-      if (!state.isAuthenticated) return;
+      if (!state.isAuthenticated || keptSession()) return;
 
       const timeoutDuration = 30 * 60 * 1000; // 30 minutos
       let timeoutId: ReturnType<typeof setTimeout>;
@@ -215,10 +256,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
   }, []);
 
+  // La sesión que se cerró sin internet se cierra en el servidor apenas vuelve la conexión,
+  // aunque nadie haya vuelto a entrar.
+  useEffect(() => subscribeConnectivity((online) => { if (online) flushPendingLogout(); }), []);
+
+  // Al volver la conexión: se comprueba la sesión y se cierra en el servidor la que se cerró sin internet.
+  useEffect(() => {
+      if (!state.isAuthenticated || !state.user?.username) return;
+      const username = state.user.username;
+      const unsubscribe = subscribeConnectivity((online) => {
+          if (!online) return;
+          flushPendingLogout();
+          void validateSession(username);
+      });
+      // Una pestaña abierta varios días con internet también renueva el plazo de la sesión mantenida.
+      const timer = setInterval(() => { if (keptSession()) void validateSession(username); }, 6 * 60 * 60 * 1000);
+      return () => { unsubscribe(); clearInterval(timer); };
+  }, [state.isAuthenticated, state.user?.username]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const updateUserContext = (data: Partial<User>) => {
       if (!state.user) return;
       const newUser = { ...state.user, ...data };
-      sessionStorage.setItem('aura_auth_user', JSON.stringify(newUser));
+      writeStoredUser(JSON.stringify(newUser));
       setState(prev => ({ ...prev, user: newUser }));
   };
 

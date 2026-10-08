@@ -1,15 +1,15 @@
 import { User, UserRole, Personnel, HealthFacility, RoleConfig, SystemConfig, Unget, Diresa, Ogess, Microred } from "../types";
 import { parseDeniedActions } from "./moduleActions";
-import { SESSION_TOKEN_KEY, supabase } from "./supabaseClient";
+import { supabase } from "./supabaseClient";
+import { readSessionToken, writeSessionToken } from "./sessionStore";
+import { isNetworkError, isOnline } from "./connectivity";
+import { withOfflineCache } from "./offlineCache";
 import { connectionsToRetire, shouldAdoptConnection } from "./ungetConnections";
 import bcrypt from "bcryptjs";
 
 // MOCK DATA (Respaldo en caso de error de conexión/sin supabase)
 const MOCK_DB = {
-    users: [
-        { username: 'admin', password: '123', role: 'ADMIN', personnelId: 'P001', isActive: true },
-        { username: 'farmacia', password: '123', role: 'FARMACIA', personnelId: 'P002', isActive: true },
-    ],
+    users: [] as Array<{ username: string; role: string; personnelId: string; isActive: boolean }>,
     personnel: [
         { id: 'P001', firstName: 'Aura', lastName: 'Admin', dni: '00000001', facilityCode: '00001', email: 'admin@aura.pe', phone: '987654321', laborRegime: 'D.L. 276', laborRegimeId: 'LR-276', professionId: 'PROF-QFAR' },
         { id: 'P002', firstName: 'Jordan', lastName: 'Perez', dni: '12345678', facilityCode: '00002', email: 'jordan@redsalud.pe', phone: '912345678', laborRegime: 'D.L. 1057 (CAS)', laborRegimeId: 'LR-1057', professionId: 'PROF-TECF' },
@@ -67,22 +67,13 @@ const USER_SELECT = "username, role, personnel_id, is_active, created_at, person
  * anterior, en el que el navegador escribía directamente sobre `users` con la clave
  * pública `anon`. Ver `supabase/SUPABASE_SEGURIDAD_APLICAR_ESTO.sql`.
  */
-export const getSessionToken = (): string | null => {
-    try {
-        return sessionStorage.getItem(SESSION_TOKEN_KEY);
-    } catch {
-        return null;
-    }
-};
+export const getSessionToken = (): string | null => readSessionToken();
 
-const setSessionToken = (token: string | null) => {
-    try {
-        if (token) sessionStorage.setItem(SESSION_TOKEN_KEY, token);
-        else sessionStorage.removeItem(SESSION_TOKEN_KEY);
-    } catch {
-        // Sin sessionStorage no hay sesión persistente; las operaciones admin pedirán reingreso.
-    }
-};
+/** Dónde se guarda (pestaña o equipo) lo decide «Mantener sesión iniciada»: `services/sessionStore.ts`. */
+const setSessionToken = (token: string | null) => writeSessionToken(token);
+
+/** Mensaje al intentar entrar sin internet. */
+const OFFLINE_LOGIN_MESSAGE = "Sin conexión a internet. Para iniciar sesión se necesita internet.";
 
 /** La función RPC no existe todavía en la base (script aún sin ejecutar). */
 const isMissingFunction = (error: any): boolean =>
@@ -129,12 +120,14 @@ export const api = {
         pin: string | null,
     ): Promise<{ success: boolean; user?: User; message?: string; result?: DeviceLoginResult }> => {
         if (!supabase) return { success: false, message: "Sin conexión con el servidor." };
+        if (!isOnline()) return { success: false, message: OFFLINE_LOGIN_MESSAGE };
         const { data, error } = await supabase.rpc("app_device_login", {
             p_device_id: deviceId,
             p_secret: secret,
             p_pin: pin,
         });
         if (error) {
+            if (isNetworkError(error)) return { success: false, message: OFFLINE_LOGIN_MESSAGE };
             return { success: false, message: isMissingFunction(error) ? "El acceso rápido aún no está disponible. Entre con su contraseña." : "No se pudo verificar el acceso. Intente de nuevo." };
         }
         const result = data as DeviceLoginResult;
@@ -192,6 +185,7 @@ export const api = {
     },
 
     login: async (username: string, password: string): Promise<{ success: boolean; user?: User; message?: string }> => {
+        if (!isOnline()) return { success: false, message: OFFLINE_LOGIN_MESSAGE };
         try {
             if (supabase) {
                 const serverVerification = await loginOnServer(username, password);
@@ -203,6 +197,7 @@ export const api = {
                     .eq("username", username)
                     .single();
 
+                if (error && isNetworkError(error)) return { success: false, message: OFFLINE_LOGIN_MESSAGE };
                 if (error || !userRecord) return { success: false, message: "Usuario o contraseña incorrectos." };
 
                 if (!userRecord.is_active) {
@@ -268,34 +263,49 @@ export const api = {
             }
             throw new Error("Supabase is missing");
         } catch (e) {
-            console.warn("Offline fallback login:", e);
-            const authUser = MOCK_DB.users.find(u => u.username.toLowerCase() === username.toLowerCase());
-            if (authUser && authUser.password === password) {
-                if (authUser.isActive) {
-                    const personnel = MOCK_DB.personnel.find(p => p.id === authUser.personnelId);
-                    const facility = MOCK_DB.facilities.find(f => f.code === personnel?.facilityCode);
-                    const roleConfig = MOCK_DB.roles.find(r => r.role === authUser.role);
-                    return {
-                        success: true,
-                        user: {
-                            username: authUser.username,
-                            role: authUser.role as UserRole,
-                            personnelId: authUser.personnelId,
-                            isActive: authUser.isActive,
-                            personnelData: personnel as Personnel,
-                            facilityData: facility as HealthFacility,
-                            permissions: roleConfig ? roleConfig.allowedModules as any : [],
-                            jurisdictionLevel: (roleConfig as any)?.jurisdictionLevel
-                        },
-                        message: "Modo Offline"
-                    };
-                }
-            }
-            return { success: false, message: "Error conectando al servidor." };
+            // Antes, sin conexión se aceptaban usuarios de prueba escritos en el código (admin /
+            // 123) y se entraba como Administrador. Se retiró el 2026-10-08: sin internet solo
+            // se entra con una sesión mantenida en este equipo (`services/sessionStore.ts`).
+            console.warn("No se pudo iniciar sesión:", e);
+            return { success: false, message: isNetworkError(e) || !isOnline() ? OFFLINE_LOGIN_MESSAGE : "Error conectando al servidor." };
         }
     },
 
-    refreshSession: async (username: string): Promise<{ success: boolean; user?: User; message?: string }> => {
+    /**
+     * «Mantener sesión iniciada»: alarga el token en el servidor por el mismo plazo que la app
+     * abre sin internet, y se vuelve a llamar cada vez que se comprueba la sesión. Devuelve
+     * `false` si el servidor dice que el token ya no vale y `null` si no se pudo saber (sin
+     * internet, o sin `SUPABASE_SESION_MANTENIDA.sql`: entonces el token dura sus 12 horas).
+     */
+    keepSession: async (): Promise<boolean | null> => {
+        const token = getSessionToken();
+        if (!supabase || !token) return null;
+        try {
+            const { data, error } = await supabase.rpc("app_session_keep", { p_token: token });
+            if (error) return null;
+            return data !== null && data !== undefined;
+        } catch {
+            return null;
+        }
+    },
+
+    /** Cierra en el servidor una sesión que se cerró sin internet (ver `logout`). */
+    endSessionToken: async (token: string): Promise<boolean> => {
+        if (!supabase) return false;
+        try {
+            const { error } = await supabase.rpc("app_logout", { p_token: token });
+            return !error || !isNetworkError(error);
+        } catch {
+            return false;
+        }
+    },
+
+    /**
+     * Relee la cuenta. `offline`: no hubo respuesta (sin internet). `expired`: el servidor no
+     * devuelve la fila, que es lo que pasa cuando el token ya no vale (las políticas de sesión
+     * la esconden) o la cuenta se borró: hay que volver a entrar.
+     */
+    refreshSession: async (username: string): Promise<{ success: boolean; user?: User; message?: string; offline?: boolean; expired?: boolean }> => {
         try {
             if (supabase) {
                 const { data: userRecord, error } = await supabase
@@ -304,7 +314,10 @@ export const api = {
                     .eq("username", username)
                     .single();
 
+                if (error && isNetworkError(error)) return { success: false, offline: true, message: "Sin conexión" };
+                if (error?.code === "PGRST116" || (!error && !userRecord)) return { success: false, expired: true, message: "User not found" };
                 if (error || !userRecord) return { success: false, message: "User not found" };
+                if (!userRecord.is_active) return { success: false, expired: true, message: "Cuenta desactivada" };
 
                 const personnelData = Array.isArray(userRecord.personnel) ? userRecord.personnel[0] : userRecord.personnel;
                 const roleConfig = Array.isArray(userRecord.roles_config) ? userRecord.roles_config[0] : userRecord.roles_config;
@@ -354,6 +367,7 @@ export const api = {
             }
         } catch (e) {
             console.warn("Refresh fallback", e);
+            if (isNetworkError(e)) return { success: false, offline: true };
         }
         return { success: false };
     },
@@ -708,11 +722,13 @@ export const api = {
 
     // --- MICROREDES ---
     getMicroredes: async (): Promise<Microred[]> => {
+        // Con copia en este equipo para las herramientas sin internet (`services/offlineCache.ts`).
+        if (!supabase) return [];
         try {
-            if (supabase) {
-                const { data, error } = await supabase.from('microredes').select('*');
-                if (!error && data) {
-                    return data.map(m => ({
+            return await withOfflineCache("catalogo:microredes", async () => {
+                const { data, error } = await supabase!.from('microredes').select('*');
+                if (error || !data) throw error || new Error("Sin datos");
+                return data.map(m => ({
                         id: m.id,
                         name: m.name,
                         ungetId: m.unget_id,
@@ -723,8 +739,7 @@ export const api = {
                         phone: m.phone,
                         email: m.email
                     }));
-                }
-            }
+            });
         } catch(e){}
         return [];
     },
@@ -766,11 +781,15 @@ export const api = {
     },
 
     getFacilities: async (): Promise<HealthFacility[]> => {
+        // Con copia en este equipo para las herramientas sin internet (`services/offlineCache.ts`).
+        // Sin internet y sin copia devuelve una lista vacía: antes devolvía establecimientos de
+        // prueba escritos en el código, que se mezclaban con los datos reales.
+        if (!supabase) return MOCK_DB.facilities;
         try {
-            if (supabase) {
-                const { data, error } = await supabase.from('facilities').select('*');
-                if (!error && data) {
-                    return data.map(f => ({
+            return await withOfflineCache("catalogo:establecimientos", async () => {
+                const { data, error } = await supabase!.from('facilities').select('*');
+                if (error || !data) throw error || new Error("Sin datos");
+                return data.map(f => ({
                         code: f.code,
                         name: f.name,
                         category: f.category,
@@ -788,10 +807,9 @@ export const api = {
                         province: f.province,
                         district: f.district
                     }));
-                }
-            }
+            });
         } catch(e){}
-        return MOCK_DB.facilities;
+        return [];
     },
 
     saveFacility: async (facility: HealthFacility, originalCode?: string): Promise<{ success: boolean; message?: string }> => {
@@ -962,11 +980,13 @@ export const api = {
     },
 
     getUngets: async (): Promise<Unget[]> => {
+        // Con copia en este equipo para las herramientas sin internet (`services/offlineCache.ts`).
+        if (!supabase) return [];
         try {
-            if (supabase) {
-                const { data, error } = await supabase.from('ungets').select('*');
-                if (!error && data) {
-                    return data.map(u => ({
+            return await withOfflineCache("catalogo:ungets", async () => {
+                const { data, error } = await supabase!.from('ungets').select('*');
+                if (error || !data) throw error || new Error("Sin datos");
+                return data.map(u => ({
                         id: u.id,
                         name: u.name,
                         region: u.region,
@@ -981,8 +1001,7 @@ export const api = {
                         province: u.province,
                         district: u.district
                     }));
-                }
-            }
+            });
         } catch(e){}
         return [];
     },
@@ -1091,18 +1110,18 @@ export const api = {
     },
 
     getSystemConfig: async (): Promise<SystemConfig> => {
+        // Sin internet, la última leída en este equipo (`services/offlineCache.ts`).
+        if (!supabase) return MOCK_DB.defaultConfig;
         try {
-            if (supabase) {
-                const { data, error } = await supabase.from('system_config').select('*');
-                if (!error && data) {
-                    const cfg: any = {};
-                    data.forEach(d => {
-                        cfg[d.key] = d.value;
-                    });
-                    const merged = { ...MOCK_DB.defaultConfig, ...cfg };
-                    return merged;
-                }
-            }
+            return await withOfflineCache("catalogo:parametros", async () => {
+                const { data, error } = await supabase!.from('system_config').select('*');
+                if (error || !data) throw error || new Error("Sin datos");
+                const cfg: any = {};
+                data.forEach(d => {
+                    cfg[d.key] = d.value;
+                });
+                return { ...MOCK_DB.defaultConfig, ...cfg } as SystemConfig;
+            });
         } catch(e) {}
         return MOCK_DB.defaultConfig;
     },
@@ -1615,14 +1634,16 @@ export const api = {
     getProfessions: async (): Promise<any[]> => {
         try {
             if (supabase) {
-                const { data, error } = await supabase.from('professions').select('*').order('name');
-                if (!error && data) {
+                // Con copia en este equipo: el Excel de Disponibilidad lleva la profesión de quien lo genera.
+                return await withOfflineCache("catalogo:profesiones", async () => {
+                    const { data, error } = await supabase!.from('professions').select('*').order('name');
+                    if (error || !data) throw error || new Error("Sin datos");
                     return data.map(p => ({
                         id: p.id,
                         name: p.name,
                         description: p.description || ''
                     }));
-                }
+                });
             }
         } catch (e) {
             console.warn("Offline fallback for professions", e);

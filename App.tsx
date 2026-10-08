@@ -36,10 +36,11 @@ import { HomeModule } from './components/HomeModule';
 import { recordToolUse } from './services/frequentTools';
 import { UserMenu } from './components/UserMenu';
 import { ToolSearchDialog, ToolSearchTrigger, useToolSearchShortcut } from './components/ToolSearch';
-import { findNavItem, findNavSection, findVisibleNavSection, NAV_TINT_CLASSES, visibleNavSections, worksOffline } from './components/navigation';
+import { findNavItem, findNavSection, findVisibleNavSection, NAV_SECTIONS, NAV_TINT_CLASSES, visibleNavSections, worksOffline } from './components/navigation';
 import { OfflineIndicator, OfflineToolNotice } from './components/OfflineIndicator';
 import { useOnline } from './components/ui/useOnline';
 import { isOnline } from './services/connectivity';
+import { warmOfflineCopies } from './services/offlineWarmup';
 import { BrandBootScreen, BrandLogo } from './components/ui/BrandLogo';
 import { UserProfile } from './components/UserProfile';
 import { showWelcomeToast } from './components/WelcomeToast';
@@ -120,6 +121,9 @@ const AuthenticatedApp: React.FC = () => {
     useEffect(() => { setBlockedView(!isOnline() && !worksOffline(currentView) ? currentView : null); }, [currentView]);
     useEffect(() => { if (online) setBlockedView(null); }, [online]);
     const offlineBlocked = !online && blockedView === currentView;
+    // Con internet, se dejan guardadas por detrás las copias que usan las herramientas sin internet.
+    const hasOfflineTool = Boolean(user) && NAV_SECTIONS.some(section => section.items.some(item => item.offline && hasPermission(item.module)));
+    useEffect(() => { if (isAuthenticated && online && hasOfflineTool) void warmOfflineCopies(); }, [isAuthenticated, online, hasOfflineTool]);
 
     // Cada herramienta que se abre suma para «Accesos frecuentes» de Inicio (en el navegador).
     useEffect(() => {
@@ -148,8 +152,10 @@ const AuthenticatedApp: React.FC = () => {
     useEffect(() => {
         if (isAuthenticated || isLoading) return;
         setCurrentView('HOME');
-        if (window.location.pathname !== APP_BASE) {
-            window.history.replaceState({}, '', APP_BASE);
+        // Con la barra final: sin ella la dirección queda fuera del service worker
+        // (`/ToolkitSISMED/`) y, sin internet, recargar el login daba la página de error.
+        if (window.location.pathname !== `${APP_BASE}/`) {
+            window.history.replaceState({}, '', `${APP_BASE}/`);
         }
     }, [isAuthenticated, isLoading]);
 
