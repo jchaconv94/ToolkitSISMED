@@ -19,6 +19,7 @@ import { availabilityConfigApi, classifyOptionsOf, describeFormula, factoryConfi
 import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
 import { formatNumber } from "../services/numberFormat";
 import { tformdetFromSheet, type TformdetFileResult } from "../services/tformdetFile";
+import { availabilityStore, fileSignature } from "../services/availabilityStore";
 import { BottomSheet } from "./ui/BottomSheet";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import {
@@ -198,18 +199,49 @@ export const AvailabilityModule: React.FC = () => {
       .catch(() => undefined);
   }, []);
 
+  // El TFORMDET se guarda en este equipo (IndexedDB, por usuario): al volver al módulo o recargar
+  // la página aparece calculado, sin subirlo otra vez (pedido del usuario del 2026-10-08).
+  const storeUser = user?.username || "";
+  const [stored, setStored] = useState<{ name: string; savedAt: string } | null>(null);
+  const [restoring, setRestoring] = useState(true);
+  const applyFile = (name: string, data: TformdetFileResult["data"], last: TformdetFileResult["last"]) => {
+    setDispFile({ name, data });
+    setLotsFile({ name, data: data.lots });
+    setTformdetSheet(last);
+    setWarehouse(data.warehouse ?? []);
+    setSource({ kind: "tformdet", classified: data.hasClassification, skipped: data.skippedCodes });
+    if (!data.hasClassification) setScope("all");
+  };
+  useEffect(() => {
+    let alive = true;
+    setRestoring(true);
+    availabilityStore.loadFile(storeUser).then((saved) => {
+      if (!alive) return;
+      if (saved) {
+        applyFile(saved.name, saved.data, saved.last);
+        setStored({ name: saved.name, savedAt: saved.savedAt });
+        setCalculated(true);
+      }
+      setRestoring(false);
+    });
+    return () => { alive = false; };
+  }, [storeUser]); // eslint-disable-line react-hooks/exhaustive-deps
+  const clearFile = () => {
+    setDispFile(null); setCalculated(false); setLotsFile(null); setTformdetSheet(null); setWarehouse([]); setSource(null); setStored(null);
+    availabilityStore.clear(storeUser);
+  };
+
   const handleDispFile = async (file: File) => {
     setReading("disp");
     try {
       // Solo la consulta TFORMDET del Toolkit (uno o varios meses): trae consumo, stock y lotes.
       const { data, last } = await readTformdetFile(file);
-      setDispFile({ name: file.name, data });
-      setLotsFile({ name: file.name, data: data.lots });
-      setTformdetSheet(last);
-      setWarehouse(data.warehouse ?? []);
-      setSource({ kind: "tformdet", classified: data.hasClassification, skipped: data.skippedCodes });
-      if (!data.hasClassification) setScope("all");
+      applyFile(file.name, data, last);
       setCalculated(false);
+      const savedAt = new Date().toISOString();
+      const ok = await availabilityStore.saveFile(storeUser, { name: file.name, savedAt, data, last });
+      setStored(ok ? { name: file.name, savedAt } : null);
+      if (!ok) toast.error("No se pudo guardar el archivo en este equipo: habrá que subirlo otra vez al recargar.");
     } catch (e: any) {
       toast.error(e?.message || "No se pudo leer el archivo.");
     } finally {
@@ -293,10 +325,30 @@ export const AvailabilityModule: React.FC = () => {
   }), [pharmacyIndex, registry]);
   // Disponibilidad de cada farmacia y puesto comunal (F01, F02…), para abrir un establecimiento por farmacia.
   const pharmacyReport = useMemo(() => (pharmacyItems ? summarize(pharmacyItems, summaryOptionsOf(config.formula, scope, vitalCodes)) : null), [pharmacyItems, config.formula, scope, vitalCodes]);
-  // Cambios al plan de redistribución: se pierden si cambian los datos (otro archivo, vista o fórmula).
+  // Cambios al plan de redistribución, guardados por archivo y vista.
   const [planEdits, setPlanEdits] = useState<PlanEdits>({});
   const report = useMemo(() => summarize(ipressItems, summaryOptionsOf(config.formula, scope, vitalCodes)), [ipressItems, config.formula, scope, vitalCodes]);
-  useEffect(() => setPlanEdits({}), [report]);
+  // Los cambios al plan se guardan junto al archivo; si cambian los datos o la vista, se recuperan
+  // los de esa combinación (o ninguno).
+  const planSignature = stored ? `${fileSignature(stored)}|${scope}` : "";
+  const [planLoaded, setPlanLoaded] = useState("");
+  useEffect(() => {
+    setPlanEdits({});
+    setPlanLoaded("");
+    if (!planSignature) return;
+    let alive = true;
+    availabilityStore.loadPlan(storeUser, planSignature).then((saved) => {
+      if (!alive) return;
+      if (saved) setPlanEdits(saved as PlanEdits);
+      setPlanLoaded(planSignature);
+    });
+    return () => { alive = false; };
+  }, [report, planSignature, storeUser]);
+  useEffect(() => {
+    if (!planSignature || planLoaded !== planSignature) return;
+    const t = window.setTimeout(() => availabilityStore.savePlan(storeUser, planSignature, planEdits), 400);
+    return () => window.clearTimeout(t);
+  }, [planEdits, planSignature, planLoaded, storeUser]);
   const otherScope: AvailabilityScope = scope === "all" ? "essential" : "all";
   const otherPct = useMemo(() => {
     const items = computed && (otherScope === "all" || source?.classified !== false) ? (otherScope === "all" ? computed.all : computed.essential) : null;
@@ -383,6 +435,13 @@ export const AvailabilityModule: React.FC = () => {
   const startResults = () => { setTab("summary"); setOpenCode(null); setLevel("ALL"); setMicrored("ALL"); setCalculated(true); };
 
   /* ------------------------------------------------------------ Pantalla de carga */
+  if (restoring && !calculated) {
+    return (
+      <div className="grid min-h-[40vh] place-items-center">
+        <p className="flex items-center gap-2 text-[13px] text-slate-500"><Loader2 className="h-4 w-4 animate-spin text-teal-600" />Abriendo el último TFORMDET guardado en este equipo…</p>
+      </div>
+    );
+  }
   if (!calculated) {
     const d = dispFile?.data;
     const ipressCount = d ? new Set(d.rows.map((r) => r.ipressCode)).size : 0;
@@ -406,7 +465,7 @@ export const AvailabilityModule: React.FC = () => {
               fileName={dispFile?.name}
               detail={d ? `${formatNumber(d.rows.length)} filas` : undefined}
               onFile={handleDispFile}
-              onClear={() => { setDispFile(null); setCalculated(false); setLotsFile(null); setTformdetSheet(null); setWarehouse([]); setSource(null); }}
+              onClear={clearFile}
               busy={reading === "disp"}
             />
           </div>
@@ -505,6 +564,7 @@ export const AvailabilityModule: React.FC = () => {
             <h2 className="truncate text-[18px] font-black text-slate-900 md:text-[20px]">{title}</h2>
             <p className="truncate text-[12.5px] text-slate-500">
               Datos al corte de <b className="font-bold text-slate-700">{cut ? monthLabel(cut) : "—"}</b> · {months.length} {months.length === 1 ? "mes" : "meses"} de consumo{months.length > 1 ? ` (${monthLabel(months[0])} a ${monthLabel(cut)})` : ""}
+              {stored && <span title={`${stored.name} · guardado el ${new Date(stored.savedAt).toLocaleString("es-PE")}`}> · guardado en este equipo</span>}
             </p>
           </div>
         </div>
