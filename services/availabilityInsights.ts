@@ -308,10 +308,6 @@ export interface TransferRow {
   quantity: number;
   sameMicrored: boolean;
   value: number;
-  /** Dentro del mismo establecimiento: de su F01 a uno de sus puestos comunales. */
-  internal?: boolean;
-  /** Sale del almacén (030S05…): `from` es el almacén visto como un ítem más. */
-  warehouse?: boolean;
 }
 
 /** Un producto del almacén con la forma de un ítem, para que entregue en Redistribución. */
@@ -327,16 +323,7 @@ const warehouseAsItem = (w: WarehouseItem): AvailabilityItem => ({
  * consumo) le da el excedente de otro que tenga el mismo producto en sobrestock, prefiriendo
  * la misma microred. Lleva lo justo para llegar al mínimo (CPA × límite de substock).
  */
-export const redistributionReport = (items: AvailabilityItem[], subMax: number, sobreMin: number, warehouse: WarehouseItem[] = []) => {
-  // Con almacén: cubre primero desde él (punto C de la auditoría), y lo que falte, de otro
-  // establecimiento. Sin almacén, como antes.
-  const stores = new Map<string, Array<{ item: AvailabilityItem; left: number }>>();
-  for (const w of warehouse) {
-    if (w.stock <= 0) continue;
-    const list = stores.get(w.medCode) || [];
-    list.push({ item: warehouseAsItem(w), left: Math.floor(w.stock) });
-    stores.set(w.medCode, list);
-  }
+export const redistributionReport = (items: AvailabilityItem[], subMax: number, sobreMin: number) => {
   const donors = new Map<string, Array<{ item: AvailabilityItem; left: number }>>();
   for (const it of items) {
     if (it.status !== StockStatus.SOBRESTOCK) continue;
@@ -351,16 +338,8 @@ export const redistributionReport = (items: AvailabilityItem[], subMax: number, 
     .sort((a, b) => a.months - b.months || b.cpa - a.cpa);
   const rows: TransferRow[] = [];
   for (const need of needs) {
-    let want = Math.ceil(need.cpa * subMax - need.stock);
+    const want = Math.ceil(need.cpa * subMax - need.stock);
     if (want <= 0) continue;
-    const store = (stores.get(need.medCode) || []).filter((d) => d.left > 0).sort((a, b) => b.left - a.left)[0];
-    if (store) {
-      const quantity = Math.min(store.left, want);
-      store.left -= quantity;
-      want -= quantity;
-      rows.push({ from: store.item, to: need, quantity, sameMicrored: false, value: quantity * (need.price || 0), warehouse: true });
-      if (want <= 0) continue;
-    }
     const pool = (donors.get(need.medCode) || []).filter((d) => d.left > 0 && d.item.code !== need.code);
     if (!pool.length) continue;
     pool.sort((a, b) => Number(b.item.microred === need.microred) - Number(a.item.microred === need.microred) || b.left - a.left);
@@ -375,35 +354,7 @@ export const redistributionReport = (items: AvailabilityItem[], subMax: number, 
     value: sum(rows.map((r) => r.value)),
     sameMicrored: rows.filter((r) => r.sameMicrored).length,
     covered: rows.filter((r) => r.to.status === StockStatus.DESABASTECIDO).length,
-    fromWarehouse: rows.filter((r) => r.warehouse).length,
   };
-};
-
-/**
- * Sugerencias internas (punto B de la auditoría, 2026-10-07): la F01 abastece a sus puestos
- * comunales. A cada puesto desabastecido o en substock (con consumo) le da lo justo para llegar
- * al mínimo (CPA × límite de substock), y la F01 se queda con ese mismo mínimo de lo que ella
- * dispensa. Trabaja sobre los ítems por farmacia; `isSeparate` dice qué código es un puesto.
- */
-export const internalTransfers = (pharmacyItems: AvailabilityItem[], subMax: number, isSeparate: (code: string) => boolean): TransferRow[] => {
-  const mains = new Map<string, { item: AvailabilityItem; left: number }>();
-  for (const it of pharmacyItems) {
-    if (!/F01$/i.test(it.code)) continue;
-    mains.set(`${it.ipressCode}|${it.medCode}`, { item: it, left: Math.floor(it.stock - it.cpa * subMax) });
-  }
-  const needs = pharmacyItems
-    .filter((i) => isSeparate(i.code) && (i.status === StockStatus.DESABASTECIDO || i.status === StockStatus.SUBSTOCK) && i.cpa > 0)
-    .sort((a, b) => a.months - b.months || b.cpa - a.cpa);
-  const rows: TransferRow[] = [];
-  for (const need of needs) {
-    const main = mains.get(`${need.ipressCode}|${need.medCode}`);
-    const want = Math.ceil(need.cpa * subMax - need.stock);
-    if (!main || main.left <= 0 || want <= 0) continue;
-    const quantity = Math.min(main.left, want);
-    main.left -= quantity;
-    rows.push({ from: main.item, to: need, quantity, sameMicrored: true, value: quantity * (need.price || 0), internal: true });
-  }
-  return rows;
 };
 
 /* ------------------------------------------------------------ Plan de redistribución */

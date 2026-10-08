@@ -11,8 +11,8 @@ import {
   DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
-  EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, internalTransfers, lotRiskOf, lotRiskReport, overstockReport, planUsage, productGapReport, redistributionPlan, redistributionReport, siteGapReport, warehouseReport,
-  type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type PlanRow, type PlanSource, type ProductGap, type SiteGapRow, type TransferRow, type WarehouseRow,
+  EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockReport, planUsage, productGapReport, redistributionPlan, redistributionReport, siteGapReport, warehouseReport,
+  type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type PlanRow, type PlanSource, type ProductGap, type SiteGapRow, type WarehouseRow,
 } from "../services/availabilityInsights";
 import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, filterInputClass, useTableSort, type Tone } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";

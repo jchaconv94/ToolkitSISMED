@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import type { AvailabilityItem } from "./availabilityReport";
 import {
-  abcXyzReport, asSupplier, consumptionReport, internalTransfers, isSeparateSite, planUsage, redistributionPlan, siteGapReport, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
+  abcXyzReport, asSupplier, consumptionReport, isSeparateSite, planUsage, redistributionPlan, siteGapReport, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
 } from "./availabilityInsights";
 
 const today = new Date(2026, 9, 7);
@@ -169,13 +169,6 @@ describe("puestos comunales escondidos en la cifra del establecimiento", () => {
     expect(siteGapReport([ipress], [f01, f02], (c) => isSeparateSite(c, "FARMACIA"))).toHaveLength(0);
   });
 
-  it("la F01 entrega a sus puestos lo justo para 2 meses y se queda con 2 meses de lo suyo", () => {
-    const rows = internalTransfers([f01, f02, f03], 2, isSeparate);
-    // Le sobran 586 − 100 × 2 = 386: primero al desabastecido (30), luego al substock (50).
-    expect(rows.map((r) => [r.to.code, r.quantity, r.internal])).toEqual([["06528F02", 30, true], ["06528F03", 50, true]]);
-    // Sin excedente en la F01 no hay sugerencia.
-    expect(internalTransfers([{ ...f01, stock: 150 }, f02], 2, isSeparate)).toHaveLength(0);
-  });
 });
 
 describe("plan de redistribución", () => {

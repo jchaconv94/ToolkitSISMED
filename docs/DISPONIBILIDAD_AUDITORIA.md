@@ -85,7 +85,15 @@ sus farmacias sumadas.
 
 338 de las 610 sugerencias son de productos que el almacén tiene.
 
-**Propuesta:** agregar la columna «Almacén» y la opción de cubrir primero desde el almacén.
+**Resuelto (2026-10-08):** Redistribución pasó a ser un **plan editable**, con una fila por
+necesidad y todas sus fuentes: internas F01 → puesto, el excedente de otros establecimientos y,
+al final, el almacén (opción A del usuario). Cada fuente tiene un saldo, así que nada se cuenta
+dos veces. La edición se hace en un panel lateral y el plan se descarga en Excel. Se probó y se
+rechazó un interruptor «cubrir primero desde el almacén»: recalculaba el plan y duplicaba lo
+abastecido.
+
+Con este TFORMDET: 2 782 necesidades; de otros establecimientos 21 712 u, del almacén 22 351 u e
+internas 3 088 u; 1 822 quedan sin cubrir.
 
 ### D. Dinero contado dos veces en el Resumen
 
