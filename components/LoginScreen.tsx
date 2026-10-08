@@ -12,11 +12,13 @@ import {
   Lock,
   ShieldCheck,
   User,
+  WifiOff,
 } from 'lucide-react';
 import { BrandMark } from './ui/BrandLogo';
 import { PinLogin } from './PinLogin';
 import { FingerprintLogin } from './FingerprintLogin';
 import { isDesktopPointer, readStoredDevice, type StoredDevice } from '../services/deviceAccess';
+import { useOnline } from './ui/useOnline';
 
 /** Solo se recuerda el usuario. La contraseña nunca se guarda en el navegador. */
 const USUARIO_RECORDADO_KEY = 'aura_saved_username';
@@ -54,6 +56,8 @@ export const LoginScreen: React.FC = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberUser, setRememberUser] = useState(false);
+  const [keepSession, setKeepSession] = useState(false);
+  const online = useOnline();
   const [error, setError] = useState('');
   const [tried, setTried] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
@@ -242,6 +246,13 @@ export const LoginScreen: React.FC = () => {
             <p className="text-[15px] font-medium text-[#4E5F5C]">Ingrese con su cuenta institucional.</p>
           </div>
 
+          {!online && (
+            <div role="status" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm font-semibold text-amber-800">
+              <WifiOff className="mt-0.5 h-[18px] w-[18px] shrink-0" />
+              <span>Sin conexión a internet. Para iniciar sesión se necesita internet.</span>
+            </div>
+          )}
+
           {error && (
             <div role="alert" className="mb-5 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm font-semibold text-red-700 animate-in fade-in slide-in-from-top-1">
               <AlertCircle className="mt-0.5 h-[18px] w-[18px] shrink-0" />
@@ -304,6 +315,7 @@ export const LoginScreen: React.FC = () => {
               )}
             </div>
 
+            <div className="-my-1 flex flex-col">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="flex min-h-[44px] cursor-pointer items-center gap-2.5 text-sm font-medium">
                 <input
@@ -318,7 +330,33 @@ export const LoginScreen: React.FC = () => {
                 type="button"
                 onClick={() => setShowHelp((v) => !v)}
                 aria-expanded={showHelp}
-                className="min-h-[44px] text-sm font-bold text-teal-700 hover:underline"
+                className="hidden min-h-[44px] text-sm font-bold text-teal-700 hover:underline sm:block"
+              >
+                ¿Olvidó su contraseña?
+              </button>
+            </div>
+            <label className="flex min-h-[44px] cursor-pointer items-start gap-2.5 py-[13px] text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={keepSession}
+                onChange={(e) => setKeepSession(e.target.checked)}
+                className="mt-px h-[18px] w-[18px] shrink-0 accent-teal-700"
+              />
+              <span className="flex flex-col gap-0.5">
+                Mantener sesión iniciada
+                {keepSession && (
+                  <span className="text-[12.5px] font-medium leading-snug text-[#4E5F5C]">
+                    Funciona sin internet hasta 7 días. No lo marque en una PC compartida.
+                  </span>
+                )}
+              </span>
+            </label>
+            {/* En el celular no entra al lado de «Recordar mi usuario»: va debajo de las casillas. */}
+              <button
+                type="button"
+                onClick={() => setShowHelp((v) => !v)}
+                aria-expanded={showHelp}
+                className="self-start min-h-[44px] text-sm font-bold text-teal-700 hover:underline sm:hidden"
               >
                 ¿Olvidó su contraseña?
               </button>

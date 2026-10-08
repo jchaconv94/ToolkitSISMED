@@ -41,6 +41,12 @@ export interface NavItem {
   /** Una línea que dice para qué sirve. */
   description: string;
   icon: LucideIcon;
+  /**
+   * Funciona sin internet: trabaja con lo que se sube y se guarda en este equipo (modo sin
+   * internet, 2026-10-08). Una herramienta nueva que no guarda nada en la base de datos debe
+   * llevarlo, y probarse con la red cortada.
+   */
+  offline?: boolean;
 }
 
 export interface NavSection {
@@ -69,10 +75,10 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: Pill,
     tint: "teal",
     items: [
-      { module: "DASHBOARD", label: "Análisis de Requerimiento", shortLabel: "Análisis", description: "Requerimiento por establecimiento", icon: BarChart2 },
+      { module: "DASHBOARD", label: "Análisis de Requerimiento", shortLabel: "Análisis", description: "Requerimiento por establecimiento", icon: BarChart2, offline: true },
       { module: "ANALYSIS_EXCLUSIONS", label: "Lista de Exclusiones", shortLabel: "Exclusiones", description: "Medicamentos fuera del análisis", icon: Ban },
-      { module: "AVAILABILITY", label: "Disponibilidad", shortLabel: "Disponibilidad", description: "Disponibilidad y DME por establecimiento", icon: Activity },
-      { module: "REDISTRIBUTION", label: "Redistribución", shortLabel: "Redistribución", description: "Canjes entre establecimientos", icon: ArrowRightLeft },
+      { module: "AVAILABILITY", label: "Disponibilidad", shortLabel: "Disponibilidad", description: "Disponibilidad y DME por establecimiento", icon: Activity, offline: true },
+      { module: "REDISTRIBUTION", label: "Redistribución", shortLabel: "Redistribución", description: "Canjes entre establecimientos", icon: ArrowRightLeft, offline: true },
     ],
   },
   {
@@ -138,6 +144,14 @@ export const findVisibleNavSection = (
 /** Sección a la que pertenece un módulo, o `null` (Inicio y Perfil no tienen sección). */
 export const findNavSection = (module: AppModule): NavSection | null =>
   NAV_SECTIONS.find(section => section.items.some(item => item.module === module)) || null;
+
+/** ¿Se puede usar sin internet? Inicio siempre (muestra lo último guardado). */
+export const worksOffline = (module: AppModule): boolean =>
+  module === NAV_HOME.module || Boolean(findNavItem(module)?.offline);
+
+/** Herramientas que el usuario puede abrir sin internet, en el orden del menú. */
+export const offlineNavItems = (hasPermission: (module: AppModule) => boolean): NavItem[] =>
+  visibleNavSections(hasPermission).flatMap(section => section.items.filter(item => item.offline));
 
 /** Entrada de navegación de un módulo, o `null` si no está en el menú. */
 export const findNavItem = (module: AppModule): NavItem | null => {
