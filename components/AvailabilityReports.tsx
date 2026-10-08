@@ -11,7 +11,7 @@ import {
   DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
-  EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockReport, planUsage, productGapReport, redistributionPlan, redistributionReport, siteGapReport, warehouseReport,
+  EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockAtRisk, overstockReport, planUsage, productGapReport, redistributionPlan, siteGapReport, warehouseReport,
   type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type PlanRow, type PlanSource, type ProductGap, type SiteGapRow, type WarehouseRow,
 } from "../services/availabilityInsights";
 import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, filterInputClass, useTableSort, type Tone } from "./ui/kit";
@@ -544,6 +544,8 @@ export const SummaryReport: React.FC<{ ctx: ReportContext; levelCounts: Record<D
   const { report, levels: lv } = ctx;
   const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(report.items), ctx.today), [ctx.byPharmacy, report.items, ctx.today]);
   const over = useMemo(() => overstockReport(report.items, ctx.sobreMin), [report.items, ctx.sobreMin]);
+  // Punto D: el dinero del sobrestock que además vence en 12 meses ya está en la otra tarjeta.
+  const overlap = useMemo(() => overstockAtRisk(over.rows, risk.rows), [over, risk]);
   const redis = useMemo(() => {
     const plan = redistributionPlan({ items: report.items, pharmacyItems: ctx.pharmacy?.items ?? [], warehouse: ctx.warehouse, subMax: ctx.subMax, sobreMin: ctx.sobreMin, isSeparate: separateOf(ctx) });
     return { needs: plan.rows.length, covered: plan.rows.filter((r) => r.sources.reduce((a, x) => a + x.qty, 0) >= r.need).length };
@@ -554,7 +556,7 @@ export const SummaryReport: React.FC<{ ctx: ReportContext; levelCounts: Record<D
   const mrRows = [...report.microredes].sort((a, b) => b.pct - a.pct);
   const alerts: Array<{ tab: ReportTab; icon: React.ReactNode; tone: string; label: string; value: string; hint: string }> = [
     { tab: "expiry", icon: <CalendarClock className="h-5 w-5" />, tone: "bg-red-50 text-red-600", label: "Vence sin usarse en 12 meses", value: money(risk.urgentValue), hint: `${formatNumber(risk.urgentLots)} lotes` },
-    { tab: "overstock", icon: <PackageX className="h-5 w-5" />, tone: "bg-blue-50 text-blue-600", label: "Sobrestock inmovilizado", value: money(over.value), hint: `${formatNumber(over.rows.length)} productos` },
+    { tab: "overstock", icon: <PackageX className="h-5 w-5" />, tone: "bg-blue-50 text-blue-600", label: "Sobrestock inmovilizado", value: money(over.value - overlap.value), hint: overlap.value > 0 ? `sin ${money(overlap.value)} que ya vencen` : `${formatNumber(over.rows.length)} productos` },
     { tab: "redistribution", icon: <Repeat2 className="h-5 w-5" />, tone: "bg-teal-50 text-teal-700", label: "Plan de redistribución", value: formatNumber(redis.needs), hint: `necesidades · ${formatNumber(redis.covered)} se cubren por completo` },
     { tab: "warehouse", icon: <Warehouse className="h-5 w-5" />, tone: "bg-amber-50 text-amber-700", label: "Almacén puede cubrir", value: formatNumber(wh.canCover), hint: `productos · ${money(wh.value)} en almacén` },
   ];
@@ -1588,8 +1590,19 @@ export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
 
 export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const data = useMemo(() => overstockReport(ctx.report.items, ctx.sobreMin), [ctx.report.items, ctx.sobreMin]);
-  const redis = useMemo(() => redistributionReport(ctx.report.items, ctx.subMax, ctx.sobreMin), [ctx.report.items, ctx.subMax, ctx.sobreMin]);
-  const movable = redis.rows.reduce((a, r) => a + r.quantity * (r.from.price || 0), 0);
+  // Lo mismo que propone el plan de redistribución: el excedente que va a otros establecimientos.
+  const movableNeeds = useMemo(() => {
+    const plan = redistributionPlan({ items: ctx.report.items, pharmacyItems: ctx.pharmacy?.items ?? [], warehouse: ctx.warehouse, subMax: ctx.subMax, sobreMin: ctx.sobreMin, isSeparate: separateOf(ctx) });
+    let value = 0, needs = 0;
+    for (const r of plan.rows) {
+      const donated = r.sources.filter((x) => plan.pools[x.pool]?.kind === "donor").reduce((a, x) => a + x.qty, 0);
+      if (donated > 0) { needs++; value += donated * (r.to.price || 0); }
+    }
+    return { value, needs };
+  }, [ctx]);
+  const movable = movableNeeds.value;
+  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(ctx.report.items), ctx.today), [ctx.byPharmacy, ctx.report.items, ctx.today]);
+  const overlap = useMemo(() => overstockAtRisk(data.rows, risk.rows), [data, risk]);
   const example = data.rows.find((r) => r.item.cpa >= 5 && r.value > 50) || data.rows[0];
   const columns: Column<OverstockRow>[] = [
     { key: "description", label: "Producto", sort: (r) => r.item.description, render: (r) => <ProductCell code={r.item.medCode} description={r.item.description} sub={r.item.name} /> },
@@ -1608,9 +1621,9 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="info" icon={<PackageX />} label="Dinero inmovilizado" value={money(data.value)} hint={`excedente sobre ${ctx.sobreMin} meses de consumo`} />
+        <KpiCard watermark tone="info" icon={<PackageX />} label="Dinero inmovilizado" value={money(data.value)} hint={overlap.value > 0 ? `de ello ${money(overlap.value)} vence en 12 meses` : `excedente sobre ${ctx.sobreMin} meses de consumo`} />
         <KpiCard watermark tone="info" label="Productos con excedente" value={formatNumber(data.rows.length)} hint={`${formatNumber(data.units)} unidades de más`} />
-        <KpiCard watermark tone="success" icon={<Repeat2 />} label="Se puede mover a donde falta" value={money(movable)} hint={`${formatNumber(redis.rows.length)} redistribuciones`} onClick={() => ctx.goTab("redistribution")} />
+        <KpiCard watermark tone="success" icon={<Repeat2 />} label="Se puede mover a donde falta" value={money(movable)} hint={`a ${formatNumber(movableNeeds.needs)} necesidades del plan`} onClick={() => ctx.goTab("redistribution")} />
         <KpiCard watermark tone="neutral" icon={<Building2 />} label="Establecimientos con excedente" value={formatNumber(data.establishments.length)} hint={data.establishments[0] ? `el mayor: ${data.establishments[0].name}` : ""} />
       </KpiStrip>
       <div className="grid gap-4 lg:grid-cols-12">

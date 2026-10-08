@@ -300,64 +300,39 @@ export const overstockReport = (items: AvailabilityItem[], sobreMin: number) => 
   };
 };
 
+/**
+ * Parte del sobrestock que ya cuenta como «vence sin usarse en 12 meses» (punto D de la
+ * auditoría): las mismas unidades son excedente y se van a vencer. Por producto y
+ * establecimiento, lo menor entre el excedente y lo que vence en 12 meses, a su precio. Así el
+ * Resumen no suma dos veces el mismo dinero.
+ */
+export const overstockAtRisk = (overRows: OverstockRow[], riskRows: LotRiskRow[]) => {
+  const risky = new Map<string, number>();
+  for (const r of riskRows) {
+    if (r.bucket === "LATER") continue;
+    const key = `${r.item.ipressCode}|${r.item.medCode}`;
+    risky.set(key, (risky.get(key) || 0) + r.atRisk);
+  }
+  let units = 0, value = 0;
+  for (const o of overRows) {
+    const both = Math.min(o.excess, risky.get(`${o.item.ipressCode}|${o.item.medCode}`) || 0);
+    units += both;
+    value += both * (o.item.price || 0);
+  }
+  return { units, value };
+};
+
 /* ------------------------------------------------------------ Redistribución */
 
-export interface TransferRow {
-  from: AvailabilityItem;
-  to: AvailabilityItem;
-  quantity: number;
-  sameMicrored: boolean;
-  value: number;
-}
+/* ------------------------------------------------------------ Plan de redistribución */
 
-/** Un producto del almacén con la forma de un ítem, para que entregue en Redistribución. */
+/** Un producto del almacén con la forma de un ítem, para que entregue en el plan. */
 const warehouseAsItem = (w: WarehouseItem): AvailabilityItem => ({
   red: "", microred: "", code: w.code, ipressCode: w.code, name: w.name || w.code, category: "",
   medCode: w.medCode, description: w.description, form: "", price: w.price, medtip: "", medpet: "", medest: "",
   consumption: [], stock: w.stock, cpa: 0, months: Infinity, status: StockStatus.SIN_ROTACION,
   nearestExpiry: w.lots.find((l) => l.expiry)?.expiry ?? null, lots: w.lots, monthsToExpiry: null, expiryRisk: false,
 });
-
-/**
- * Sugerencias de redistribución: a cada establecimiento desabastecido o en substock (con
- * consumo) le da el excedente de otro que tenga el mismo producto en sobrestock, prefiriendo
- * la misma microred. Lleva lo justo para llegar al mínimo (CPA × límite de substock).
- */
-export const redistributionReport = (items: AvailabilityItem[], subMax: number, sobreMin: number) => {
-  const donors = new Map<string, Array<{ item: AvailabilityItem; left: number }>>();
-  for (const it of items) {
-    if (it.status !== StockStatus.SOBRESTOCK) continue;
-    const left = Math.floor(it.stock - it.cpa * sobreMin);
-    if (left <= 0) continue;
-    const list = donors.get(it.medCode) || [];
-    list.push({ item: it, left });
-    donors.set(it.medCode, list);
-  }
-  const needs = items
-    .filter((i) => (i.status === StockStatus.DESABASTECIDO || i.status === StockStatus.SUBSTOCK) && i.cpa > 0)
-    .sort((a, b) => a.months - b.months || b.cpa - a.cpa);
-  const rows: TransferRow[] = [];
-  for (const need of needs) {
-    const want = Math.ceil(need.cpa * subMax - need.stock);
-    if (want <= 0) continue;
-    const pool = (donors.get(need.medCode) || []).filter((d) => d.left > 0 && d.item.code !== need.code);
-    if (!pool.length) continue;
-    pool.sort((a, b) => Number(b.item.microred === need.microred) - Number(a.item.microred === need.microred) || b.left - a.left);
-    const donor = pool[0];
-    const quantity = Math.min(donor.left, want);
-    donor.left -= quantity;
-    rows.push({ from: donor.item, to: need, quantity, sameMicrored: donor.item.microred === need.microred, value: quantity * (need.price || 0) });
-  }
-  rows.sort((a, b) => Number(b.to.status === StockStatus.DESABASTECIDO) - Number(a.to.status === StockStatus.DESABASTECIDO) || b.value - a.value);
-  return {
-    rows,
-    value: sum(rows.map((r) => r.value)),
-    sameMicrored: rows.filter((r) => r.sameMicrored).length,
-    covered: rows.filter((r) => r.to.status === StockStatus.DESABASTECIDO).length,
-  };
-};
-
-/* ------------------------------------------------------------ Plan de redistribución */
 
 export type PlanSourceKind = "internal" | "donor" | "warehouse";
 
