@@ -1809,7 +1809,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
       </div>
       {overPools.length > 0 && (
         <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-[12.5px] text-red-800">
-          En {overPools.length === 1 ? "una fuente" : `${overPools.length} fuentes`} se asigna más de lo que tiene{overPools.length === 1 ? "" : "n"} para dar. Baje las cantidades marcadas en rojo antes de descargar el plan.
+          En {overPools.length === 1 ? "una fuente" : `${overPools.length} fuentes`} se asigna más de lo que tiene{overPools.length === 1 ? "" : "n"} para dar. Baje las cantidades marcadas en rojo antes de descargar el Excel.
         </p>
       )}
       <ReportTable
@@ -1837,8 +1837,9 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
                 <RotateCcw className="h-4 w-4" />Deshacer
               </button>
             )}
-            <button type="button" onClick={download} disabled={overPools.length > 0 || !active.length} className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-teal-600 px-4 text-[12.5px] font-bold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50">
-              <Download className="h-4 w-4" />Descargar plan
+            {/* El mismo botón «Excel» de las demás pestañas (pedido del usuario); este trae el plan en varias hojas. */}
+            <button type="button" onClick={download} disabled={overPools.length > 0 || !active.length} title={overPools.length ? "Hay fuentes con más asignado de lo que tienen: corríjalas antes de descargar" : "Descargar el plan en Excel (entregas, pedido al almacén, internas y sin cubrir)"} className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+              <Download className="h-4 w-4 text-teal-700" />Excel
             </button>
           </div>
         )}
