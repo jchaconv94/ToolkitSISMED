@@ -1,11 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Info } from "lucide-react";
 import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
 import type { LevelThresholds } from "../services/availabilityReport";
-import { BottomSheet } from "./ui/BottomSheet";
-import { useIsDesktop } from "./ui/useIsDesktop";
 import { formatNumber } from "../services/numberFormat";
 
 /**
@@ -78,79 +75,9 @@ export const TipBox: React.FC<{ title: string; color?: string; rows?: Array<[str
 
 /* ---------------------------------------------------------------- Tarjeta de gráfico */
 
-/**
- * Explicación detrás de un ícono «i»: en escritorio, un recuadro flotante bajo el ícono que se
- * dibuja sobre toda la página (portal) y se acomoda dentro de la pantalla, para que no lo corte
- * un panel lateral ni una tarjeta; en el celular, un panel inferior.
- */
-export const InfoTip: React.FC<{ title: string; children: React.ReactNode; align?: "left" | "right" }> = ({ title, children }) => {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ left: number; top: number; up: boolean } | null>(null);
-  const isDesktop = useIsDesktop();
-  const btn = useRef<HTMLButtonElement>(null);
-  const pop = useRef<HTMLSpanElement>(null);
-  const WIDTH = 340;
-  const place = () => {
-    const r = btn.current?.getBoundingClientRect();
-    if (!r) return;
-    const left = Math.min(Math.max(8, r.left - 12), window.innerWidth - WIDTH - 8);
-    const up = r.bottom + 260 > window.innerHeight && r.top > 280;
-    setPos({ left, top: up ? r.top - 8 : r.bottom + 8, up });
-  };
-  useEffect(() => {
-    if (!open || !isDesktop) return;
-    place();
-    const close = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (!btn.current?.contains(t) && !pop.current?.contains(t)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
-    const hide = () => setOpen(false);
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", onKey, true);
-    window.addEventListener("resize", hide);
-    window.addEventListener("scroll", hide, true);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("resize", hide);
-      window.removeEventListener("scroll", hide, true);
-    };
-  }, [open, isDesktop]); // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <span className="relative inline-flex align-middle normal-case tracking-normal">
-      <button
-        ref={btn}
-        type="button"
-        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
-        aria-label={`Qué es: ${title}`}
-        aria-expanded={open}
-        className={`grid h-6 w-6 place-items-center rounded-full transition-colors ${open ? "bg-teal-50 text-teal-700" : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"}`}
-      >
-        <Info className="h-4 w-4" />
-      </button>
-      {isDesktop ? (
-        open && pos && createPortal(
-          <span
-            ref={pop}
-            role="dialog"
-            aria-label={title}
-            className="fixed z-[100003] max-h-[70vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-left text-[12.5px] font-normal leading-relaxed text-slate-600 shadow-xl"
-            style={{ left: pos.left, top: pos.top, width: WIDTH, transform: pos.up ? "translateY(-100%)" : undefined }}
-          >
-            <span className="mb-1.5 block text-[13px] font-black text-slate-900">{title}</span>
-            {children}
-          </span>,
-          document.body,
-        )
-      ) : (
-        <BottomSheet open={open} title={title} onClose={() => setOpen(false)}>
-          <div className="pb-4 text-[14px] leading-relaxed text-slate-600">{children}</div>
-        </BottomSheet>
-      )}
-    </span>
-  );
-};
+import { InfoTip } from "./ui/InfoTip";
+
+export { InfoTip };
 
 /** Tarjeta blanca con título en mayúsculas, ícono «i» opcional y acción a la derecha. */
 export const ChartCard: React.FC<{
