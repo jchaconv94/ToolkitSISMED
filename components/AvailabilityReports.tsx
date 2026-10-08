@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, ArrowRight, ChevronDown, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Download, RotateCcw, Repeat2, Store, TrendingUp, Warehouse, X } from "lucide-react";
 import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
@@ -1596,9 +1597,10 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   const sum = (list: PlanView[], kind: string) => list.reduce((a, v) => a + v.sources.filter((x) => plan.pools[x.pool]?.kind === kind).reduce((b, x) => b + x.qty, 0), 0);
   const donorUnits = sum(active, "donor"), whUnits = sum(active, "warehouse"), internalUnits = sum(active, "internal");
   const shortRows = active.filter((v) => v.short > 0);
-  const [filter, setFilter] = useState<"ALL" | "DONOR" | "WAREHOUSE" | "INTERNAL" | "SHORT" | "EXCLUDED">("ALL");
+  const [filter, setFilter] = useState<"ALL" | "DONOR" | "WAREHOUSE" | "INTERNAL" | "SHORT">("ALL");
   const has = (v: PlanView, kind: string) => v.sources.some((x) => plan.pools[x.pool]?.kind === kind && x.qty > 0);
-  const rows = views.filter((v) => filter === "EXCLUDED" ? v.excluded : !v.excluded && (filter === "ALL" || (filter === "SHORT" ? v.short > 0 : has(v, filter === "DONOR" ? "donor" : filter === "WAREHOUSE" ? "warehouse" : "internal"))));
+  // Las filas que no se distribuyen siguen en la tabla (en gris y sin marcar), para volver a marcarlas.
+  const rows = views.filter((v) => filter === "ALL" || (!v.excluded && (filter === "SHORT" ? v.short > 0 : has(v, filter === "DONOR" ? "donor" : filter === "WAREHOUSE" ? "warehouse" : "internal"))));
 
   const byDonor = useMemo(() => {
     const m = new Map<string, { name: string; n: number }>();
@@ -1621,15 +1623,16 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   const overRow = (v: PlanView) => !v.excluded && v.sources.some((x) => x.qty > 0 && leftOf(x.pool) < 0);
   // Una fila, un dato por celda (NN/g, Carbon, PatternFly): el detalle y la edición, en el panel.
   const columns: Column<PlanView>[] = [
-    { key: "description", label: "Producto", sort: (r) => r.to.description, render: (r) => <ProductCell code={r.to.medCode} description={r.to.description} /> },
-    { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className="block max-w-[240px]"><span className="block truncate font-semibold text-slate-800">{r.site ? whereOf(r.to) : r.to.name}</span><span className="block text-[11.5px] text-slate-500">{formatNumber(r.to.stock)} u · CPA {dec(r.to.cpa)}</span></span> },
+    { key: "description", label: "Producto", sort: (r) => r.to.description, render: (r) => <span className={r.excluded ? "opacity-45" : ""}><ProductCell code={r.to.medCode} description={r.to.description} /></span> },
+    { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className={`block max-w-[240px] ${r.excluded ? "opacity-45" : ""}`}><span className="block truncate font-semibold text-slate-800">{r.site ? whereOf(r.to) : r.to.name}</span><span className="block text-[11.5px] text-slate-500">{formatNumber(r.to.stock)} u · CPA {dec(r.to.cpa)}</span></span> },
     { key: "status", label: "Situación", sort: (r) => STATUS_ORDER.indexOf(r.to.status), render: (r) => <StatusPill status={r.to.status} /> },
     { key: "need", label: "Necesita", sort: (r) => r.need, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-slate-900">{formatNumber(r.need)}</span> },
     { key: "others", label: "De otros", sort: (r) => units(r, "donor") + units(r, "internal"), firstDir: "desc", render: (r) => { const n = units(r, "donor") + units(r, "internal"); return <span className={`font-mono ${n ? "font-bold text-blue-700" : "text-slate-300"}`}>{formatNumber(n)}</span>; } },
     { key: "warehouse", label: "Del almacén", sort: (r) => units(r, "warehouse"), firstDir: "desc", render: (r) => { const n = units(r, "warehouse"); return <span className={`font-mono ${n ? "font-bold text-amber-700" : "text-slate-300"}`}>{formatNumber(n)}</span>; } },
     { key: "short", label: "Falta", sort: (r) => (r.excluded ? -1 : r.short), firstDir: "desc", render: (r) => <span className={`font-mono ${!r.excluded && r.short ? "font-bold text-red-600" : "text-slate-300"}`}>{r.excluded ? "—" : formatNumber(r.short)}</span> },
     { key: "state", label: "Estado", sort: (r) => (r.excluded ? 3 : r.short === 0 ? 0 : r.covered > 0 ? 1 : 2), render: (r) => { const [label, cls] = stateOf(r); return <span className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-bold ${overRow(r) ? "bg-red-600 text-white" : cls}`}>{overRow(r) ? "Revisar" : label}</span>; } },
-    { key: "include", label: "Distribuir", sort: (r) => Number(!r.excluded), render: (r) => <input type="checkbox" checked={!r.excluded} onClick={(e) => e.stopPropagation()} onChange={(e) => setExcluded(r.key, !e.target.checked)} className="h-4 w-4 accent-teal-600" aria-label="Distribuir" /> },
+    // La casilla solo marca o desmarca; el resto de la fila abre el panel.
+    { key: "include", label: "Distribuir", sort: (r) => Number(!r.excluded), render: (r) => <label onClick={(e) => e.stopPropagation()} className="-m-3 inline-flex cursor-pointer p-3" title={r.excluded ? "Volver a incluir en el plan" : "Quitar del plan"}><input type="checkbox" checked={!r.excluded} onChange={(e) => setExcluded(r.key, !e.target.checked)} className="h-4 w-4 cursor-pointer accent-teal-600" aria-label="Distribuir" /></label> },
   ];
   const [openKey, setOpenKey] = useState<{ key: string; list: string[] } | null>(null);
   const openView = openKey ? views.find((v) => v.key === openKey.key) ?? null : null;
@@ -1662,7 +1665,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-3 xl:grid-cols-5">
-        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Necesidades" value={formatNumber(active.length)} hint={`${formatNumber(active.filter((v) => v.to.status === StockStatus.DESABASTECIDO).length)} desabastecidas · ${formatNumber(active.length - shortRows.length)} cubiertas`} onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
+        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Necesidades" value={formatNumber(active.length)} hint={`${formatNumber(active.length - shortRows.length)} cubiertas${views.length > active.length ? ` · ${formatNumber(views.length - active.length)} sin distribuir` : ` · ${formatNumber(active.filter((v) => v.to.status === StockStatus.DESABASTECIDO).length)} desabastecidas`}`} onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
         <KpiCard watermark tone="success" icon={<Building2 />} label="De otros establecimientos" value={`${formatNumber(donorUnits)} u`} hint={`en ${formatNumber(active.filter((v) => has(v, "donor")).length)} necesidades · su excedente`} onClick={() => { setFilter("DONOR"); toTable(); }} active={filter === "DONOR"} />
         <KpiCard watermark tone="warning" icon={<Warehouse />} label="Del almacén" value={`${formatNumber(whUnits)} u`} hint={`completa ${formatNumber(active.filter((v) => has(v, "warehouse")).length)} necesidades`} onClick={() => { setFilter("WAREHOUSE"); toTable(); }} active={filter === "WAREHOUSE"} />
         <KpiCard watermark tone="info" icon={<Store />} label="Internas F01 → puesto" value={`${formatNumber(internalUnits)} u`} hint={`${formatNumber(active.filter((v) => has(v, "internal")).length)} puestos`} onClick={() => { setFilter("INTERNAL"); toTable(); }} active={filter === "INTERNAL"} />
@@ -1695,7 +1698,6 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         minWidth={1100}
         toolbar={(
           <div className="flex shrink-0 items-center gap-2">
-            <Pills value={filter === "EXCLUDED" ? "EXCLUDED" : "PLAN"} onChange={(v) => setFilter(v === "EXCLUDED" ? "EXCLUDED" : "ALL")} options={[{ value: "PLAN", label: "En el plan", count: active.length }, { value: "EXCLUDED", label: "No distribuir", count: views.length - active.length }]} />
             {edited && (
               <button type="button" onClick={() => setEdits({})} className="flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50" title="Vuelve a la sugerencia inicial">
                 <RotateCcw className="h-4 w-4" />Restablecer
@@ -1712,7 +1714,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
             <>
               <div className="flex items-start gap-2">
                 <span className="min-w-0 flex-1"><ProductCell code={r.to.medCode} description={r.to.description} /></span>
-                <input type="checkbox" checked={!r.excluded} onClick={(e) => e.stopPropagation()} onChange={(e) => setExcluded(r.key, !e.target.checked)} className="mt-1 h-5 w-5 accent-teal-600" aria-label="Distribuir" />
+                  <label onClick={(e) => e.stopPropagation()} className="-m-2 inline-flex cursor-pointer p-2"><input type="checkbox" checked={!r.excluded} onChange={(e) => setExcluded(r.key, !e.target.checked)} className="h-5 w-5 cursor-pointer accent-teal-600" aria-label="Distribuir" /></label>
               </div>
               <p className="mt-1.5 truncate text-[12px] font-semibold text-slate-700">{r.site ? whereOf(r.to) : r.to.name}</p>
               <div className="mt-1.5 flex items-center gap-2 text-[12px] text-slate-500">
@@ -1761,7 +1763,8 @@ const PlanDrawer: React.FC<{
     .filter((p) => p.medCode === v.to.medCode && (v.site ? p.kind === "internal" && p.item.ipressCode === v.to.ipressCode : p.kind !== "internal" && p.item.code !== v.to.code))
     .sort((a, b) => Number((assigned.get(b.key) ?? 0) > 0) - Number((assigned.get(a.key) ?? 0) > 0) || Number(a.kind === "warehouse") - Number(b.kind === "warehouse") || Number(b.item.microred === v.to.microred) - Number(a.item.microred === v.to.microred) || leftOf(b.key) - leftOf(a.key));
   const where = v.site ? siteLabel(ctx, v.to) : v.to.name;
-  return (
+  // En un portal: dentro de la pestaña, el fondo oscuro dejaba una franja blanca arriba.
+  return createPortal(
     <div className="fixed inset-0 z-[100000] flex justify-end bg-slate-900/40" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <aside role="dialog" aria-label={v.to.description} className="flex h-full w-full flex-col bg-white shadow-2xl animate-in slide-in-from-right duration-200 md:w-[620px]">
         <div className="flex items-start gap-3 border-b border-slate-200 px-4 py-3.5 md:px-5">
@@ -1823,7 +1826,8 @@ const PlanDrawer: React.FC<{
           {edited && <button type="button" onClick={onReset} className="ml-auto flex h-9 items-center gap-1.5 rounded-full border border-slate-200 px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50"><RotateCcw className="h-4 w-4" />Volver a la sugerencia</button>}
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 };
 
