@@ -1677,10 +1677,10 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         <KpiCard watermark tone="danger" icon={<PackageX />} label="Sin cubrir" value={formatNumber(shortRows.length)} hint={`faltan ${formatNumber(shortRows.reduce((a, v) => a + v.short, 0))} u`} onClick={() => { setFilter("SHORT"); toTable(); }} active={filter === "SHORT"} />
       </KpiStrip>
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Quién entrega más" info={INFO.redistribution(ctx.subMax, ctx.sobreMin)}>
+        <ChartCard title="Establecimientos con más excedente para transferir" info={<><P>Establecimientos en sobrestock que más productos transfieren en el plan. El número es la cantidad de productos que entregan.</P><P>Excedente: lo que tienen por encima de {ctx.sobreMin} meses de consumo.</P></>}>
           <HBars labelWidth="w-36 md:w-56" rows={byDonor.map(([code, e]) => ({ key: code, label: e.name, value: e.n, color: "#3b82f6", text: `${e.n}` }))} onSelect={ctx.openEstablishment} />
         </ChartCard>
-        <ChartCard title="Quién recibe más">
+        <ChartCard title="Establecimientos con más productos por recibir" info={<P>Establecimientos desabastecidos o en substock que más productos reciben en el plan, de otros establecimientos o del almacén. El número es la cantidad de productos.</P>}>
           <HBars labelWidth="w-36 md:w-56" rows={byReceiver.map(([code, e]) => ({ key: code, label: e.name, value: e.n, color: "#0d9488", text: `${e.n}` }))} onSelect={ctx.openEstablishment} />
         </ChartCard>
       </div>
