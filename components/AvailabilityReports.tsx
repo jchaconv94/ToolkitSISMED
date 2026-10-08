@@ -19,6 +19,7 @@ import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import { BottomSheet } from "./ui/BottomSheet";
+import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type HeadAlign } from "./ui/FloatingTableHead";
 import {
   ChartCard, Donut, Gauge, HBars, InfoTip, LEVEL_COLOR, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar, TipBox, useChartTip,
@@ -1600,7 +1601,11 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   const [filter, setFilter] = useState<"ALL" | "DONOR" | "WAREHOUSE" | "INTERNAL" | "SHORT">("ALL");
   const has = (v: PlanView, kind: string) => v.sources.some((x) => plan.pools[x.pool]?.kind === kind && x.qty > 0);
   // Las filas que no se distribuyen siguen en la tabla (en gris y sin marcar), para volver a marcarlas.
-  const rows = views.filter((v) => filter === "ALL" || (!v.excluded && (filter === "SHORT" ? v.short > 0 : has(v, filter === "DONOR" ? "donor" : filter === "WAREHOUSE" ? "warehouse" : "internal"))));
+  // «Mostrar»: todas, solo las que van en el plan o solo las que se quitaron (pedido del usuario:
+  // los filtros ayudan a ver lo desmarcado, pero tienen que decir claramente qué muestran).
+  const [show, setShow] = useState<"ALL" | "IN" | "OUT">("ALL");
+  const [confirmReset, setConfirmReset] = useState(false);
+  const rows = views.filter((v) => (show === "ALL" || (show === "OUT" ? v.excluded : !v.excluded)) && (filter === "ALL" || (!v.excluded && (filter === "SHORT" ? v.short > 0 : has(v, filter === "DONOR" ? "donor" : filter === "WAREHOUSE" ? "warehouse" : "internal")))));
 
   const byDonor = useMemo(() => {
     const m = new Map<string, { name: string; n: number }>();
@@ -1698,9 +1703,11 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         minWidth={1100}
         toolbar={(
           <div className="flex shrink-0 items-center gap-2">
+            <span className="hidden text-[12px] font-bold text-slate-500 xl:inline">Mostrar:</span>
+            <Pills value={show} onChange={setShow} options={[{ value: "ALL", label: "Todas", count: views.length }, { value: "IN", label: "Se distribuyen", count: active.length }, { value: "OUT", label: "No se distribuyen", count: views.length - active.length }]} />
             {edited && (
-              <button type="button" onClick={() => setEdits({})} className="flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50" title="Vuelve a la sugerencia inicial">
-                <RotateCcw className="h-4 w-4" />Restablecer
+              <button type="button" onClick={() => setConfirmReset(true)} className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50" title="Vuelve al plan calculado">
+                <RotateCcw className="h-4 w-4" />Deshacer mis cambios
               </button>
             )}
             <button type="button" onClick={download} disabled={overPools.length > 0 || !active.length} className="flex h-9 items-center gap-1.5 rounded-full bg-teal-600 px-4 text-[12.5px] font-bold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50">
@@ -1724,6 +1731,15 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
             </>
           );
         }}
+      />
+      <ConfirmationDialog
+        isOpen={confirmReset}
+        tone="warning"
+        title="Deshacer mis cambios"
+        description={`Se pierden los cambios que hiciste en ${formatNumber(Object.keys(edits).length)} ${Object.keys(edits).length === 1 ? "fila" : "filas"} (cantidades y filas quitadas) y el plan vuelve a como lo calculó el sistema.`}
+        confirmLabel="Deshacer"
+        onConfirm={() => { setEdits({}); setConfirmReset(false); }}
+        onCancel={() => setConfirmReset(false)}
       />
       {openView && (
         <PlanDrawer
