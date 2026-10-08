@@ -308,9 +308,15 @@ export interface TransferRow {
   quantity: number;
   sameMicrored: boolean;
   value: number;
-  /** Dentro del mismo establecimiento: de su F01 a uno de sus puestos comunales. */
-  internal?: boolean;
 }
+
+/** Un producto del almacén con la forma de un ítem, para que entregue en Redistribución. */
+const warehouseAsItem = (w: WarehouseItem): AvailabilityItem => ({
+  red: "", microred: "", code: w.code, ipressCode: w.code, name: w.name || w.code, category: "",
+  medCode: w.medCode, description: w.description, form: "", price: w.price, medtip: "", medpet: "", medest: "",
+  consumption: [], stock: w.stock, cpa: 0, months: Infinity, status: StockStatus.SIN_ROTACION,
+  nearestExpiry: w.lots.find((l) => l.expiry)?.expiry ?? null, lots: w.lots, monthsToExpiry: null, expiryRisk: false,
+});
 
 /**
  * Sugerencias de redistribución: a cada establecimiento desabastecido o en substock (con
@@ -351,31 +357,139 @@ export const redistributionReport = (items: AvailabilityItem[], subMax: number, 
   };
 };
 
+/* ------------------------------------------------------------ Plan de redistribución */
+
+export type PlanSourceKind = "internal" | "donor" | "warehouse";
+
+/** Quien puede entregar un producto y cuánto tiene para dar (su «saldo» en el plan). */
+export interface PlanPool {
+  key: string;
+  kind: PlanSourceKind;
+  item: AvailabilityItem;
+  medCode: string;
+  capacity: number;
+}
+
+export interface PlanSource {
+  pool: string;
+  qty: number;
+}
+
+/** Una necesidad (establecimiento o puesto × producto) y de dónde sale cada parte. */
+export interface PlanRow {
+  key: string;
+  to: AvailabilityItem;
+  /** Lo que le falta para llegar al límite de substock (CPA × meses). */
+  need: number;
+  /** ¿Es un puesto comunal? Solo recibe de su F01. */
+  site: boolean;
+  sources: PlanSource[];
+}
+
+export interface RedistributionPlan {
+  rows: PlanRow[];
+  pools: Record<string, PlanPool>;
+}
+
 /**
- * Sugerencias internas (punto B de la auditoría, 2026-10-07): la F01 abastece a sus puestos
- * comunales. A cada puesto desabastecido o en substock (con consumo) le da lo justo para llegar
- * al mínimo (CPA × límite de substock), y la F01 se queda con ese mismo mínimo de lo que ella
- * dispensa. Trabaja sobre los ítems por farmacia; `isSeparate` dice qué código es un puesto.
+ * Plan de redistribución (punto C de la auditoría, aprobado el 2026-10-07): una fila por cada
+ * necesidad, con todas sus fuentes, para que nada se abastezca dos veces. Sugerencia inicial,
+ * en este orden (opción A del usuario):
+ * 1. Puesto comunal: de su F01, que se queda con el límite de substock de lo que dispensa.
+ * 2. Establecimiento: del excedente de otros en sobrestock (lo que pasa del límite de
+ *    sobrestock), primero de la misma microred.
+ * 3. Lo que falte, del almacén.
+ * Cada fuente tiene un saldo que no se puede pasar; el usuario corrige las cantidades después.
  */
-export const internalTransfers = (pharmacyItems: AvailabilityItem[], subMax: number, isSeparate: (code: string) => boolean): TransferRow[] => {
-  const mains = new Map<string, { item: AvailabilityItem; left: number }>();
+export const redistributionPlan = (opts: {
+  items: AvailabilityItem[];
+  pharmacyItems?: AvailabilityItem[];
+  warehouse?: WarehouseItem[];
+  subMax: number;
+  sobreMin: number;
+  isSeparate?: (code: string) => boolean;
+}): RedistributionPlan => {
+  const { items, pharmacyItems = [], warehouse = [], subMax, sobreMin, isSeparate = () => false } = opts;
+  const pools: Record<string, PlanPool> = {};
+  const left: Record<string, number> = {};
+  const addPool = (pool: PlanPool) => { pools[pool.key] = pool; left[pool.key] = pool.capacity; };
+  const donorsByMed = new Map<string, PlanPool[]>();
+  for (const it of items) {
+    if (it.status !== StockStatus.SOBRESTOCK) continue;
+    const capacity = Math.floor(it.stock - it.cpa * sobreMin);
+    if (capacity <= 0) continue;
+    const pool: PlanPool = { key: `d|${it.code}|${it.medCode}`, kind: "donor", item: it, medCode: it.medCode, capacity };
+    addPool(pool);
+    donorsByMed.set(it.medCode, [...(donorsByMed.get(it.medCode) || []), pool]);
+  }
+  const storeByMed = new Map<string, PlanPool>();
+  for (const w of warehouse) {
+    if (w.stock <= 0) continue;
+    const prev = storeByMed.get(w.medCode);
+    if (prev && prev.capacity >= w.stock) continue; // un almacén por producto: el que más tiene
+    const pool: PlanPool = { key: `w|${w.code}|${w.medCode}`, kind: "warehouse", item: warehouseAsItem(w), medCode: w.medCode, capacity: Math.floor(w.stock) };
+    if (prev) delete pools[prev.key];
+    addPool(pool);
+    storeByMed.set(w.medCode, pool);
+  }
+  const mains = new Map<string, PlanPool>();
   for (const it of pharmacyItems) {
     if (!/F01$/i.test(it.code)) continue;
-    mains.set(`${it.ipressCode}|${it.medCode}`, { item: it, left: Math.floor(it.stock - it.cpa * subMax) });
+    const capacity = Math.floor(it.stock - it.cpa * subMax);
+    if (capacity <= 0) continue;
+    const pool: PlanPool = { key: `i|${it.code}|${it.medCode}`, kind: "internal", item: it, medCode: it.medCode, capacity };
+    addPool(pool);
+    mains.set(`${it.ipressCode}|${it.medCode}`, pool);
   }
-  const needs = pharmacyItems
-    .filter((i) => isSeparate(i.code) && (i.status === StockStatus.DESABASTECIDO || i.status === StockStatus.SUBSTOCK) && i.cpa > 0)
-    .sort((a, b) => a.months - b.months || b.cpa - a.cpa);
-  const rows: TransferRow[] = [];
-  for (const need of needs) {
-    const main = mains.get(`${need.ipressCode}|${need.medCode}`);
-    const want = Math.ceil(need.cpa * subMax - need.stock);
-    if (!main || main.left <= 0 || want <= 0) continue;
-    const quantity = Math.min(main.left, want);
-    main.left -= quantity;
-    rows.push({ from: main.item, to: need, quantity, sameMicrored: true, value: quantity * (need.price || 0), internal: true });
+
+  const inNeed = (i: AvailabilityItem) => (i.status === StockStatus.DESABASTECIDO || i.status === StockStatus.SUBSTOCK) && i.cpa > 0;
+  const needs = [
+    ...items.filter(inNeed).map((to) => ({ to, site: false })),
+    ...pharmacyItems.filter((i) => isSeparate(i.code) && inNeed(i)).map((to) => ({ to, site: true })),
+  ].sort((a, b) => Number(b.to.status === StockStatus.DESABASTECIDO) - Number(a.to.status === StockStatus.DESABASTECIDO) || a.to.months - b.to.months || b.to.cpa - a.to.cpa);
+
+  const rows: PlanRow[] = [];
+  const take = (pool: PlanPool, want: number, sources: PlanSource[]) => {
+    const qty = Math.min(left[pool.key], want);
+    if (qty <= 0) return 0;
+    left[pool.key] -= qty;
+    sources.push({ pool: pool.key, qty });
+    return qty;
+  };
+  for (const { to, site } of needs) {
+    const need = Math.ceil(to.cpa * subMax - to.stock);
+    if (need <= 0) continue;
+    let want = need;
+    const sources: PlanSource[] = [];
+    if (site) {
+      const main = mains.get(`${to.ipressCode}|${to.medCode}`);
+      if (main) want -= take(main, want, sources);
+    } else {
+      const donors = (donorsByMed.get(to.medCode) || [])
+        .filter((d) => d.item.code !== to.code && left[d.key] > 0)
+        .sort((a, b) => Number(b.item.microred === to.microred) - Number(a.item.microred === to.microred) || left[b.key] - left[a.key]);
+      for (const d of donors) {
+        if (want <= 0) break;
+        want -= take(d, want, sources);
+      }
+      const store = storeByMed.get(to.medCode);
+      if (store && want > 0) want -= take(store, want, sources);
+      // El almacén se muestra aunque no haya hecho falta: así se le puede pasar una parte.
+      if (store && !sources.some((x) => x.pool === store.key)) sources.push({ pool: store.key, qty: 0 });
+    }
+    rows.push({ key: `${to.code}|${to.medCode}`, to, need, site, sources });
   }
-  return rows;
+  return { rows, pools };
+};
+
+/** Lo que ya está asignado de cada fuente en el plan (sin las filas que no se distribuyen). */
+export const planUsage = (rows: Array<{ sources: PlanSource[]; excluded?: boolean }>): Record<string, number> => {
+  const used: Record<string, number> = {};
+  for (const r of rows) {
+    if (r.excluded) continue;
+    for (const s of r.sources) used[s.pool] = (used[s.pool] || 0) + s.qty;
+  }
+  return used;
 };
 
 /* ------------------------------------------------------------ Faltan en un puesto */

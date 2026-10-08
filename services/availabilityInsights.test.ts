@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import type { AvailabilityItem } from "./availabilityReport";
 import {
-  abcXyzReport, asSupplier, consumptionReport, internalTransfers, isSeparateSite, siteGapReport, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
+  abcXyzReport, asSupplier, consumptionReport, isSeparateSite, planUsage, redistributionPlan, siteGapReport, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, redistributionReport, variationOf, warehouseReport, xyzOf,
 } from "./availabilityInsights";
 
 const today = new Date(2026, 9, 7);
@@ -169,11 +169,39 @@ describe("puestos comunales escondidos en la cifra del establecimiento", () => {
     expect(siteGapReport([ipress], [f01, f02], (c) => isSeparateSite(c, "FARMACIA"))).toHaveLength(0);
   });
 
-  it("la F01 entrega a sus puestos lo justo para 2 meses y se queda con 2 meses de lo suyo", () => {
-    const rows = internalTransfers([f01, f02, f03], 2, isSeparate);
-    // Le sobran 586 − 100 × 2 = 386: primero al desabastecido (30), luego al substock (50).
-    expect(rows.map((r) => [r.to.code, r.quantity, r.internal])).toEqual([["06528F02", 30, true], ["06528F03", 50, true]]);
-    // Sin excedente en la F01 no hay sugerencia.
-    expect(internalTransfers([{ ...f01, stock: 150 }, f02], 2, isSeparate)).toHaveLength(0);
+});
+
+describe("plan de redistribución", () => {
+  const at = (code: string, over: Partial<AvailabilityItem>) => item({ code, ipressCode: code.slice(0, 5), name: code, medCode: "00807", price: 1, ...over });
+  const need = at("06001", { microred: "MR1", stock: 0, cpa: 58, months: 0, status: StockStatus.DESABASTECIDO });
+  const donor = at("06002", { microred: "MR1", stock: 419, cpa: 58, months: 7.2, status: StockStatus.SOBRESTOCK });
+  const wh = [{ code: "030S05", name: "ALMACEN", medCode: "00807", description: "AMOX", price: 1, stock: 2973, lots: [] }];
+
+  it("usa primero el excedente de otro establecimiento y completa con el almacén", () => {
+    const plan = redistributionPlan({ items: [need, donor], warehouse: wh, subMax: 2, sobreMin: 6 });
+    const row = plan.rows[0];
+    expect(row.need).toBe(116);
+    // Al donante le sobran 419 − 58 × 6 = 71; el almacén pone los 45 que faltan.
+    expect(row.sources.map((x) => [plan.pools[x.pool].kind, x.qty])).toEqual([["donor", 71], ["warehouse", 45]]);
+  });
+
+  it("no pasa del saldo de cada fuente entre varias necesidades", () => {
+    const other = at("06003", { microred: "MR2", stock: 0, cpa: 50, months: 0, status: StockStatus.DESABASTECIDO });
+    const plan = redistributionPlan({ items: [need, other, donor], subMax: 2, sobreMin: 6 });
+    const used = planUsage(plan.rows);
+    expect(used["d|06002|00807"]).toBe(71);
+    // Lo que no alcanza queda como faltante, no se inventa.
+    const covered = plan.rows.reduce((a, r) => a + r.sources.reduce((b, x) => b + x.qty, 0), 0);
+    expect(covered).toBe(71);
+    // Una fila que no se distribuye libera su parte.
+    expect(planUsage(plan.rows.map((r, i) => ({ ...r, excluded: i === 0 })))["d|06002|00807"] ?? 0).toBeLessThan(71);
+  });
+
+  it("el puesto comunal recibe solo de su F01", () => {
+    const f01 = at("06528F01", { stock: 586, cpa: 100, months: 5.86, status: StockStatus.NORMOSTOCK });
+    const f02 = at("06528F02", { stock: 0, cpa: 15, months: 0, status: StockStatus.DESABASTECIDO });
+    const plan = redistributionPlan({ items: [donor], pharmacyItems: [f01, f02], warehouse: wh, subMax: 2, sobreMin: 6, isSeparate: (c) => isSeparateSite(c, undefined) });
+    const row = plan.rows.find((r) => r.site)!;
+    expect(row.sources.map((x) => [plan.pools[x.pool].kind, x.qty])).toEqual([["internal", 30]]);
   });
 });

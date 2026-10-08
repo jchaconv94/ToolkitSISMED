@@ -1,22 +1,25 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight, ChevronDown, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Repeat2, Store, TrendingUp, Warehouse, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { AlertTriangle, ArrowRight, ChevronDown, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Download, RotateCcw, Repeat2, Store, TrendingUp, Warehouse, X } from "lucide-react";
 import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
 import { formatOneDecimal } from "../services/stockStatus";
 import { formatNumber } from "../services/numberFormat";
-import { STATUS_LABEL, monthLabel } from "../services/availabilityExport";
+import { STATUS_LABEL, buildTableWorkbook, monthLabel, type TableSheet } from "../services/availabilityExport";
+import { saveAs } from "file-saver";
 import {
   DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
-  EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, internalTransfers, lotRiskOf, lotRiskReport, overstockReport, productGapReport, redistributionReport, siteGapReport, warehouseReport,
-  type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type ProductGap, type SiteGapRow, type TransferRow, type WarehouseRow,
+  EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockReport, planUsage, productGapReport, redistributionPlan, redistributionReport, siteGapReport, warehouseReport,
+  type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type PlanRow, type PlanSource, type ProductGap, type SiteGapRow, type WarehouseRow,
 } from "../services/availabilityInsights";
-import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, useTableSort, type Tone } from "./ui/kit";
+import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, filterInputClass, useTableSort, type Tone } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import { BottomSheet } from "./ui/BottomSheet";
+import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type HeadAlign } from "./ui/FloatingTableHead";
 import {
   ChartCard, Donut, Gauge, HBars, InfoTip, LEVEL_COLOR, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar, TipBox, useChartTip,
@@ -54,7 +57,19 @@ export interface ReportContext {
    */
   byPharmacy: (items: AvailabilityItem[]) => AvailabilityItem[];
   goTab: (tab: ReportTab) => void;
+  /** Cambios del usuario al plan de redistribución; viven en el módulo para no perderse al cambiar de pestaña. */
+  planEdits: PlanEdits;
+  setPlanEdits: React.Dispatch<React.SetStateAction<PlanEdits>>;
+  /** Para el título de los Excel: «UNGET Bellavista · set 2026». */
+  reportTitle: string;
 }
+
+/** Lo que el usuario cambió en una fila del plan: no distribuirla o la cantidad de cada fuente. */
+export interface PlanEdit {
+  excluded?: boolean;
+  qty?: Record<string, number>;
+}
+export type PlanEdits = Record<string, PlanEdit>;
 
 export type ReportTab = "summary" | "establishments" | "gaps" | "expiry" | "consumption" | "abc" | "overstock" | "redistribution" | "warehouse";
 
@@ -425,11 +440,12 @@ const INFO = {
   ),
   redistribution: (subMax: number, sobreMin: number) => (
     <>
-      <P>Para cada establecimiento desabastecido o en substock (con consumo), busca otro que tenga el mismo producto con excedente (más de {sobreMin} meses), primero en la misma microred.</P>
-      <P>La cantidad es lo justo para llegar a {subMax} meses de consumo, sin dejar al que entrega por debajo de {sobreMin} meses.</P>
-      <P><b>Internas:</b> dentro de un mismo establecimiento, la F01 abastece a sus puestos comunales. Le da a cada puesto lo justo para llegar a {subMax} meses, y la F01 se queda con {subMax} meses de lo que ella dispensa.</P>
+      <P>Es un plan: no mueve nada hasta que se registre en el SISMED. Cada fila es un establecimiento (o puesto comunal) desabastecido o en substock, con consumo, y lo que <b>necesita</b> para llegar a {subMax} meses de consumo.</P>
+      <P>La sugerencia inicial cubre esa necesidad en este orden: un puesto comunal, de su F01 (que se queda con {subMax} meses de lo que dispensa); un establecimiento, primero del <b>excedente de otros</b> (lo que pasa de {sobreMin} meses, primero de la misma microred) y lo que falte, <b>del almacén</b>.</P>
+      <P>Las cantidades se pueden cambiar y una fila se puede quitar del plan. Cada fuente tiene un saldo («le quedan»): si se asigna más de lo que tiene, se marca en rojo. Nada se cuenta dos veces.</P>
     </>
   ),
+
   gaps: (subMax: number) => (
     <>
       <P>Por cada producto: en cuántos establecimientos está desabastecido o con menos de {subMax} meses de stock.</P>
@@ -453,7 +469,10 @@ export const SummaryReport: React.FC<{ ctx: ReportContext; levelCounts: Record<D
   const { report, levels: lv } = ctx;
   const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(report.items), ctx.today), [ctx.byPharmacy, report.items, ctx.today]);
   const over = useMemo(() => overstockReport(report.items, ctx.sobreMin), [report.items, ctx.sobreMin]);
-  const redis = useMemo(() => redistributionReport(report.items, ctx.subMax, ctx.sobreMin), [report.items, ctx.subMax, ctx.sobreMin]);
+  const redis = useMemo(() => {
+    const plan = redistributionPlan({ items: report.items, pharmacyItems: ctx.pharmacy?.items ?? [], warehouse: ctx.warehouse, subMax: ctx.subMax, sobreMin: ctx.sobreMin, isSeparate: separateOf(ctx) });
+    return { needs: plan.rows.length, covered: plan.rows.filter((r) => r.sources.reduce((a, x) => a + x.qty, 0) >= r.need).length };
+  }, [report.items, ctx]);
   const wh = useMemo(() => warehouseReport(ctx.warehouse, report.items, ctx.subMax), [ctx.warehouse, report.items, ctx.subMax]);
   const c = report.counts;
   const ranges: Record<DmeLevel, string> = { OPTIMO: `≥ ${lv.optimo} %`, ALTO: `${lv.alto} – ${lv.optimo} %`, REGULAR: `${lv.regular} – ${lv.alto} %`, BAJO: `< ${lv.regular} %` };
@@ -461,7 +480,7 @@ export const SummaryReport: React.FC<{ ctx: ReportContext; levelCounts: Record<D
   const alerts: Array<{ tab: ReportTab; icon: React.ReactNode; tone: string; label: string; value: string; hint: string }> = [
     { tab: "expiry", icon: <CalendarClock className="h-5 w-5" />, tone: "bg-red-50 text-red-600", label: "Vence sin usarse en 12 meses", value: money(risk.urgentValue), hint: `${formatNumber(risk.urgentLots)} lotes` },
     { tab: "overstock", icon: <PackageX className="h-5 w-5" />, tone: "bg-blue-50 text-blue-600", label: "Sobrestock inmovilizado", value: money(over.value), hint: `${formatNumber(over.rows.length)} productos` },
-    { tab: "redistribution", icon: <Repeat2 className="h-5 w-5" />, tone: "bg-teal-50 text-teal-700", label: "Redistribuciones sugeridas", value: formatNumber(redis.rows.length), hint: `${formatNumber(redis.covered)} cubren un desabastecido` },
+    { tab: "redistribution", icon: <Repeat2 className="h-5 w-5" />, tone: "bg-teal-50 text-teal-700", label: "Plan de redistribución", value: formatNumber(redis.needs), hint: `necesidades · ${formatNumber(redis.covered)} se cubren por completo` },
     { tab: "warehouse", icon: <Warehouse className="h-5 w-5" />, tone: "bg-amber-50 text-amber-700", label: "Almacén puede cubrir", value: formatNumber(wh.canCover), hint: `productos · ${money(wh.value)} en almacén` },
   ];
   return (
@@ -1526,87 +1545,309 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
 
 /* ---------------------------------------------------------------- Redistribución */
 
+interface PlanView extends PlanRow {
+  excluded: boolean;
+  covered: number;
+  short: number;
+}
+
+const PlanQty: React.FC<{ value: number; max: number; over: boolean; disabled?: boolean; onChange: (v: number) => void }> = ({ value, max, over, disabled, onChange }) => (
+  <input
+    type="number"
+    min={0}
+    max={max}
+    value={value}
+    disabled={disabled}
+    onClick={(e) => e.stopPropagation()}
+    onChange={(e) => onChange(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+    className={`h-8 w-[72px] rounded-lg border px-2 text-center font-mono text-[13px] font-bold outline-none focus:ring-2 focus:ring-teal-500/30 disabled:opacity-40 ${over ? "border-red-400 bg-red-50 text-red-700" : "border-slate-200 bg-white text-slate-800"}`}
+  />
+);
+
 export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const { anchor, toTable } = useTableAnchor();
-  const data = useMemo(() => {
-    const external = redistributionReport(ctx.report.items, ctx.subMax, ctx.sobreMin);
-    // Las internas (F01 → puesto comunal) van primero dentro de cada grupo: es el movimiento más fácil.
-    const internal = internalTransfers(ctx.pharmacy?.items ?? [], ctx.subMax, separateOf(ctx));
-    const rows = [...internal, ...external.rows].sort((a, b) => Number(b.to.status === StockStatus.DESABASTECIDO) - Number(a.to.status === StockStatus.DESABASTECIDO) || Number(!!b.internal) - Number(!!a.internal) || b.value - a.value);
-    return {
-      rows,
-      external: external.rows.length,
-      internal: internal.length,
-      internalDesab: internal.filter((r) => r.to.status === StockStatus.DESABASTECIDO).length,
-      value: external.value + internal.reduce((a, r) => a + r.value, 0),
-      sameMicrored: external.sameMicrored,
-      covered: rows.filter((r) => r.to.status === StockStatus.DESABASTECIDO).length,
-    };
-  }, [ctx]);
-  const [filter, setFilter] = useState<"ALL" | "DESAB" | "SAME" | "INTERNAL">("ALL");
-  const rows = data.rows.filter((r) => filter === "ALL" || (filter === "DESAB" ? r.to.status === StockStatus.DESABASTECIDO : filter === "INTERNAL" ? r.internal : r.sameMicrored && !r.internal));
+  const isSeparate = useMemo(() => separateOf(ctx), [ctx]);
+  // Sugerencia inicial: internas, luego excedente de otros establecimientos y lo que falte, del almacén.
+  const plan = useMemo(
+    () => redistributionPlan({ items: ctx.report.items, pharmacyItems: ctx.pharmacy?.items ?? [], warehouse: ctx.warehouse, subMax: ctx.subMax, sobreMin: ctx.sobreMin, isSeparate }),
+    [ctx.report.items, ctx.pharmacy, ctx.warehouse, ctx.subMax, ctx.sobreMin, isSeparate],
+  );
+  const { planEdits: edits, setPlanEdits: setEdits } = ctx;
+  const views: PlanView[] = useMemo(() => plan.rows.map((r) => {
+    const e = edits[r.key];
+    // Fuentes de la sugerencia más las que el usuario agregó desde el panel.
+    const extra = Object.keys(e?.qty ?? {}).filter((k) => !r.sources.some((x) => x.pool === k)).map((k) => ({ pool: k, qty: 0 }));
+    const sources = [...r.sources, ...extra].map((x) => ({ ...x, qty: e?.qty?.[x.pool] ?? x.qty }));
+    const covered = sources.reduce((a, x) => a + x.qty, 0);
+    return { ...r, sources, excluded: !!e?.excluded, covered, short: Math.max(0, r.need - covered) };
+  }), [plan, edits]);
+  const used = useMemo(() => planUsage(views), [views]);
+  const leftOf = (pool: string) => (plan.pools[pool]?.capacity ?? 0) - (used[pool] || 0);
+  // Una fila nunca recibe más de lo que necesita: el tope de cada fuente es lo que falta con las demás.
+  const roomFor = (v: PlanView, x: PlanSource) => Math.max(0, v.need - (v.covered - x.qty));
+  const setQty = (v: PlanView, pool: string, n: number) => {
+    const x = v.sources.find((s) => s.pool === pool);
+    const value = Math.min(n, x ? roomFor(v, x) : Math.max(0, v.need - v.covered));
+    setEdits((cur) => ({ ...cur, [v.key]: { ...cur[v.key], qty: { ...cur[v.key]?.qty, [pool]: value } } }));
+  };
+  const setExcluded = (row: string, v: boolean) => setEdits((cur) => ({ ...cur, [row]: { ...cur[row], excluded: v } }));
+  const edited = Object.keys(edits).length > 0;
+  const overPools = Object.keys(used).filter((k) => leftOf(k) < 0);
+
+  const active = views.filter((v) => !v.excluded);
+  const sum = (list: PlanView[], kind: string) => list.reduce((a, v) => a + v.sources.filter((x) => plan.pools[x.pool]?.kind === kind).reduce((b, x) => b + x.qty, 0), 0);
+  const donorUnits = sum(active, "donor"), whUnits = sum(active, "warehouse"), internalUnits = sum(active, "internal");
+  const shortRows = active.filter((v) => v.short > 0);
+  const [filter, setFilter] = useState<"ALL" | "DONOR" | "WAREHOUSE" | "INTERNAL" | "SHORT">("ALL");
+  const has = (v: PlanView, kind: string) => v.sources.some((x) => plan.pools[x.pool]?.kind === kind && x.qty > 0);
+  // Las filas que no se distribuyen siguen en la tabla (en gris y sin marcar), para volver a marcarlas.
+  // «Mostrar»: todas, solo las que van en el plan o solo las que se quitaron (pedido del usuario:
+  // los filtros ayudan a ver lo desmarcado, pero tienen que decir claramente qué muestran).
+  const [show, setShow] = useState<"ALL" | "IN" | "OUT">("ALL");
+  const [confirmReset, setConfirmReset] = useState(false);
+  const rows = views.filter((v) => (show === "ALL" || (show === "OUT" ? v.excluded : !v.excluded)) && (filter === "ALL" || (!v.excluded && (filter === "SHORT" ? v.short > 0 : has(v, filter === "DONOR" ? "donor" : filter === "WAREHOUSE" ? "warehouse" : "internal")))));
+
   const byDonor = useMemo(() => {
-    const m = new Map<string, { name: string; n: number; value: number }>();
-    for (const r of data.rows) { if (r.internal) continue; const e = m.get(r.from.code) || { name: r.from.name, n: 0, value: 0 }; e.n++; e.value += r.value; m.set(r.from.code, e); }
+    const m = new Map<string, { name: string; n: number }>();
+    for (const v of active) for (const x of v.sources) {
+      const pool = plan.pools[x.pool];
+      if (pool?.kind !== "donor" || !x.qty) continue;
+      const e = m.get(pool.item.code) || { name: pool.item.name, n: 0 }; e.n++; m.set(pool.item.code, e);
+    }
     return [...m.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 8);
-  }, [data]);
+  }, [active, plan]);
   const byReceiver = useMemo(() => {
     const m = new Map<string, { name: string; n: number }>();
-    for (const r of data.rows) { if (r.internal) continue; const e = m.get(r.to.code) || { name: r.to.name, n: 0 }; e.n++; m.set(r.to.code, e); }
+    for (const v of active) if (!v.site && v.covered > 0) { const e = m.get(v.to.code) || { name: v.to.name, n: 0 }; e.n++; m.set(v.to.code, e); }
     return [...m.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 8);
-  }, [data]);
-  const columns: Column<TransferRow>[] = [
-    { key: "description", label: "Producto", sort: (r) => r.to.description, render: (r) => <ProductCell code={r.to.medCode} description={r.to.description} /> },
-    { key: "from", label: "Entrega", sort: (r) => r.from.name, render: (r) => <span className="block max-w-[220px]"><span className="block truncate font-semibold text-slate-800">{r.internal ? `${siteLabel(ctx, r.from).split(" › ")[0]} · F01` : r.from.name}</span><span className="block text-[11.5px] text-blue-700">{formatNumber(r.from.stock)} u · {dec(r.from.months)} meses</span></span> },
-    { key: "arrow", label: "", render: () => <ArrowRight className="h-4 w-4 text-slate-300" /> },
-    { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className="block max-w-[220px]"><span className="block truncate font-semibold text-slate-800">{r.to.name}</span><span className="block truncate text-[11.5px] text-slate-500">{r.internal ? `${r.to.code.slice(5)} · ` : ""}{formatNumber(r.to.stock)} u · CPA {dec(r.to.cpa)}</span></span> },
+  }, [active]);
+
+  const whereOf = (it: AvailabilityItem) => siteLabel(ctx, it);
+  const units = (v: PlanView, kind: string) => v.sources.filter((x) => plan.pools[x.pool]?.kind === kind).reduce((a, x) => a + x.qty, 0);
+  const stateOf = (v: PlanView): [string, string] => v.excluded ? ["No se distribuye", "bg-slate-100 text-slate-500"] : v.short === 0 ? ["Cubierto", "bg-emerald-50 text-emerald-700"] : v.covered > 0 ? ["Parcial", "bg-amber-50 text-amber-700"] : ["Sin cubrir", "bg-red-50 text-red-700"];
+  const overRow = (v: PlanView) => !v.excluded && v.sources.some((x) => x.qty > 0 && leftOf(x.pool) < 0);
+  // Una fila, un dato por celda (NN/g, Carbon, PatternFly): el detalle y la edición, en el panel.
+  const columns: Column<PlanView>[] = [
+    { key: "description", label: "Producto", sort: (r) => r.to.description, render: (r) => <span className={r.excluded ? "opacity-45" : ""}><ProductCell code={r.to.medCode} description={r.to.description} /></span> },
+    { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className={`block max-w-[240px] ${r.excluded ? "opacity-45" : ""}`}><span className="block truncate font-semibold text-slate-800">{r.site ? whereOf(r.to) : r.to.name}</span><span className="block text-[11.5px] text-slate-500">{formatNumber(r.to.stock)} u · CPA {dec(r.to.cpa)}</span></span> },
     { key: "status", label: "Situación", sort: (r) => STATUS_ORDER.indexOf(r.to.status), render: (r) => <StatusPill status={r.to.status} /> },
-    { key: "quantity", label: "Cantidad", align: "right", sort: (r) => r.quantity, firstDir: "desc", render: (r) => <span className="font-mono text-[14px] font-black text-teal-700">{formatNumber(r.quantity)}</span> },
-    { key: "same", label: "Tipo", sort: (r) => (r.internal ? 2 : Number(r.sameMicrored)), render: (r) => <span title={r.internal ? "De la F01 a su puesto comunal" : r.sameMicrored ? "Misma microred" : "Otra microred"} className={`whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-bold ${r.internal ? "bg-teal-50 text-teal-700" : r.sameMicrored ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{r.internal ? "Interna" : r.sameMicrored ? "Misma" : "Otra"}</span> },
-    { key: "value", label: "Valor", align: "right", sort: (r) => r.value, firstDir: "desc", render: (r) => <span className="font-mono">{money(r.value)}</span> },
+    { key: "need", label: "Necesita", sort: (r) => r.need, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-slate-900">{formatNumber(r.need)}</span> },
+    { key: "others", label: "De otros", sort: (r) => units(r, "donor") + units(r, "internal"), firstDir: "desc", render: (r) => { const n = units(r, "donor") + units(r, "internal"); return <span className={`font-mono ${n ? "font-bold text-blue-700" : "text-slate-300"}`}>{formatNumber(n)}</span>; } },
+    { key: "warehouse", label: "Del almacén", sort: (r) => units(r, "warehouse"), firstDir: "desc", render: (r) => { const n = units(r, "warehouse"); return <span className={`font-mono ${n ? "font-bold text-amber-700" : "text-slate-300"}`}>{formatNumber(n)}</span>; } },
+    { key: "short", label: "Falta", sort: (r) => (r.excluded ? -1 : r.short), firstDir: "desc", render: (r) => <span className={`font-mono ${!r.excluded && r.short ? "font-bold text-red-600" : "text-slate-300"}`}>{r.excluded ? "—" : formatNumber(r.short)}</span> },
+    { key: "state", label: "Estado", sort: (r) => (r.excluded ? 3 : r.short === 0 ? 0 : r.covered > 0 ? 1 : 2), render: (r) => { const [label, cls] = stateOf(r); return <span className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-bold ${overRow(r) ? "bg-red-600 text-white" : cls}`}>{overRow(r) ? "Revisar" : label}</span>; } },
+    // La casilla solo marca o desmarca; el resto de la fila abre el panel.
+    { key: "include", label: "Distribuir", sort: (r) => Number(!r.excluded), render: (r) => <label onClick={(e) => e.stopPropagation()} className="-m-3 inline-flex cursor-pointer p-3" title={r.excluded ? "Volver a incluir en el plan" : "Quitar del plan"}><input type="checkbox" checked={!r.excluded} onChange={(e) => setExcluded(r.key, !e.target.checked)} className="h-4 w-4 cursor-pointer accent-teal-600" aria-label="Distribuir" /></label> },
   ];
+  const [openKey, setOpenKey] = useState<{ key: string; list: string[] } | null>(null);
+  const openView = openKey ? views.find((v) => v.key === openKey.key) ?? null : null;
+
+  const download = async () => {
+    const lines = active.flatMap((v) => v.sources.filter((x) => x.qty > 0).map((x) => ({ v, x, pool: plan.pools[x.pool] })));
+    const toCols = (who: string) => [
+      { header: who, width: 34, align: "left" as const }, { header: "Cód. entrega", width: 12 },
+      { header: "Recibe", width: 34, align: "left" as const }, { header: "Cód. recibe", width: 12 },
+      { header: "Código SISMED", width: 12 }, { header: "Producto", width: 48, align: "left" as const },
+      { header: "Cantidad", width: 11, fmt: "int" }, { header: "Precio", width: 10, fmt: "money" }, { header: "Valor", width: 12, fmt: "money" },
+    ];
+    const toRow = (l: (typeof lines)[number]) => [l.pool.item.name, l.pool.item.code, l.v.site ? whereOf(l.v.to) : l.v.to.name, l.v.to.code, l.v.to.medCode, l.v.to.description, l.x.qty, l.v.to.price || 0, l.x.qty * (l.v.to.price || 0)];
+    const byGiver = (a: (typeof lines)[number], b: (typeof lines)[number]) => a.pool.item.name.localeCompare(b.pool.item.name, "es") || a.v.to.name.localeCompare(b.v.to.name, "es") || a.v.to.description.localeCompare(b.v.to.description, "es");
+    const subtitle = `Plan de redistribución · ${ctx.reportTitle} · generado el ${new Date().toLocaleDateString("es-PE")}. Es un plan: se ejecuta al registrar los movimientos en el SISMED.`;
+    const sheets: TableSheet[] = [
+      { name: "Entre establecimientos", title: "Entregas entre establecimientos", subtitle, columns: toCols("Entrega"), rows: lines.filter((l) => l.pool.kind === "donor").sort(byGiver).map(toRow) },
+      { name: "Desde el almacén", title: "Pedido al almacén", subtitle, columns: toCols("Almacén"), rows: lines.filter((l) => l.pool.kind === "warehouse").sort(byGiver).map(toRow) },
+      { name: "Internas F01 - puesto", title: "Internas: de la F01 a sus puestos comunales", subtitle, columns: toCols("Entrega (F01)"), rows: lines.filter((l) => l.pool.kind === "internal").sort(byGiver).map(toRow) },
+      {
+        name: "Sin cubrir", title: "Lo que el plan no alcanza a cubrir", subtitle,
+        columns: [{ header: "Establecimiento", width: 36, align: "left" }, { header: "Código", width: 10 }, { header: "Código SISMED", width: 12 }, { header: "Producto", width: 48, align: "left" }, { header: "Situación", width: 14 }, { header: "Necesita", width: 11, fmt: "int" }, { header: "Cubierto", width: 11, fmt: "int" }, { header: "Falta", width: 10, fmt: "int" }],
+        rows: shortRows.map((v) => [v.site ? whereOf(v.to) : v.to.name, v.to.code, v.to.medCode, v.to.description, STATUS_LABEL[v.to.status], v.need, v.covered, v.short]),
+      },
+    ];
+    const buffer = await buildTableWorkbook(sheets).xlsx.writeBuffer();
+    saveAs(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `Plan_redistribucion_${ctx.reportTitle.replace(/[^\w]+/g, "_")}.xlsx`);
+  };
+
   return (
     <div className="space-y-4">
-      <KpiStrip cols={ctx.pharmacy ? "md:grid-cols-3 xl:grid-cols-5" : "md:grid-cols-2 xl:grid-cols-4"}>
-        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Redistribuciones sugeridas" value={formatNumber(data.rows.length)} hint={data.internal ? `${formatNumber(data.external)} entre establecimientos · ${formatNumber(data.internal)} internas` : "de excedente a donde falta"} onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
-        <KpiCard watermark tone="danger" icon={<PackageX />} label="Cubren un desabastecido" value={formatNumber(data.covered)} hint="el que recibe tiene stock 0" onClick={() => { setFilter("DESAB"); toTable(); }} active={filter === "DESAB"} />
-        <KpiCard watermark tone="success" icon={<Building2 />} label="Dentro de la misma microred" value={formatNumber(data.sameMicrored)} hint={`${pctText(data.external ? (data.sameMicrored / data.external) * 100 : 0)} de las de entre establecimientos`} onClick={() => { setFilter("SAME"); toTable(); }} active={filter === "SAME"} />
-        {ctx.pharmacy && <KpiCard watermark tone="success" icon={<Store />} label="Internas F01 → puesto" value={formatNumber(data.internal)} hint={`del mismo establecimiento · ${formatNumber(data.internalDesab)} a desabastecidos`} onClick={() => { setFilter("INTERNAL"); toTable(); }} active={filter === "INTERNAL"} />}
-        <KpiCard watermark tone="neutral" label="Valor a mover" value={money(data.value)} hint="a precio del producto" />
+      <KpiStrip cols="md:grid-cols-3 xl:grid-cols-5">
+        <KpiCard watermark tone="info" icon={<Repeat2 />} label="Necesidades" value={formatNumber(active.length)} hint={`${formatNumber(active.length - shortRows.length)} cubiertas${views.length > active.length ? ` · ${formatNumber(views.length - active.length)} sin distribuir` : ` · ${formatNumber(active.filter((v) => v.to.status === StockStatus.DESABASTECIDO).length)} desabastecidas`}`} onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
+        <KpiCard watermark tone="success" icon={<Building2 />} label="De otros establecimientos" value={`${formatNumber(donorUnits)} u`} hint={`en ${formatNumber(active.filter((v) => has(v, "donor")).length)} necesidades · su excedente`} onClick={() => { setFilter("DONOR"); toTable(); }} active={filter === "DONOR"} />
+        <KpiCard watermark tone="warning" icon={<Warehouse />} label="Del almacén" value={`${formatNumber(whUnits)} u`} hint={`completa ${formatNumber(active.filter((v) => has(v, "warehouse")).length)} necesidades`} onClick={() => { setFilter("WAREHOUSE"); toTable(); }} active={filter === "WAREHOUSE"} />
+        <KpiCard watermark tone="info" icon={<Store />} label="Internas F01 → puesto" value={`${formatNumber(internalUnits)} u`} hint={`${formatNumber(active.filter((v) => has(v, "internal")).length)} puestos`} onClick={() => { setFilter("INTERNAL"); toTable(); }} active={filter === "INTERNAL"} />
+        <KpiCard watermark tone="danger" icon={<PackageX />} label="Sin cubrir" value={formatNumber(shortRows.length)} hint={`faltan ${formatNumber(shortRows.reduce((a, v) => a + v.short, 0))} u`} onClick={() => { setFilter("SHORT"); toTable(); }} active={filter === "SHORT"} />
       </KpiStrip>
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Quién entrega más" info={INFO.redistribution(ctx.subMax, ctx.sobreMin)}>
+        <ChartCard title="Establecimientos con más excedente para transferir" info={<><P>Establecimientos en sobrestock que más productos transfieren en el plan. El número es la cantidad de productos que entregan.</P><P>Excedente: lo que tienen por encima de {ctx.sobreMin} meses de consumo.</P></>}>
           <HBars labelWidth="w-36 md:w-56" rows={byDonor.map(([code, e]) => ({ key: code, label: e.name, value: e.n, color: "#3b82f6", text: `${e.n}` }))} onSelect={ctx.openEstablishment} />
         </ChartCard>
-        <ChartCard title="Quién recibe más">
+        <ChartCard title="Establecimientos con más productos por recibir" info={<P>Establecimientos desabastecidos o en substock que más productos reciben en el plan, de otros establecimientos o del almacén. El número es la cantidad de productos.</P>}>
           <HBars labelWidth="w-36 md:w-56" rows={byReceiver.map(([code, e]) => ({ key: code, label: e.name, value: e.n, color: "#0d9488", text: `${e.n}` }))} onSelect={ctx.openEstablishment} />
         </ChartCard>
       </div>
+      {overPools.length > 0 && (
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-[12.5px] text-red-800">
+          En {overPools.length === 1 ? "una fuente" : `${overPools.length} fuentes`} se asigna más de lo que tiene{overPools.length === 1 ? "" : "n"} para dar. Baje las cantidades marcadas en rojo antes de descargar el plan.
+        </p>
+      )}
       <ReportTable
         anchorRef={anchor}
-        title="Sugerencias"
+        title="Plan de redistribución"
         info={INFO.redistribution(ctx.subMax, ctx.sobreMin)}
         rows={rows}
         columns={columns}
-        rowKey={(r) => `${r.from.code}|${r.to.code}|${r.to.medCode}`}
-        itemLabel="sugerencias"
-        searchOf={(r) => `${r.to.medCode} ${r.to.description} ${r.from.name} ${r.to.name}`}
+        rowKey={(r) => r.key}
+        itemLabel="necesidades"
+        searchOf={(r) => `${r.to.medCode} ${r.to.description} ${r.to.name} ${r.sources.map((x) => plan.pools[x.pool]?.item.name).join(" ")}`}
         placeholder="Buscar producto o establecimiento…"
-        onRowClick={(r, rows) => ctx.openProduct(r.to, rows.map((x) => x.to))}
+        onRowClick={(r, list) => setOpenKey({ key: r.key, list: list.map((x) => x.key) })}
         minWidth={1100}
-        card={(r) => (
-          <>
-            <ProductCell code={r.to.medCode} description={r.to.description} />
-            <div className="mt-2 flex items-center gap-2 text-[12px]">
-              <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">{r.from.name}</span>
-              <span className="flex shrink-0 items-center gap-1 rounded-lg bg-teal-50 px-2 py-1 font-mono font-black text-teal-700">{formatNumber(r.quantity)}<ArrowRight className="h-3.5 w-3.5" /></span>
-              <span className="min-w-0 flex-1 truncate text-right font-semibold text-slate-700">{r.to.name}</span>
-            </div>
-            {r.internal && <p className="mt-1.5 text-[11.5px] text-slate-500"><span className="rounded-md bg-teal-50 px-1.5 py-0.5 font-bold text-teal-700">Interna</span> de la F01 a su puesto {r.to.code.slice(5)}</p>}
-          </>
+        toolbar={(
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Un combo en la misma línea del buscador (pedido del usuario: nada que salte a otra fila). */}
+            <select value={show} onChange={(e) => setShow(e.target.value as typeof show)} aria-label="Qué filas mostrar" className={`${filterInputClass} !w-auto min-w-[150px] cursor-pointer`}>
+              <option value="ALL">Todas ({formatNumber(views.length)})</option>
+              <option value="IN">Incluidas ({formatNumber(active.length)})</option>
+              <option value="OUT">Excluidas ({formatNumber(views.length - active.length)})</option>
+            </select>
+            {edited && (
+              <button type="button" onClick={() => setConfirmReset(true)} className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50" title="Deshacer mis cambios: el plan vuelve a como lo calculó el sistema">
+                <RotateCcw className="h-4 w-4" />Deshacer
+              </button>
+            )}
+            <button type="button" onClick={download} disabled={overPools.length > 0 || !active.length} className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-teal-600 px-4 text-[12.5px] font-bold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50">
+              <Download className="h-4 w-4" />Descargar plan
+            </button>
+          </div>
         )}
+        card={(r) => {
+          const [label, cls] = stateOf(r);
+          return (
+            <>
+              <div className="flex items-start gap-2">
+                <span className="min-w-0 flex-1"><ProductCell code={r.to.medCode} description={r.to.description} /></span>
+                  <label onClick={(e) => e.stopPropagation()} className="-m-2 inline-flex cursor-pointer p-2"><input type="checkbox" checked={!r.excluded} onChange={(e) => setExcluded(r.key, !e.target.checked)} className="h-5 w-5 cursor-pointer accent-teal-600" aria-label="Distribuir" /></label>
+              </div>
+              <p className="mt-1.5 truncate text-[12px] font-semibold text-slate-700">{r.site ? whereOf(r.to) : r.to.name}</p>
+              <div className="mt-1.5 flex items-center gap-2 text-[12px] text-slate-500">
+                <span>Necesita <b className="text-slate-900">{formatNumber(r.need)}</b></span>
+                <span className={`ml-auto whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-bold ${overRow(r) ? "bg-red-600 text-white" : cls}`}>{overRow(r) ? "Revisar" : label}</span>
+              </div>
+            </>
+          );
+        }}
       />
+      <ConfirmationDialog
+        isOpen={confirmReset}
+        tone="warning"
+        title="Deshacer mis cambios"
+        description={`Se pierden los cambios que hiciste en ${formatNumber(Object.keys(edits).length)} ${Object.keys(edits).length === 1 ? "fila" : "filas"} (cantidades y filas quitadas) y el plan vuelve a como lo calculó el sistema.`}
+        confirmLabel="Deshacer"
+        onConfirm={() => { setEdits({}); setConfirmReset(false); }}
+        onCancel={() => setConfirmReset(false)}
+      />
+      {openView && (
+        <PlanDrawer
+          ctx={ctx}
+          view={openView}
+          plan={plan}
+          leftOf={leftOf}
+          onQty={(pool, n) => setQty(openView, pool, n)}
+          onExcluded={(v) => setExcluded(openView.key, v)}
+          onReset={() => setEdits((cur) => { const next = { ...cur }; delete next[openView.key]; return next; })}
+          edited={!!edits[openView.key]}
+          onClose={() => setOpenKey(null)}
+          nav={openKey ? drawerNav(openKey.key, openKey.list, (key) => setOpenKey({ key, list: openKey.list })) : undefined}
+        />
+      )}
     </div>
+  );
+};
+
+/** Panel de una necesidad del plan: de dónde sale cada parte y quién más puede dar. */
+const PlanDrawer: React.FC<{
+  ctx: ReportContext;
+  view: PlanView;
+  plan: ReturnType<typeof redistributionPlan>;
+  leftOf: (pool: string) => number;
+  onQty: (pool: string, n: number) => void;
+  onExcluded: (v: boolean) => void;
+  onReset: () => void;
+  edited: boolean;
+  onClose: () => void;
+  nav?: DrawerNav;
+}> = ({ ctx, view: v, plan, leftOf, onQty, onExcluded, onReset, edited, onClose, nav }) => {
+  useDrawerKeys(true, onClose, nav);
+  const assigned = new Map(v.sources.map((x) => [x.pool, x.qty]));
+  // Quién puede dar: su F01 si es un puesto; si no, todos los establecimientos con excedente de ese producto y el almacén.
+  const candidates = Object.values(plan.pools)
+    .filter((p) => p.medCode === v.to.medCode && (v.site ? p.kind === "internal" && p.item.ipressCode === v.to.ipressCode : p.kind !== "internal" && p.item.code !== v.to.code))
+    .sort((a, b) => Number((assigned.get(b.key) ?? 0) > 0) - Number((assigned.get(a.key) ?? 0) > 0) || Number(a.kind === "warehouse") - Number(b.kind === "warehouse") || Number(b.item.microred === v.to.microred) - Number(a.item.microred === v.to.microred) || leftOf(b.key) - leftOf(a.key));
+  const where = v.site ? siteLabel(ctx, v.to) : v.to.name;
+  // En un portal: dentro de la pestaña, el fondo oscuro dejaba una franja blanca arriba.
+  return createPortal(
+    <div className="fixed inset-0 z-[100000] flex justify-end bg-slate-900/40" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <aside role="dialog" aria-label={v.to.description} className="flex h-full w-full flex-col bg-white shadow-2xl animate-in slide-in-from-right duration-200 md:w-[620px]">
+        <div className="flex items-start gap-3 border-b border-slate-200 px-4 py-3.5 md:px-5">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2"><CodeChip code={v.to.medCode} /><StatusPill status={v.to.status} /></div>
+            <h3 className="mt-1 text-[16px] font-black leading-snug text-slate-900">{v.to.description}</h3>
+            <p className="truncate text-[12.5px] text-slate-500">Recibe: {where}{v.to.microred ? ` · ${v.to.microred}` : ""}</p>
+          </div>
+          <DrawerNavButtons nav={nav} />
+          <button type="button" onClick={onClose} aria-label="Cerrar" className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 md:px-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[["Stock", formatNumber(v.to.stock)], ["CPA", dec(v.to.cpa)], ["Necesita", formatNumber(v.need)], [v.excluded ? "No se distribuye" : v.short ? "Falta" : "Cubierto", v.excluded ? "—" : formatNumber(v.short || v.covered)]].map(([label, value]) => (
+              <div key={label} className="rounded-xl bg-slate-50 px-3 py-2.5">
+                <p className="text-[10.5px] font-black uppercase tracking-wider text-slate-400">{label}</p>
+                <p className="mt-0.5 font-mono text-[17px] font-black text-slate-900">{value}</p>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="mb-2 flex items-center gap-1.5">
+              <h4 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">De dónde sale</h4>
+              <InfoTip title="De dónde sale"><P>Viene calculado. Primero, el excedente de otros establecimientos (lo que les sobra por encima de {ctx.sobreMin} meses, primero de la misma microred); lo que falte, del almacén. Un puesto comunal recibe de su F01.</P><P>Se puede cambiar cualquier cantidad o elegir a otro que también tenga excedente. «Le queda» descuenta lo que ya se le asignó en todo el plan.</P></InfoTip>
+            </div>
+            {candidates.length ? (
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <table className="w-full text-[12.5px]">
+                  <thead className="bg-slate-50 text-[10.5px] font-black uppercase tracking-wider text-slate-500">
+                    <tr><th className="px-3 py-2 text-left">Quién entrega</th><th className="px-2 py-2 text-center">Puede dar</th><th className="px-2 py-2 text-center">Le queda</th><th className="px-3 py-2 text-center">Asignado</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {candidates.map((p) => {
+                      const qty = assigned.get(p.key) ?? 0;
+                      const left = leftOf(p.key);
+                      return (
+                        <tr key={p.key} className={qty > 0 ? "bg-teal-50/40" : ""}>
+                          <td className="px-3 py-2">
+                            <span className="block font-semibold text-slate-800">{p.kind === "warehouse" ? `Almacén · ${p.item.name}` : p.kind === "internal" ? `${siteLabel(ctx, p.item).split(" › ")[0]} · F01` : p.item.name}</span>
+                            <span className="block text-[11px] text-slate-400">{p.kind === "warehouse" ? "almacén" : p.kind === "internal" ? "su farmacia principal" : `${p.item.microred || "—"}${p.item.microred === v.to.microred ? " · misma microred" : ""} · ${dec(p.item.months)} meses de stock`}</span>
+                          </td>
+                          <td className="px-2 py-2 text-center font-mono text-slate-600">{formatNumber(p.capacity)}</td>
+                          <td className={`px-2 py-2 text-center font-mono ${left < 0 ? "font-bold text-red-600" : "text-slate-500"}`}>{formatNumber(left)}</td>
+                          <td className="px-3 py-2 text-center"><PlanQty value={qty} max={Math.max(0, v.need - (v.covered - qty))} over={left < 0 && qty > 0} disabled={v.excluded} onChange={(n) => onQty(p.key, n)} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="rounded-xl bg-slate-50 px-3 py-3 text-[12.5px] text-slate-500">Ningún establecimiento tiene excedente de este producto y el almacén no tiene stock.</p>
+            )}
+            {candidates.some((p) => leftOf(p.key) < 0 && (assigned.get(p.key) ?? 0) > 0) && <p className="mt-2 text-[12px] font-semibold text-red-600">Se asigna más de lo que le queda a alguien (en rojo). Baje esa cantidad.</p>}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 border-t border-slate-200 px-4 py-3 md:px-5">
+          <label className="flex items-center gap-2 text-[13px] font-semibold text-slate-700"><input type="checkbox" checked={!v.excluded} onChange={(e) => onExcluded(!e.target.checked)} className="h-4 w-4 accent-teal-600" />Distribuir</label>
+          {edited && <button type="button" onClick={onReset} className="ml-auto flex h-9 items-center gap-1.5 rounded-full border border-slate-200 px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50"><RotateCcw className="h-4 w-4" />Volver a la sugerencia</button>}
+        </div>
+      </aside>
+    </div>,
+    document.body,
   );
 };
 

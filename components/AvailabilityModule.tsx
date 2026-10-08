@@ -23,7 +23,7 @@ import { BottomSheet } from "./ui/BottomSheet";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import {
   AbcReport, ConsumptionReport, drawerNav, EstablishmentDetail, EstablishmentsReport, ExpiryReport, GapsReport, OverstockReport, ProductDrawer, ProductGapDrawer, RedistributionReport, SummaryReport, WarehouseReport,
-  type ReportContext, type ReportTab,
+  type PlanEdits, type ReportContext, type ReportTab,
 } from "./AvailabilityReports";
 
 /**
@@ -293,7 +293,10 @@ export const AvailabilityModule: React.FC = () => {
   }), [pharmacyIndex, registry]);
   // Disponibilidad de cada farmacia y puesto comunal (F01, F02…), para abrir un establecimiento por farmacia.
   const pharmacyReport = useMemo(() => (pharmacyItems ? summarize(pharmacyItems, summaryOptionsOf(config.formula, scope, vitalCodes)) : null), [pharmacyItems, config.formula, scope, vitalCodes]);
+  // Cambios al plan de redistribución: se pierden si cambian los datos (otro archivo, vista o fórmula).
+  const [planEdits, setPlanEdits] = useState<PlanEdits>({});
   const report = useMemo(() => summarize(ipressItems, summaryOptionsOf(config.formula, scope, vitalCodes)), [ipressItems, config.formula, scope, vitalCodes]);
+  useEffect(() => setPlanEdits({}), [report]);
   const otherScope: AvailabilityScope = scope === "all" ? "essential" : "all";
   const otherPct = useMemo(() => {
     const items = computed && (otherScope === "all" || source?.classified !== false) ? (otherScope === "all" ? computed.all : computed.essential) : null;
@@ -455,6 +458,9 @@ export const AvailabilityModule: React.FC = () => {
     openEstablishment,
     openProduct: (item, list) => setProduct(item, list ?? [item]),
     goTab,
+    planEdits,
+    setPlanEdits,
+    reportTitle: `${title}${cut ? ` · ${monthLabel(cut)}` : ""}`,
   };
   const classifiedOff = source?.classified === false;
   const scopeSwitch = (compact = false) => (
