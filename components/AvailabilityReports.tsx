@@ -14,7 +14,7 @@ import {
   EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, internalTransfers, lotRiskOf, lotRiskReport, overstockReport, planUsage, productGapReport, redistributionPlan, redistributionReport, siteGapReport, warehouseReport,
   type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type PlanRow, type PlanSource, type ProductGap, type SiteGapRow, type TransferRow, type WarehouseRow,
 } from "../services/availabilityInsights";
-import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, useTableSort, type Tone } from "./ui/kit";
+import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, filterInputClass, useTableSort, type Tone } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useIsDesktop } from "./ui/useIsDesktop";
@@ -1703,14 +1703,18 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         minWidth={1100}
         toolbar={(
           <div className="flex shrink-0 items-center gap-2">
-            <span className="hidden text-[12px] font-bold text-slate-500 xl:inline">Mostrar:</span>
-            <Pills value={show} onChange={setShow} options={[{ value: "ALL", label: "Todas", count: views.length }, { value: "IN", label: "Se distribuyen", count: active.length }, { value: "OUT", label: "No se distribuyen", count: views.length - active.length }]} />
+            {/* Un combo en la misma línea del buscador (pedido del usuario: nada que salte a otra fila). */}
+            <select value={show} onChange={(e) => setShow(e.target.value as typeof show)} aria-label="Qué filas mostrar" className={`${filterInputClass} !w-auto min-w-[150px] cursor-pointer`}>
+              <option value="ALL">Todas ({formatNumber(views.length)})</option>
+              <option value="IN">Incluidas ({formatNumber(active.length)})</option>
+              <option value="OUT">Excluidas ({formatNumber(views.length - active.length)})</option>
+            </select>
             {edited && (
-              <button type="button" onClick={() => setConfirmReset(true)} className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50" title="Vuelve al plan calculado">
-                <RotateCcw className="h-4 w-4" />Deshacer mis cambios
+              <button type="button" onClick={() => setConfirmReset(true)} className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50" title="Deshacer mis cambios: el plan vuelve a como lo calculó el sistema">
+                <RotateCcw className="h-4 w-4" />Deshacer
               </button>
             )}
-            <button type="button" onClick={download} disabled={overPools.length > 0 || !active.length} className="flex h-9 items-center gap-1.5 rounded-full bg-teal-600 px-4 text-[12.5px] font-bold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50">
+            <button type="button" onClick={download} disabled={overPools.length > 0 || !active.length} className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-teal-600 px-4 text-[12.5px] font-bold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50">
               <Download className="h-4 w-4" />Descargar plan
             </button>
           </div>
