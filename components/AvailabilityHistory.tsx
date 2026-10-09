@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, CalendarRange, FileSpreadsheet, History, MoreVertical, Settings2, Trash2, WifiOff, X } from "lucide-react";
+import { AlertTriangle, CalendarRange, FileSpreadsheet, History, ListChecks, MoreVertical, Settings2, Trash2, WifiOff, X } from "lucide-react";
 import { EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
 import { BottomSheet } from "./ui/BottomSheet";
@@ -56,7 +56,10 @@ export const AvailabilityHistory: React.FC<{
   onRemoveMonth: (month: string) => Promise<void>;
   isAdmin: boolean;
   onConfig: () => void;
-}> = ({ data, status, error, offline, registry, formula, scopeTitle, year, years, onYear, onOpenReport, storedReport, canRemove, onRemoveMonth, isAdmin, onConfig }) => {
+  /** ¿Está fuera del análisis? (selección personal de «Establecimientos del análisis»). */
+  isOut: (code: string) => boolean;
+  onEditSites: () => void;
+}> = ({ data, status, error, offline, registry, formula, scopeTitle, year, years, onYear, onOpenReport, storedReport, canRemove, onRemoveMonth, isAdmin, onConfig, isOut, onEditSites }) => {
   const isDesktop = useIsDesktop();
   const [view, setView] = useState<HistoryView>("all");
   const [unget, setUnget] = useState(ALL);
@@ -78,21 +81,23 @@ export const AvailabilityHistory: React.FC<{
   const codes = useMemo(() => [...new Set((data?.records ?? []).map((r) => r.code))], [data]);
   const ungets = useMemo(() => [...new Set(codes.map(ungetOf))].sort((a, b) => a.localeCompare(b, "es")), [codes, registry]); // eslint-disable-line react-hooks/exhaustive-deps
   const microredes = useMemo(() => [...new Set(codes.filter((c) => unget === ALL || ungetOf(c) === unget).map(microredOf))].sort((a, b) => a.localeCompare(b, "es")), [codes, unget, registry]); // eslint-disable-line react-hooks/exhaustive-deps
-  const inFilter = (code: string) => (unget === ALL || ungetOf(code) === unget) && (microred === ALL || microredOf(code) === microred);
+  // Los establecimientos fuera del análisis no cuentan: se ven aparte, en su propia tabla.
+  const inPlace = (code: string) => (unget === ALL || ungetOf(code) === unget) && (microred === ALL || microredOf(code) === microred);
+  const inFilter = (code: string) => inPlace(code) && !isOut(code);
 
   const series = useMemo(() => ({
     all: historySeries(index, "all", months, inFilter, opts),
     essential: historySeries(index, "essential", months, inFilter, opts),
     prevAll: historySeries(index, "all", prevMonths, inFilter, opts),
     prevEssential: historySeries(index, "essential", prevMonths, inFilter, opts),
-  }), [index, months, prevMonths, opts, unget, microred, registry]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [index, months, prevMonths, opts, unget, microred, registry, isOut]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Establecimientos esperados: los que tienen algo guardado en el año, dentro del filtro.
   const expected = useMemo(() => {
     const set = new Set<string>();
     for (const v of ["all", "essential"] as HistoryView[]) for (const m of months) for (const code of index.get(v)?.get(m)?.keys() ?? []) if (inFilter(code)) set.add(code);
     return set;
-  }, [index, months, unget, microred, registry]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [index, months, unget, microred, registry, isOut]); // eslint-disable-line react-hooks/exhaustive-deps
   const coverage = series.all.map((p, i) => ({ establishments: Math.max(p.establishments, series.essential[i].establishments), expected: expected.size }));
   const withData = months.map((_, i) => series.all[i].pct !== null || series.essential[i].pct !== null);
   const lastIdx = withData.lastIndexOf(true);
@@ -111,10 +116,14 @@ export const AvailabilityHistory: React.FC<{
   const groupRows = useMemo(() => {
     if (!byUnget && microredes.length < 2) return null;
     return historyRows(index, view, months, (code) => (inFilter(code) ? (byUnget ? ungetOf(code) : microredOf(code)) : null), (key) => ({ name: key, group: "" }), opts);
-  }, [index, view, months, byUnget, microredes, opts, unget, microred, registry]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [index, view, months, byUnget, microredes, opts, unget, microred, registry, isOut]); // eslint-disable-line react-hooks/exhaustive-deps
   const establishmentRows = useMemo(
     () => historyRows(index, view, months, (code) => (inFilter(code) ? code : null), (code) => ({ name: registry.get(code)?.name || code, group: byUnget ? `${ungetOf(code)} · ${microredOf(code)}` : microredOf(code) }), opts),
-    [index, view, months, opts, unget, microred, registry, byUnget], // eslint-disable-line react-hooks/exhaustive-deps
+    [index, view, months, opts, unget, microred, registry, byUnget, isOut], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const outsideRows = useMemo(
+    () => historyRows(index, view, months, (code) => (inPlace(code) && isOut(code) ? code : null), (code) => ({ name: registry.get(code)?.name || code, group: byUnget ? `${ungetOf(code)} · ${microredOf(code)}` : microredOf(code) }), opts),
+    [index, view, months, opts, unget, microred, registry, byUnget, isOut], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   if (status === "loading") {
@@ -179,13 +188,18 @@ export const AvailabilityHistory: React.FC<{
   const microredOptions = [{ value: ALL, label: "Todas las microredes" }, ...microredes.map((m) => ({ value: m, label: m }))];
   const yearOptions = years.map((y) => ({ value: String(y), label: String(y) }));
   const monthOptions = months.map((m, i) => ({ value: String(i), label: monthName(m), disabled: !withData[i] })).filter((o) => !o.disabled);
-  const subtitle = `${scopeTitle} · ${savedCount} ${savedCount === 1 ? "mes guardado" : "meses guardados"} en ${year}`;
+  const outsideCount = new Set(codes.filter(isOut)).size;
+  const subtitle = `${scopeTitle} · ${savedCount} ${savedCount === 1 ? "mes guardado" : "meses guardados"} en ${year}${outsideCount ? ` · ${outsideCount} fuera del análisis` : ""}`;
   const filterCount = (unget !== ALL ? 1 : 0) + (microred !== ALL ? 1 : 0);
 
   const menuItems = (
     <>
       <button type="button" onClick={() => { setMenuOpen(false); setMonthsOpen(true); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 hover:bg-slate-50">
         <CalendarRange className="h-5 w-5" />Meses guardados
+      </button>
+      <button type="button" onClick={() => { setMenuOpen(false); onEditSites(); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 hover:bg-slate-50">
+        <ListChecks className="h-5 w-5" /><span className="flex-1 text-left">Establecimientos del análisis</span>
+        {outsideCount > 0 && <span className="text-[12px] font-bold text-slate-400">{outsideCount} fuera</span>}
       </button>
       {isAdmin && (
         <button type="button" onClick={() => { setMenuOpen(false); onConfig(); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 hover:bg-slate-50">
@@ -361,6 +375,40 @@ export const AvailabilityHistory: React.FC<{
           </>
         )}
       />
+
+      {outsideRows.length > 0 && (
+        <ReportTable
+          title="Fuera del análisis"
+          info={<P>Establecimientos desmarcados en «Establecimientos del análisis»: están guardados, pero no cuentan en los indicadores, los gráficos ni las microredes. Los centros de salud mental comunitario van fuera por omisión.</P>}
+          rows={outsideRows}
+          columns={[
+            { key: "name", label: "Establecimiento", sort: (r) => r.name, render: (r) => <span className="block max-w-[260px]"><span className="block truncate font-semibold text-slate-800">{r.name}</span><span className="block truncate text-[11.5px] text-slate-500">{r.group}</span></span> },
+            ...monthCols,
+            { key: "delta", label: deltaLabel, sort: (r) => deltaOf(r), render: (r) => <Delta value={deltaOf(r)} /> },
+          ]}
+          rowKey={(r) => r.key}
+          itemLabel="establecimientos"
+          toolbar={
+            <button type="button" onClick={onEditSites} className="flex h-9 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12.5px] font-bold text-slate-700 hover:bg-slate-50">
+              <ListChecks className="h-4 w-4" />Cambiar
+            </button>
+          }
+          onRowClick={(row, list) => setOpenState({ row, list })}
+          minWidth={300 + shown * 76}
+          card={(r) => (
+            <>
+              <p className="font-semibold text-slate-800">{r.name}</p>
+              <p className="text-[12px] text-slate-500">{r.group}</p>
+              {sel !== null && (
+                <div className="mt-2 flex items-center justify-between text-[12.5px]">
+                  <span className="flex items-center gap-2 text-slate-600">{shortName(months[sel])} <LevelPct pct={r.pct[sel]} levelOf={levelOf} /></span>
+                  <Delta value={deltaOf(r)} />
+                </div>
+              )}
+            </>
+          )}
+        />
+      )}
 
       </>
       )}

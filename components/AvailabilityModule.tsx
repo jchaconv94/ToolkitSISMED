@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, ArrowLeft, BarChart3, Building2, CalendarClock, CheckCircle2, Download, FileSpreadsheet, History, LayoutDashboard, Loader2, MoreVertical, PackageX, RefreshCw, Repeat2, SearchX, Settings2, TrendingUp, Upload, Warehouse, X,
+  Activity, AlertTriangle, ArrowLeft, BarChart3, Building2, CalendarClock, CheckCircle2, Download, FileSpreadsheet, History, LayoutDashboard, ListChecks, Loader2, MoreVertical, PackageX, RefreshCw, Repeat2, SearchX, Settings2, TrendingUp, Upload, Warehouse, X,
 } from "lucide-react";
+import { isOutOfAnalysis, loadSitePrefs, saveSitePrefs, type SitePrefs } from "../services/availabilitySites";
+import { AvailabilitySitesDialog, type SiteOption } from "./AvailabilitySitesDialog";
 import { useAuth } from "../contexts/AuthContext";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
 import { getUserJurisdictionScope } from "../services/jurisdictionService";
@@ -315,7 +317,19 @@ export const AvailabilityModule: React.FC = () => {
     }
   };
 
-  // Filas por IPRESS (las farmacias sumadas): no dependen de la fórmula.
+  // Establecimientos fuera del análisis (2026-10-09): selección personal, guardada en este equipo.
+  // Los centros de salud mental comunitario van fuera por omisión.
+  const [sitePrefs, setSitePrefs] = useState<SitePrefs>(() => loadSitePrefs(storeUser));
+  useEffect(() => { setSitePrefs(loadSitePrefs(storeUser)); }, [storeUser]);
+  const [sitesOpen, setSitesOpen] = useState(false);
+  const applySitePrefs = (prefs: SitePrefs) => {
+    setSitePrefs(prefs);
+    if (!saveSitePrefs(storeUser, prefs)) toast.error("No se pudo guardar la selección en este equipo: se usará hasta recargar la página.");
+  };
+  const isOut = useCallback((code: string, name?: string) => isOutOfAnalysis(code, registry.get(code)?.name || name, sitePrefs), [registry, sitePrefs]);
+
+  // Filas por IPRESS (las farmacias sumadas): no dependen de la fórmula. Las de los establecimientos
+  // fuera del análisis van aparte.
   const baseRows = useMemo(() => {
     if (!dispFile || !calculated) return null;
     const rows = dispFile.data.rows.map((r) => {
@@ -323,12 +337,18 @@ export const AvailabilityModule: React.FC = () => {
       const info = registry.get(r.ipressCode);
       return info ? { ...r, microred: r.microred || info.microred || "", red: r.red || info.red || "", category: r.category || info.category || "" } : r;
     });
+    const ipress = groupByIpress(rows, (code) => registry.get(code)?.name);
+    const outCodes = new Set(ipress.filter((r) => isOut(r.code, r.name)).map((r) => r.code));
+    // Cada farmacia o puesto comunal con su nombre del registro, si está registrado.
+    const pharmacy = dispFile.data.hasPharmacies ? rows.map((r) => (r.code !== r.ipressCode && registry.get(r.code)?.name ? { ...r, name: registry.get(r.code)!.name! } : r)) : null;
     return {
-      ipress: groupByIpress(rows, (code) => registry.get(code)?.name),
-      // Cada farmacia o puesto comunal con su nombre del registro, si está registrado.
-      pharmacy: dispFile.data.hasPharmacies ? rows.map((r) => (r.code !== r.ipressCode && registry.get(r.code)?.name ? { ...r, name: registry.get(r.code)!.name! } : r)) : null,
+      ipress: ipress.filter((r) => !outCodes.has(r.code)),
+      pharmacy: pharmacy?.filter((r) => !outCodes.has(r.ipressCode)) ?? null,
+      outIpress: ipress.filter((r) => outCodes.has(r.code)),
+      outPharmacy: pharmacy?.filter((r) => outCodes.has(r.ipressCode)) ?? null,
+      sites: [...new Map(ipress.map((r) => [r.code, r.name])).entries()].map(([code, name]) => ({ code, name })),
     };
-  }, [dispFile, calculated, registry]);
+  }, [dispFile, calculated, registry, isOut]);
 
   // Todos los productos y, del mismo cálculo, la DME con los códigos fusionados.
   const vitalCodes = useMemo(() => vitalCodeSet(config.vitals), [config.vitals]);
@@ -340,28 +360,35 @@ export const AvailabilityModule: React.FC = () => {
     const lots = lotsFile?.data;
     const opts = classifyOptionsOf(config.formula);
     const groups = config.fused.groups;
+    const items = (rows: typeof baseRows.ipress | null) => (rows ? buildItems(rows, lots, asOf, opts) : null);
     return {
-      all: buildItems(baseRows.ipress, lots, asOf, opts),
-      essential: buildItems(essentialRows(baseRows.ipress, groups), lots, asOf, opts),
-      pharmacyAll: baseRows.pharmacy ? buildItems(baseRows.pharmacy, lots, asOf, opts) : null,
-      pharmacyEssential: baseRows.pharmacy ? buildItems(essentialRows(baseRows.pharmacy, groups), lots, asOf, opts) : null,
+      all: items(baseRows.ipress)!,
+      essential: items(essentialRows(baseRows.ipress, groups))!,
+      pharmacyAll: items(baseRows.pharmacy),
+      pharmacyEssential: baseRows.pharmacy ? items(essentialRows(baseRows.pharmacy, groups)) : null,
+      outAll: items(baseRows.outIpress)!,
+      outEssential: items(essentialRows(baseRows.outIpress, groups))!,
+      outPharmacyAll: items(baseRows.outPharmacy),
+      outPharmacyEssential: baseRows.outPharmacy ? items(essentialRows(baseRows.outPharmacy, groups)) : null,
     };
   }, [baseRows, lotsFile, config.formula, config.fused, asOf]);
 
   const ipressItems = useMemo<AvailabilityItem[]>(() => (computed ? (scope === "all" ? computed.all : computed.essential) : []), [computed, scope]);
   const pharmacyItems = computed ? (scope === "all" ? computed.pharmacyAll : computed.pharmacyEssential) : null;
+  const outItems = useMemo<AvailabilityItem[]>(() => (computed ? (scope === "all" ? computed.outAll : computed.outEssential) : []), [computed, scope]);
+  const outPharmacyItems = computed ? (scope === "all" ? computed.outPharmacyAll : computed.outPharmacyEssential) : null;
   // Ítems de cada farmacia (F01, F02…) por establecimiento y producto: el riesgo de vencimiento
   // se calcula por farmacia, con sus propios lotes y su propio CPA.
   const pharmacyIndex = useMemo(() => {
     const m = new Map<string, AvailabilityItem[]>();
-    for (const it of pharmacyItems ?? []) {
+    for (const it of [...(pharmacyItems ?? []), ...(outPharmacyItems ?? [])]) {
       if (it.code === it.ipressCode) continue;
       const k = `${it.ipressCode}|${it.medCode}`;
       const list = m.get(k);
       if (list) list.push(it); else m.set(k, [it]);
     }
     return m;
-  }, [pharmacyItems]);
+  }, [pharmacyItems, outPharmacyItems]);
   /**
    * Unidades para el riesgo de vencimiento de un establecimiento con farmacias (2026-10-07):
    * los puestos comunales (y las F02+ sin tipo en el registro, por prudencia) van separados,
@@ -396,6 +423,9 @@ export const AvailabilityModule: React.FC = () => {
   // Cambios al plan de redistribución, guardados por archivo y vista.
   const [planEdits, setPlanEdits] = useState<PlanEdits>({});
   const report = useMemo(() => summarize(ipressItems, summaryOptionsOf(config.formula, scope, vitalCodes)), [ipressItems, config.formula, scope, vitalCodes]);
+  // Los de fuera del análisis, con su propio cálculo: se ven aparte y se pueden abrir.
+  const outReport = useMemo(() => summarize(outItems, summaryOptionsOf(config.formula, scope, vitalCodes)), [outItems, config.formula, scope, vitalCodes]);
+  const outPharmacyReport = useMemo(() => (outPharmacyItems ? summarize(outPharmacyItems, summaryOptionsOf(config.formula, scope, vitalCodes)) : null), [outPharmacyItems, config.formula, scope, vitalCodes]);
   // Los cambios al plan se guardan junto al archivo; si cambian los datos o la vista, se recuperan
   // los de esa combinación (o ninguno).
   const planSignature = stored ? `${fileSignature(stored)}|${scope}` : "";
@@ -431,10 +461,11 @@ export const AvailabilityModule: React.FC = () => {
     if (!savePlan) return { all: null, essential: null };
     const idx = indexHistory(savePlan.records);
     return {
-      all: historySeries(idx, "all", [savePlan.month], null, historyOptions)[0].pct,
-      essential: historySeries(idx, "essential", [savePlan.month], null, historyOptions)[0].pct,
+      // Igual que el tablero: sin los establecimientos fuera del análisis (sí se guardan).
+      all: historySeries(idx, "all", [savePlan.month], (code) => !isOut(code), historyOptions)[0].pct,
+      essential: historySeries(idx, "essential", [savePlan.month], (code) => !isOut(code), historyOptions)[0].pct,
     };
-  }, [savePlan, historyOptions]);
+  }, [savePlan, historyOptions, isOut]);
   const inScope = (code: string) => scopeInfo.level === "GLOBAL" || (scopeInfo.level === "UNGET" && !!scopeInfo.ungetId && registry.get(code)?.ungetId === String(scopeInfo.ungetId));
   /** Meses anteriores al corte con sus 12 meses de consumo en el archivo, calculados igual que el corte. */
   const backfillPlans = (existing: HistoryData | null): HistorySavePlan[] => {
@@ -477,7 +508,8 @@ export const AvailabilityModule: React.FC = () => {
       setSavePlan(planHistorySave({
         month: cut,
         window: months.length,
-        items: { all: computed.all, essential: source?.classified === false ? null : computed.essential },
+        // Se guardan todos, también los de fuera del análisis: el historial los aparta al mostrarlos.
+        items: { all: [...computed.all, ...computed.outAll], essential: source?.classified === false ? null : [...computed.essential, ...computed.outEssential] },
         vitals: vitalCodes,
         nameOf: (code) => registry.get(code)?.name,
         inRegistry: (code) => registry.has(code),
@@ -547,7 +579,13 @@ export const AvailabilityModule: React.FC = () => {
   const goTab = (t: ReportTab) => { setOpenCode(null); setTab(t); scroller.current?.scrollIntoView({ block: "start" }); };
   const closeProduct = useCallback(() => setProductState(null), []);
   const closeGap = useCallback(() => setGapState(null), []);
-  const openEstablishmentName = openCode ? (report.establishments.find((e) => e.code === openCode) ?? pharmacyReport?.establishments.find((e) => e.code === openCode))?.name : undefined;
+  // Un establecimiento fuera del análisis se abre con su propio cálculo.
+  const openIsOut = !!openCode && (outReport.establishments.some((e) => e.code === openCode) || !!outPharmacyReport?.establishments.some((e) => e.code === openCode));
+  const openEstablishmentName = openCode
+    ? (openIsOut
+      ? outReport.establishments.find((e) => e.code === openCode) ?? outPharmacyReport?.establishments.find((e) => e.code === openCode)
+      : report.establishments.find((e) => e.code === openCode) ?? pharmacyReport?.establishments.find((e) => e.code === openCode))?.name
+    : undefined;
   useModuleHeaderOverride(
     screen !== "report" ? null
       : calculated && openCode ? { title: openEstablishmentName || openCode, subtitle: "Disponibilidad", onBack: closeEstablishment }
@@ -608,12 +646,29 @@ export const AvailabilityModule: React.FC = () => {
 
   const startResults = () => { setTab("summary"); setOpenCode(null); setLevel("ALL"); setMicrored("ALL"); setCalculated(true); };
 
+  // Lista de la ventana «Establecimientos del análisis»: los del TFORMDET y los del historial.
+  const siteOptions = useMemo<SiteOption[]>(() => {
+    const names = new Map<string, string>();
+    for (const s of baseRows?.sites ?? []) names.set(s.code, s.name);
+    for (const r of history?.records ?? []) if (!names.has(r.code)) names.set(r.code, r.code);
+    const multi = new Set([...names.keys()].map((c) => registry.get(c)?.red || "")).size > 1;
+    return [...names].map(([code, name]) => {
+      const info = registry.get(code);
+      const mr = info?.microred || "Sin microred";
+      return { code, name: info?.name || name, group: multi ? `${info?.red || "Sin UNGET"} · ${mr}` : mr, category: info?.category || undefined };
+    });
+  }, [baseRows, history, registry]);
+  const sitesDialog = <AvailabilitySitesDialog open={sitesOpen} onClose={() => setSitesOpen(false)} sites={siteOptions} prefs={sitePrefs} onApply={applySitePrefs} />;
+
   /* ------------------------------------------------------------ Historial */
   if (screen === "history") {
     const reds = [...new Set((history?.records ?? []).map((r) => registry.get(r.code)?.red).filter(Boolean))];
     return (
       <>
+        {sitesDialog}
         <AvailabilityHistory
+          isOut={isOut}
+          onEditSites={() => setSitesOpen(true)}
           data={history}
           status={historyStatus}
           error={historyError}
@@ -731,6 +786,8 @@ export const AvailabilityModule: React.FC = () => {
     planEdits,
     setPlanEdits,
     reportTitle: `${title}${cut ? ` · ${monthLabel(cut)}` : ""}`,
+    outside: outReport.establishments.length ? outReport : undefined,
+    editSites: () => setSitesOpen(true),
   };
   const classifiedOff = source?.classified === false;
   const scopeSwitch = (compact = false) => (
@@ -756,6 +813,10 @@ export const AvailabilityModule: React.FC = () => {
       <button type="button" onClick={() => { setActionsOpen(false); setCalculated(false); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 hover:bg-slate-50">
         <RefreshCw className="h-5 w-5" />Cargar otro TFORMDET
       </button>
+      <button type="button" onClick={() => { setActionsOpen(false); setSitesOpen(true); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 hover:bg-slate-50">
+        <ListChecks className="h-5 w-5" /><span className="flex-1 text-left">Establecimientos del análisis</span>
+        {outReport.establishments.length > 0 && <span className="text-[12px] font-bold text-slate-400">{outReport.establishments.length} fuera</span>}
+      </button>
       {isAdmin && (
         <button type="button" onClick={() => { setActionsOpen(false); setConfigOpen(true); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 hover:bg-slate-50">
           <Settings2 className="h-5 w-5" />Configuración de la fórmula
@@ -772,7 +833,14 @@ export const AvailabilityModule: React.FC = () => {
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {backButton}
           <div className="min-w-0">
-            <h2 className="truncate text-[18px] font-black text-slate-900 md:text-[20px]">{title}</h2>
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="truncate text-[18px] font-black text-slate-900 md:text-[20px]">{title}</h2>
+              {outReport.establishments.length > 0 && (
+                <button type="button" onClick={() => setSitesOpen(true)} title="Establecimientos del análisis" className="flex shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11.5px] font-bold text-slate-600 transition-colors hover:bg-slate-200">
+                  <ListChecks className="h-3.5 w-3.5" />{outReport.establishments.length} fuera del análisis
+                </button>
+              )}
+            </div>
             <p className="truncate text-[12.5px] text-slate-500">
               Datos al corte de <b className="font-bold text-slate-700">{cut ? monthLabel(cut) : "—"}</b> · {months.length} {months.length === 1 ? "mes" : "meses"} de consumo{months.length > 1 ? ` (${monthLabel(months[0])} a ${monthLabel(cut)})` : ""}
               {stored && <span title={`${stored.name} · guardado el ${new Date(stored.savedAt).toLocaleString("es-PE")}`}> · guardado en este equipo</span>}
@@ -812,7 +880,7 @@ export const AvailabilityModule: React.FC = () => {
       </div>
 
       <div ref={scroller} />
-      {openCode && <EstablishmentDetail ctx={ctx} code={openCode} onClose={closeEstablishment} onSwitch={(c) => { setProduct(null); setOpenCode(c); requestAnimationFrame(() => scrollMain(0)); }} />}
+      {openCode && <EstablishmentDetail ctx={openIsOut ? { ...ctx, report: outReport, pharmacy: outPharmacyReport, outside: undefined, outsideDetail: true } : ctx} code={openCode} onClose={closeEstablishment} onSwitch={(c) => { setProduct(null); setOpenCode(c); requestAnimationFrame(() => scrollMain(0)); }} />}
       {/* Los reportes siguen montados (ocultos) mientras el detalle está abierto: así conservan página, filtros y búsqueda. */}
       <div className={openCode ? "hidden" : undefined}>
           <nav aria-label="Reportes" className="sticky -top-2.5 z-20 -mx-3 mb-4 border-b border-slate-200 bg-slate-50 px-3 pt-0.5 sm:-top-3 sm:-mx-5 sm:px-5 2xl:-mx-6 2xl:px-6">
@@ -864,6 +932,7 @@ export const AvailabilityModule: React.FC = () => {
         previewRows={baseRows?.ipress ?? null}
         lots={lotsFile?.data}
       />
+      {sitesDialog}
       <AvailabilityHistorySaveDialog
         open={!!savePlan}
         onClose={() => { setSavePlan(null); setBackfill([]); }}
