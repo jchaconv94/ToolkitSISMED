@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, CalendarRange, FileSpreadsheet, History, MoreVertical, Settings2, Trash2, WifiOff, X } from "lucide-react";
 import { EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
@@ -234,6 +235,16 @@ export const AvailabilityHistory: React.FC<{
         <p className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2.5 text-[12.5px] font-semibold text-amber-800"><WifiOff className="h-4 w-4 shrink-0" />Sin conexión: se muestra la última copia del historial guardada en este equipo.</p>
       )}
 
+      {lastIdx < 0 ? (
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <EmptyState
+            icon={<History className="h-6 w-6" />}
+            title={`No hay meses guardados en ${year}`}
+            description={`Hay meses guardados en ${[...new Set(data.months.map((m) => m.slice(0, 4)))].sort().reverse().join(", ")}. Elija otro año arriba.`}
+          />
+        </div>
+      ) : (
+      <>
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
         {kpi("all")}
         {kpi("essential")}
@@ -255,17 +266,26 @@ export const AvailabilityHistory: React.FC<{
       </KpiStrip>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        {(["all", "essential"] as HistoryView[]).map((v) => (
+        {(["all", "essential"] as HistoryView[]).map((v) => {
+          const values = (v === "all" ? series.all : series.essential).map((p) => p.pct);
+          const empty = [...values, ...(v === "all" ? series.prevAll : series.prevEssential).map((p) => p.pct)].every((x) => x === null);
+          return (
           <ChartCard
             key={v}
             title={VIEW_LABEL[v]}
             info={<><P>Disponibilidad guardada de cada mes de {year}, con la fórmula vigente; la línea punteada es {year - 1}.</P><P>Un mes sin guardar corta la línea. Un punto hueco con borde ámbar es un mes en que faltan establecimientos. Toque un mes para verlo en los indicadores.</P></>}
-            action={<HistoryLegend current={String(year)} previous={String(year - 1)} />}
+            action={empty ? undefined : <HistoryLegend current={String(year)} previous={String(year - 1)} />}
           >
+            {empty ? (
+              <EmptyState
+                title={`Sin datos de ${VIEW_LABEL[v].toLowerCase()} en ${year}`}
+                description={v === "essential" ? "Se guardan cuando el TFORMDET trae la clasificación de los productos (Toolkit 2.2.5 o posterior)." : undefined}
+              />
+            ) : (
             <HistoryChart
               labels={months.map(shortName)}
               titles={months.map(monthName)}
-              values={(v === "all" ? series.all : series.essential).map((p) => p.pct)}
+              values={values}
               previous={(v === "all" ? series.prevAll : series.prevEssential).map((p) => p.pct)}
               currentLabel={String(year)}
               previousLabel={String(year - 1)}
@@ -277,8 +297,10 @@ export const AvailabilityHistory: React.FC<{
               levelLabels={DME_LEVEL_LABEL}
               levelOf={levelOf}
             />
+            )}
           </ChartCard>
-        ))}
+          );
+        })}
       </div>
 
       {groupRows && (
@@ -339,6 +361,9 @@ export const AvailabilityHistory: React.FC<{
           </>
         )}
       />
+
+      </>
+      )}
 
       <HistoryEstablishmentDrawer
         state={openState}
@@ -441,7 +466,8 @@ const HistoryEstablishmentDrawer: React.FC<{
   };
   const views: HistoryView[] = ["all", "essential"];
   const pctNow = (v: HistoryView) => (month ? pctOf(v, month) : null);
-  return (
+  // En un portal: dentro del módulo, una animación con transform corría el panel hacia abajo.
+  return createPortal(
     <div className="fixed inset-0 z-[100000] flex justify-end bg-slate-900/40 md:backdrop-blur-[2px]" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <aside role="dialog" aria-label={info?.name || code} className="flex h-full w-full flex-col bg-white shadow-2xl animate-in slide-in-from-right duration-200 md:w-[620px]">
         <div className="flex items-start gap-3 border-b border-slate-200 px-4 py-3.5 md:px-5">
@@ -510,7 +536,8 @@ const HistoryEstablishmentDrawer: React.FC<{
           </p>
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

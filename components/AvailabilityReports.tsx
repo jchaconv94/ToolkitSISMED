@@ -9,7 +9,7 @@ import { STATUS_LABEL, buildTableWorkbook, monthLabel, type TableSheet } from ".
 import { saveAs } from "file-saver";
 import {
   TFORMDET_OUTFLOWS,
-  DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityRow, type ClassifyOptions, type SummaryOptions, dmeLevelOf, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
+  DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
   isStill,

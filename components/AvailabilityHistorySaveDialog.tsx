@@ -24,16 +24,19 @@ export const AvailabilityHistorySaveDialog: React.FC<{
   open: boolean;
   onClose: () => void;
   plan: HistorySavePlan | null;
+  /** Meses anteriores que se pueden llenar con el mismo archivo (TFORMDET de más de 12 meses). */
+  backfill: Array<{ plan: HistorySavePlan; selected: boolean }>;
+  onToggleBackfill: (month: string) => void;
   pcts: { all: number | null; essential: number | null };
   formula: AvailabilityFormula;
   monthsInFile: number;
   busy: boolean;
   onSave: () => void;
-}> = ({ open, onClose, plan, pcts, formula, monthsInFile, busy, onSave }) => {
+}> = ({ open, onClose, plan, backfill, onToggleBackfill, pcts, formula, monthsInFile, busy, onSave }) => {
   if (!plan) return null;
+  const extra = backfill.filter((b) => b.selected).length;
   const month = monthFull(plan.month);
   const last = plan.previous[0];
-  const replaced = plan.previous.reduce((a, s) => a + s.establishments, 0);
   const level = (v: number) => <LevelChip level={dmeLevelOf(v, formula.levels)} />;
   const canSave = !plan.blocked && plan.establishments > 0;
   return (
@@ -48,7 +51,7 @@ export const AvailabilityHistorySaveDialog: React.FC<{
         <>
           <button type="button" onClick={onClose} disabled={busy} className={dialogSecondaryButton}>Cancelar</button>
           <button type="button" onClick={onSave} disabled={!canSave || busy} className={dialogPrimaryButton}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}{plan.previous.length ? `Reemplazar ${month}` : `Guardar ${month}`}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}{extra ? `Guardar ${extra + 1} meses` : plan.previous.length ? `Reemplazar ${month}` : `Guardar ${month}`}
           </button>
         </>
       }
@@ -65,7 +68,7 @@ export const AvailabilityHistorySaveDialog: React.FC<{
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
           <p className="flex items-start gap-2.5 font-semibold">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{capital(month)} ya está guardado: {formatNumber(replaced)} establecimientos, la última vez por {last.savedByName} el {dateTime(last.savedAt)}.</span>
+            <span>{capital(month)} ya está guardado: {formatNumber(plan.savedEstablishments)} establecimientos, la última vez por {last.savedByName} el {dateTime(last.savedAt)}.</span>
           </p>
           <p className="mt-1 pl-[26px]">
             Se reemplazan los {formatNumber(plan.establishments)} de este archivo.
@@ -93,11 +96,27 @@ export const AvailabilityHistorySaveDialog: React.FC<{
           ))}
         </DialogSection>
       )}
-      {monthsInFile > HISTORY_WINDOW && !plan.blocked && (
-        <p className="mt-4 flex items-start gap-2.5 rounded-xl bg-slate-50 px-4 py-3 text-[12.5px] text-slate-600">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />
-          Este TFORMDET trae {monthsInFile} meses: también se pueden llenar los {monthsInFile - HISTORY_WINDOW} meses anteriores que tengan 12 meses de consumo.
-        </p>
+      {backfill.length > 0 && !plan.blocked && (
+        <DialogSection title={`Meses anteriores (${backfill.length})`} className="mt-4">
+          <p className="flex items-start gap-2.5 px-4 py-3 text-[12.5px] text-slate-600">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />
+            El TFORMDET trae más de {HISTORY_WINDOW} meses: estos meses tienen sus {HISTORY_WINDOW} meses de consumo en el archivo y se calculan igual que el corte. Los que ya están guardados se reemplazan solo si los marca.
+          </p>
+          {backfill.map(({ plan: p, selected }) => (
+            <label key={p.month} className={`flex items-center gap-3 px-4 py-2.5 text-[13px] ${p.establishments ? "cursor-pointer hover:bg-slate-50" : "opacity-50"}`}>
+              <input type="checkbox" checked={selected} disabled={busy || !p.establishments} onChange={() => onToggleBackfill(p.month)} className="h-4 w-4 shrink-0 accent-teal-600" />
+              <span className="min-w-0 flex-1">
+                <span className="block font-bold text-slate-800">{capital(monthFull(p.month))}</span>
+                <span className="block text-[12px] text-slate-500">
+                  {formatNumber(p.establishments)} establecimientos{p.excluded.length ? ` · ${p.excluded.length} no se guardan` : ""}
+                </span>
+              </span>
+              <span className={`shrink-0 text-right text-[12px] font-semibold ${p.previous.length ? "text-amber-700" : "text-slate-500"}`}>
+                {p.previous.length ? `Guardado por ${p.previous[0].savedByName}` : "Sin guardar"}
+              </span>
+            </label>
+          ))}
+        </DialogSection>
       )}
     </ResponsiveDialog>
   );

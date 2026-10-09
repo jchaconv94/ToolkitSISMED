@@ -1,5 +1,5 @@
 import { StockStatus } from "../types";
-import { dmeLevelOf, type AvailabilityItem, type LevelThresholds } from "./availabilityReport";
+import { dmeLevelOf, type AvailabilityItem, type AvailabilityRow, type LevelThresholds, type ParsedTformdet } from "./availabilityReport";
 import type { ScopeRule } from "./availabilityConfig";
 import type { DmeLevel } from "./stockStatus";
 import { callSendKeysRpc } from "./sendKeys";
@@ -77,6 +77,65 @@ export const previousMonth = (month: string) => {
 export const currentMonthKey = (now: Date = new Date()): string => {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit" }).formatToParts(now);
   return `${parts.find((p) => p.type === "year")?.value}${parts.find((p) => p.type === "month")?.value}`;
+};
+
+/* ------------------------------------------------------------ Ventana de 12 meses */
+
+/**
+ * Filas de un mes como si fuera el corte: el consumo de los 12 meses que terminan en él y el
+ * stock al cierre de ese mes. Lo que ese mes no tenía stock ni consumo en su ventana no se
+ * evalúa, igual que al corte (`parseTformdetHistory`).
+ */
+export const rowsAtMonth = (rows: AvailabilityRow[], k: number, window = HISTORY_WINDOW): AvailabilityRow[] => {
+  const from = Math.max(0, k - window + 1);
+  const out: AvailabilityRow[] = [];
+  for (const r of rows) {
+    const consumption = r.consumption.slice(from, k + 1);
+    const stock = r.stockByMonth ? r.stockByMonth[k] ?? 0 : k === r.consumption.length - 1 ? r.stock : 0;
+    if (stock <= 0 && !consumption.some((c) => c > 0)) continue;
+    out.push({ ...r, consumption, stock });
+  }
+  return out;
+};
+
+/**
+ * Meses anteriores al corte que se pueden guardar con un TFORMDET de más de 12 meses: los que
+ * tienen sus 12 meses de consumo dentro del archivo (índices en `months`).
+ */
+export const backfillMonths = (months: string[], window = HISTORY_WINDOW): number[] => {
+  const out: number[] = [];
+  for (let k = window - 1; k < months.length - 1; k++) out.push(k);
+  return out;
+};
+
+const sliceRow = (r: AvailabilityRow, from: number): AvailabilityRow => ({
+  ...r,
+  consumption: r.consumption.slice(from),
+  otherOut: r.otherOut?.slice(from),
+  outflows: r.outflows && Object.fromEntries(Object.entries(r.outflows).map(([k, v]) => [k, v.slice(from)])),
+  stockByMonth: r.stockByMonth?.slice(from),
+});
+
+/**
+ * El TFORMDET recortado a sus últimos 12 meses: el reporte del mes siempre se calcula con 12
+ * meses de consumo (decisión del usuario del 2026-10-09), aunque el archivo traiga más. Los
+ * meses anteriores solo sirven para llenar el historial hacia atrás. Lo que en esos 12 meses no
+ * tuvo consumo ni stock al corte deja de evaluarse, como al leer el archivo.
+ */
+export const lastMonthsOf = <T extends ParsedTformdet>(data: T, window = HISTORY_WINDOW): T => {
+  if (data.months.length <= window) return data;
+  const from = data.months.length - window;
+  const months = data.months.slice(from);
+  const rows: AvailabilityRow[] = [];
+  const dormantRows: AvailabilityRow[] = [];
+  for (const r of [...data.rows, ...(data.dormantRows ?? [])]) {
+    const t = sliceRow(r, from);
+    const evaluated = t.stock > 0 || t.consumption.some((c) => c > 0);
+    if (evaluated) rows.push(t);
+    else if (t.stockByMonth?.some((v) => v > 0)) dormantRows.push(t);
+  }
+  const reportedMonths = data.reportedMonths && Object.fromEntries(Object.entries(data.reportedMonths).map(([code, list]) => [code, list.filter((m) => m >= months[0])]));
+  return { ...data, months, rows, dormantRows, reportedMonths };
 };
 
 /* ------------------------------------------------------------ Conteos y porcentaje */
@@ -222,6 +281,8 @@ export interface HistorySavePlan {
   excluded: Array<{ code: string; name: string; reason: ExcludedReason }>;
   /** Guardados anteriores de ese mes (se reemplazan los establecimientos de este archivo). */
   previous: HistorySave[];
+  /** Establecimientos distintos ya guardados ese mes (uno puede venir de dos guardados: una vista en cada uno). */
+  savedEstablishments: number;
   /** Establecimientos ya guardados ese mes que no vienen en este archivo: se conservan. */
   kept: string[];
   /** El archivo no trae la clasificación: solo se guarda «todos los productos». */
@@ -263,6 +324,7 @@ export const planHistorySave = (input: {
     establishments: codes.size,
     excluded: excluded.sort((a, b) => a.reason.localeCompare(b.reason) || a.code.localeCompare(b.code)),
     previous: (input.existing?.saves ?? []).filter((s) => s.month === month).sort((a, b) => b.savedAt.localeCompare(a.savedAt)),
+    savedEstablishments: savedCodes.size,
     kept: [...savedCodes].filter((c) => !codes.has(c) && input.inScope(c)).sort(),
     essentialMissing: !input.items.essential,
     blocked,
