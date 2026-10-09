@@ -615,6 +615,8 @@ export interface EstablishmentInfo {
   type?: string;
   microred?: string;
   red?: string;
+  /** UNGET del registro, para saber si está en la jurisdicción de quien guarda el historial. */
+  ungetId?: string;
   category?: string;
 }
 
@@ -643,9 +645,15 @@ export interface ParsedTformdet extends ParsedAvailability {
   outflowColumns?: string[];
   /**
    * Productos que se dejaron fuera por no tener stock al corte ni consumo, pero que sí tuvieron
-   * stock algún mes anterior: cuentan en la evolución de ese mes. Falta en lo guardado antes.
+   * stock algún mes anterior: cuentan en el historial de ese mes. Falta en lo guardado antes.
    */
   dormantRows?: AvailabilityRow[];
+  /**
+   * Meses en que cada establecimiento (código de IPRESS) tiene filas en el archivo. Uno que no
+   * informó el mes no se guarda en el historial: con stock 0 saldría todo desabastecido. Falta
+   * en lo guardado antes del historial.
+   */
+  reportedMonths?: Record<string, string[]>;
 }
 
 /** Código de establecimiento o de farmacia: `06503`, `06502F01`. Los almacenes (`030S05`) no. */
@@ -731,6 +739,7 @@ export const parseTformdetHistory = (
   }
   const groups = new Map<string, Acc>();
   const monthSet = new Set<string>();
+  const reported = new Map<string, Set<string>>();
   const skipped = new Set<string>();
   const lotRows: Array<{ month: string; key: string; lot: Lot }> = [];
   const warehouseRows: Array<{ month: string; raw: unknown[]; code: string; medCode: string }> = [];
@@ -748,6 +757,9 @@ export const parseTformdetHistory = (
       continue;
     }
     monthSet.add(month);
+    const ipress = ipressCodeOf(code);
+    const seen = reported.get(ipress);
+    if (seen) seen.add(month); else reported.set(ipress, new Set([month]));
     const key = `${code}|${medCode}`;
     let g = groups.get(key);
     if (!g) {
@@ -849,5 +861,6 @@ export const parseTformdetHistory = (
     skippedCodes: [...skipped].sort(),
     outflowColumns: cOut.map((c) => c.column),
     dormantRows,
+    reportedMonths: Object.fromEntries([...reported].map(([code, set]) => [code, [...set].sort()])),
   };
 };
