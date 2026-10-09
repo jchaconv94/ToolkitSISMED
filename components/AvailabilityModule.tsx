@@ -358,18 +358,19 @@ export const AvailabilityModule: React.FC = () => {
   const computed = useMemo(() => {
     if (!baseRows) return null;
     const lots = lotsFile?.data;
-    const opts = classifyOptionsOf(config.formula);
     const groups = config.fused.groups;
-    const items = (rows: typeof baseRows.ipress | null) => (rows ? buildItems(rows, lots, asOf, opts) : null);
+    // Cada vista con sus límites: la regla de gran volumen puede ir solo en la DME.
+    const all = (rows: typeof baseRows.ipress | null) => (rows ? buildItems(rows, lots, asOf, classifyOptionsOf(config.formula, "all")) : null);
+    const ess = (rows: typeof baseRows.ipress | null) => (rows ? buildItems(essentialRows(rows, groups), lots, asOf, classifyOptionsOf(config.formula, "essential")) : null);
     return {
-      all: items(baseRows.ipress)!,
-      essential: items(essentialRows(baseRows.ipress, groups))!,
-      pharmacyAll: items(baseRows.pharmacy),
-      pharmacyEssential: baseRows.pharmacy ? items(essentialRows(baseRows.pharmacy, groups)) : null,
-      outAll: items(baseRows.outIpress)!,
-      outEssential: items(essentialRows(baseRows.outIpress, groups))!,
-      outPharmacyAll: items(baseRows.outPharmacy),
-      outPharmacyEssential: baseRows.outPharmacy ? items(essentialRows(baseRows.outPharmacy, groups)) : null,
+      all: all(baseRows.ipress)!,
+      essential: ess(baseRows.ipress)!,
+      pharmacyAll: all(baseRows.pharmacy),
+      pharmacyEssential: ess(baseRows.pharmacy),
+      outAll: all(baseRows.outIpress)!,
+      outEssential: ess(baseRows.outIpress)!,
+      outPharmacyAll: all(baseRows.outPharmacy),
+      outPharmacyEssential: ess(baseRows.outPharmacy),
     };
   }, [baseRows, lotsFile, config.formula, config.fused, asOf]);
 
@@ -476,7 +477,8 @@ export const AvailabilityModule: React.FC = () => {
       return info ? { ...r, microred: r.microred || info.microred || "", red: r.red || info.red || "", category: r.category || info.category || "" } : r;
     };
     const base = groupByIpress([...fullData.rows, ...(fullData.dormantRows ?? [])].map(enrich), (code) => registry.get(code)?.name);
-    const opts = classifyOptionsOf(config.formula);
+    const optsAll = classifyOptionsOf(config.formula, "all");
+    const optsEssential = classifyOptionsOf(config.formula, "essential");
     return backfillMonths(fullData.months).map((k) => {
       const month = fullData.months[k];
       const rows = rowsAtMonth(base, k);
@@ -485,8 +487,8 @@ export const AvailabilityModule: React.FC = () => {
         month,
         window: HISTORY_WINDOW,
         items: {
-          all: buildItems(rows, undefined, asOfMonth, opts),
-          essential: fullData.hasClassification ? buildItems(essentialRows(rows, config.fused.groups), undefined, asOfMonth, opts) : null,
+          all: buildItems(rows, undefined, asOfMonth, optsAll),
+          essential: fullData.hasClassification ? buildItems(essentialRows(rows, config.fused.groups), undefined, asOfMonth, optsEssential) : null,
         },
         vitals: vitalCodes,
         nameOf: (code) => registry.get(code)?.name,
@@ -631,6 +633,8 @@ export const AvailabilityModule: React.FC = () => {
         preparedByRole: await professionOf(),
         rule: scope === "all" ? config.formula.all : config.formula.essential,
         limits: { subMax: config.formula.subMax, sobreMin: config.formula.sobreMin },
+        largeVolumeMonths: classifyOptionsOf(config.formula, scope).largeVolumeMonths,
+        outside: outReport.establishments.map((e) => ({ code: e.code, name: e.name, pct: e.pct })),
         aggregate: config.formula.aggregate,
         tformdet: tformdetSheet,
         warehouse,

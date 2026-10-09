@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import {
-  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, cutDateOf, essentialRows, groupByIpress, isEstablishmentCode, parseTformdetHistory, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, tformdetLastMonth, wholeMonthsBetween,
+  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, cutDateOf, essentialRows, groupByIpress, isEstablishmentCode, isLargeVolume, presentationLiters, parseTformdetHistory, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, tformdetLastMonth, wholeMonthsBetween,
 } from "./availabilityReport";
 
 const HEADER = ["RED", "MICRORED", "COD EESS", "ESTABLECIMIENTO", "CAT", "MED COD", "DESCRIPCION DEL PRODUCTO", "MEDFF", "PRECIO", "MEDTIP", "MEDPET", "MEDEST",
@@ -258,5 +258,38 @@ describe("fecha del stock (punto E de la auditoría)", () => {
     expect(desdeCorte.expiryRisk).toBe(false);     // 6 meses de stock alcanzan
     expect(desdeHoy.monthsToExpiry).toBe(2);       // contado desde hoy parecía a punto de vencer
     expect(desdeHoy.expiryRisk).toBe(true);
+  });
+});
+
+describe("soluciones de gran volumen (ficha 28, consideración a)", () => {
+  it("lee los litros de la presentación, no de la concentración", () => {
+    expect(presentationLiters("SODIO CLORURO 1 L 900 mg/100 mL (0.9 %)")).toBe(1);
+    expect(presentationLiters("DEXTROSA - 5 g/100 mL (5 %) - 1 L - INYECT")).toBe(1);
+    expect(presentationLiters("SODIO CLORURO 100 mL 900 mg/100 mL (0.9 %)")).toBe(0.1);
+    expect(presentationLiters("AGUA DESTILADA 1000 mL")).toBe(1);
+    expect(presentationLiters("SOLUCION X 1.5 L")).toBe(1.5);
+    expect(presentationLiters("AMOXICILINA 250 mg/5 mL")).toBeNull();
+    expect(isLargeVolume("SOLUCION DE LACTATO SODICO COMPUESTA (LACTATO RINGER) 1 L")).toBe(true);
+    expect(isLargeVolume("YODO POVIDONA 10 g/100 mL 1 L SOLUCION")).toBe(true);
+    expect(isLargeVolume("SODIO CLORURO 900 mg/100 mL (0.9 %) 100 mL INYECTABLE")).toBe(false);
+    expect(isLargeVolume("PARACETAMOL 500 mg TABLETA")).toBe(false);
+  });
+
+  it("con la regla, una de 1 L con 1,5 meses es Normostock; sin ella, Substock", () => {
+    const base = { code: "06499", ipressCode: "06499", name: "P.S. A", microred: "MR", red: "R", category: "I-2", price: 1, medtip: "M", medpet: "P", medest: "S" };
+    const rows = [
+      { ...base, medCode: "05873", description: "SODIO CLORURO 1 L 900 mg/100 mL (0.9 %)", consumption: [10, 10], stock: 15 },
+      { ...base, medCode: "05872", description: "SODIO CLORURO 100 mL 900 mg/100 mL (0.9 %)", consumption: [10, 10], stock: 15 },
+      { ...base, medCode: "03789", description: "DEXTROSA 1 L 5 g/100 mL (5 %)", consumption: [10, 10], stock: 5 },
+      // Un insumo de 1 L no es «un medicamento que corresponde a una solución».
+      { ...base, medCode: "11338", description: "JABON GERMICIDA LIQUIDO 1 L", medtip: "I", consumption: [10, 10], stock: 15 },
+    ] as any[];
+    const opts = { truncate: false, subMax: 2, sobreMin: 6 };
+    const withRule = buildItems(rows, undefined, new Date(), { ...opts, largeVolumeMonths: 1 });
+    expect(withRule.map((i) => i.status)).toEqual([StockStatus.NORMOSTOCK, StockStatus.SUBSTOCK, StockStatus.SUBSTOCK, StockStatus.SUBSTOCK]);
+    expect(withRule.map((i) => !!i.largeVolume)).toEqual([true, false, true, false]);
+    const without = buildItems(rows, undefined, new Date(), opts);
+    expect(without.map((i) => i.status)).toEqual([StockStatus.SUBSTOCK, StockStatus.SUBSTOCK, StockStatus.SUBSTOCK, StockStatus.SUBSTOCK]);
+    expect(without.some((i) => i.largeVolume)).toBe(false);
   });
 });

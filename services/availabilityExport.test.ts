@@ -71,4 +71,25 @@ describe("Excel de disponibilidad", () => {
     const head = (at.getRow(10).values as unknown[]).map(String);
     expect(at.getCell(11, head.indexOf("Motivo")).value).toBe("Vencen 12 u sin usarse");
   });
+
+  it("la metodología dice qué establecimientos quedaron fuera y explica la regla de 1 litro", async () => {
+    const { rows } = parseAvailabilitySheet([HEADER,
+      ["R", "MR", "06503", "P.S. A", "I-1", "05873", "SODIO CLORURO 1 L 900 mg/100 mL (0.9 %)", "INY", 1, "M", "P", "S", 10, 10, 15]]);
+    const items = buildItems(rows, undefined, new Date(), { truncate: false, subMax: 2, sobreMin: 6, largeVolumeMonths: 1 });
+    expect(items[0].status).toBe(StockStatus.NORMOSTOCK);
+    const wb = await buildAvailabilityWorkbook({
+      report: summarize(items), pharmacyItems: null, months: ["202608", "202609"], scope: "essential", title: "UNGET X", formulaText: "f",
+      levels: { optimo: 90, alto: 80, regular: 70 }, source: "s", largeVolumeMonths: 1,
+      outside: [{ code: "31456", name: "C.S.M.C. BELLAVISTA", pct: 73.17 }],
+    });
+    const me = wb.getWorksheet("Metodología")!;
+    const text: string[] = [];
+    me.eachRow((row) => row.eachCell((cell) => { if (typeof cell.value === "string") text.push(cell.value); }));
+    const all = text.join(" | ");
+    expect(all).toMatch(/Fuera del análisis/);
+    expect(all).toMatch(/C\.S\.M\.C\. BELLAVISTA \(31456, 73,2 %\)/);
+    expect(all).toMatch(/Soluciones de gran volumen/);
+    expect(all).toMatch(/Soluciones de 1 L o más: desde 1/);
+  });
 });
+

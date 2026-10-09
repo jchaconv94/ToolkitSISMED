@@ -275,6 +275,10 @@ export interface AvailabilityExportParams {
   /** Regla de la vista exportada, para explicarla en Metodología. */
   rule?: ScopeRule;
   limits?: { subMax: number; sobreMin: number };
+  /** Soluciones de gran volumen (1 L o más): Normostock desde estos meses, si la regla va en esta vista. */
+  largeVolumeMonths?: number;
+  /** Establecimientos que quien generó el reporte dejó fuera del análisis (no cuentan en nada). */
+  outside?: Array<{ code: string; name: string; pct: number }>;
   aggregate?: "average" | "sum";
   /** Stock de los almacenes al corte (no cuenta en la disponibilidad). */
   warehouse?: WarehouseItem[] | null;
@@ -709,6 +713,12 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       ? `Medicamentos esenciales (DME): tipo M, de estrategia «S» o «_», del petitorio o del listado de códigos fusionados de DIGEMID${p.fusedVersion ? ` (${p.fusedVersion})` : ""}. Las presentaciones de un mismo grupo se suman en su código destino (columna «Fusiona»).`
       : "Todos los productos con stock al cierre o con consumo en el periodo."],
     ["", "No se incluyen", "Los almacenes (códigos como 030S05): su stock se muestra en la hoja «Almacén». Los productos sin stock y sin consumo en todo el periodo."],
+    ...(p.outside?.length
+      ? [["", "Fuera del análisis", `Establecimientos que quien generó el reporte dejó fuera (no cuentan en la disponibilidad ni en las demás hojas): ${p.outside.map((o) => `${o.name} (${o.code}, ${pctText(o.pct)})`).join("; ")}. Los centros de salud mental comunitario van fuera por omisión.`]]
+      : []),
+    ...(p.largeVolumeMonths !== undefined
+      ? [["", "Soluciones de gran volumen", `Las de 1 L o más (se reconocen por la presentación) son Normostock desde ${n(Math.min(lim.subMax, p.largeVolumeMonths))} ${p.largeVolumeMonths === 1 ? "mes" : "meses"} de provisión: «la disponibilidad se considera con un mes de existencia disponible» (ficha 28, consideración a).`]]
+      : []),
   ]);
 
   meSection("3. Cálculo paso a paso");
@@ -726,10 +736,12 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
 
   meSection("4. Situaciones");
   const counts = (yes: boolean) => (yes ? "Sí" : "No");
+  const lvMonths = Math.min(lim.subMax, p.largeVolumeMonths ?? lim.subMax);
+  const lvNote = (text: string) => (p.largeVolumeMonths !== undefined ? ` Soluciones de 1 L o más: ${text}.` : "");
   const sitRows: Array<[StockStatus, string, string]> = [
     [StockStatus.DESABASTECIDO, "No hay stock (stock 0).", "No"],
-    [StockStatus.SUBSTOCK, `Menos de ${n(lim.subMax)} meses de provisión.`, counts(rule.substock)],
-    [StockStatus.NORMOSTOCK, `De ${n(lim.subMax)} a ${n(lim.sobreMin)} meses de provisión.`, counts(rule.normostock)],
+    [StockStatus.SUBSTOCK, `Menos de ${n(lim.subMax)} meses de provisión.${lvNote(`menos de ${n(lvMonths)}`)}`, counts(rule.substock)],
+    [StockStatus.NORMOSTOCK, `De ${n(lim.subMax)} a ${n(lim.sobreMin)} meses de provisión.${lvNote(`desde ${n(lvMonths)}`)}`, counts(rule.normostock)],
     [StockStatus.SOBRESTOCK, `Más de ${n(lim.sobreMin)} meses de provisión.`, counts(rule.sobrestock)],
     [StockStatus.SIN_ROTACION, "Hay stock, pero no hubo consumo en todo el periodo.", rule.sinRotacion === "yes" ? "Sí" : rule.sinRotacion === "vital" ? "Solo si es medicamento vital (RM 1288-2018); los demás no se evalúan" : "No"],
   ];

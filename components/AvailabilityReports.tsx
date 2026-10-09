@@ -1239,7 +1239,10 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
       <aside role="dialog" aria-label={item.description} className="flex h-full w-full flex-col bg-white shadow-2xl animate-in slide-in-from-right duration-200 md:w-[620px]">
         <div className="flex items-start gap-3 border-b border-slate-200 px-4 py-3.5 md:px-5">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2"><CodeChip code={item.medCode} /><StatusPill status={item.status} /></div>
+            <div className="flex flex-wrap items-center gap-2">
+              <CodeChip code={item.medCode} /><StatusPill status={item.status} />
+              {item.largeVolume && <span title="Ficha 28: una solución de 1 L o más cuenta como disponible desde menos meses de existencia (Configuración › Gran volumen)" className="rounded-full bg-sky-50 px-2 py-0.5 text-[11.5px] font-bold text-sky-700">Gran volumen</span>}
+            </div>
             <h3 className="mt-1 text-[16px] font-black leading-snug text-slate-900">{item.description}</h3>
             <p className="truncate text-[12.5px] text-slate-500">{item.name} · {item.microred}</p>
           </div>
@@ -1913,8 +1916,9 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   const { planEdits: edits, setPlanEdits: setEdits } = ctx;
   const views: PlanView[] = useMemo(() => plan.rows.map((r) => {
     const e = edits[r.key];
-    // Fuentes de la sugerencia más las que el usuario agregó desde el panel.
-    const extra = Object.keys(e?.qty ?? {}).filter((k) => !r.sources.some((x) => x.pool === k)).map((k) => ({ pool: k, qty: 0 }));
+    // Fuentes de la sugerencia más las que el usuario agregó desde el panel (si siguen existiendo:
+    // un establecimiento que luego quedó fuera del análisis ya no es fuente).
+    const extra = Object.keys(e?.qty ?? {}).filter((k) => !!plan.pools[k] && !r.sources.some((x) => x.pool === k)).map((k) => ({ pool: k, qty: 0 }));
     const sources = [...r.sources, ...extra].map((x) => ({ ...x, qty: e?.qty?.[x.pool] ?? x.qty }));
     const covered = sources.reduce((a, x) => a + x.qty, 0);
     return { ...r, sources, excluded: !!e?.excluded, covered, short: Math.max(0, r.need - covered) };

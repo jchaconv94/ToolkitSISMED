@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
-import { Calculator, Check, FileSpreadsheet, HeartPulse, Info, Layers, Loader2, Pencil, Plus, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { Calculator, Check, Droplets, FileSpreadsheet, HeartPulse, Info, Layers, Loader2, Pencil, Plus, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import {
   DEFAULT_AVAILABILITY_FORMULA, availabilityConfigApi, classifyOptionsOf, diffFusedGroups, parseFusedCodesSheet, summaryOptionsOf, vitalCodeSet,
   type AvailabilityConfig, type AvailabilityFormula, type FusedCatalog, type FusedGroups, type ScopeRule, type SinRotacionRule,
 } from "../services/availabilityConfig";
-import { buildItems, essentialRows, summarize, type AvailabilityRow, type Lot } from "../services/availabilityReport";
+import { StockStatus } from "../types";
+import { buildItems, essentialRows, isLargeVolume, summarize, type AvailabilityRow, type Lot } from "../services/availabilityReport";
 import type { VitalProduct } from "../services/vitalProducts";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
 import { TableSearch, inputClass } from "./ui/kit";
@@ -14,10 +15,11 @@ import { TablePagination } from "./ui/TablePagination";
 
 /**
  * Configuración del módulo Disponibilidad (aprobada el 2026-10-06): fórmula, códigos
- * fusionados de DIGEMID y productos vitales. Solo el administrador la abre; vale para todos.
+ * fusionados de DIGEMID, productos vitales y, desde el 2026-10-09, la regla de las soluciones
+ * de gran volumen de la ficha 28. Solo el administrador la abre; vale para todos.
  */
 
-type Tab = "formula" | "fused" | "vitals";
+type Tab = "formula" | "largeVolume" | "fused" | "vitals";
 const PAGE = 25;
 
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -26,6 +28,7 @@ const padCode = (v: string) => {
   return /^\d+$/.test(s) && s.length < 5 ? s.padStart(5, "0") : s;
 };
 const pctText = (p: number) => `${p.toFixed(1).replace(".", ",")} %`;
+const monthsLabel = (n: number) => `${String(n).replace(".", ",")} ${n === 1 ? "mes" : "meses"}`;
 const dateText = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "");
 
 const Switch: React.FC<{ on: boolean; onChange: (v: boolean) => void; label: string }> = ({ on, onChange, label }) => (
@@ -66,9 +69,31 @@ const Row: React.FC<{ title: string; hint?: string; children: React.ReactNode }>
 
 /* ------------------------------------------------------------------ Fórmula */
 
-const FormulaTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: AvailabilityFormula) => void; preview: { current: [number, number]; draft: [number, number] } | null }> = ({ formula: f, onChange, preview }) => {
+type Preview = { current: [number, number]; draft: [number, number] } | null;
+
+/** Cómo cambia la disponibilidad con el borrador, antes de guardar. */
+const PreviewCard: React.FC<{ preview: Preview }> = ({ preview }) =>
+  preview ? (
+    <div className="rounded-2xl border border-teal-200 bg-teal-50/60 p-4">
+      <p className="text-[11px] font-black uppercase tracking-widest text-teal-700">Con los archivos cargados</p>
+      {(["Todos los productos", "DME de la UNGET"] as const).map((label, i) => (
+        <div key={label} className="mt-3">
+          <p className="text-[12px] text-slate-500">{label}</p>
+          <p className="text-[20px] font-black text-slate-900">
+            {pctText(preview.current[i])}
+            {Math.abs(preview.current[i] - preview.draft[i]) > 0.05 && <><span className="mx-1 text-[14px] text-slate-400">→</span><span className="text-teal-700">{pctText(preview.draft[i])}</span></>}
+          </p>
+        </div>
+      ))}
+      <p className="mt-3 text-[11.5px] text-slate-500">Cambia al mover los interruptores, antes de guardar.</p>
+    </div>
+  ) : (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 text-[12.5px] text-slate-500">Cargue y calcule los archivos para ver aquí cómo cambia la disponibilidad antes de guardar.</div>
+  );
+
+const FormulaTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: AvailabilityFormula) => void; preview: Preview }> = ({ formula: f, onChange, preview }) => {
   const setRule = (scope: "all" | "essential", patch: Partial<ScopeRule>) => onChange({ ...f, [scope]: { ...f[scope], ...patch } });
-  const situations: Array<[keyof Omit<ScopeRule, "sinRotacion">, string, string]> = [
+  const situations: Array<[Exclude<keyof ScopeRule, "sinRotacion" | "largeVolume">, string, string]> = [
     ["normostock", "Normostock", `${f.subMax} a ${f.sobreMin} meses`],
     ["sobrestock", "Sobrestock", `más de ${f.sobreMin} meses`],
     ["substock", "Substock", `menos de ${f.subMax} meses`],
@@ -123,28 +148,122 @@ const FormulaTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availab
         </Card>
       </div>
       <div className="space-y-4">
-        {preview ? (
-          <div className="rounded-2xl border border-teal-200 bg-teal-50/60 p-4">
-            <p className="text-[11px] font-black uppercase tracking-widest text-teal-700">Con los archivos cargados</p>
-            {(["Todos los productos", "DME de la UNGET"] as const).map((label, i) => (
-              <div key={label} className="mt-3">
-                <p className="text-[12px] text-slate-500">{label}</p>
-                <p className="text-[20px] font-black text-slate-900">
-                  {pctText(preview.current[i])}
-                  {Math.abs(preview.current[i] - preview.draft[i]) > 0.05 && <><span className="mx-1 text-[14px] text-slate-400">→</span><span className="text-teal-700">{pctText(preview.draft[i])}</span></>}
-                </p>
-              </div>
-            ))}
-            <p className="mt-3 text-[11.5px] text-slate-500">Cambia al mover los interruptores, antes de guardar.</p>
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 text-[12.5px] text-slate-500">Cargue y calcule los archivos para ver aquí cómo cambia la disponibilidad antes de guardar.</div>
-        )}
+        <PreviewCard preview={preview} />
         <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-[12px] text-slate-600">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-          <span>La ficha 28 cuenta Normostock y Sobrestock. En Sin rotación «solo se considera a los medicamentos vitales»: con «Vitales», esos cuentan como disponibles y los demás sin rotación no entran en el total.</span>
+          <span>La ficha 28 cuenta Normostock y Sobrestock. En Sin rotación «solo se considera a los medicamentos vitales»: con «Vitales», esos cuentan como disponibles y los demás sin rotación no entran en el total. Las soluciones de 1 L o más tienen su propio límite (pestaña «Gran volumen»).</span>
         </div>
         <button type="button" onClick={() => onChange(DEFAULT_AVAILABILITY_FORMULA)} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 hover:bg-slate-50">
+          <RotateCcw className="h-4 w-4" />Restablecer ficha 28
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ Gran volumen */
+
+/**
+ * Soluciones de gran volumen (ficha 28, consideración a): se reconocen solas por la presentación
+ * de la descripción (1 L o más) y se clasifican con su propio límite de Normostock.
+ */
+const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: AvailabilityFormula) => void; preview: Preview; rows: AvailabilityRow[] | null; groups: FusedGroups }> = ({ formula: f, onChange, preview, rows, groups }) => {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const months = Math.min(f.subMax, f.largeVolumeMonths);
+  // Productos de 1 L o más de la DME (o de todos, si la DME no se puede calcular) en el archivo
+  // cargado: en cuántos establecimientos están y en cuántos pasan a Normostock con la regla.
+  const products = useMemo(() => {
+    if (!rows) return null;
+    // Solo medicamentos (MEDTIP «M»): sin la clasificación del Toolkit 2.2.5 no se puede saber cuáles son.
+    if (!rows.some((r) => r.medtip)) return { list: [], dme: false, classified: false };
+    const dme = essentialRows(rows, groups);
+    const source = (dme.length ? dme : rows.filter((r) => r.medtip === "M")).filter((r) => isLargeVolume(r.description));
+    const base = { truncate: f.truncate, subMax: f.subMax, sobreMin: f.sobreMin };
+    const without = buildItems(source, undefined, new Date(), base);
+    const withRule = buildItems(source, undefined, new Date(), { ...base, largeVolumeMonths: f.largeVolumeMonths });
+    const by = new Map<string, { code: string; name: string; sites: number; changed: number }>();
+    without.forEach((it, i) => {
+      const e = by.get(it.medCode) || { code: it.medCode, name: it.description, sites: 0, changed: 0 };
+      e.sites++;
+      if (it.status === StockStatus.SUBSTOCK && withRule[i].status === StockStatus.NORMOSTOCK) e.changed++;
+      by.set(it.medCode, e);
+    });
+    return { list: [...by.values()].sort((a, b) => b.changed - a.changed || a.name.localeCompare(b.name, "es")), dme: dme.length > 0, classified: true };
+  }, [rows, groups, f.truncate, f.subMax, f.sobreMin, f.largeVolumeMonths]);
+  const q = norm(search.trim());
+  const shown = (products?.list ?? []).filter((p) => !q || norm(`${p.code} ${p.name}`).includes(q));
+  useEffect(() => setPage(1), [q]);
+  const changed = (products?.list ?? []).reduce((a, p) => a + p.changed, 0);
+  const setRule = (scope: "all" | "essential", v: boolean) => onChange({ ...f, [scope]: { ...f[scope], largeVolume: v } });
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
+      <div className="space-y-4">
+        <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-50 text-sky-700"><Droplets className="h-5 w-5" /></span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] font-bold text-slate-900">Soluciones de gran volumen · Ficha 28, consideración a)</p>
+            <p className="mt-1 text-[12.5px] italic text-slate-600">«Para un medicamento que corresponde a una solución de gran volumen (igual o mayor 1 litro) la disponibilidad se considera con un mes de existencia disponible.»</p>
+            <p className="mt-2 text-[12px] text-slate-500">Se reconocen solas: medicamentos (MEDTIP «M») con presentación de 1 L o más en la descripción, como «SODIO CLORURO 1 L». Con la regla, desde {monthsLabel(months)} de existencia cuentan como Normostock en vez de Substock. La ficha la aplica solo a la DME.</p>
+          </div>
+        </div>
+        <Card title="Regla">
+          <Row title="Aplicar en" hint="Todos los productos · Esenciales (DME)">
+            <span className="flex items-center gap-2 text-[12px] font-semibold text-slate-500">Todos <Switch on={!!f.all.largeVolume} onChange={(v) => setRule("all", v)} label="Gran volumen en todos los productos" /></span>
+            <span className="flex items-center gap-2 text-[12px] font-semibold text-slate-500">DME <Switch on={!!f.essential.largeVolume} onChange={(v) => setRule("essential", v)} label="Gran volumen en la DME" /></span>
+          </Row>
+          <Row title="Normostock desde" hint={`Para las demás, ${monthsLabel(f.subMax)} (límite de Substock de la pestaña Fórmula)`}>
+            <NumberBox value={f.largeVolumeMonths} onChange={(v) => onChange({ ...f, largeVolumeMonths: Math.max(0, Math.min(f.subMax, v)) })} suffix="meses" label="Normostock desde" step={0.5} />
+          </Row>
+        </Card>
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center">
+            <p className="min-w-0 flex-1 px-1 text-[11px] font-black uppercase tracking-widest text-slate-400">
+              {products?.classified ? `${products.list.length} medicamentos de 1 L o más en el archivo cargado${products.dme ? " (DME)" : ""}` : "Medicamentos de 1 L o más"}
+            </p>
+            {products && products.list.length > 0 && <TableSearch value={search} onChange={setSearch} placeholder="Buscar producto o código…" className="md:max-w-xs" />}
+          </div>
+          {!products ? (
+            <p className="px-4 py-6 text-center text-[12.5px] text-slate-500">Cargue y calcule el TFORMDET para ver qué productos son de gran volumen y en cuántos establecimientos cambia su situación.</p>
+          ) : !products.classified ? (
+            <p className="px-4 py-6 text-center text-[12.5px] text-slate-500">Este TFORMDET no trae la clasificación de los productos (MEDTIP): no se puede saber cuáles son medicamentos. Descárguelo con el Toolkit 2.2.5 o posterior.</p>
+          ) : products.list.length === 0 ? (
+            <p className="px-4 py-6 text-center text-[12.5px] text-slate-500">El archivo cargado no trae medicamentos de 1 L o más.</p>
+          ) : (
+            <>
+              <div className="scrollbar-x overflow-x-auto">
+                <table className="w-full min-w-[560px]">
+                  <thead><tr className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wide text-slate-500"><th className="px-4 py-3">Código</th><th className="px-4 py-3">Producto</th><th className="px-4 py-3 text-center">Establecimientos</th><th className="px-4 py-3 text-center">Pasan a Normostock</th></tr></thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {shown.slice((page - 1) * PAGE, page * PAGE).map((p) => (
+                      <tr key={p.code} className="h-12">
+                        <td className="px-4"><span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{p.code}</span></td>
+                        <td className="px-4 text-[13px] font-semibold text-slate-900">{p.name}</td>
+                        <td className="px-4 text-center font-mono text-[12.5px] text-slate-600">{p.sites}</td>
+                        <td className={`px-4 text-center font-mono text-[12.5px] font-bold ${p.changed ? "text-emerald-700" : "text-slate-300"}`}>{p.changed || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <TablePagination page={page} pageSize={PAGE} total={shown.length} onPageChange={setPage} itemLabel="productos" />
+            </>
+          )}
+        </div>
+      </div>
+      <div className="space-y-4">
+        <PreviewCard preview={preview} />
+        {products && products.list.length > 0 && (
+          <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-[12px] text-slate-600">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+            <span>
+              {f.essential.largeVolume || f.all.largeVolume
+                ? <>Con {monthsLabel(months)}, {changed} {changed === 1 ? "ítem pasa" : "ítems pasan"} de Substock a Normostock en los establecimientos del archivo.</>
+                : <>La regla está apagada. Encendida, con {monthsLabel(months)}, {changed} {changed === 1 ? "ítem pasaría" : "ítems pasarían"} de Substock a Normostock.</>}
+            </span>
+          </div>
+        )}
+        <button type="button" onClick={() => onChange({ ...f, largeVolumeMonths: DEFAULT_AVAILABILITY_FORMULA.largeVolumeMonths, all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: true } })} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 hover:bg-slate-50">
           <RotateCcw className="h-4 w-4" />Restablecer ficha 28
         </button>
       </div>
@@ -380,6 +499,11 @@ export const AvailabilityConfigDialog: React.FC<{
   }, [open, config]);
 
   const dirtyFormula = JSON.stringify(formula) !== JSON.stringify(config.formula);
+  // La regla de gran volumen se guarda dentro de la fórmula, pero tiene su propia pestaña.
+  const lvOf = (f: AvailabilityFormula) => JSON.stringify([f.all.largeVolume, f.essential.largeVolume, f.largeVolumeMonths]);
+  const dirtyLargeVolume = lvOf(formula) !== lvOf(config.formula);
+  const restOf = (f: AvailabilityFormula) => JSON.stringify({ ...f, largeVolumeMonths: 0, all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: false } });
+  const dirtyFormulaRest = restOf(formula) !== restOf(config.formula);
   const dirtyFused = fused !== config.fused;
   const dirtyVitals = JSON.stringify(vitals) !== JSON.stringify(config.vitals);
   const dirty = dirtyFormula || dirtyFused || dirtyVitals;
@@ -388,12 +512,11 @@ export const AvailabilityConfigDialog: React.FC<{
   const preview = useMemo(() => {
     if (!open || !previewRows) return null;
     const pct = (f: AvailabilityFormula, groups: FusedGroups, vit: VitalProduct[]): [number, number] => {
-      const opts = classifyOptionsOf(f);
       const today = new Date();
       const vc = vitalCodeSet(vit);
       return [
-        summarize(buildItems(previewRows, undefined, today, opts), summaryOptionsOf(f, "all", vc)).pct,
-        summarize(buildItems(essentialRows(previewRows, groups), undefined, today, opts), summaryOptionsOf(f, "essential", vc)).pct,
+        summarize(buildItems(previewRows, undefined, today, classifyOptionsOf(f, "all")), summaryOptionsOf(f, "all", vc)).pct,
+        summarize(buildItems(essentialRows(previewRows, groups), undefined, today, classifyOptionsOf(f, "essential")), summaryOptionsOf(f, "essential", vc)).pct,
       ];
     };
     return { current: pct(config.formula, config.fused.groups, config.vitals), draft: pct(formula, fused.groups, vitals) };
@@ -416,7 +539,8 @@ export const AvailabilityConfigDialog: React.FC<{
   };
 
   const tabs: Array<[Tab, string, React.ReactNode, boolean]> = [
-    ["formula", "Fórmula", <Calculator key="f" className="h-4 w-4" />, dirtyFormula],
+    ["formula", "Fórmula", <Calculator key="f" className="h-4 w-4" />, dirtyFormulaRest],
+    ["largeVolume", "Gran volumen", <Droplets key="g" className="h-4 w-4" />, dirtyLargeVolume],
     ["fused", "Códigos fusionados", <Layers key="c" className="h-4 w-4" />, dirtyFused],
     ["vitals", "Vitales", <HeartPulse key="v" className="h-4 w-4" />, dirtyVitals],
   ];
@@ -453,6 +577,7 @@ export const AvailabilityConfigDialog: React.FC<{
       }
     >
       {tab === "formula" && <FormulaTab formula={formula} onChange={setFormula} preview={preview} />}
+      {tab === "largeVolume" && <LargeVolumeTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} />}
       {tab === "fused" && <FusedTab catalog={fused} onChange={setFused} prev={config.fusedPrev} meta={config.meta.fused} />}
       {tab === "vitals" && <VitalsTab vitals={vitals} onChange={setVitals} />}
     </ResponsiveDialog>

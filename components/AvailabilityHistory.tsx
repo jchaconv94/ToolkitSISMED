@@ -188,7 +188,7 @@ export const AvailabilityHistory: React.FC<{
   const microredOptions = [{ value: ALL, label: "Todas las microredes" }, ...microredes.map((m) => ({ value: m, label: m }))];
   const yearOptions = years.map((y) => ({ value: String(y), label: String(y) }));
   const monthOptions = months.map((m, i) => ({ value: String(i), label: monthName(m), disabled: !withData[i] })).filter((o) => !o.disabled);
-  const outsideCount = new Set(codes.filter(isOut)).size;
+  const outsideCount = codes.filter((c) => isOut(c)).length;
   const subtitle = `${scopeTitle} · ${savedCount} ${savedCount === 1 ? "mes guardado" : "meses guardados"} en ${year}${outsideCount ? ` · ${outsideCount} fuera del análisis` : ""}`;
   const filterCount = (unget !== ALL ? 1 : 0) + (microred !== ALL ? 1 : 0);
 
