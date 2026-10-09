@@ -107,5 +107,9 @@ Con 100 PC bloqueadas serían ~29 000.
    - Alternativa sin token: Supabase → Edge Functions → *Deploy a new function* → nombre
      `stock-relay`, pegar `supabase/functions/stock-relay/index.ts` y **desactivar «Verify JWT»**.
 3. **Toolkit 2.3.2:** se publica al unir el PR de Toolkit-OGM y llega solo por la actualización automática.
-4. **Prueba real en CONSUELO:** en la consola de Sync SISMED debe aparecer el aviso de la
-   dirección interna y luego «✓ ¡Éxito! … Enviado por el respaldo Cloudflare».
+4. **Prueba real en CONSUELO (2026-10-09, hecha):** la consola mostró el aviso de la dirección
+   interna `10.254.30.102` y luego «✓ ¡Éxito! Stock detallado sincronizado (OK:463 registros …).
+   Enviado por el respaldo Cloudflare», 6 s después de empezar a subir.
+
+Estado al 2026-10-09: Cloudflare `/stock` y Supabase `stock-relay` publicados; secreto
+`SUPABASE_ACCESS_TOKEN` creado (token de Supabase con permiso solo de Edge Functions).
