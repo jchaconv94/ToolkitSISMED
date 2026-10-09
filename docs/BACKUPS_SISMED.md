@@ -28,6 +28,9 @@ Reglas acordadas:
 | **Cloudflare Worker + Durable Object** (`cloudflare/conexion`, servicio `sismed-conexion`) | Las conexiones abiertas (hibernan: una conexión quieta no consume nada) y el paso del archivo hacia y desde R2, por el enlace interno de Cloudflare. |
 | **Cloudflare R2** (bucket `sismed-backups`) | Los zips, de paso. Descargas gratis e ilimitadas. |
 
+El mismo servicio `sismed-conexion` atiende además `POST /stock`, el envío de stock por camino de
+respaldo para redes que bloquean Google (`docs/ENVIO_STOCK_RESPALDO.md`). No usa el Durable Object.
+
 **Cambio aprobado en la etapa 2 (2026-10-01):** el archivo ya no se sube con enlaces firmados por Supabase, sino por el mismo servicio de Cloudflare, que llega a R2 por su enlace interno (`BACKUPS`) sin ninguna clave. Los secretos `R2_*` que se guardaron en Supabase en la etapa 0 se borraron el 2026-10-02, junto con su token `sismed-backups-web` en Cloudflare. Queda solo «Edit Cloudflare Workers», el que usa GitHub para publicar (`CLOUDFLARE_API_TOKEN`).
 
 **Por qué no Supabase para los archivos:** el plan gratuito trae 5 GB de descargas al mes y la
