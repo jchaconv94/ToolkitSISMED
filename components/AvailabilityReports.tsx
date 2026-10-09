@@ -488,7 +488,7 @@ const INFO = {
       <P>Cada lote se revisa por separado. Los lotes se usan del que vence primero al último, al ritmo del consumo promedio mensual (CPA). Los puestos comunales se evalúan cada uno con sus propios lotes y su propio CPA; las farmacias del hospital (F01 y las de tipo farmacia) se suman, porque el stock se mueve entre ellas dentro del mismo local.</P>
       <P>Una F01 que abastece a sus puestos comunales entrega parte de su stock como <b>otras salidas</b>, que no son consumo. Para el vencimiento, su CPA suma lo que dispensa y lo que entrega a sus puestos, porque ese stock también sale de ella.</P>
       <P>Lo que no alcanza a usarse antes de su fecha de vencimiento queda en riesgo, y se valoriza a su precio.</P>
-      <P>En la tabla de lotes, <b>Se consume antes de vencer</b> son las unidades del lote que alcanzan a usarse a ese ritmo antes de su fecha, y <b>En riesgo</b>, las que vencerían sin usarse.</P>
+      <P>En la tabla de lotes, <b>Consumible</b> son las unidades del lote que alcanzan a usarse a ese ritmo antes de su fecha de vencimiento, y <b>En riesgo</b>, las que vencerían sin usarse.</P>
       <P>Los meses que faltan para vencer se cuentan desde el <b>cierre del mes de corte</b>, que es la fecha del stock del TFORMDET, y no desde hoy.</P>
       <Ex>CPA 10 al mes. Lote A: 40 unidades, vence en 2 meses → se usan 20, quedan <b>20 en riesgo</b>. Lote B: 30 unidades, vence en 12 meses → se usan las 30 (alcanza el tiempo).</Ex>
     </>
@@ -1177,7 +1177,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-[12.5px]">
                   <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500">
-                    <tr>{bySite && <th className="px-3 py-2 text-left">Farmacia</th>}<th className="px-3 py-2 text-center">Lote</th><th className="px-3 py-2 text-center">Vence</th><th className="px-3 py-2 text-center">Saldo</th><th className="px-3 py-2 text-center">Se consume antes de vencer</th><th className="px-3 py-2 text-center">En riesgo</th></tr>
+                    <tr>{bySite && <th className="px-3 py-2 text-left">Farmacia</th>}<th className="px-3 py-2 text-center">Lote</th><th className="px-3 py-2 text-center">Vence</th><th className="px-3 py-2 text-center">Saldo</th><th className="px-3 py-2 text-center">Consumible</th><th className="px-3 py-2 text-center">En riesgo</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {lotRows.map(({ unit, lot: l, risk: r }, i) => {
@@ -1412,7 +1412,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
     { key: "expiry", label: "Vence", sort: (r) => r.lot.expiry?.getTime() ?? null, render: (r) => <span className="whitespace-nowrap">{dateText(r.lot.expiry)}<span className="block text-[11px] text-slate-400">{r.bucket === "EXPIRED" ? "vencido" : `en ${dec(r.monthsToExpiry)} meses`}</span></span> },
     { key: "balance", label: "Saldo", align: "right", sort: (r) => r.lot.balance, firstDir: "desc", render: (r) => <span className="font-mono">{formatNumber(r.lot.balance)}</span> },
     { key: "cpa", label: "CPA", align: "right", sort: (r) => r.item.cpa, render: (r) => <span className="font-mono">{dec(r.item.cpa)}{r.item.dispensedCpa !== undefined && <span className="block font-sans text-[11px] text-slate-400" title={`Solo dispensado: ${dec(r.item.dispensedCpa)}`}>con entregas a puestos</span>}</span> },
-    { key: "usable", label: "Se consume antes de vencer", align: "right", render: (r) => <span className="font-mono text-slate-500">{formatNumber(r.usable)}</span> },
+    { key: "usable", label: "Consumible", align: "right", render: (r) => <span className="font-mono text-slate-500">{formatNumber(r.usable)}</span> },
     { key: "atRisk", label: "En riesgo", align: "right", sort: (r) => r.atRisk, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-red-700">{formatNumber(r.atRisk)}</span> },
     { key: "value", label: "Valor", align: "right", sort: (r) => r.value, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-slate-900">{money(r.value)}</span> },
   ];
@@ -1445,7 +1445,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         excel={{ name: "Vencimientos", title: "Lotes en riesgo de vencer sin usarse", subtitle: ctx.reportTitle, columns: [
           ...xSite(ctx, (r: LotRiskRow) => r.item), ...xProduct((r: LotRiskRow) => r.item), { header: "Lote", width: 14, value: (r) => r.lot.lot },
           { header: "Vence", width: 12, fmt: "date", value: (r) => r.lot.expiry ?? "" }, { header: "Meses al vencimiento", width: 12, fmt: "dec1", value: (r) => r.monthsToExpiry },
-          { header: "Saldo", width: 10, fmt: "int", value: (r) => r.lot.balance }, { header: "CPA", width: 9, fmt: "dec1", value: (r) => r.item.cpa }, { header: "Se consume antes de vencer", width: 14, fmt: "int", value: (r) => r.usable },
+          { header: "Saldo", width: 10, fmt: "int", value: (r) => r.lot.balance }, { header: "CPA", width: 9, fmt: "dec1", value: (r) => r.item.cpa }, { header: "Consumible", width: 11, fmt: "int", value: (r) => r.usable },
           { header: "En riesgo", width: 10, fmt: "int", value: (r) => r.atRisk }, { header: "Precio", width: 10, fmt: "money", value: (r) => r.item.price || 0 }, { header: "Valor en riesgo", width: 13, fmt: "money", value: (r) => r.value },
         ] }}
         rowKey={(r) => `${r.item.code}|${r.item.medCode}|${r.lot.lot}|${r.lot.expiry?.getTime()}`}
