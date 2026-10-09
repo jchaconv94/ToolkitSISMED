@@ -317,6 +317,46 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
   useEffect(() => setPage(1), [signature]);
   const mobile = useIncrementalCount(sorted.length, signature);
   const { tableRef, floating } = useFloatingTableHead([page, sorted.length, isDesktop]);
+  // La tabla sigue al panel que se abrió desde ella (punto G): ver `drawerFollower`.
+  const [flashKey, setFlashKey] = useState<string | null>(null);
+  const rowEls = React.useRef(new Map<string, HTMLElement>());
+  const live = React.useRef({ sorted, rowKey, showAtLeast: mobile.showAtLeast });
+  live.current = { sorted, rowKey, showAtLeast: mobile.showAtLeast };
+  const ownFollower = React.useRef<DrawerFollower | null>(null);
+  useEffect(() => () => { if (drawerFollower === ownFollower.current) drawerFollower = null; }, []);
+  const refRow = (key: string) => (el: HTMLElement | null) => { if (el) rowEls.current.set(key, el); else rowEls.current.delete(key); };
+  const openRow = (row: T, list: T[]) => {
+    if (!onRowClick) return;
+    let lastKey = rowKey(row);
+    const follower: DrawerFollower = {
+      length: list.length,
+      list: null,
+      index: (i) => {
+        const target = list[i];
+        if (target === undefined) return;
+        const { sorted: rows, rowKey: keyOf, showAtLeast } = live.current;
+        lastKey = keyOf(target);
+        const pos = rows.findIndex((r) => keyOf(r) === lastKey);
+        if (pos >= 0) { setPage(Math.floor(pos / PAGE_SIZE) + 1); showAtLeast(pos + 1); }
+      },
+      close: () => {
+        const key = lastKey;
+        setFlashKey(key);
+        // Si el registro no está a la vista, se lleva al centro (y no queda pegado a la barra del celular).
+        window.setTimeout(() => {
+          const el = rowEls.current.get(key);
+          if (!el) return;
+          const r = el.getBoundingClientRect();
+          if (r.top < 120 || r.bottom > window.innerHeight - 90) el.scrollIntoView({ block: "center", behavior: "smooth" });
+        }, 50);
+        window.setTimeout(() => setFlashKey((k) => (k === key ? null : k)), 2200);
+      },
+    };
+    drawerFollower = ownFollower.current = follower;
+    onRowClick(row, list);
+  };
+  // El resaltado pinta las celdas (no la fila), así no choca con el fondo de la fila desplegada.
+  const flash = (key: string) => `[&>td]:transition-colors [&>td]:duration-700 ${flashKey === key ? "[&>td]:bg-teal-100" : ""}`;
   const head = (c: Column<T>) => {
     if (!c.sort) return c.label;
     const s = headSort(c.key);
@@ -366,7 +406,7 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
                   ));
                   return (
                     <React.Fragment key={key}>
-                      <tr onClick={onRowClick ? () => onRowClick(row, sorted) : undefined} className={`h-14 ${onRowClick ? "cursor-pointer hover:bg-slate-50" : ""} ${open ? "bg-teal-50/40" : ""}`}>
+                      <tr ref={refRow(key)} onClick={onRowClick ? () => openRow(row, sorted) : undefined} className={`h-14 ${onRowClick ? "cursor-pointer hover:bg-slate-50" : ""} ${open ? "bg-teal-50/40" : ""} ${flash(key)}`}>
                         {subRows && (
                           <td className="w-10 px-2 py-2">
                             {kids?.length ? (
@@ -386,7 +426,7 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
                         {cells(row, false)}
                       </tr>
                       {open && kids!.map((kid) => (
-                        <tr key={rowKey(kid)} onClick={onRowClick ? () => onRowClick(kid, kids!) : undefined} className={`h-12 bg-slate-50/70 ${onRowClick ? "cursor-pointer hover:bg-teal-50/60" : ""}`}>
+                        <tr key={rowKey(kid)} ref={refRow(rowKey(kid))} onClick={onRowClick ? () => openRow(kid, kids!) : undefined} className={`h-12 bg-slate-50/70 ${onRowClick ? "cursor-pointer hover:bg-teal-50/60" : ""} ${flash(rowKey(kid))}`}>
                           <td className="relative w-10 px-2"><span className="absolute inset-y-0 left-1/2 w-px bg-teal-200" /></td>
                           {cells(kid, true)}
                         </tr>
@@ -406,8 +446,8 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
             const kids = subRows?.(row);
             const open = !!kids?.length && openRows.has(key);
             return (
-              <div key={key} className="rounded-2xl border border-slate-200 bg-white">
-                <div onClick={onRowClick ? () => onRowClick(row, sorted) : undefined} className={`p-3.5 ${onRowClick ? "cursor-pointer active:bg-slate-50" : ""}`}>
+              <div key={key} ref={refRow(key)} className={`rounded-2xl border transition-colors duration-700 ${flashKey === key ? "border-teal-300 bg-teal-50" : "border-slate-200 bg-white"}`}>
+                <div onClick={onRowClick ? () => openRow(row, sorted) : undefined} className={`p-3.5 ${onRowClick ? "cursor-pointer active:bg-slate-50" : ""}`}>
                   {card(row)}
                 </div>
                 {!!kids?.length && (
@@ -418,7 +458,7 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
                     {open && (
                       <div className="space-y-2 border-t border-slate-100 bg-slate-50 p-2.5">
                         {kids.map((kid) => (
-                          <div key={rowKey(kid)} onClick={onRowClick ? () => onRowClick(kid, kids!) : undefined} className="rounded-xl border border-slate-200 bg-white p-3 active:bg-slate-50">{card(kid)}</div>
+                          <div key={rowKey(kid)} ref={refRow(rowKey(kid))} onClick={onRowClick ? () => openRow(kid, kids!) : undefined} className={`rounded-xl border p-3 transition-colors duration-700 active:bg-slate-50 ${flashKey === rowKey(kid) ? "border-teal-300 bg-teal-50" : "border-slate-200 bg-white"}`}>{card(kid)}</div>
                         ))}
                       </div>
                     )}
@@ -1011,15 +1051,36 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
 
 export interface DrawerNav { index: number; total: number; prev: () => void; next: () => void }
 
+/**
+ * La tabla sigue al panel (punto G de la auditoría, 2026-10-09). La tabla de donde se abrió un
+ * panel queda como «seguidora»: al pasar de registro con ‹ ›, salta a la página donde está el
+ * registro abierto, y al cerrar el panel lo resalta un momento. La lista que recibe el panel
+ * es la misma de la tabla, en el mismo orden (a veces convertida: filas → productos), así que la
+ * posición en una es la posición en la otra. Se ata a la primera lista del mismo largo que
+ * navega, para no moverse con un panel abierto desde otro panel (otra lista).
+ */
+interface DrawerFollower { length: number; list: unknown[] | null; index: (i: number) => void; close: () => void }
+let drawerFollower: DrawerFollower | null = null;
+const followDrawerIndex = (list: unknown[], i: number) => {
+  const f = drawerFollower;
+  if (!f || f.length !== list.length || (f.list && f.list !== list)) return;
+  f.list = list;
+  f.index(i);
+};
+const followDrawerClose = () => drawerFollower?.close();
+
 /** Arma la navegación anterior/siguiente de un panel sobre la lista de la tabla de donde se abrió. */
 export function drawerNav<T>(current: T, list: T[], open: (item: T) => void): DrawerNav | undefined {
   const index = list.indexOf(current);
   if (index < 0 || list.length < 2) return undefined;
-  return { index, total: list.length, prev: () => index > 0 && open(list[index - 1]), next: () => index < list.length - 1 && open(list[index + 1]) };
+  const go = (i: number) => { open(list[i]); followDrawerIndex(list, i); };
+  return { index, total: list.length, prev: () => index > 0 && go(index - 1), next: () => index < list.length - 1 && go(index + 1) };
 }
 
 /** Teclas del panel: Esc cierra; ← y → pasan al registro anterior o siguiente (no mientras se escribe). */
 const useDrawerKeys = (active: boolean, onClose: () => void, nav?: DrawerNav) => {
+  // Al cerrar el panel, la tabla de donde se abrió resalta el último registro visto.
+  useEffect(() => (active ? followDrawerClose : undefined), [active]);
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
