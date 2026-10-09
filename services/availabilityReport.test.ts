@@ -62,6 +62,21 @@ describe("disponibilidad", () => {
     expect(summarize(buildItems(rows), { ...DEFAULT_SUMMARY, rule: { ...DEFAULT_SUMMARY.rule, sinRotacion: "yes" } }).establishments[0].available).toBe(3);
   });
 
+  it("DME (ficha 28): un sin rotación que no es vital no se evalúa, no entra en el total", () => {
+    const { rows } = parseAvailabilitySheet([HEADER,
+      row("06499", "A", "00001", [...zeros.slice(1), 10], 30), // Normo
+      row("06499", "A", "00002", zeros, 4), // Sin rotación, vital
+      row("06499", "A", "00005", zeros, 9), // Sin rotación, no vital
+      row("06499", "A", "00003", [...zeros.slice(1), 10], 0)]); // Desab
+    const vital = { ...DEFAULT_SUMMARY, rule: { ...DEFAULT_SUMMARY.rule, sinRotacion: "vital" as const }, vitalCodes: new Set(["00002"]) };
+    const e = summarize(buildItems(essentialRows(rows, {})), vital).establishments[0];
+    // 4 ítems, pero el sin rotación no vital queda fuera: 3 evaluados, 2 disponibles (normo + vital).
+    expect(e).toMatchObject({ total: 3, available: 2, sinRotacion: 1, desabastecido: 1 });
+    expect(e.pct).toBeCloseTo(66.67, 2);
+    // Con «No» (sin rotación nunca disponible) los dos siguen en el total, como en «todos los productos».
+    expect(summarize(buildItems(essentialRows(rows, {}))).establishments[0]).toMatchObject({ total: 4, available: 1, sinRotacion: 2 });
+  });
+
   it("corte a un decimal y límites configurables", () => {
     // 6,03 meses: sin cortar es Sobrestock; cortado a 6,0 es Normostock.
     expect(classifyAvailability(603, 100).status).toBe(StockStatus.SOBRESTOCK);

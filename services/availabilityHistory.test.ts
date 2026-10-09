@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildItems, essentialRows, groupByIpress, parseTformdetHistory, summarize, type AvailabilityRow, type ParsedTformdet } from "./availabilityReport";
 import type { ScopeRule } from "./availabilityConfig";
 import {
-  availableOf, backfillMonths, currentMonthKey, historyRecordsOf, historyRows, historySeries, indexHistory, lastMonthsOf, planHistorySave,
+  availableOf, backfillMonths, currentMonthKey, evaluatedCounts, historyRecordsOf, historyRows, historySeries, indexHistory, lastMonthsOf, planHistorySave,
   previousMonth, previousYearMonth, recordPct, rowsAtMonth, yearMonths,
   type HistoryData, type HistoryOptions,
 } from "./availabilityHistory";
@@ -48,6 +48,15 @@ describe("historial de disponibilidad: conteos", () => {
     expect(availableOf(eess, DME_RULE, "all")).toBe(2);
     expect(availableOf(eess, { ...ALL_RULE, substock: true, sinRotacion: "yes" }, "all")).toBe(5);
     expect(recordPct({ ...eess, total: 0 }, ALL_RULE, "all")).toBeNull();
+  });
+
+  it("DME con «solo vitales»: los sin rotación que no son vitales salen del total (ficha 28)", () => {
+    const [eess] = historyRecordsOf(items, "202609", "essential", VITALS);
+    // 6 ítems: 2 sin rotación, 1 vital. Se evalúan 5; disponibles normo + sobre + el vital.
+    expect(evaluatedCounts(eess, DME_RULE, "essential")).toMatchObject({ total: 5, sinRotacion: 1, sinRotacionVital: 1 });
+    expect(recordPct(eess, DME_RULE, "essential")).toBeCloseTo(60, 10);
+    // Con otra regla no se toca nada.
+    expect(evaluatedCounts(eess, ALL_RULE, "essential")).toBe(eess);
   });
 
   it.each(["average", "sum"] as const)("reproduce el porcentaje del tablero (%s) para la UNGET, cada microred y cada establecimiento", (aggregate) => {

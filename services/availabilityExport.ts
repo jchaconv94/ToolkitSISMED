@@ -731,7 +731,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
     [StockStatus.SUBSTOCK, `Menos de ${n(lim.subMax)} meses de provisión.`, counts(rule.substock)],
     [StockStatus.NORMOSTOCK, `De ${n(lim.subMax)} a ${n(lim.sobreMin)} meses de provisión.`, counts(rule.normostock)],
     [StockStatus.SOBRESTOCK, `Más de ${n(lim.sobreMin)} meses de provisión.`, counts(rule.sobrestock)],
-    [StockStatus.SIN_ROTACION, "Hay stock, pero no hubo consumo en todo el periodo.", rule.sinRotacion === "yes" ? "Sí" : rule.sinRotacion === "vital" ? "Solo si es medicamento vital (RM 1288-2018)" : "No"],
+    [StockStatus.SIN_ROTACION, "Hay stock, pero no hubo consumo en todo el periodo.", rule.sinRotacion === "yes" ? "Sí" : rule.sinRotacion === "vital" ? "Solo si es medicamento vital (RM 1288-2018); los demás no se evalúan" : "No"],
   ];
   const sitStart = mr;
   meTable(["", "Situación", "Condición", "¿Cuenta como disponible?"], [1, 1, 1, 1], sitRows.map(([st, cond, yes]) => ["", STATUS_LABEL[st], cond, yes]));

@@ -179,3 +179,30 @@ resalta el 31; en el celular, del 1 al 61 carga hasta el 100 y lo centra.
   06520 no tenía red ni microred en el registro. Eso salió del registro de prueba con que se
   revisó la auditoría (34 establecimientos y ninguna farmacia), no del registro real del usuario,
   que tiene todas sus farmacias registradas. No había que registrar nada.
+
+### I. Comparación con el tablero nacional de la DME (2026-10-09)
+
+El usuario comparó el historial con el tablero de DIGEMID (ficha 28, convenios de gestión
+2026): Bellavista daba entre 4 y 7 puntos menos en todos los meses. Con el archivo de
+disponibilidad del SISMED de agosto 2026 y la tabla «Detalle de la DME mensual por IPRESS» del
+tablero (33 establecimientos, 84,04 %), establecimiento por establecimiento:
+
+1. **Sin rotación que no son vitales (corregido).** La ficha dice que en sin rotación «solo se
+   considera a los medicamentos vitales» (RM 1288-2018). El tablero nacional saca del total a
+   los que no son vitales; la web los dejaba en el total como no disponibles. Ahora, con la
+   regla «vital», no se evalúan (`isEvaluated` en `availabilityReport.ts`, `evaluatedCounts` en
+   el historial). Agosto pasa de 79,9 % a 82,7 %, y el sin rotación queda igual o a uno de
+   diferencia del nacional en 31 de 33 establecimientos. El sobrestock ya coincidía. El
+   historial se recalcula solo: cada mes guarda aparte sus sin rotación vitales.
+2. **El C.S.M.C. Bellavista (31456) no está en el tablero nacional** (el usuario: «no se
+   considera a salud mental»). Su porcentaje está cerca del promedio, así que no explica la
+   diferencia; queda por decidir si se excluye.
+3. **Medicamentos que la web cuenta y el nacional no.** En casi todos los establecimientos la
+   web tiene ~6 normostock y ~2 desabastecidos más. Los que aparecen en todos o casi todos y
+   el nacional no cuenta: betametasona crema 20 g, clorfenamina 4 mg, sodio cloruro 0,9 %
+   100 mL, tetraciclina ungüento oftálmico, fitomenadiona 10 mg/mL, calcio gluconato y tres
+   yodo povidona de 1 L (dos de espuma salen desabastecidas en 24 y 26 establecimientos). Sin
+   ellos, agosto da 83,5 %. Pueden ser la exclusión por intervención estratégica (listado de
+   DGIESP) o un listado de fusionados distinto; **no se aplicó**: falta el listado oficial.
+
+Quedan 1,4 puntos (82,7 % frente a 84,04 %) que dependen del punto 3.

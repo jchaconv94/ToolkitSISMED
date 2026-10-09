@@ -17,7 +17,7 @@ import { DME_LEVEL_LABEL, dmeLevelOf, type EstablishmentInfo } from "../services
 import { monthFull } from "../services/availabilityExport";
 import type { AvailabilityFormula } from "../services/availabilityConfig";
 import {
-  HISTORY_SQL, availableOf, historyRows, historySeries, indexHistory, recordPct, yearMonths,
+  HISTORY_SQL, availableOf, evaluatedCounts, historyRows, historySeries, indexHistory, recordPct, yearMonths,
   type HistoryCounts, type HistoryData, type HistoryEntityRow, type HistoryOptions, type HistorySave, type HistoryView,
 } from "../services/availabilityHistory";
 import { formatNumber } from "../services/numberFormat";
@@ -457,7 +457,11 @@ const HistoryEstablishmentDrawer: React.FC<{
   const info = registry.get(code);
   const levelOf = (v: number) => dmeLevelOf(v, formula.levels);
   const month = sel !== null ? months[sel] : null;
-  const counts = (v: HistoryView) => (month ? index.get(v)?.get(month)?.get(code) : undefined);
+  // Lo que entra en la evaluación con la regla vigente (en la DME, los sin rotación no vitales no).
+  const counts = (v: HistoryView) => {
+    const raw = month ? index.get(v)?.get(month)?.get(code) : undefined;
+    return raw ? evaluatedCounts(raw, opts.rules[v], v) : undefined;
+  };
   const record = month ? data.records.find((r) => r.code === code && r.month === month && r.save !== undefined) : undefined;
   const save: HistorySave | undefined = record?.save !== undefined ? data.saves[record.save] : undefined;
   const pctOf = (v: HistoryView, m: string) => {

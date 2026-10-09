@@ -167,13 +167,29 @@ export const historyRecordsOf = (items: AvailabilityItem[], month: string, view:
   return [...byCode].map(([code, c]) => ({ code, month, view, ...c })).sort((a, b) => a.code.localeCompare(b.code));
 };
 
-export const availableOf = (c: HistoryCounts, rule: ScopeRule, view: HistoryView) =>
-  (rule.normostock ? c.normostock : 0) +
-  (rule.sobrestock ? c.sobrestock : 0) +
-  (rule.substock ? c.substock : 0) +
-  (rule.sinRotacion === "yes" ? c.sinRotacion : rule.sinRotacion === "vital" && view === "essential" ? c.sinRotacionVital : 0);
+/**
+ * Conteos que entran en la evaluación con la regla: con «vital» (DME, ficha 28) los sin
+ * rotación que no son vitales no se evalúan, así que salen del total. Se recalcula con lo
+ * guardado, porque cada mes guarda aparte sus sin rotación vitales.
+ */
+export const evaluatedCounts = (c: HistoryCounts, rule: ScopeRule, view: HistoryView): HistoryCounts => {
+  if (rule.sinRotacion !== "vital") return c;
+  const vital = view === "essential" ? c.sinRotacionVital : 0;
+  return { ...c, sinRotacion: vital, sinRotacionVital: vital, total: c.total - (c.sinRotacion - vital) };
+};
 
-export const recordPct = (c: HistoryCounts, rule: ScopeRule, view: HistoryView): number | null => (c.total ? (availableOf(c, rule, view) / c.total) * 100 : null);
+export const availableOf = (counts: HistoryCounts, rule: ScopeRule, view: HistoryView) => {
+  const c = evaluatedCounts(counts, rule, view);
+  return (rule.normostock ? c.normostock : 0) +
+    (rule.sobrestock ? c.sobrestock : 0) +
+    (rule.substock ? c.substock : 0) +
+    (rule.sinRotacion === "yes" || rule.sinRotacion === "vital" ? c.sinRotacion : 0);
+};
+
+export const recordPct = (counts: HistoryCounts, rule: ScopeRule, view: HistoryView): number | null => {
+  const total = evaluatedCounts(counts, rule, view).total;
+  return total ? (availableOf(counts, rule, view) / total) * 100 : null;
+};
 
 export interface HistoryOptions {
   rules: Record<HistoryView, ScopeRule>;
@@ -216,7 +232,7 @@ const pctOfCodes = (byCode: Map<string, HistoryCounts> | undefined, codes: ((cod
     if (p === null) continue;
     pcts.push(p);
     available += availableOf(c, rule, view);
-    total += c.total;
+    total += evaluatedCounts(c, rule, view).total;
   }
   if (!pcts.length) return { pct: null, establishments: 0 };
   const pct = opts.aggregate === "sum" ? (available / total) * 100 : pcts.reduce((a, b) => a + b, 0) / pcts.length;
