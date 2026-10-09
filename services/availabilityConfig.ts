@@ -245,5 +245,5 @@ export const describeFormula = (f: AvailabilityFormula, scope: "all" | "essentia
   const r = scope === "all" ? f.all : f.essential;
   const parts = [r.normostock && "Normostock", r.sobrestock && "Sobrestock", r.substock && "Substock", r.sinRotacion === "yes" ? "Sin rotación" : r.sinRotacion === "vital" ? "Sin rotación de vitales" : null].filter(Boolean);
   const agg = f.aggregate === "sum" ? "suma de sus ítems" : "promedio de sus establecimientos";
-  return `Disponibilidad = (${parts.join(" + ") || "nada"}) ÷ total de ítems · meses ${f.truncate ? "cortados a un decimal" : "sin cortar"} · Substock < ${f.subMax}, Sobrestock > ${f.sobreMin} · microred y UNGET: ${agg}.`;
+  return `Disponibilidad = (${parts.join(" + ") || "nada"}) ÷ total de ítems${r.sinRotacion === "vital" ? " (los demás sin rotación no se evalúan)" : ""} · meses ${f.truncate ? "cortados a un decimal" : "sin cortar"} · Substock < ${f.subMax}, Sobrestock > ${f.sobreMin} · microred y UNGET: ${agg}.`;
 };

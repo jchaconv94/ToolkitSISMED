@@ -142,7 +142,7 @@ const FormulaTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availab
         )}
         <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-[12px] text-slate-600">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-          <span>La ficha 28 cuenta Normostock, Sobrestock y el Sin rotación solo de los vitales.</span>
+          <span>La ficha 28 cuenta Normostock y Sobrestock. En Sin rotación «solo se considera a los medicamentos vitales»: con «Vitales», esos cuentan como disponibles y los demás sin rotación no entran en el total.</span>
         </div>
         <button type="button" onClick={() => onChange(DEFAULT_AVAILABILITY_FORMULA)} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 hover:bg-slate-50">
           <RotateCcw className="h-4 w-4" />Restablecer ficha 28

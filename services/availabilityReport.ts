@@ -17,8 +17,11 @@ import { FUSED_CODE_GROUPS } from "./fusedCodes";
  * - Situación: Desabastecido (stock 0), Sin rotación (stock > 0 y CPA 0), Substock (< 2),
  *   Normostock (2 a 6) y Sobrestock (> 6). No existe «Sin consumo» (decisión del usuario).
  * - Disponibilidad = (Normostock + Sobrestock) ÷ total de ítems. Sin rotación cuenta en el
- *   total y no como disponible, salvo los medicamentos **vitales** en la vista de esenciales
- *   (ficha 28, RM 1288-2018-MINSA), cuando se tenga esa lista.
+ *   total y no como disponible. En la vista de esenciales (regla «vital»), la ficha 28 dice
+ *   que en sin rotación «solo se considera a los medicamentos vitales» (RM 1288-2018-MINSA):
+ *   los vitales cuentan como disponibles y **los demás sin rotación no se evalúan** (no entran
+ *   en el total). Comprobado el 2026-10-09 contra el tablero nacional de agosto 2026 de
+ *   Bellavista: con esta regla el sin rotación de cada establecimiento coincide.
  * - La vista principal toma **todos los productos**. La DME (ficha 28) sale del mismo cálculo
  *   con `essentialRows`: medicamentos (M) que no son de estrategia (EST «S» o «_»), del
  *   petitorio o del listado de códigos fusionados, y con las presentaciones de una misma DCI
@@ -435,6 +438,16 @@ const emptyCounts = (): StatusCounts => ({ desabastecido: 0, substock: 0, normos
 
 export const DEFAULT_RULE: ScopeRule = { normostock: true, sobrestock: true, substock: false, sinRotacion: "no" };
 
+const isVitalItem = (item: AvailabilityItem, vitalCodes?: ReadonlySet<string>) =>
+  !!vitalCodes && (vitalCodes.has(item.medCode) || !!item.fusedFrom?.some((c) => vitalCodes.has(c)));
+
+/**
+ * ¿Entra en la evaluación? Con la regla «vital» (DME, ficha 28), un sin rotación que no es
+ * vital no se evalúa: no suma ni en el total ni como disponible.
+ */
+export const isEvaluated = (item: AvailabilityItem, rule: ScopeRule, vitalCodes?: ReadonlySet<string>) =>
+  !(rule.sinRotacion === "vital" && item.status === StockStatus.SIN_ROTACION && !isVitalItem(item, vitalCodes));
+
 /** ¿Cuenta como disponible según la regla? Desabastecido nunca. */
 export const isAvailable = (item: AvailabilityItem, rule: ScopeRule, vitalCodes?: ReadonlySet<string>) => {
   switch (item.status) {
@@ -442,7 +455,7 @@ export const isAvailable = (item: AvailabilityItem, rule: ScopeRule, vitalCodes?
     case StockStatus.SOBRESTOCK: return rule.sobrestock;
     case StockStatus.SUBSTOCK: return rule.substock;
     case StockStatus.SIN_ROTACION:
-      return rule.sinRotacion === "yes" || (rule.sinRotacion === "vital" && (!!vitalCodes?.has(item.medCode) || !!item.fusedFrom?.some((c) => vitalCodes?.has(c))));
+      return rule.sinRotacion === "yes" || (rule.sinRotacion === "vital" && isVitalItem(item, vitalCodes));
     default: return false;
   }
 };
@@ -450,6 +463,7 @@ export const isAvailable = (item: AvailabilityItem, rule: ScopeRule, vitalCodes?
 const countItems = (items: AvailabilityItem[], rule: ScopeRule, vitalCodes?: ReadonlySet<string>): StatusCounts => {
   const c = emptyCounts();
   for (const it of items) {
+    if (!isEvaluated(it, rule, vitalCodes)) continue;
     c.total++;
     if (it.status === StockStatus.DESABASTECIDO) c.desabastecido++;
     else if (it.status === StockStatus.SUBSTOCK) c.substock++;
