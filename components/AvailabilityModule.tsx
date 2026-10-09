@@ -9,7 +9,7 @@ import { userFullName } from "../services/sessionDisplay";
 import { api } from "../services/api";
 import {
   averageConsumption, buildItems, cutDateOf, essentialRows, groupByIpress, summarize,
-  type EstablishmentInfo, type AvailabilityItem, type AvailabilityScope, type Lot, type TformdetMonthSheet, type WarehouseItem, type ParsedAvailability,
+  type EstablishmentInfo, type AvailabilityItem, type AvailabilityScope, type Lot, type TformdetMonthSheet, type WarehouseItem, type ParsedAvailability, type ParsedTformdet,
 } from "../services/availabilityReport";
 import { monthLabel } from "../services/availabilityExport";
 import { exportAvailabilityExcel } from "../services/availabilityExportClient";
@@ -512,6 +512,7 @@ export const AvailabilityModule: React.FC = () => {
     subMax: config.formula.subMax,
     sobreMin: config.formula.sobreMin,
     asOf,
+    hasOutflows: Array.isArray((dispFile?.data as Partial<ParsedTformdet> | undefined)?.outflowColumns),
     warehouse,
     otherPct,
     scopeLabel: scope === "all" ? "todos los productos" : "medicamentos esenciales",

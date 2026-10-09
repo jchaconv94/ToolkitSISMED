@@ -8,6 +8,7 @@ import { formatNumber } from "../services/numberFormat";
 import { STATUS_LABEL, buildTableWorkbook, monthLabel, type TableSheet } from "../services/availabilityExport";
 import { saveAs } from "file-saver";
 import {
+  TFORMDET_OUTFLOWS,
   DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
@@ -43,6 +44,8 @@ export interface ReportContext {
   sobreMin: number;
   /** Fecha del stock: cierre del mes de corte. Los meses al vencimiento se cuentan desde aquí (punto E). */
   asOf: Date;
+  /** ¿El TFORMDET cargado trae las salidas que no son consumo? (los guardados antes del punto F, no). */
+  hasOutflows: boolean;
   warehouse: WarehouseItem[];
   /** Porcentaje del otro alcance (todos ↔ esenciales), si se pudo calcular. */
   otherPct: number | null;
@@ -1043,6 +1046,76 @@ const DrawerNavButtons: React.FC<{ nav?: DrawerNav }> = ({ nav }) => {
 
 /* ---------------------------------------------------------------- Detalle de un producto (panel lateral) */
 
+/**
+ * Salidas que no son consumo de un producto (punto F de la auditoría, 2026-10-09): distingue el
+ * producto sin consumo que de verdad no se mueve del que sale por otra vía (lo devuelve, lo
+ * distribuye, se vence). Una fila por tipo de salida, un dato por celda.
+ */
+const OutflowsSection: React.FC<{ ctx: ReportContext; item: AvailabilityItem }> = ({ ctx, item }) => {
+  const noUse = item.cpa <= 0;
+  const heading = (
+    <div className="mb-2 flex items-center gap-1.5">
+      <h4 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">Otras salidas (no son consumo)</h4>
+      <InfoTip title="Otras salidas"><P>Salidas del TFORMDET que no cuentan como consumo: devoluciones, distribución, vencidos, merma y otras salidas. No suben el CPA; sirven para saber si un producto sin consumo igual sale del establecimiento por otra vía.</P></InfoTip>
+    </div>
+  );
+  if (!ctx.hasOutflows) {
+    return noUse ? (
+      <div>{heading}<p className="rounded-xl bg-slate-50 px-3 py-3 text-[13px] text-slate-500">Para verlas, vuelva a cargar el TFORMDET: el que está guardado es de antes de que la web las leyera.</p></div>
+    ) : null;
+  }
+  const rows = TFORMDET_OUTFLOWS.flatMap(({ column, label }) => {
+    const series = item.outflows?.[column];
+    const total = series?.reduce((a, b) => a + b, 0) ?? 0;
+    if (!series || total <= 0) return [];
+    const last = series.reduce((at, v, i) => (v > 0 ? i : at), -1);
+    return [{ column, label, total, months: series.filter((v) => v > 0).length, last: last >= 0 ? monthLabel(ctx.months[last]) : "—" }];
+  });
+  if (!rows.length) {
+    return noUse && item.stock > 0 ? (
+      <div>
+        {heading}
+        <p className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] font-semibold text-amber-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />No tuvo consumo ni otras salidas en los {ctx.months.length} meses: el stock no se mueve.
+        </p>
+      </div>
+    ) : null;
+  }
+  const total = rows.reduce((a, r) => a + r.total, 0);
+  return (
+    <div>
+      {heading}
+      {noUse && (
+        <p className="mb-2 rounded-xl bg-teal-50 px-3 py-2.5 text-[13px] font-semibold text-teal-800">
+          Sin consumo, pero salió por otra vía: {formatNumber(total)} u en los {ctx.months.length} meses.
+        </p>
+      )}
+      <div className="overflow-hidden rounded-xl border border-slate-200">
+        <table className="w-full text-[12.5px]">
+          <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500">
+            <tr><th className="px-3 py-2 text-left">Tipo</th><th className="px-3 py-2 text-center">Unidades</th><th className="px-3 py-2 text-center">Meses con salida</th><th className="px-3 py-2 text-center">Última salida</th></tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={r.column}>
+                <td className="px-3 py-2 text-slate-700" title={`Columna ${r.column} del TFORMDET`}>{r.label}</td>
+                <td className="px-3 py-2 text-center font-mono">{formatNumber(r.total)}</td>
+                <td className="px-3 py-2 text-center font-mono">{r.months}</td>
+                <td className="px-3 py-2 text-center">{r.last}</td>
+              </tr>
+            ))}
+          </tbody>
+          {rows.length > 1 && (
+            <tfoot className="border-t border-slate-200 bg-slate-50 font-bold text-slate-800">
+              <tr><td className="px-3 py-2">Total</td><td className="px-3 py-2 text-center font-mono">{formatNumber(total)}</td><td colSpan={2} /></tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+};
+
 export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityItem | null; onClose: () => void; nav?: DrawerNav }> = ({ ctx, item, onClose, nav }) => {
   useDrawerKeys(!!item, onClose, nav);
   if (!item) return null;
@@ -1091,6 +1164,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
             </div>
             <MonthlyBars values={item.consumption} labels={ctx.months.map(monthShort)} cpa={item.cpa} highlight={peakMonths} height={190} />
           </div>
+          <OutflowsSection ctx={ctx} item={item} />
           <div>
             <div className="mb-2 flex items-center gap-1.5">
               <h4 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">Lotes, del que vence primero</h4>
