@@ -8,7 +8,7 @@ import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
 import { userFullName } from "../services/sessionDisplay";
 import { api } from "../services/api";
 import {
-  averageConsumption, buildItems, essentialRows, groupByIpress, summarize,
+  averageConsumption, buildItems, cutDateOf, essentialRows, groupByIpress, summarize,
   type EstablishmentInfo, type AvailabilityItem, type AvailabilityScope, type Lot, type TformdetMonthSheet, type WarehouseItem, type ParsedAvailability,
 } from "../services/availabilityReport";
 import { monthLabel } from "../services/availabilityExport";
@@ -266,19 +266,21 @@ export const AvailabilityModule: React.FC = () => {
 
   // Todos los productos y, del mismo cálculo, la DME con los códigos fusionados.
   const vitalCodes = useMemo(() => vitalCodeSet(config.vitals), [config.vitals]);
-  const today = useMemo(() => new Date(), [calculated]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Los meses al vencimiento se cuentan desde el cierre del mes de corte, la fecha del stock (punto E).
+  const cutKey = dispFile?.data.months?.[dispFile.data.months.length - 1];
+  const asOf = useMemo(() => cutDateOf(cutKey), [cutKey]);
   const computed = useMemo(() => {
     if (!baseRows) return null;
     const lots = lotsFile?.data;
     const opts = classifyOptionsOf(config.formula);
     const groups = config.fused.groups;
     return {
-      all: buildItems(baseRows.ipress, lots, today, opts),
-      essential: buildItems(essentialRows(baseRows.ipress, groups), lots, today, opts),
-      pharmacyAll: baseRows.pharmacy ? buildItems(baseRows.pharmacy, lots, today, opts) : null,
-      pharmacyEssential: baseRows.pharmacy ? buildItems(essentialRows(baseRows.pharmacy, groups), lots, today, opts) : null,
+      all: buildItems(baseRows.ipress, lots, asOf, opts),
+      essential: buildItems(essentialRows(baseRows.ipress, groups), lots, asOf, opts),
+      pharmacyAll: baseRows.pharmacy ? buildItems(baseRows.pharmacy, lots, asOf, opts) : null,
+      pharmacyEssential: baseRows.pharmacy ? buildItems(essentialRows(baseRows.pharmacy, groups), lots, asOf, opts) : null,
     };
-  }, [baseRows, lotsFile, config.formula, config.fused, today]);
+  }, [baseRows, lotsFile, config.formula, config.fused, asOf]);
 
   const ipressItems = useMemo<AvailabilityItem[]>(() => (computed ? (scope === "all" ? computed.all : computed.essential) : []), [computed, scope]);
   const pharmacyItems = computed ? (scope === "all" ? computed.pharmacyAll : computed.pharmacyEssential) : null;
@@ -387,7 +389,7 @@ export const AvailabilityModule: React.FC = () => {
   const expiryRiskMap = () => {
     const map: Record<string, { units: number; value: number }> = {};
     const add = (key: string, units: number, value: number) => { const e = map[key] || (map[key] = { units: 0, value: 0 }); e.units += units; e.value += value; };
-    for (const r of lotRiskReport(byPharmacy(report.items), today).rows) {
+    for (const r of lotRiskReport(byPharmacy(report.items), asOf).rows) {
       add(`${r.item.ipressCode}|${r.item.medCode}`, r.atRisk, r.value);
       if (r.item.code !== r.item.ipressCode) add(`${r.item.code}|${r.item.medCode}`, r.atRisk, r.value);
     }
@@ -509,7 +511,7 @@ export const AvailabilityModule: React.FC = () => {
     levels: config.formula.levels,
     subMax: config.formula.subMax,
     sobreMin: config.formula.sobreMin,
-    today,
+    asOf,
     warehouse,
     otherPct,
     scopeLabel: scope === "all" ? "todos los productos" : "medicamentos esenciales",

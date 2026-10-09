@@ -332,6 +332,18 @@ export const averageConsumption = (consumption: number[]): number => {
   return withUse.length ? withUse.reduce((a, b) => a + b, 0) / withUse.length : 0;
 };
 
+/**
+ * Fecha del stock: el último día del mes de corte («202609» → 30/09/2026), porque STOCK_FIN es el
+ * saldo al cierre del mes. Los meses al vencimiento se cuentan desde aquí y no desde hoy (punto E
+ * de la auditoría, 2026-10-09): con un TFORMDET de meses atrás, contar desde hoy le restaba al
+ * lote los meses que ya pasaron y lo marcaba en riesgo de más. Sin mes reconocible, `fallback`.
+ */
+export const cutDateOf = (cut: string | null | undefined, fallback: Date = new Date()): Date => {
+  const m = /^(\d{4})(\d{2})$/.exec(String(cut ?? "").trim());
+  const month = m ? Number(m[2]) : 0;
+  return m && month >= 1 && month <= 12 ? new Date(Number(m[1]), month, 0) : fallback;
+};
+
 /** Meses enteros entre dos fechas, como DATEDIF(…, "M") de Excel. */
 export const wholeMonthsBetween = (from: Date, to: Date): number => {
   let months = (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth());

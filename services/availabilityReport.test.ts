@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import {
-  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, essentialRows, groupByIpress, isEstablishmentCode, parseTformdetHistory, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, tformdetLastMonth, wholeMonthsBetween,
+  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, cutDateOf, essentialRows, groupByIpress, isEstablishmentCode, parseTformdetHistory, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, tformdetLastMonth, wholeMonthsBetween,
 } from "./availabilityReport";
 
 const HEADER = ["RED", "MICRORED", "COD EESS", "ESTABLECIMIENTO", "CAT", "MED COD", "DESCRIPCION DEL PRODUCTO", "MEDFF", "PRECIO", "MEDTIP", "MEDPET", "MEDEST",
@@ -189,5 +189,37 @@ describe("disponibilidad", () => {
 
   it("avisa si el archivo no es de disponibilidad", () => {
     expect(() => parseAvailabilitySheet([["A", "B"], [1, 2]])).toThrow(/encabezados/);
+  });
+});
+
+describe("fecha del stock (punto E de la auditoría)", () => {
+  it("es el último día del mes de corte", () => {
+    expect(cutDateOf("202609")).toEqual(new Date(2026, 8, 30));
+    expect(cutDateOf("202602")).toEqual(new Date(2026, 1, 28));
+    expect(cutDateOf("202402")).toEqual(new Date(2024, 1, 29));
+    expect(cutDateOf("202612")).toEqual(new Date(2026, 11, 31));
+  });
+
+  it("sin un mes reconocible usa la fecha de respaldo", () => {
+    const hoy = new Date(2026, 9, 9);
+    expect(cutDateOf(undefined, hoy)).toBe(hoy);
+    expect(cutDateOf("", hoy)).toBe(hoy);
+    expect(cutDateOf("202613", hoy)).toBe(hoy);
+    expect(cutDateOf("set 2026", hoy)).toBe(hoy);
+  });
+
+  it("los meses al vencimiento se cuentan desde el cierre del corte, no desde hoy", () => {
+    // Un TFORMDET de junio revisado en octubre: el lote vence el 31/12/2026.
+    const rows = [{
+      red: "R", microred: "M", code: "00001", ipressCode: "00001", name: "P.S.", category: "I-1", medCode: "01000", description: "P", form: "", price: 1,
+      medtip: "M", medpet: "P", medest: "S", consumption: [10, 10, 10], stock: 60,
+    }];
+    const lots = new Map([["00001|01000", [{ lot: "L1", expiry: new Date(2026, 11, 31), balance: 60 }]]]);
+    const desdeCorte = buildItems(rows, lots, cutDateOf("202606"))[0];
+    const desdeHoy = buildItems(rows, lots, new Date(2026, 9, 9))[0];
+    expect(desdeCorte.monthsToExpiry).toBe(6);     // del 30/06 al 31/12
+    expect(desdeCorte.expiryRisk).toBe(false);     // 6 meses de stock alcanzan
+    expect(desdeHoy.monthsToExpiry).toBe(2);       // contado desde hoy parecía a punto de vencer
+    expect(desdeHoy.expiryRisk).toBe(true);
   });
 });
