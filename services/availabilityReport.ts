@@ -586,8 +586,8 @@ export const TFORMDET_CONSUMPTION_COLUMNS = ["VENTA", "SIS", "INTERSAN", "EXO", 
 /**
  * Salidas del TFORMDET que no son consumo (punto F de la auditoría, 2026-10-09), con su nombre
  * para la pantalla. Distinguen el producto que de verdad no se mueve del que sale por otra vía
- * (lo devuelve, lo distribuye, se vence). Todas restan del stock. Las que no tienen nombre
- * confirmado muestran la columna.
+ * (lo devuelve, lo distribuye, se vence). Todas restan del stock. FAC_PERD, DEV_VEN y DEV_MERMA
+ * no se usan en la operación (el usuario, 2026-10-09) y no se muestran.
  */
 export const TFORMDET_OUTFLOWS: ReadonlyArray<{ column: string; label: string }> = [
   { column: "DEVOL", label: "Devoluciones" },
@@ -598,9 +598,6 @@ export const TFORMDET_OUTFLOWS: ReadonlyArray<{ column: string; label: string }>
   { column: "OTRAS_SAL", label: "Otras salidas" },
   { column: "DEFNAC", label: "Defensa nacional" },
   { column: "VENTAINST", label: "Venta institucional" },
-  { column: "DEV_VEN", label: "DEV_VEN" },
-  { column: "DEV_MERMA", label: "DEV_MERMA" },
-  { column: "FAC_PERD", label: "FAC_PERD" },
 ];
 // SAL_CONINS, SAL_REGULA e ING_REGULA no van: son columnas informativas que no restan del stock
 // (comprobado el 2026-10-09: en las 196 866 filas de un TFORMDET de 12 meses, STOCK_FIN = SALDO +
