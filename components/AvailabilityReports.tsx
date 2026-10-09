@@ -8,9 +8,11 @@ import { formatNumber } from "../services/numberFormat";
 import { STATUS_LABEL, buildTableWorkbook, monthLabel, type TableSheet } from "../services/availabilityExport";
 import { saveAs } from "file-saver";
 import {
+  TFORMDET_OUTFLOWS,
   DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
+  isStill,
   EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockAtRisk, overstockReport, planUsage, productGapReport, redistributionPlan, siteGapReport, warehouseReport,
   type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type PlanRow, type PlanSource, type ProductGap, type SiteGapRow, type WarehouseRow,
 } from "../services/availabilityInsights";
@@ -43,6 +45,8 @@ export interface ReportContext {
   sobreMin: number;
   /** Fecha del stock: cierre del mes de corte. Los meses al vencimiento se cuentan desde aquí (punto E). */
   asOf: Date;
+  /** ¿El TFORMDET cargado trae las salidas que no son consumo? (los guardados antes del punto F, no). */
+  hasOutflows: boolean;
   warehouse: WarehouseItem[];
   /** Porcentaje del otro alcance (todos ↔ esenciales), si se pudo calcular. */
   otherPct: number | null;
@@ -485,6 +489,7 @@ const INFO = {
       <P>Cada lote se revisa por separado. Los lotes se usan del que vence primero al último, al ritmo del consumo promedio mensual (CPA). Los puestos comunales se evalúan cada uno con sus propios lotes y su propio CPA; las farmacias del hospital (F01 y las de tipo farmacia) se suman, porque el stock se mueve entre ellas dentro del mismo local.</P>
       <P>Una F01 que abastece a sus puestos comunales entrega parte de su stock como <b>otras salidas</b>, que no son consumo. Para el vencimiento, su CPA suma lo que dispensa y lo que entrega a sus puestos, porque ese stock también sale de ella.</P>
       <P>Lo que no alcanza a usarse antes de su fecha de vencimiento queda en riesgo, y se valoriza a su precio.</P>
+      <P>En la tabla de lotes, <b>Por consumir</b> son las unidades del lote que alcanzan a usarse a ese ritmo antes de su fecha de vencimiento, y <b>En riesgo</b>, las que vencerían sin usarse.</P>
       <P>Los meses que faltan para vencer se cuentan desde el <b>cierre del mes de corte</b>, que es la fecha del stock del TFORMDET, y no desde hoy.</P>
       <Ex>CPA 10 al mes. Lote A: 40 unidades, vence en 2 meses → se usan 20, quedan <b>20 en riesgo</b>. Lote B: 30 unidades, vence en 12 meses → se usan las 30 (alcanza el tiempo).</Ex>
     </>
@@ -1043,6 +1048,76 @@ const DrawerNavButtons: React.FC<{ nav?: DrawerNav }> = ({ nav }) => {
 
 /* ---------------------------------------------------------------- Detalle de un producto (panel lateral) */
 
+/**
+ * Salidas que no son consumo de un producto (punto F de la auditoría, 2026-10-09): distingue el
+ * producto sin consumo que de verdad no se mueve del que sale por otra vía (lo devuelve, lo
+ * distribuye, se vence). Una fila por tipo de salida, un dato por celda.
+ */
+const OutflowsSection: React.FC<{ ctx: ReportContext; item: AvailabilityItem }> = ({ ctx, item }) => {
+  const noUse = item.cpa <= 0;
+  const heading = (
+    <div className="mb-2 flex items-center gap-1.5">
+      <h4 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">Otras salidas (no son consumo)</h4>
+      <InfoTip title="Otras salidas"><P>Salidas del TFORMDET que no cuentan como consumo: devoluciones, distribución, vencidos, merma y otras salidas. No suben el CPA; sirven para saber si un producto sin consumo igual sale del establecimiento por otra vía.</P></InfoTip>
+    </div>
+  );
+  if (!ctx.hasOutflows) {
+    return noUse ? (
+      <div>{heading}<p className="rounded-xl bg-slate-50 px-3 py-3 text-[13px] text-slate-500">Para verlas, vuelva a cargar el TFORMDET: el que está guardado es de antes de que la web las leyera.</p></div>
+    ) : null;
+  }
+  const rows = TFORMDET_OUTFLOWS.flatMap(({ column, label }) => {
+    const series = item.outflows?.[column];
+    const total = series?.reduce((a, b) => a + b, 0) ?? 0;
+    if (!series || total <= 0) return [];
+    const last = series.reduce((at, v, i) => (v > 0 ? i : at), -1);
+    return [{ column, label, total, months: series.filter((v) => v > 0).length, last: last >= 0 ? monthLabel(ctx.months[last]) : "—" }];
+  });
+  if (!rows.length) {
+    return noUse && item.stock > 0 ? (
+      <div>
+        {heading}
+        <p className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] font-semibold text-amber-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />No tuvo consumo ni otras salidas en los {ctx.months.length} meses: el stock no se mueve.
+        </p>
+      </div>
+    ) : null;
+  }
+  const total = rows.reduce((a, r) => a + r.total, 0);
+  return (
+    <div>
+      {heading}
+      {noUse && (
+        <p className="mb-2 rounded-xl bg-teal-50 px-3 py-2.5 text-[13px] font-semibold text-teal-800">
+          Sin consumo, pero salió por otra vía: {formatNumber(total)} u en los {ctx.months.length} meses.
+        </p>
+      )}
+      <div className="overflow-hidden rounded-xl border border-slate-200">
+        <table className="w-full text-[12.5px]">
+          <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500">
+            <tr><th className="px-3 py-2 text-left">Tipo</th><th className="px-3 py-2 text-center">Unidades</th><th className="px-3 py-2 text-center">Meses con salida</th><th className="px-3 py-2 text-center">Última salida</th></tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={r.column}>
+                <td className="px-3 py-2 text-slate-700" title={`Columna ${r.column} del TFORMDET`}>{r.label}</td>
+                <td className="px-3 py-2 text-center font-mono">{formatNumber(r.total)}</td>
+                <td className="px-3 py-2 text-center font-mono">{r.months}</td>
+                <td className="px-3 py-2 text-center">{r.last}</td>
+              </tr>
+            ))}
+          </tbody>
+          {rows.length > 1 && (
+            <tfoot className="border-t border-slate-200 bg-slate-50 font-bold text-slate-800">
+              <tr><td className="px-3 py-2">Total</td><td className="px-3 py-2 text-center font-mono">{formatNumber(total)}</td><td colSpan={2} /></tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+};
+
 export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityItem | null; onClose: () => void; nav?: DrawerNav }> = ({ ctx, item, onClose, nav }) => {
   useDrawerKeys(!!item, onClose, nav);
   if (!item) return null;
@@ -1081,7 +1156,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {stat("Stock", formatNumber(item.stock))}
             {stat("CPA", dec(item.cpa))}
-            {stat("Meses", dec(item.months))}
+            {stat("Meses de stock", dec(item.months))}
             {stat("Precio", item.price ? `S/ ${formatNumber(item.price, 2)}` : "—")}
           </div>
           <div>
@@ -1091,6 +1166,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
             </div>
             <MonthlyBars values={item.consumption} labels={ctx.months.map(monthShort)} cpa={item.cpa} highlight={peakMonths} height={190} />
           </div>
+          <OutflowsSection ctx={ctx} item={item} />
           <div>
             <div className="mb-2 flex items-center gap-1.5">
               <h4 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">Lotes, del que vence primero</h4>
@@ -1102,7 +1178,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-[12.5px]">
                   <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500">
-                    <tr>{bySite && <th className="px-3 py-2 text-left">Farmacia</th>}<th className="px-3 py-2 text-center">Lote</th><th className="px-3 py-2 text-center">Vence</th><th className="px-3 py-2 text-center">Saldo</th><th className="px-3 py-2 text-center">Se usa</th><th className="px-3 py-2 text-center">En riesgo</th></tr>
+                    <tr>{bySite && <th className="px-3 py-2 text-left">Farmacia</th>}<th className="px-3 py-2 text-center">Lote</th><th className="px-3 py-2 text-center">Vence</th><th className="px-3 py-2 text-center">Saldo</th><th className="px-3 py-2 text-center">Por consumir</th><th className="px-3 py-2 text-center">En riesgo</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {lotRows.map(({ unit, lot: l, risk: r }, i) => {
@@ -1130,15 +1206,29 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
           </div>
           {others.length > 0 && (
             <div>
-              <h4 className="mb-2 text-[11.5px] font-black uppercase tracking-wider text-slate-500">En otros establecimientos</h4>
-              <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
-                {others.slice(0, 12).map((o) => (
-                  <div key={o.code} className="flex items-center gap-3 px-3 py-2 text-[12.5px]">
-                    <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">{o.name}<span className="ml-1.5 font-normal text-slate-400">{o.microred}</span></span>
-                    <span className="font-mono text-slate-600">{formatNumber(o.stock)} u · {dec(o.months)} m</span>
-                    <StatusPill status={o.status} />
-                  </div>
-                ))}
+              <div className="mb-2 flex items-center gap-1.5">
+                <h4 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">En otros establecimientos</h4>
+                <InfoTip title="En otros establecimientos" align="right"><P>El mismo producto en los demás establecimientos, primero los que más lo necesitan.</P><P><b>Stock</b>: unidades al cierre del mes de corte. <b>Meses de stock</b>: cuántos meses le alcanza a ese ritmo de consumo (stock ÷ CPA). Sin consumo no se puede calcular y se muestra «—».</P></InfoTip>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <table className="w-full text-[12.5px]">
+                  <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500">
+                    <tr><th className="px-3 py-2 text-left">Establecimiento</th><th className="px-3 py-2 text-center">Stock</th><th className="px-3 py-2 text-center">Meses de stock</th><th className="px-3 py-2 text-center">Situación</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {others.slice(0, 12).map((o) => (
+                      <tr key={o.code}>
+                        <td className="max-w-[220px] px-3 py-2">
+                          <span className="block truncate font-semibold text-slate-700">{o.name}</span>
+                          <span className="block truncate text-[11.5px] text-slate-400">{o.microred}</span>
+                        </td>
+                        <td className="px-3 py-2 text-center font-mono">{formatNumber(o.stock)}</td>
+                        <td className="px-3 py-2 text-center font-mono" title={Number.isFinite(o.months) ? undefined : "Sin consumo: no se puede calcular"}>{Number.isFinite(o.months) ? dec(o.months) : "—"}</td>
+                        <td className="px-3 py-2 text-center"><StatusPill status={o.status} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
@@ -1302,7 +1392,7 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
 export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const { anchor, toTable } = useTableAnchor();
   const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(ctx.report.items), ctx.asOf), [ctx.byPharmacy, ctx.report.items, ctx.asOf]);
-  const [bucket, setBucket] = useState<"URGENT" | "ALL" | "NOUSE" | (typeof EXPIRY_BUCKETS)[number]>("URGENT");
+  const [bucket, setBucket] = useState<"URGENT" | "ALL" | "NOUSE" | "STILL" | (typeof EXPIRY_BUCKETS)[number]>("URGENT");
   const byEst = useMemo(() => {
     const m = new Map<string, { name: string; value: number; lots: number }>();
     for (const r of risk.rows) {
@@ -1314,7 +1404,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
     }
     return [...m.entries()].sort((a, b) => b[1].value - a[1].value).slice(0, 10);
   }, [risk]);
-  const rows = risk.rows.filter((r) => bucket === "ALL" || (bucket === "URGENT" ? r.bucket !== "LATER" : bucket === "NOUSE" ? r.item.cpa <= 0 : r.bucket === bucket));
+  const rows = risk.rows.filter((r) => bucket === "ALL" || (bucket === "URGENT" ? r.bucket !== "LATER" : bucket === "NOUSE" ? r.item.cpa <= 0 : bucket === "STILL" ? isStill(r.item) : r.bucket === bucket));
   const bucketColor: Record<string, string> = { EXPIRED: "#7f1d1d", M3: "#dc2626", M6: "#f97316", M12: "#f59e0b", LATER: "#94a3b8" };
   const whereOf = (it: AvailabilityItem) => siteLabel(ctx, it);
   const columns: Column<LotRiskRow>[] = [
@@ -1323,7 +1413,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
     { key: "expiry", label: "Vence", sort: (r) => r.lot.expiry?.getTime() ?? null, render: (r) => <span className="whitespace-nowrap">{dateText(r.lot.expiry)}<span className="block text-[11px] text-slate-400">{r.bucket === "EXPIRED" ? "vencido" : `en ${dec(r.monthsToExpiry)} meses`}</span></span> },
     { key: "balance", label: "Saldo", align: "right", sort: (r) => r.lot.balance, firstDir: "desc", render: (r) => <span className="font-mono">{formatNumber(r.lot.balance)}</span> },
     { key: "cpa", label: "CPA", align: "right", sort: (r) => r.item.cpa, render: (r) => <span className="font-mono">{dec(r.item.cpa)}{r.item.dispensedCpa !== undefined && <span className="block font-sans text-[11px] text-slate-400" title={`Solo dispensado: ${dec(r.item.dispensedCpa)}`}>con entregas a puestos</span>}</span> },
-    { key: "usable", label: "Se usa", align: "right", render: (r) => <span className="font-mono text-slate-500">{formatNumber(r.usable)}</span> },
+    { key: "usable", label: "Por consumir", align: "right", render: (r) => <span className="font-mono text-slate-500">{formatNumber(r.usable)}</span> },
     { key: "atRisk", label: "En riesgo", align: "right", sort: (r) => r.atRisk, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-red-700">{formatNumber(r.atRisk)}</span> },
     { key: "value", label: "Valor", align: "right", sort: (r) => r.value, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-slate-900">{money(r.value)}</span> },
   ];
@@ -1332,7 +1422,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
         <KpiCard watermark tone="danger" icon={<CalendarClock />} label="Vence sin usarse en 12 meses" value={money(risk.urgentValue)} hint={`${formatNumber(risk.urgentLots)} lotes · al ${dateText(ctx.asOf)}`} onClick={() => { setBucket("URGENT"); toTable(); }} active={bucket === "URGENT"} />
         <KpiCard watermark tone="danger" label="En los próximos 3 meses" value={money(risk.byBucket.M3.value + risk.byBucket.EXPIRED.value)} hint={`${risk.byBucket.M3.lots + risk.byBucket.EXPIRED.lots} lotes, incluye vencidos`} onClick={() => { setBucket("M3"); toTable(); }} active={bucket === "M3"} />
-        <KpiCard watermark tone="neutral" label="De productos sin consumo" value={money(risk.noUseValue)} hint={`${formatNumber(risk.noUseLots)} lotes sin rotación`} onClick={() => { setBucket("NOUSE"); toTable(); }} active={bucket === "NOUSE"} />
+        <KpiCard watermark tone="neutral" label="De productos sin consumo" value={money(risk.noUseValue)} hint={ctx.hasOutflows ? `${money(risk.stillValue)} no se mueven nada` : `${formatNumber(risk.noUseLots)} lotes sin rotación`} onClick={() => { setBucket("NOUSE"); toTable(); }} active={bucket === "NOUSE" || bucket === "STILL"} />
         <KpiCard watermark tone="warning" label="Total en riesgo" value={money(risk.value)} hint={`${formatNumber(risk.units)} unidades · ${formatNumber(risk.rows.length)} lotes`} onClick={() => { setBucket("ALL"); toTable(); }} active={bucket === "ALL"} />
       </KpiStrip>
       <div className="grid gap-4 lg:grid-cols-12">
@@ -1356,7 +1446,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         excel={{ name: "Vencimientos", title: "Lotes en riesgo de vencer sin usarse", subtitle: ctx.reportTitle, columns: [
           ...xSite(ctx, (r: LotRiskRow) => r.item), ...xProduct((r: LotRiskRow) => r.item), { header: "Lote", width: 14, value: (r) => r.lot.lot },
           { header: "Vence", width: 12, fmt: "date", value: (r) => r.lot.expiry ?? "" }, { header: "Meses al vencimiento", width: 12, fmt: "dec1", value: (r) => r.monthsToExpiry },
-          { header: "Saldo", width: 10, fmt: "int", value: (r) => r.lot.balance }, { header: "CPA", width: 9, fmt: "dec1", value: (r) => r.item.cpa }, { header: "Se usa", width: 10, fmt: "int", value: (r) => r.usable },
+          { header: "Saldo", width: 10, fmt: "int", value: (r) => r.lot.balance }, { header: "CPA", width: 9, fmt: "dec1", value: (r) => r.item.cpa }, { header: "Por consumir", width: 11, fmt: "int", value: (r) => r.usable },
           { header: "En riesgo", width: 10, fmt: "int", value: (r) => r.atRisk }, { header: "Precio", width: 10, fmt: "money", value: (r) => r.item.price || 0 }, { header: "Valor en riesgo", width: 13, fmt: "money", value: (r) => r.value },
         ] }}
         rowKey={(r) => `${r.item.code}|${r.item.medCode}|${r.lot.lot}|${r.lot.expiry?.getTime()}`}
@@ -1365,7 +1455,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         placeholder="Buscar producto, lote o establecimiento…"
         onRowClick={(r, rows) => ctx.openProduct(r.item, rows.map((x) => x.item))}
         minWidth={1050}
-        toolbar={<Pills value={bucket} onChange={setBucket} options={[{ value: "URGENT", label: "Próximos 12 meses" }, ...EXPIRY_BUCKETS.map((b) => ({ value: b, label: EXPIRY_BUCKET_LABEL[b], count: risk.byBucket[b].lots })), { value: "NOUSE", label: "Sin consumo" }, { value: "ALL", label: "Todos" }]} />}
+        toolbar={<Pills value={bucket} onChange={setBucket} options={[{ value: "URGENT", label: "Próximos 12 meses" }, ...EXPIRY_BUCKETS.map((b) => ({ value: b, label: EXPIRY_BUCKET_LABEL[b], count: risk.byBucket[b].lots })), { value: "NOUSE", label: "Sin consumo" }, ...(ctx.hasOutflows ? [{ value: "STILL" as const, label: "Sin ningún movimiento", count: risk.stillLots }] : []), { value: "ALL", label: "Todos" }]} />}
         card={(r) => (
           <>
             <ProductCell code={r.item.medCode} description={r.item.description} sub={whereOf(r.item)} />

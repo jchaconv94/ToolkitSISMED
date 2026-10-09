@@ -57,6 +57,11 @@ export interface AvailabilityRow {
    * en una F01 son, sobre todo, lo que entrega a sus puestos comunales. Solo las trae el TFORMDET.
    */
   otherOut?: number[];
+  /**
+   * Salidas que no son consumo, por columna del TFORMDET y por mes (punto F de la auditoría):
+   * devoluciones, distribución, vencidos, otras salidas… Solo las que tuvieron algo.
+   */
+  outflows?: Record<string, number[]>;
   stock: number;
 }
 
@@ -312,21 +317,32 @@ export const groupByIpress = (rows: AvailabilityRow[], nameOf?: (code: string) =
         name: nameOf?.(r.ipressCode) || names.get(r.ipressCode) || r.ipressCode,
         consumption: [...r.consumption],
         otherOut: r.otherOut && [...r.otherOut],
+        outflows: copyOutflows(r.outflows),
       });
     } else {
       g.consumption = g.consumption.map((v, i) => v + (r.consumption[i] || 0));
       g.otherOut = sumSeries(g.otherOut, r.otherOut);
+      g.outflows = sumOutflows(g.outflows, r.outflows);
       g.stock += r.stock;
     }
   }
   return [...groups.values()];
 };
 
-/** CPA de la ficha 28: consumo ÷ meses con consumo (sin consumo, 0). */
 /** Suma mes a mes dos series (otras salidas); si falta una, queda la otra. */
 export const sumSeries = (a?: number[], b?: number[]): number[] | undefined =>
   !a ? b && [...b] : !b ? a : a.map((v, i) => v + (b[i] || 0));
 
+/** Suma, columna por columna, las salidas que no son consumo de dos filas (punto F). */
+export const sumOutflows = (a?: Record<string, number[]>, b?: Record<string, number[]>): Record<string, number[]> | undefined => {
+  if (!a || !b) return a ? copyOutflows(a) : b && copyOutflows(b);
+  const out = copyOutflows(a)!;
+  for (const [column, series] of Object.entries(b)) out[column] = sumSeries(out[column], series)!;
+  return out;
+};
+const copyOutflows = (o?: Record<string, number[]>) => o && Object.fromEntries(Object.entries(o).map(([k, v]) => [k, [...v]]));
+
+/** CPA de la ficha 28: consumo ÷ meses con consumo (sin consumo, 0). */
 export const averageConsumption = (consumption: number[]): number => {
   const withUse = consumption.filter((v) => v > 0);
   return withUse.length ? withUse.reduce((a, b) => a + b, 0) / withUse.length : 0;
@@ -539,11 +555,13 @@ export const essentialRows = (
         medpet: "P",
         consumption: [...r.consumption],
         otherOut: r.otherOut && [...r.otherOut],
+        outflows: copyOutflows(r.outflows),
         fusedFrom: target ? [r.medCode] : [],
       });
     } else {
       g.consumption = g.consumption.map((v, i) => v + (r.consumption[i] || 0));
       g.otherOut = sumSeries(g.otherOut, r.otherOut);
+      g.outflows = sumOutflows(g.outflows, r.outflows);
       g.stock += r.stock;
       if (target) {
         g.fusedFrom = [...(g.fusedFrom || []), r.medCode];
@@ -564,6 +582,26 @@ export const essentialRows = (
  * REINGRE, DEFNAC y OTRAS_SAL no cuentan.
  */
 export const TFORMDET_CONSUMPTION_COLUMNS = ["VENTA", "SIS", "INTERSAN", "EXO", "SOAT", "CREDHOSP", "OTR_CONV"] as const;
+
+/**
+ * Salidas del TFORMDET que no son consumo (punto F de la auditoría, 2026-10-09), con su nombre
+ * para la pantalla. Distinguen el producto que de verdad no se mueve del que sale por otra vía
+ * (lo devuelve, lo distribuye, se vence). Todas restan del stock. FAC_PERD, DEV_VEN y DEV_MERMA
+ * no se usan en la operación (el usuario, 2026-10-09) y no se muestran.
+ */
+export const TFORMDET_OUTFLOWS: ReadonlyArray<{ column: string; label: string }> = [
+  { column: "DEVOL", label: "Devoluciones" },
+  { column: "DISTRI", label: "Distribución" },
+  { column: "TRANSF", label: "Transferencias" },
+  { column: "VENCIDO", label: "Vencidos" },
+  { column: "MERMA", label: "Merma" },
+  { column: "OTRAS_SAL", label: "Otras salidas" },
+  { column: "DEFNAC", label: "Defensa nacional" },
+  { column: "VENTAINST", label: "Venta institucional" },
+];
+// SAL_CONINS, SAL_REGULA e ING_REGULA no van: son columnas informativas que no restan del stock
+// (comprobado el 2026-10-09: en las 196 866 filas de un TFORMDET de 12 meses, STOCK_FIN = SALDO +
+// INGRE + REINGRE − consumo − estas salidas, sin ellas). Sumarlas contaría dos veces.
 
 export interface EstablishmentInfo {
   name?: string;
@@ -595,6 +633,8 @@ export interface ParsedTformdet extends ParsedAvailability {
   hasClassification: boolean;
   /** Códigos que no son establecimientos (almacenes como 030S05) y se dejaron fuera. */
   skippedCodes: string[];
+  /** Columnas de salidas que no son consumo que trae el archivo. Falta en lo guardado antes del punto F. */
+  outflowColumns?: string[];
 }
 
 /** Código de establecimiento o de farmacia: `06503`, `06502F01`. Los almacenes (`030S05`) no. */
@@ -665,6 +705,7 @@ export const parseTformdetHistory = (
   const cTip = at("MEDTIP"), cPet = at("MEDPET"), cEst = at("MEDEST"), cFf = at("MEDFF");
   const cCons = TFORMDET_CONSUMPTION_COLUMNS.map((c) => at(normHeader(c)));
   const cOther = at("OTRAS SAL");
+  const cOut = TFORMDET_OUTFLOWS.map(({ column }) => ({ column, index: at(normHeader(column)) })).filter((c) => c.index >= 0);
   if (cMonth < 0 && !options.fallbackMonth) {
     throw new Error("El TFORMDET no trae la columna ANNOMES y no se pudo saber de qué mes es. Descárguelo con un rango de meses en el Toolkit.");
   }
@@ -673,6 +714,7 @@ export const parseTformdetHistory = (
     row: Omit<AvailabilityRow, "consumption" | "stock">;
     consumption: Map<string, number>;
     otherOut: Map<string, number>;
+    outflows: Map<string, Map<string, number>>;
     stock: Map<string, number>;
     price: Map<string, number>;
   }
@@ -706,13 +748,20 @@ export const parseTformdetHistory = (
           medpet: cPet >= 0 ? text(raw[cPet]).toUpperCase() : "",
           medest: cEst >= 0 ? text(raw[cEst]).toUpperCase() : "",
         },
-        consumption: new Map(), otherOut: new Map(), stock: new Map(), price: new Map(),
+        consumption: new Map(), otherOut: new Map(), outflows: new Map(), stock: new Map(), price: new Map(),
       };
       groups.set(key, g);
     }
     const used = cCons.reduce((sum, i) => sum + (i >= 0 ? Math.max(0, toNumber(raw[i])) : 0), 0);
     g.consumption.set(month, (g.consumption.get(month) || 0) + used);
     if (cOther >= 0) g.otherOut.set(month, (g.otherOut.get(month) || 0) + Math.max(0, toNumber(raw[cOther])));
+    for (const { column, index } of cOut) {
+      const v = Math.max(0, toNumber(raw[index]));
+      if (!v) continue;
+      const byMonth = g.outflows.get(column) || new Map<string, number>();
+      byMonth.set(month, (byMonth.get(month) || 0) + v);
+      g.outflows.set(column, byMonth);
+    }
     const stock = Math.max(0, toNumber(raw[cStock]));
     g.stock.set(month, (g.stock.get(month) || 0) + stock);
     if (cPrice >= 0) g.price.set(month, toNumber(raw[cPrice]));
@@ -741,6 +790,7 @@ export const parseTformdetHistory = (
       price: priceMonth ? g.price.get(priceMonth) || 0 : 0,
       consumption,
       otherOut: cOther >= 0 ? months.map((m) => g.otherOut.get(m) || 0) : undefined,
+      outflows: g.outflows.size ? Object.fromEntries([...g.outflows].map(([column, byMonth]) => [column, months.map((m) => byMonth.get(m) || 0)])) : undefined,
       stock,
     });
   }
@@ -781,5 +831,6 @@ export const parseTformdetHistory = (
     warehouse,
     hasClassification: cTip >= 0 && cPet >= 0 && cEst >= 0,
     skippedCodes: [...skipped].sort(),
+    outflowColumns: cOut.map((c) => c.column),
   };
 };

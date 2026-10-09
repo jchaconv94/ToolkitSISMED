@@ -134,6 +134,29 @@ en riesgo un lote solo porque pasó el tiempo desde el corte.
 **Propuesta:** mostrar en su panel las otras salidas del periodo, para distinguir el producto
 que de verdad no se mueve del que sale por otra vía.
 
+**Resuelto (2026-10-09):**
+
+- El TFORMDET se lee también con sus salidas que no son consumo, por tipo y por mes
+  (`TFORMDET_OUTFLOWS`: devoluciones, distribución, transferencias, vencidos, merma, otras
+  salidas, defensa nacional, venta institucional; `outflows` de cada fila, sumadas por IPRESS y
+  por códigos fusionados).
+- Se comprobó que todas restan del stock: en las 196 866 filas del TFORMDET de 12 meses,
+  STOCK_FIN = SALDO + INGRE + REINGRE − consumo − estas salidas.
+- SAL_CONINS, SAL_REGULA e ING_REGULA son informativas y quedan fuera. FAC_PERD, DEV_VEN y
+  DEV_MERMA no se usan en la operación (el usuario) y no se muestran.
+- El panel del producto tiene la sección «Otras salidas (no son consumo)», con una fila por tipo
+  (unidades, meses con salida, última salida). Sin consumo, dice «salió por otra vía» o avisa que
+  «el stock no se mueve».
+- En Vencimientos, la tarjeta «De productos sin consumo» dice cuánto de ese dinero no se mueve
+  nada (`isStill`, `stillValue`), y la tabla tiene el filtro «Sin ningún movimiento».
+- Con este TFORMDET, por IPRESS: de 793 productos con stock y sin consumo, 123 salen por otra vía
+  (casi todos por devoluciones) y 670 no se mueven.
+- De paso, el panel se aclaró a pedido del usuario:
+  - la columna «Se usa» de los lotes pasa a «Por consumir»;
+  - «En otros establecimientos» es una tabla (Stock, Meses de stock, Situación) en vez de
+    «30 u · 0,0 m»;
+  - el dato «Meses» dice «Meses de stock».
+
 ### G. Recorrer los paneles con ‹ ›
 
 Al pasar de un registro a otro dentro del panel, la tabla de atrás no cambia de página; al

@@ -87,19 +87,30 @@ export interface LotRiskReport {
   /** Lotes de productos que no se consumen en el periodo (CPA 0): todo su saldo está en riesgo. */
   noUseLots: number;
   noUseValue: number;
+  /** De esos, los que tampoco tuvieron otras salidas (devoluciones, distribución…): no se mueven nada (punto F). */
+  stillLots: number;
+  stillValue: number;
 }
+
+/** ¿Tuvo alguna salida que no es consumo en el periodo? (punto F) */
+export const hasOutflows = (item: Pick<AvailabilityItem, "outflows">): boolean =>
+  Object.values(item.outflows ?? {}).some((series) => series.some((v) => v > 0));
+
+/** Sin consumo y sin ninguna otra salida: el stock no se mueve (punto F). */
+export const isStill = (item: AvailabilityItem): boolean => item.cpa <= 0 && !hasOutflows(item);
 
 export const lotRiskReport = (items: AvailabilityItem[], today: Date): LotRiskReport => {
   const rows = items.flatMap((it) => lotRiskOf(it, today)).sort((a, b) => b.value - a.value || a.monthsToExpiry - b.monthsToExpiry);
   const byBucket = Object.fromEntries(EXPIRY_BUCKETS.map((b) => [b, { value: 0, lots: 0 }])) as LotRiskReport["byBucket"];
-  let urgentValue = 0, urgentLots = 0, noUseLots = 0, noUseValue = 0;
+  let urgentValue = 0, urgentLots = 0, noUseLots = 0, noUseValue = 0, stillLots = 0, stillValue = 0;
   for (const r of rows) {
     byBucket[r.bucket].value += r.value;
     byBucket[r.bucket].lots++;
     if (r.bucket !== "LATER") { urgentValue += r.value; urgentLots++; }
     if (r.item.cpa <= 0) { noUseLots++; noUseValue += r.value; }
+    if (isStill(r.item)) { stillLots++; stillValue += r.value; }
   }
-  return { rows, value: sum(rows.map((r) => r.value)), units: sum(rows.map((r) => r.atRisk)), byBucket, urgentValue, urgentLots, noUseLots, noUseValue };
+  return { rows, value: sum(rows.map((r) => r.value)), units: sum(rows.map((r) => r.atRisk)), byBucket, urgentValue, urgentLots, noUseLots, noUseValue, stillLots, stillValue };
 };
 
 /* ------------------------------------------------------------ Consumo: picos y XYZ */
