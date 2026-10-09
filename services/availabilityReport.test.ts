@@ -174,6 +174,24 @@ describe("disponibilidad", () => {
     expect(groupByIpress(parsed.rows)[0].otherOut).toEqual([40, 30]);
   });
 
+  it("guarda las salidas que no son consumo por tipo y mes, y las suma por IPRESS (punto F)", () => {
+    const H = ["ANNOMES", "CODIGO_PRE", "EESS", "CODIGO_MED", "DESCRIPCION MED", "VENTA", "DEVOL", "VENCIDO", "DISTRI", "OTRAS_SAL", "SAL_CONINS", "STOCK_FIN"];
+    const parsed = parseTformdetHistory([H,
+      ["202608", "06520F01", "FARM", "143", "P", 0, 10, 0, 0, 0, 5, 50],
+      ["202609", "06520F01", "FARM", "143", "P", 0, 0, 2, 0, 0, 0, 48],
+      ["202609", "06520F02", "PUESTO", "143", "P", 0, 4, 0, 0, 0, 0, 6],
+      ["202609", "06520F02", "PUESTO", "200", "Q", 0, 0, 0, 0, 0, 0, 9],
+    ]);
+    expect(parsed.outflowColumns).toEqual(["DEVOL", "DISTRI", "VENCIDO", "OTRAS_SAL"]);
+    const f1 = parsed.rows.find((x) => x.code === "06520F01")!;
+    // Solo las que tuvieron algo; SAL_CONINS es informativa y no resta del stock.
+    expect(f1.outflows).toEqual({ DEVOL: [10, 0], VENCIDO: [0, 2] });
+    expect(parsed.rows.find((x) => x.medCode === "00200")!.outflows).toBeUndefined();
+    const ipress = groupByIpress(parsed.rows).find((x) => x.medCode === "00143")!;
+    expect(ipress.outflows).toEqual({ DEVOL: [10, 4], VENCIDO: [0, 2] });
+    expect(f1.outflows).toEqual({ DEVOL: [10, 0], VENCIDO: [0, 2] }); // sumar no toca la fila original
+  });
+
   it("guarda los registros del último mes del TFORMDET para el Excel", () => {
     const sheet = [["ANNOMES", "CODIGO_PRE", "CODIGO_MED", "MEDLOTE", "MEDREGSAN", "VENTA", "STOCK_FIN"],
       ["202608", "06503", "143", "L1", "EE-1", 5, 30],

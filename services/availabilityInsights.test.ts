@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import type { AvailabilityItem } from "./availabilityReport";
 import {
-  abcXyzReport, asSupplier, overstockAtRisk, consumptionReport, isSeparateSite, planUsage, redistributionPlan, siteGapReport, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, variationOf, warehouseReport, xyzOf,
+  abcXyzReport, asSupplier, hasOutflows, isStill, lotRiskReport, overstockAtRisk, consumptionReport, isSeparateSite, planUsage, redistributionPlan, siteGapReport, lotRiskOf, pharmacyKind, overstockReport, peakOf, productGapReport, variationOf, warehouseReport, xyzOf,
 } from "./availabilityInsights";
 
 const today = new Date(2026, 9, 7);
@@ -216,5 +216,28 @@ describe("sobrestock que ya vence", () => {
     expect(over.rows[0].excess).toBe(70);
     expect(risk[0].atRisk).toBe(80);
     expect(overstockAtRisk(over.rows, risk)).toEqual({ units: 70, value: 140 });
+  });
+});
+
+describe("productos sin consumo: quietos o que salen por otra vía (punto F)", () => {
+  it("distingue el que no se mueve del que sale por devoluciones", () => {
+    const quieto = item({ cpa: 0, stock: 10, consumption: Array(12).fill(0) });
+    const devuelve = item({ cpa: 0, stock: 10, consumption: Array(12).fill(0), outflows: { DEVOL: [0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0] } });
+    const ceros = item({ cpa: 0, stock: 10, consumption: Array(12).fill(0), outflows: { DEVOL: Array(12).fill(0) } });
+    expect(hasOutflows(devuelve)).toBe(true);
+    expect(isStill(quieto)).toBe(true);
+    expect(isStill(devuelve)).toBe(false);
+    expect(isStill(ceros)).toBe(true);
+    expect(isStill(item({ cpa: 5, stock: 10 }))).toBe(false); // con consumo nunca está quieto
+  });
+
+  it("el riesgo de vencimiento separa el valor de lo que no se mueve nada", () => {
+    const lote = (n: string) => [{ lot: n, expiry: inMonths(6), balance: 10 }];
+    const quieto = item({ code: "00001", cpa: 0, stock: 10, price: 3, consumption: Array(12).fill(0), lots: lote("Q") });
+    const devuelve = item({ code: "00002", ipressCode: "00002", cpa: 0, stock: 10, price: 2, consumption: Array(12).fill(0), outflows: { DEVOL: [1, ...Array(11).fill(0)] }, lots: lote("D") });
+    const r = lotRiskReport([quieto, devuelve], today);
+    expect(r.noUseValue).toBe(50);
+    expect(r.stillValue).toBe(30);
+    expect(r.stillLots).toBe(1);
   });
 });
