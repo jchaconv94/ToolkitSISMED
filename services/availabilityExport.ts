@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { StockStatus } from "../types";
 import type { ScopeRule } from "./availabilityConfig";
-import { DME_LEVEL_LABEL, dmeLevelOf, ipressCodeOf, wholeMonthsBetween, type AvailabilityItem, type AvailabilityReport, type TformdetMonthSheet, type WarehouseItem } from "./availabilityReport";
+import { DME_LEVEL_LABEL, cutDateOf, dmeLevelOf, ipressCodeOf, wholeMonthsBetween, type AvailabilityItem, type AvailabilityReport, type TformdetMonthSheet, type WarehouseItem } from "./availabilityReport";
 import type { DmeLevel } from "./stockStatus";
 import { formatNumber } from "./numberFormat";
 import { CHART_COLORS, brandImage, donutCard, findingCard, gaugeCard, hBarsCard, kpiCard, levelColumnsCard, miniKpiCard, rankingCard, type ChartImage, type KpiSpec } from "./availabilityCharts";
@@ -543,7 +543,8 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   // puede cubrir. Junto a cada producto, cuántos establecimientos lo necesitan.
   if (hasWarehouse) {
     const wh = wb.addWorksheet("Almacén", { properties: { tabColor: { argb: "FF0369A1" } } });
-    const today = new Date();
+    // Meses al vencimiento desde el cierre del mes de corte, igual que la web (punto E).
+    const asOf = cutDateOf(cut);
     const needOf = (medCode: string) => {
       const list = itemsByCode.get(medCode) || [];
       const desab = list.filter((i) => i.status === StockStatus.DESABASTECIDO && i.cpa > 0);
@@ -562,7 +563,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       { header: "Detalle de lotes (lote · vence · saldo)", width: 60 },
     ], whRows.map(({ w, need, nearest }) => [
       w.code, w.medCode, w.description, w.stock, w.price || null, w.stock * (w.price || 0), w.lots.length, dateText(nearest),
-      nearest ? wholeMonthsBetween(today, nearest) : null,
+      nearest ? wholeMonthsBetween(asOf, nearest) : null,
       need.desab || null, need.sub || null, need.units || null, w.lots.map((l) => `${l.lot} · ${dateText(l.expiry)} · ${l.balance}`).join("  |  "),
     ]), { freezeCols: 3 });
     whRows.forEach(({ need }, n) => {
@@ -572,7 +573,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       { label: "Productos con stock", value: formatNumber(whRows.length), hint: "en el almacén", color: "#0369A1" },
       { label: "Valor del stock", value: `S/ ${formatNumber(Math.round(whRows.reduce((sum, { w }) => sum + w.stock * (w.price || 0), 0)))}`, hint: "a precio de operación", color: "#0F766E" },
       { label: "Necesarios en EESS", value: formatNumber(whRows.filter(({ need }) => need.desab + need.sub > 0).length), hint: "con EESS desabastecidos o en substock", color: "#DC2626" },
-      { label: "Vencen en < 6 meses", value: formatNumber(whRows.filter(({ nearest }) => nearest && wholeMonthsBetween(today, nearest) < 6).length), hint: "revisar rotación", color: "#B45309" },
+      { label: "Vencen en < 6 meses", value: formatNumber(whRows.filter(({ nearest }) => nearest && wholeMonthsBetween(asOf, nearest) < 6).length), hint: "revisar rotación", color: "#B45309" },
     ], sheetWidthPx(wh, 13));
   }
 
@@ -750,6 +751,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
     ["", "Riesgo de vencimiento", p.expiryRisk
       ? "Cada lote por separado: se usan del que vence primero al último al ritmo del CPA; lo que no alcanza a usarse antes de su fecha queda en riesgo (unidades en la columna). Los puestos comunales se evalúan con sus propios lotes y CPA; las farmacias del hospital, sumadas. La F01 que abastece a sus puestos suma a su CPA lo que les entrega (otras salidas)."
       : "El producto vencería antes de consumirse: sus meses de provisión superan los meses que faltan para el vencimiento más próximo."],
+    ["", "Meses para vencer", `Se cuentan desde el cierre del mes de corte (${dateText(cutDateOf(cut))}), que es la fecha del stock del TFORMDET, y no desde el día en que se generó el archivo.`],
     ["", "Valor del stock (S/)", "Stock × precio del producto."],
     ["", "Stock en almacén", "Stock del almacén al cierre del mes de corte. No cuenta en la disponibilidad; sirve para ver qué se puede cubrir."],
     ...(scope === "essential" ? [["", "Fusiona", "Códigos de las presentaciones que se sumaron en este producto (listado de códigos fusionados de DIGEMID)."]] : []),

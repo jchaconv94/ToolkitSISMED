@@ -41,7 +41,8 @@ export interface ReportContext {
   levels: LevelThresholds;
   subMax: number;
   sobreMin: number;
-  today: Date;
+  /** Fecha del stock: cierre del mes de corte. Los meses al vencimiento se cuentan desde aquí (punto E). */
+  asOf: Date;
   warehouse: WarehouseItem[];
   /** Porcentaje del otro alcance (todos ↔ esenciales), si se pudo calcular. */
   otherPct: number | null;
@@ -484,6 +485,7 @@ const INFO = {
       <P>Cada lote se revisa por separado. Los lotes se usan del que vence primero al último, al ritmo del consumo promedio mensual (CPA). Los puestos comunales se evalúan cada uno con sus propios lotes y su propio CPA; las farmacias del hospital (F01 y las de tipo farmacia) se suman, porque el stock se mueve entre ellas dentro del mismo local.</P>
       <P>Una F01 que abastece a sus puestos comunales entrega parte de su stock como <b>otras salidas</b>, que no son consumo. Para el vencimiento, su CPA suma lo que dispensa y lo que entrega a sus puestos, porque ese stock también sale de ella.</P>
       <P>Lo que no alcanza a usarse antes de su fecha de vencimiento queda en riesgo, y se valoriza a su precio.</P>
+      <P>Los meses que faltan para vencer se cuentan desde el <b>cierre del mes de corte</b>, que es la fecha del stock del TFORMDET, y no desde hoy.</P>
       <Ex>CPA 10 al mes. Lote A: 40 unidades, vence en 2 meses → se usan 20, quedan <b>20 en riesgo</b>. Lote B: 30 unidades, vence en 12 meses → se usan las 30 (alcanza el tiempo).</Ex>
     </>
   ),
@@ -542,7 +544,7 @@ const INFO = {
 
 export const SummaryReport: React.FC<{ ctx: ReportContext; levelCounts: Record<DmeLevel, number>; onLevel: (l: DmeLevel) => void; onMicrored: (m: string) => void }> = ({ ctx, levelCounts, onLevel, onMicrored }) => {
   const { report, levels: lv } = ctx;
-  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(report.items), ctx.today), [ctx.byPharmacy, report.items, ctx.today]);
+  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(report.items), ctx.asOf), [ctx.byPharmacy, report.items, ctx.asOf]);
   const over = useMemo(() => overstockReport(report.items, ctx.sobreMin), [report.items, ctx.sobreMin]);
   // Punto D: el dinero del sobrestock que además vence en 12 meses ya está en la otra tarjeta.
   const overlap = useMemo(() => overstockAtRisk(over.rows, risk.rows), [over, risk]);
@@ -555,7 +557,7 @@ export const SummaryReport: React.FC<{ ctx: ReportContext; levelCounts: Record<D
   const ranges: Record<DmeLevel, string> = { OPTIMO: `≥ ${lv.optimo} %`, ALTO: `${lv.alto} – ${lv.optimo} %`, REGULAR: `${lv.regular} – ${lv.alto} %`, BAJO: `< ${lv.regular} %` };
   const mrRows = [...report.microredes].sort((a, b) => b.pct - a.pct);
   const alerts: Array<{ tab: ReportTab; icon: React.ReactNode; tone: string; label: string; value: string; hint: string }> = [
-    { tab: "expiry", icon: <CalendarClock className="h-5 w-5" />, tone: "bg-red-50 text-red-600", label: "Vence sin usarse en 12 meses", value: money(risk.urgentValue), hint: `${formatNumber(risk.urgentLots)} lotes` },
+    { tab: "expiry", icon: <CalendarClock className="h-5 w-5" />, tone: "bg-red-50 text-red-600", label: "Vence sin usarse en 12 meses", value: money(risk.urgentValue), hint: `${formatNumber(risk.urgentLots)} lotes · al ${dateText(ctx.asOf)}` },
     { tab: "overstock", icon: <PackageX className="h-5 w-5" />, tone: "bg-blue-50 text-blue-600", label: "Sobrestock inmovilizado", value: money(over.value - overlap.value), hint: overlap.value > 0 ? `sin ${money(overlap.value)} que ya vencen` : `${formatNumber(over.rows.length)} productos` },
     { tab: "redistribution", icon: <Repeat2 className="h-5 w-5" />, tone: "bg-teal-50 text-teal-700", label: "Plan de redistribución", value: formatNumber(redis.needs), hint: `necesidades · ${formatNumber(redis.covered)} se cubren por completo` },
     { tab: "warehouse", icon: <Warehouse className="h-5 w-5" />, tone: "bg-amber-50 text-amber-700", label: "Almacén puede cubrir", value: formatNumber(wh.canCover), hint: `productos · ${money(wh.value)} en almacén` },
@@ -892,7 +894,7 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
   const siblings = useMemo(() => pharmacyGroups(ctx.pharmacy).get(ipressCode) ?? [], [ctx.pharmacy, ipressCode]);
   const parent = ctx.report.establishments.find((x) => x.code === ipressCode);
   const [status, setStatus] = useState<StockStatus | "ALL" | "RISK">("ALL");
-  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(items), ctx.today), [ctx.byPharmacy, items, ctx.today]);
+  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(items), ctx.asOf), [ctx.byPharmacy, items, ctx.asOf]);
   const riskKeys = useMemo(() => new Set(risk.rows.map((r) => r.item.medCode)), [risk]);
   const monthlyValue = useMemo(() => ctx.months.map((_, i) => items.reduce((a, it) => a + (it.consumption[i] || 0) * (it.price || 0), 0)), [items, ctx.months]);
   const avgValue = monthlyValue.filter((v) => v > 0).reduce((a, b) => a + b, 0) / Math.max(1, monthlyValue.filter((v) => v > 0).length);
@@ -1047,7 +1049,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
   // Los lotes de un establecimiento con farmacias se muestran y evalúan por farmacia.
   const units = ctx.byPharmacy([item]);
   const lotRows = units.flatMap((unit) => {
-    const risk = new Map(lotRiskOf(unit, ctx.today).map((r) => [r.lot, r]));
+    const risk = new Map(lotRiskOf(unit, ctx.asOf).map((r) => [r.lot, r]));
     return unit.lots.map((lot) => ({ unit, lot, risk: risk.get(lot) }));
   }).sort((a, b) => (a.lot.expiry?.getTime() ?? Infinity) - (b.lot.expiry?.getTime() ?? Infinity));
   const bySite = new Set(lotRows.map((r) => r.lot.site ?? r.unit.code)).size > 1;
@@ -1299,7 +1301,7 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
 
 export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const { anchor, toTable } = useTableAnchor();
-  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(ctx.report.items), ctx.today), [ctx.byPharmacy, ctx.report.items, ctx.today]);
+  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(ctx.report.items), ctx.asOf), [ctx.byPharmacy, ctx.report.items, ctx.asOf]);
   const [bucket, setBucket] = useState<"URGENT" | "ALL" | "NOUSE" | (typeof EXPIRY_BUCKETS)[number]>("URGENT");
   const byEst = useMemo(() => {
     const m = new Map<string, { name: string; value: number; lots: number }>();
@@ -1328,7 +1330,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="danger" icon={<CalendarClock />} label="Vence sin usarse en 12 meses" value={money(risk.urgentValue)} hint={`${formatNumber(risk.urgentLots)} lotes`} onClick={() => { setBucket("URGENT"); toTable(); }} active={bucket === "URGENT"} />
+        <KpiCard watermark tone="danger" icon={<CalendarClock />} label="Vence sin usarse en 12 meses" value={money(risk.urgentValue)} hint={`${formatNumber(risk.urgentLots)} lotes · al ${dateText(ctx.asOf)}`} onClick={() => { setBucket("URGENT"); toTable(); }} active={bucket === "URGENT"} />
         <KpiCard watermark tone="danger" label="En los próximos 3 meses" value={money(risk.byBucket.M3.value + risk.byBucket.EXPIRED.value)} hint={`${risk.byBucket.M3.lots + risk.byBucket.EXPIRED.lots} lotes, incluye vencidos`} onClick={() => { setBucket("M3"); toTable(); }} active={bucket === "M3"} />
         <KpiCard watermark tone="neutral" label="De productos sin consumo" value={money(risk.noUseValue)} hint={`${formatNumber(risk.noUseLots)} lotes sin rotación`} onClick={() => { setBucket("NOUSE"); toTable(); }} active={bucket === "NOUSE"} />
         <KpiCard watermark tone="warning" label="Total en riesgo" value={money(risk.value)} hint={`${formatNumber(risk.units)} unidades · ${formatNumber(risk.rows.length)} lotes`} onClick={() => { setBucket("ALL"); toTable(); }} active={bucket === "ALL"} />
@@ -1601,7 +1603,7 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
     return { value, needs };
   }, [ctx]);
   const movable = movableNeeds.value;
-  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(ctx.report.items), ctx.today), [ctx.byPharmacy, ctx.report.items, ctx.today]);
+  const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(ctx.report.items), ctx.asOf), [ctx.byPharmacy, ctx.report.items, ctx.asOf]);
   const overlap = useMemo(() => overstockAtRisk(data.rows, risk.rows), [data, risk]);
   const example = data.rows.find((r) => r.item.cpa >= 5 && r.value > 50) || data.rows[0];
   const columns: Column<OverstockRow>[] = [
@@ -1994,7 +1996,7 @@ export const WarehouseReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const { anchor, toTable } = useTableAnchor();
   const data = useMemo(() => warehouseReport(ctx.warehouse, ctx.report.items, ctx.subMax), [ctx.warehouse, ctx.report.items, ctx.subMax]);
   const [filter, setFilter] = useState<"NEED" | "ALL" | "NODEMAND" | "EXPIRY">("NEED");
-  const soon = (r: WarehouseRow) => !!r.nearestExpiry && r.nearestExpiry.getTime() - ctx.today.getTime() < 183 * 86400000;
+  const soon = (r: WarehouseRow) => !!r.nearestExpiry && r.nearestExpiry.getTime() - ctx.asOf.getTime() < 183 * 86400000;
   const rows = data.rows.filter((r) => filter === "ALL" || (filter === "NEED" ? r.inNeed > 0 : filter === "EXPIRY" ? soon(r) : r.networkMonths === Infinity));
   if (!ctx.warehouse.length) {
     return <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><EmptyState title="Sin almacén en el archivo" description="El TFORMDET no trae registros de almacén (códigos como 030S05)." /></div>;

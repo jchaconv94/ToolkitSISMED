@@ -117,6 +117,13 @@ Hoy se cuentan desde la fecha actual, pero el stock es al cierre del mes de cort
 
 **Propuesta:** contar desde el cierre del mes de corte y decirlo en pantalla («al 30/09/2026»).
 
+**Resuelto (2026-10-09):** los meses al vencimiento se cuentan desde el último día del mes de
+corte (`cutDateOf` en `services/availabilityReport.ts`, con pruebas), en la web y en el Excel:
+situación del producto, riesgo por lote (FEFO), Vencimientos, Resumen, Sobrestock y Almacén. Las
+tarjetas «Vence sin usarse en 12 meses» lo dicen («N lotes · al 30/09/2026»), la «i» de
+Vencimientos lo explica y la Metodología del Excel lo anota. Con un TFORMDET viejo ya no se marca
+en riesgo un lote solo porque pasó el tiempo desde el corte.
+
 ### F. Productos con stock y sin consumo
 
 - 793 ítems tienen stock y CPA 0, así que todo su saldo figura «en riesgo» (S/ 210 162).
