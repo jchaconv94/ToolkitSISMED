@@ -16,6 +16,8 @@ export const useIncrementalCount = (total: number, resetKey: unknown, step = 50)
     count: Math.min(count, total),
     hasMore: count < total,
     loadMore: () => setCount(current => current + step),
+    /** Muestra al menos `n` elementos (para llegar a uno que está más abajo). */
+    showAtLeast: (n: number) => setCount(current => Math.max(current, Math.ceil(n / step) * step)),
   };
 };
 

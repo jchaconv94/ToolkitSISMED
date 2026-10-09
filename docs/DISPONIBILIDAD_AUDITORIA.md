@@ -164,6 +164,13 @@ cerrar el panel vuelves a la página donde estabas.
 
 **Propuesta:** que la tabla siga al registro abierto.
 
+**Resuelto (2026-10-09):** la tabla de donde se abrió el panel lo sigue. Al pasar de registro con
+‹ › o con las flechas, salta a la página donde está el registro abierto (en el celular, carga la
+lista hasta él). Al cerrar el panel, lo deja a la vista y lo resalta un momento. Va en
+`ReportTable` y `drawerNav`, así que vale para todos los paneles del tablero (producto, producto en
+la red y plan de redistribución). Probado: del registro 1 al 31 la tabla pasa a «26–50 de 718» y
+resalta el 31; en el celular, del 1 al 61 carga hasta el 100 y lo centra.
+
 ### H. Recordatorios de datos
 
 - Este TFORMDET no trae MEDTIP/MEDPET/MEDEST, así que «Medicamentos esenciales» queda apagado.
