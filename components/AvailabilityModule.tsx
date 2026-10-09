@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, BarChart3, Building2, CalendarClock, CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, Loader2, MoreVertical, PackageX, RefreshCw, Repeat2, SearchX, Settings2, TrendingUp, Upload, Warehouse, X,
+  Activity, AlertTriangle, BarChart3, Building2, CalendarClock, CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, LineChart, Loader2, MoreVertical, PackageX, RefreshCw, Repeat2, SearchX, Settings2, TrendingUp, Upload, Warehouse, X,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
@@ -23,7 +23,7 @@ import { availabilityStore, fileSignature } from "../services/availabilityStore"
 import { BottomSheet } from "./ui/BottomSheet";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import {
-  AbcReport, ConsumptionReport, drawerNav, EstablishmentDetail, EstablishmentsReport, ExpiryReport, GapsReport, OverstockReport, ProductDrawer, ProductGapDrawer, RedistributionReport, SummaryReport, WarehouseReport,
+  AbcReport, ConsumptionReport, drawerNav, EstablishmentDetail, EstablishmentsReport, EvolutionReport, ExpiryReport, GapsReport, OverstockReport, ProductDrawer, ProductGapDrawer, RedistributionReport, SummaryReport, WarehouseReport,
   type PlanEdits, type ReportContext, type ReportTab,
 } from "./AvailabilityReports";
 
@@ -69,6 +69,7 @@ const readTformdetFile = async (file: File): Promise<TformdetFileResult> => {
 
 const TABS: Array<{ id: ReportTab; label: string; icon: React.ReactNode }> = [
   { id: "summary", label: "Resumen", icon: <LayoutDashboard className="h-4 w-4" /> },
+  { id: "evolution", label: "Evolución", icon: <LineChart className="h-4 w-4" /> },
   { id: "establishments", label: "Establecimientos", icon: <Building2 className="h-4 w-4" /> },
   { id: "gaps", label: "¿Dónde falta?", icon: <SearchX className="h-4 w-4" /> },
   { id: "expiry", label: "Vencimientos", icon: <CalendarClock className="h-4 w-4" /> },
@@ -264,6 +265,19 @@ export const AvailabilityModule: React.FC = () => {
     };
   }, [dispFile, calculated, registry]);
 
+  // Evolución mes a mes: también los productos que solo tuvieron stock algún mes anterior al corte.
+  // Sin el stock de cada mes (TFORMDET guardado antes), no hay evolución.
+  const evolutionBase = useMemo(() => {
+    if (!dispFile || !calculated || !dispFile.data.rows.some((r) => r.stockByMonth)) return null;
+    const dormant = (dispFile.data as Partial<ParsedTformdet>).dormantRows ?? [];
+    const rows = [...dispFile.data.rows, ...dormant].map((r) => {
+      if (r.microred && r.red) return r;
+      const info = registry.get(r.ipressCode);
+      return info ? { ...r, microred: r.microred || info.microred || "", red: r.red || info.red || "", category: r.category || info.category || "" } : r;
+    });
+    return groupByIpress(rows, (code) => registry.get(code)?.name);
+  }, [dispFile, calculated, registry]);
+
   // Todos los productos y, del mismo cálculo, la DME con los códigos fusionados.
   const vitalCodes = useMemo(() => vitalCodeSet(config.vitals), [config.vitals]);
   // Los meses al vencimiento se cuentan desde el cierre del mes de corte, la fecha del stock (punto E).
@@ -351,6 +365,15 @@ export const AvailabilityModule: React.FC = () => {
     const t = window.setTimeout(() => availabilityStore.savePlan(storeUser, planSignature, planEdits), 400);
     return () => window.clearTimeout(t);
   }, [planEdits, planSignature, planLoaded, storeUser]);
+  const evolutionInput = useMemo(() => {
+    if (!evolutionBase) return null;
+    return {
+      rows: scope === "all" ? evolutionBase : essentialRows(evolutionBase, config.fused.groups),
+      classify: classifyOptionsOf(config.formula),
+      summary: summaryOptionsOf(config.formula, scope, vitalCodes),
+    };
+  }, [evolutionBase, scope, config.formula, config.fused, vitalCodes]);
+
   const otherScope: AvailabilityScope = scope === "all" ? "essential" : "all";
   const otherPct = useMemo(() => {
     const items = computed && (otherScope === "all" || source?.classified !== false) ? (otherScope === "all" ? computed.all : computed.essential) : null;
@@ -513,6 +536,7 @@ export const AvailabilityModule: React.FC = () => {
     sobreMin: config.formula.sobreMin,
     asOf,
     hasOutflows: Array.isArray((dispFile?.data as Partial<ParsedTformdet> | undefined)?.outflowColumns),
+    evolution: evolutionInput,
     warehouse,
     otherPct,
     scopeLabel: scope === "all" ? "todos los productos" : "medicamentos esenciales",
@@ -622,6 +646,7 @@ export const AvailabilityModule: React.FC = () => {
           {tab === "establishments" && (
             <EstablishmentsReport ctx={ctx} view={eessView} onView={setEessView} level={level} onLevel={setLevel} microred={microred} onMicrored={setMicrored} levelCounts={levelCounts} />
           )}
+          {tab === "evolution" && <EvolutionReport ctx={ctx} />}
           {tab === "gaps" && <GapsReport ctx={ctx} onProduct={(g, list) => setGap(g, list ?? [g])} />}
           {tab === "expiry" && <ExpiryReport ctx={ctx} />}
           {tab === "consumption" && <ConsumptionReport ctx={ctx} />}

@@ -62,6 +62,8 @@ export interface AvailabilityRow {
    * devoluciones, distribución, vencidos, otras salidas… Solo las que tuvieron algo.
    */
   outflows?: Record<string, number[]>;
+  /** Stock al cierre de cada mes (STOCK_FIN), alineado con `consumption`, para la evolución mes a mes. */
+  stockByMonth?: number[];
   stock: number;
 }
 
@@ -318,11 +320,13 @@ export const groupByIpress = (rows: AvailabilityRow[], nameOf?: (code: string) =
         consumption: [...r.consumption],
         otherOut: r.otherOut && [...r.otherOut],
         outflows: copyOutflows(r.outflows),
+        stockByMonth: r.stockByMonth && [...r.stockByMonth],
       });
     } else {
       g.consumption = g.consumption.map((v, i) => v + (r.consumption[i] || 0));
       g.otherOut = sumSeries(g.otherOut, r.otherOut);
       g.outflows = sumOutflows(g.outflows, r.outflows);
+      g.stockByMonth = sumSeries(g.stockByMonth, r.stockByMonth);
       g.stock += r.stock;
     }
   }
@@ -556,12 +560,14 @@ export const essentialRows = (
         consumption: [...r.consumption],
         otherOut: r.otherOut && [...r.otherOut],
         outflows: copyOutflows(r.outflows),
+        stockByMonth: r.stockByMonth && [...r.stockByMonth],
         fusedFrom: target ? [r.medCode] : [],
       });
     } else {
       g.consumption = g.consumption.map((v, i) => v + (r.consumption[i] || 0));
       g.otherOut = sumSeries(g.otherOut, r.otherOut);
       g.outflows = sumOutflows(g.outflows, r.outflows);
+      g.stockByMonth = sumSeries(g.stockByMonth, r.stockByMonth);
       g.stock += r.stock;
       if (target) {
         g.fusedFrom = [...(g.fusedFrom || []), r.medCode];
@@ -635,6 +641,11 @@ export interface ParsedTformdet extends ParsedAvailability {
   skippedCodes: string[];
   /** Columnas de salidas que no son consumo que trae el archivo. Falta en lo guardado antes del punto F. */
   outflowColumns?: string[];
+  /**
+   * Productos que se dejaron fuera por no tener stock al corte ni consumo, pero que sí tuvieron
+   * stock algún mes anterior: cuentan en la evolución de ese mes. Falta en lo guardado antes.
+   */
+  dormantRows?: AvailabilityRow[];
 }
 
 /** Código de establecimiento o de farmacia: `06503`, `06502F01`. Los almacenes (`030S05`) no. */
@@ -772,16 +783,20 @@ export const parseTformdetHistory = (
   const months = [...monthSet].sort();
   const last = months[months.length - 1];
   const rows: AvailabilityRow[] = [];
+  const dormantRows: AvailabilityRow[] = [];
   for (const g of groups.values()) {
     const consumption = months.map((m) => g.consumption.get(m) || 0);
     const stock = g.stock.get(last) || 0;
+    const stockByMonth = months.map((m) => g.stock.get(m) || 0);
     // Sin stock al corte y sin consumo en todo el periodo: no se evalúa. Así lo deja fuera el
     // archivo de disponibilidad del SISMED (comprobado con agosto 2026 de Bellavista: con esta
     // regla coinciden las 11 444 filas por farmacia, las 8 691 por IPRESS y el 71,68 %).
-    if (stock === 0 && consumption.every((c) => c === 0)) continue;
+    // Si tuvo stock algún mes anterior, se guarda aparte: en ese mes sí se evalúa (evolución).
+    const dormant = stock === 0 && consumption.every((c) => c === 0);
+    if (dormant && !stockByMonth.some((v) => v > 0)) continue;
     const info = options.info?.(g.row.ipressCode);
     const priceMonth = [...g.price.keys()].sort().pop();
-    rows.push({
+    (dormant ? dormantRows : rows).push({
       ...g.row,
       name: g.row.code === g.row.ipressCode ? info?.name || g.row.name : g.row.name,
       microred: info?.microred || "",
@@ -791,6 +806,7 @@ export const parseTformdetHistory = (
       consumption,
       otherOut: cOther >= 0 ? months.map((m) => g.otherOut.get(m) || 0) : undefined,
       outflows: g.outflows.size ? Object.fromEntries([...g.outflows].map(([column, byMonth]) => [column, months.map((m) => byMonth.get(m) || 0)])) : undefined,
+      stockByMonth,
       stock,
     });
   }
@@ -832,5 +848,6 @@ export const parseTformdetHistory = (
     hasClassification: cTip >= 0 && cPet >= 0 && cEst >= 0,
     skippedCodes: [...skipped].sort(),
     outflowColumns: cOut.map((c) => c.column),
+    dormantRows,
   };
 };

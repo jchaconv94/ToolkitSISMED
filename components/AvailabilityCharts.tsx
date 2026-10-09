@@ -4,6 +4,7 @@ import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
 import type { LevelThresholds } from "../services/availabilityReport";
 import { formatNumber } from "../services/numberFormat";
+import { useIsDesktop } from "./ui/useIsDesktop";
 
 /**
  * Gráficos del módulo Disponibilidad (2026-10-07), en SVG y HTML: velocímetro, dona, columnas
@@ -354,6 +355,74 @@ export const RankingChart: React.FC<{ rows: RankRow[]; levels: LevelThresholds; 
               <text x={x + bw / 2} y={top + plotH + 10} transform={`rotate(-50 ${x + bw / 2} ${top + plotH + 10})`} textAnchor="end" className="fill-slate-600 text-[11px]">
                 {r.label.length > 22 ? `${r.label.slice(0, 21)}…` : r.label}
               </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
+
+/* ---------------------------------------------------------------- Evolución mes a mes */
+
+/**
+ * Disponibilidad mes a mes sobre las franjas de nivel (evolución, 2026-10-09). Los meses con el
+ * CPA calculado con menos de 12 meses de consumo (`partial`) van en tono claro y con línea
+ * punteada: son orientativos.
+ */
+export const EvolutionChart: React.FC<{
+  labels: string[];
+  values: number[];
+  partial: boolean[];
+  windows: number[];
+  levels: LevelThresholds;
+  levelLabels: Record<DmeLevel, string>;
+  levelOf: (pct: number) => DmeLevel;
+}> = ({ labels, values, partial, windows, levels, levelLabels, levelOf }) => {
+  const n = values.length;
+  // En el celular entra a lo ancho sin deslizar: sin los nombres de nivel a la derecha (los
+  // colores de las franjas siguen) y con espacios más chicos.
+  const compact = !useIsDesktop();
+  const minPct = Math.max(0, Math.min(levels.regular - 10, Math.floor((Math.min(...values, 100) - 5) / 10) * 10));
+  const left = compact ? 28 : 40, right = compact ? 6 : 72, top = 26, plotH = compact ? 200 : 240, bottom = 34;
+  const slot = compact ? 48 : Math.max(64, 760 / Math.max(n, 1));
+  const width = left + right + n * slot;
+  const height = top + plotH + bottom;
+  const y = (v: number) => top + plotH - ((Math.max(minPct, Math.min(100, v)) - minPct) / (100 - minPct)) * plotH;
+  const x = (i: number) => left + i * slot + slot / 2;
+  const bands: Array<[number, number, DmeLevel]> = [[levels.optimo, 100, "OPTIMO"], [levels.alto, levels.optimo, "ALTO"], [levels.regular, levels.alto, "REGULAR"], [minPct, levels.regular, "BAJO"]];
+  const ticks: number[] = [];
+  for (let v = minPct; v <= 100; v += 10) ticks.push(v);
+  const [hover, setHover] = useState<number | null>(null);
+  const tip = useChartTip();
+  // Tramos de la línea: punteados mientras alguno de sus extremos sea parcial.
+  const segments = values.slice(1).map((v, i) => ({ x1: x(i), y1: y(values[i]), x2: x(i + 1), y2: y(v), dashed: partial[i] || partial[i + 1] }));
+  return (
+    <div className="scrollbar-x overflow-x-auto">
+      {tip.layer}
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ minWidth: compact ? undefined : Math.min(width, 640) }} className="w-full" role="img" aria-label="Disponibilidad mes a mes">
+        {bands.map(([a, b, l]) => (
+          <g key={l}>
+            <rect x={left} y={y(b)} width={width - left - right} height={Math.max(0, y(a) - y(b))} fill={LEVEL_SOFT[l]} opacity={0.6} />
+            {!compact && <text x={width - right + 8} y={(y(a) + y(b)) / 2} dominantBaseline="middle" className="text-[12px] font-bold" fill={LEVEL_COLOR[l]}>{levelLabels[l]}</text>}
+          </g>
+        ))}
+        {ticks.map((t) => (
+          <text key={t} x={left - 8} y={y(t)} textAnchor="end" dominantBaseline="middle" className="fill-slate-400 text-[11px]">{t}</text>
+        ))}
+        {segments.map((sg, i) => (
+          <line key={i} x1={sg.x1} y1={sg.y1} x2={sg.x2} y2={sg.y2} stroke={sg.dashed ? "#94a3b8" : "#0f766e"} strokeWidth={2.5} strokeDasharray={sg.dashed ? "5 5" : undefined} />
+        ))}
+        {values.map((v, i) => {
+          const level = levelOf(v);
+          const b = tip.bind(<TipBox title={labels[i]} color={LEVEL_COLOR[level]} rows={[["Disponibilidad", pct1(v)], ["Nivel", levelLabels[level]], ["CPA con", `${windows[i]} ${windows[i] === 1 ? "mes" : "meses"} de consumo`]]} note={partial[i] ? "Orientativo: menos de 12 meses de consumo en el archivo" : undefined} />);
+          return (
+            <g key={i} onMouseEnter={() => setHover(i)} onMouseMove={b.onMouseMove} onMouseLeave={() => { b.onMouseLeave(); setHover(null); }}>
+              <rect x={x(i) - slot / 2} y={top} width={slot} height={plotH} fill="transparent" />
+              {hover === i && <line x1={x(i)} x2={x(i)} y1={top} y2={top + plotH} stroke="#cbd5e1" strokeDasharray="3 3" />}
+              <circle cx={x(i)} cy={y(v)} r={hover === i ? 7 : 5.5} fill={partial[i] ? "#fff" : LEVEL_COLOR[level]} stroke={partial[i] ? "#94a3b8" : "#fff"} strokeWidth={2} />
+              <text x={x(i)} y={y(v) - 12} textAnchor="middle" className={`text-[11.5px] font-bold ${partial[i] ? "fill-slate-400" : "fill-slate-700"}`} style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{v.toFixed(1).replace(".", ",")}</text>
+              <text x={x(i)} y={top + plotH + 20} textAnchor="middle" className={`text-[11px] ${partial[i] ? "fill-slate-400" : "fill-slate-600 font-semibold"}`}>{labels[i]}</text>
             </g>
           );
         })}

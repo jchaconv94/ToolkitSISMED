@@ -9,7 +9,7 @@ import { STATUS_LABEL, buildTableWorkbook, monthLabel, type TableSheet } from ".
 import { saveAs } from "file-saver";
 import {
   TFORMDET_OUTFLOWS,
-  DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
+  DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityRow, type ClassifyOptions, type SummaryOptions, dmeLevelOf, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
   isStill,
@@ -24,8 +24,9 @@ import { BottomSheet } from "./ui/BottomSheet";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type HeadAlign } from "./ui/FloatingTableHead";
 import {
-  ChartCard, Donut, Gauge, HBars, InfoTip, LEVEL_COLOR, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar, TipBox, useChartTip,
+  ChartCard, Donut, EvolutionChart, Gauge, HBars, InfoTip, LEVEL_COLOR, LEVEL_SOFT, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar, TipBox, useChartTip,
 } from "./AvailabilityCharts";
+import { availabilityEvolution, type EvolutionEntity } from "../services/availabilityEvolution";
 
 /**
  * Pantallas de reporte del módulo Disponibilidad (2026-10-07). Cada pestaña recibe el mismo
@@ -47,6 +48,8 @@ export interface ReportContext {
   asOf: Date;
   /** ¿El TFORMDET cargado trae las salidas que no son consumo? (los guardados antes del punto F, no). */
   hasOutflows: boolean;
+  /** Para la evolución mes a mes: filas por IPRESS de la vista y la fórmula. `null` si el TFORMDET guardado no trae el stock de cada mes. */
+  evolution: { rows: AvailabilityRow[]; classify: ClassifyOptions; summary: SummaryOptions } | null;
   warehouse: WarehouseItem[];
   /** Porcentaje del otro alcance (todos ↔ esenciales), si se pudo calcular. */
   otherPct: number | null;
@@ -76,7 +79,7 @@ export interface PlanEdit {
 }
 export type PlanEdits = Record<string, PlanEdit>;
 
-export type ReportTab = "summary" | "establishments" | "gaps" | "expiry" | "consumption" | "abc" | "overstock" | "redistribution" | "warehouse";
+export type ReportTab = "summary" | "evolution" | "establishments" | "gaps" | "expiry" | "consumption" | "abc" | "overstock" | "redistribution" | "warehouse";
 
 const PAGE_SIZE = 25;
 const MONTH_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"];
@@ -1295,6 +1298,131 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
           )}
         </div>
       </aside>
+    </div>
+  );
+};
+
+/* ---------------------------------------------------------------- Evolución mes a mes */
+
+/** Meses con menos historial de consumo que este no se muestran: su CPA no es confiable. */
+const EVOLUTION_MIN_WINDOW = 6;
+const pp = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${formatOneDecimal(Math.abs(v)).replace(".", ",")} pp`;
+
+const LevelPct: React.FC<{ pct: number | null; levelOf: (v: number) => DmeLevel; dim?: boolean }> = ({ pct, levelOf, dim }) => {
+  if (pct === null) return <span className="text-slate-300">—</span>;
+  const l = levelOf(pct);
+  return <span className={`inline-block min-w-[54px] rounded-md px-1.5 py-0.5 text-center font-mono text-[12px] font-bold ${dim ? "opacity-60" : ""}`} style={{ background: LEVEL_SOFT[l], color: LEVEL_COLOR[l] }}>{dec(pct)}</span>;
+};
+
+const Delta: React.FC<{ value: number | null }> = ({ value }) =>
+  value === null ? <span className="text-slate-300">—</span> : <span className={`font-mono text-[12.5px] font-bold ${value > 0.05 ? "text-emerald-700" : value < -0.05 ? "text-red-700" : "text-slate-500"}`}>{pp(value)}</span>;
+
+export const EvolutionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
+  const input = ctx.evolution;
+  const ev = useMemo(() => (input && ctx.months.length > 1 ? availabilityEvolution(input.rows, ctx.months, input) : null), [input, ctx.months]);
+  const levelOf = (v: number) => dmeLevelOf(v, ctx.levels);
+  if (ctx.months.length < 2) {
+    return <div className="rounded-2xl border border-slate-200 bg-white"><EmptyState title="Hace falta un TFORMDET de varios meses" description="La evolución compara la disponibilidad de cada mes. Descargue la consulta TFORMDET con un rango de meses en el Toolkit." /></div>;
+  }
+  if (!ev) {
+    return <div className="rounded-2xl border border-slate-200 bg-white"><EmptyState title="Vuelva a cargar el TFORMDET" description="El que está guardado en este equipo es de antes de la evolución y no trae el stock de cada mes." /></div>;
+  }
+  const n = ev.months.length;
+  const minWindow = Math.min(EVOLUTION_MIN_WINDOW, n);
+  const first = Math.max(ev.windows.findIndex((w) => w >= minWindow), n - 12, 0);
+  const idx = ev.months.map((_, k) => k).filter((k) => k >= first);
+  const partial = idx.map((k) => ev.windows[k] < 12);
+  const values = idx.map((k) => ev.unget[k]);
+  const last = values[values.length - 1], firstVal = values[0];
+  const worst = idx.reduce((w, k) => (ev.unget[k] < ev.unget[w] ? k : w), idx[0]);
+  const delta = (e: EvolutionEntity) => {
+    const a = e.pct[idx[0]], b = e.pct[idx[idx.length - 1]];
+    return a === null || b === null ? null : b - a;
+  };
+  const establishments = [...ev.establishments].sort((a, b) => (delta(a) ?? 0) - (delta(b) ?? 0));
+  const microredes = [...ev.microredes].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  const monthCols: Column<EvolutionEntity>[] = idx.map((k, i) => ({
+    key: `m${ev.months[k]}`, label: monthShort(ev.months[k]), sort: (r) => r.pct[k], firstDir: "desc",
+    render: (r) => <LevelPct pct={r.pct[k]} levelOf={levelOf} dim={partial[i]} />,
+  }));
+  const someParcial = partial.some(Boolean);
+  return (
+    <div className="space-y-4">
+      <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard watermark tone={LEVEL_TONE[levelOf(last)]} label="Disponibilidad al corte" value={pctText(last)} hint={`${monthLabel(ev.months[n - 1])} · nivel ${DME_LEVEL_LABEL[levelOf(last)]}`} />
+        <KpiCard watermark tone="neutral" label={`Hace ${idx.length - 1} ${idx.length - 1 === 1 ? "mes" : "meses"}`} value={pctText(firstVal)} hint={monthLabel(ev.months[idx[0]])} />
+        <KpiCard watermark tone={last - firstVal > 0.05 ? "success" : last - firstVal < -0.05 ? "danger" : "neutral"} label="Variación" value={pp(last - firstVal)} hint={`de ${monthLabel(ev.months[idx[0]])} a ${monthLabel(ev.months[n - 1])}`} />
+        <KpiCard watermark tone={LEVEL_TONE[levelOf(ev.unget[worst])]} label="Peor mes" value={pctText(ev.unget[worst])} hint={monthLabel(ev.months[worst])} />
+      </KpiStrip>
+      <ChartCard
+        title="Disponibilidad mes a mes"
+        info={<><P>Cada mes se calcula como si fuera el corte: con su stock al cierre del mes y el consumo de los 12 meses anteriores (CPA), con la misma fórmula del tablero.</P><P>Se muestran hasta los últimos 12 meses que tengan al menos {EVOLUTION_MIN_WINDOW} meses de consumo en el archivo; con menos, el CPA no es confiable. Para 12 meses completos hacen falta 24 meses de TFORMDET.</P></>}
+      >
+        <EvolutionChart labels={idx.map((k) => monthShort(ev.months[k]))} values={values} partial={partial} windows={idx.map((k) => ev.windows[k])} levels={ctx.levels} levelLabels={DME_LEVEL_LABEL} levelOf={levelOf} />
+        {someParcial && (
+          <p className="mt-2 text-[12px] text-slate-500">
+            Puntos claros y línea punteada: CPA con menos de 12 meses de consumo (el archivo empieza en {monthLabel(ev.months[0])}). Con 24 meses de TFORMDET salen completos.
+          </p>
+        )}
+      </ChartCard>
+      {microredes.length > 1 && (
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center gap-1.5 border-b border-slate-100 p-3">
+            <h3 className="text-[11.5px] font-black uppercase tracking-wider text-slate-500">Microredes mes a mes</h3>
+          </div>
+          <div className="scrollbar-x overflow-x-auto">
+            <table className="w-full min-w-[720px] text-[13px]">
+              <thead className="bg-slate-50 text-[10.5px] font-black uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-3 py-2.5 text-left">Microred</th>
+                  {idx.map((k) => <th key={k} className="px-2 py-2.5 text-center">{monthShort(ev.months[k])}</th>)}
+                  <th className="px-3 py-2.5 text-center">Variación</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {microredes.map((m) => (
+                  <tr key={m.code} className="h-12">
+                    <td className="px-3 py-2 font-semibold text-slate-800">{m.name}</td>
+                    {idx.map((k, i) => <td key={k} className="px-2 py-2 text-center"><LevelPct pct={m.pct[k]} levelOf={levelOf} dim={partial[i]} /></td>)}
+                    <td className="px-3 py-2 text-center"><Delta value={delta(m)} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      <ReportTable
+        title="Establecimientos mes a mes"
+        info={<P>Primero los que más bajaron entre el primer y el último mes. Clic en un establecimiento para abrirlo.</P>}
+        rows={establishments}
+        columns={[
+          { key: "name", label: "Establecimiento", sort: (r) => r.name, render: (r) => <span className="block max-w-[240px]"><span className="block truncate font-semibold text-slate-800">{r.name}</span><span className="block truncate text-[11.5px] text-slate-500">{r.microred}</span></span> },
+          ...monthCols,
+          { key: "delta", label: "Variación", sort: (r) => delta(r), render: (r) => <Delta value={delta(r)} /> },
+        ]}
+        rowKey={(r) => r.code}
+        itemLabel="establecimientos"
+        searchOf={(r) => `${r.code} ${r.name} ${r.microred}`}
+        placeholder="Buscar establecimiento o microred…"
+        onRowClick={(r) => ctx.openEstablishment(r.code)}
+        minWidth={300 + idx.length * 78}
+        excel={{ name: "Evolución", title: "Disponibilidad mes a mes por establecimiento", subtitle: `${ctx.reportTitle} · ${ctx.scopeLabel}`, columns: [
+          { header: "Código", width: 9, value: (r) => r.code }, { header: "Establecimiento", width: 34, value: (r) => r.name }, { header: "Microred", width: 18, value: (r) => r.microred },
+          ...idx.map((k) => ({ header: monthLabel(ev.months[k]), width: 10, fmt: "dec1" as const, value: (r: EvolutionEntity) => r.pct[k] ?? "" })),
+          { header: "Variación (pp)", width: 12, fmt: "dec1" as const, value: (r) => delta(r) ?? "" },
+        ] }}
+        card={(r) => (
+          <>
+            <p className="font-semibold text-slate-800">{r.name}</p>
+            <p className="text-[12px] text-slate-500">{r.microred}</p>
+            <div className="mt-2 flex items-center justify-between text-[12.5px]">
+              <span className="flex items-center gap-2">{monthShort(ev.months[idx[0]])} <LevelPct pct={r.pct[idx[0]]} levelOf={levelOf} dim={partial[0]} /> → {monthShort(ev.months[n - 1])} <LevelPct pct={r.pct[n - 1]} levelOf={levelOf} /></span>
+              <Delta value={delta(r)} />
+            </div>
+          </>
+        )}
+      />
     </div>
   );
 };
