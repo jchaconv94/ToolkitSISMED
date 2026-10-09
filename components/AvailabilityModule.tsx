@@ -72,6 +72,14 @@ const readTformdetFile = async (file: File): Promise<TformdetFileResult> => {
     });
     if (reply.ok && reply.result) return reply.result;
     if (!reply.retry) throw new Error(reply.message || "No se pudo leer el archivo.");
+    // Respaldo con SheetJS. Si tampoco puede, se muestra por qué falló el lector rápido: con un
+    // archivo muy grande SheetJS devuelve una hoja vacía y el aviso «Suba la consulta TFORMDET»
+    // confundía (2026-10-09, TFORMDET de 21 meses).
+    try {
+      return tformdetFromSheet(await readSheet(file), file.name);
+    } catch {
+      throw new Error(`No se pudo leer el archivo${reply.message ? ` (${reply.message})` : ""}. Si es un TFORMDET de muchos meses, descárguelo con menos meses (hasta 24).`);
+    }
   }
   return tformdetFromSheet(await readSheet(file), file.name);
 };
@@ -671,7 +679,7 @@ export const AvailabilityModule: React.FC = () => {
             />
           </div>
           {reading === "disp" && (
-            <p className="mt-3 flex items-center gap-2 text-[12.5px] text-slate-500"><Loader2 className="h-4 w-4 animate-spin text-teal-600" />Leyendo el archivo… un TFORMDET de 12 meses puede tardar medio minuto.</p>
+            <p className="mt-3 flex items-center gap-2 text-[12.5px] text-slate-500"><Loader2 className="h-4 w-4 animate-spin text-teal-600" />Leyendo el archivo… un TFORMDET de 12 meses puede tardar medio minuto, y uno de 24 meses, hasta un minuto.</p>
           )}
           {source?.kind === "tformdet" && !source.classified && (
             <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800">

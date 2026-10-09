@@ -84,7 +84,18 @@ botón.
   y quitar el mes. Con un TFORMDET sintético de 24 meses, el relleno de 12 meses respetando un mes
   ya guardado por otra persona. Sin internet, la copia del historial y el botón apagado.
 
-## Pendiente
+## Archivos de muchos meses (2026-10-09)
 
-Aplicar `supabase/SUPABASE_DISPONIBILIDAD_HISTORIAL.sql` en Supabase. Puede ir antes o después de
-publicar: la tabla es nueva y nadie la lee hasta que la web la use.
+El primer TFORMDET real de 21 meses (enero 2025 a setiembre 2026) no se leía y salía «Suba la
+consulta TFORMDET del Toolkit». El Toolkit 2.3.1 escribe el Excel con XlsxWriter en memoria
+constante: los textos van dentro de cada celda y la hoja de 24 meses pesa ~620 MB sin comprimir,
+más que el texto más largo que admite el navegador (~512 MB). `services/fastXlsx.ts` ahora
+descomprime y recorre la hoja por trozos: lee igual que antes los archivos de siempre (misma huella
+en el de 12 meses, y más rápido) y uno de 24 meses tarda ~18 s en Chromium. Si aun así no puede, el
+aviso dice por qué y sugiere descargarlo con menos meses.
+
+## Puesta en marcha
+
+`supabase/SUPABASE_DISPONIBILIDAD_HISTORIAL.sql` ya está aplicado en Supabase (el usuario,
+2026-10-09). Si se reinstala la base, se puede aplicar antes o después de publicar: la tabla es
+nueva y nadie la lee hasta que la web la use.
