@@ -10,6 +10,8 @@ on:
     branches: [main]
     paths:
       - "cloudflare/conexion/**"
+      # El reenvío de stock (/stock) es código compartido con Supabase.
+      - "supabase/functions/stock-relay/**"
       - ".github/workflows/cloudflare-conexion.yml"
   workflow_dispatch:
 

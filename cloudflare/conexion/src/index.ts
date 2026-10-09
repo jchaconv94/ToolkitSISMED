@@ -31,6 +31,11 @@
  *   GET  /backup/<job>/download?token=…                 descarga (admite Range)
  * Un backup no descargado se borra a la hora; la regla del bucket lo borra al día.
  *
+ * Envío de stock por camino de respaldo (no usa la conexión abierta ni el Durable Object):
+ *   POST /stock   el Toolkit manda aquí el stock cuando la red bloquea script.google.com, y
+ *                 este servicio lo pasa al Apps Script de la UNGET. Código y reglas en
+ *                 supabase/functions/stock-relay/index.ts (lo comparte con Supabase).
+ *
  * Reglas (etapa 3), antes de avisar a la PC:
  *   - Consumo: si algún dato del plan gratuito llega al 80 %, se rechaza el pedido.
  *   - Cupo: app_backup_request_start reserva el pedido si el establecimiento no agotó
@@ -44,6 +49,8 @@ import {
   usageBlocks, usageFor, usageMessage,
 } from "./logic";
 import { UsageEnv, readUsage } from "./usage";
+// El reenvío de stock es el mismo código que publica Supabase (camino de respaldo B).
+import { relayStock } from "../../../supabase/functions/stock-relay/index";
 
 export interface Env extends UsageEnv {
   REGION: DurableObjectNamespace<Region>;
@@ -171,6 +178,15 @@ export default {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === "/salud") return json({ ok: true });
+    if (url.pathname === "/stock") {
+      try {
+        return await relayStock(request, { supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY });
+      } catch {
+        return new Response(JSON.stringify({ error: "ERROR_DEL_SERVICIO", message: "Error del servicio de respaldo.", final: false }), {
+          status: 500, headers: { "Content-Type": "application/json; charset=utf-8", "X-Relay-Error": "ERROR_DEL_SERVICIO" },
+        });
+      }
+    }
 
     const parts = url.pathname.split("/");
     if (parts[1] === "backup") {
