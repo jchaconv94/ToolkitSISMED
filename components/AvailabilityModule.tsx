@@ -1,17 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, BarChart3, Building2, CalendarClock, CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, Loader2, MoreVertical, PackageX, RefreshCw, Repeat2, SearchX, Settings2, TrendingUp, Upload, Warehouse, X,
+  Activity, AlertTriangle, ArrowLeft, BarChart3, Building2, CalendarClock, CheckCircle2, Download, FileSpreadsheet, History, LayoutDashboard, Loader2, MoreVertical, PackageX, RefreshCw, Repeat2, SearchX, Settings2, TrendingUp, Upload, Warehouse, X,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
+import { getUserJurisdictionScope } from "../services/jurisdictionService";
+import { isOnline } from "../services/connectivity";
+import { useOnline } from "./ui/useOnline";
+import {
+  HISTORY_WINDOW, availabilityHistoryApi, backfillMonths, historySeries, indexHistory, lastMonthsOf, planHistorySave, rowsAtMonth,
+  type HistoryData, type HistorySavePlan,
+} from "../services/availabilityHistory";
+import { AvailabilityHistory, type HistoryStatus } from "./AvailabilityHistory";
+import { AvailabilityHistorySaveDialog } from "./AvailabilityHistorySaveDialog";
 import { userFullName } from "../services/sessionDisplay";
 import { api } from "../services/api";
 import {
   averageConsumption, buildItems, cutDateOf, essentialRows, groupByIpress, summarize,
   type EstablishmentInfo, type AvailabilityItem, type AvailabilityScope, type Lot, type TformdetMonthSheet, type WarehouseItem, type ParsedAvailability, type ParsedTformdet,
 } from "../services/availabilityReport";
-import { monthLabel } from "../services/availabilityExport";
+import { monthFull, monthLabel } from "../services/availabilityExport";
 import { exportAvailabilityExcel } from "../services/availabilityExportClient";
 import type { DmeLevel } from "../services/stockStatus";
 import { asSupplier, isSeparateSite, lotRiskReport, type ProductGap } from "../services/availabilityInsights";
@@ -193,7 +202,7 @@ export const AvailabilityModule: React.FC = () => {
         setRegistry(new Map(facilities.map((f) => {
           const m = f.microredId ? mr.get(f.microredId) : undefined;
           const unget = f.ungetId || m?.ungetId;
-          return [String(f.code).trim(), { name: f.name, type: f.type || "", microred: m?.name || "", red: (unget && ug.get(unget)) || "", category: f.category || "" }];
+          return [String(f.code).trim(), { name: f.name, type: f.type || "", microred: m?.name || "", red: (unget && ug.get(unget)) || "", ungetId: unget ? String(unget) : undefined, category: f.category || "" }];
         })));
       })
       .catch(() => undefined);
@@ -204,8 +213,12 @@ export const AvailabilityModule: React.FC = () => {
   const storeUser = user?.username || "";
   const [stored, setStored] = useState<{ name: string; savedAt: string } | null>(null);
   const [restoring, setRestoring] = useState(true);
+  /** El archivo completo: si trae más de 12 meses, los anteriores llenan el historial hacia atrás. */
+  const [fullData, setFullData] = useState<ParsedTformdet | null>(null);
   const applyFile = (name: string, data: TformdetFileResult["data"], last: TformdetFileResult["last"]) => {
-    setDispFile({ name, data });
+    setFullData(data);
+    // El reporte del mes siempre con los últimos 12 meses de consumo.
+    setDispFile({ name, data: lastMonthsOf(data) });
     setLotsFile({ name, data: data.lots });
     setTformdetSheet(last);
     setWarehouse(data.warehouse ?? []);
@@ -227,9 +240,54 @@ export const AvailabilityModule: React.FC = () => {
     return () => { alive = false; };
   }, [storeUser]); // eslint-disable-line react-hooks/exhaustive-deps
   const clearFile = () => {
-    setDispFile(null); setCalculated(false); setLotsFile(null); setTformdetSheet(null); setWarehouse([]); setSource(null); setStored(null);
+    setDispFile(null); setFullData(null); setCalculated(false); setLotsFile(null); setTformdetSheet(null); setWarehouse([]); setSource(null); setStored(null);
     availabilityStore.clear(storeUser);
   };
+
+  // Historial (2026-10-09): es la pantalla principal; el reporte del mes se abre aparte.
+  const [screen, setScreen] = useState<"history" | "report">("history");
+  const online = useOnline();
+  const scopeInfo = useMemo(() => getUserJurisdictionScope(user), [user]);
+  const [historyYear, setHistoryYear] = useState(() => new Date().getFullYear());
+  const [history, setHistory] = useState<HistoryData | null>(null);
+  const [historyStatus, setHistoryStatus] = useState<HistoryStatus>("loading");
+  const [historyError, setHistoryError] = useState<string>();
+  const [historyOffline, setHistoryOffline] = useState(false);
+  const firstHistoryLoad = useRef(true);
+  const loadHistory = useCallback(async (year: number) => {
+    const offline = !isOnline();
+    try {
+      const data = await availabilityHistoryApi.list(storeUser, `${year - 1}01`, `${year}12`);
+      setHistory(data);
+      setHistoryStatus("ready");
+      setHistoryOffline(offline);
+      // Al entrar, el año más reciente con algo guardado.
+      const latest = Math.max(0, ...data.months.map((m) => Number(m.slice(0, 4))));
+      if (firstHistoryLoad.current && latest && latest < year && !data.months.some((m) => m.startsWith(String(year)))) setHistoryYear(latest);
+    } catch (e: any) {
+      const message = e?.message || "";
+      setHistory(null);
+      setHistoryError(message);
+      setHistoryStatus(/Falta instalar/.test(message) ? "missing-sql" : "error");
+      // Sin internet y sin copia del historial: directo al reporte del mes, que funciona sin internet.
+      if (offline && firstHistoryLoad.current) setScreen("report");
+    } finally {
+      firstHistoryLoad.current = false;
+    }
+  }, [storeUser]);
+  useEffect(() => { loadHistory(historyYear); }, [historyYear, loadHistory]);
+  const historyYears = useMemo(() => {
+    const set = new Set([new Date().getFullYear(), historyYear, ...(history?.months ?? []).map((m) => Number(m.slice(0, 4)))]);
+    return [...set].sort((a, b) => b - a);
+  }, [history, historyYear]);
+  // Guarda en el historial quien tiene la acción y es de una UNGET o de la DIRESA (el servidor lo vuelve a comprobar).
+  // Sin el SQL del historial, el botón no se ofrece: no podría guardar.
+  const canSaveHistory = can("AVAILABILITY", "saveHistory") && (scopeInfo.level === "GLOBAL" || scopeInfo.level === "UNGET") && historyStatus !== "missing-sql";
+  const [savePlan, setSavePlan] = useState<HistorySavePlan | null>(null);
+  /** Meses anteriores que se pueden llenar con el mismo archivo, y si se van a guardar. */
+  const [backfill, setBackfill] = useState<Array<{ plan: HistorySavePlan; selected: boolean }>>([]);
+  const [preparing, setPreparing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const handleDispFile = async (file: File) => {
     setReading("disp");
@@ -359,6 +417,108 @@ export const AvailabilityModule: React.FC = () => {
 
   const months = dispFile?.data.months ?? [];
   const cut = months[months.length - 1];
+
+  const historyOptions = useMemo(() => ({ rules: { all: config.formula.all, essential: config.formula.essential }, aggregate: config.formula.aggregate, levels: config.formula.levels }), [config.formula]);
+  const planPcts = useMemo(() => {
+    if (!savePlan) return { all: null, essential: null };
+    const idx = indexHistory(savePlan.records);
+    return {
+      all: historySeries(idx, "all", [savePlan.month], null, historyOptions)[0].pct,
+      essential: historySeries(idx, "essential", [savePlan.month], null, historyOptions)[0].pct,
+    };
+  }, [savePlan, historyOptions]);
+  const inScope = (code: string) => scopeInfo.level === "GLOBAL" || (scopeInfo.level === "UNGET" && !!scopeInfo.ungetId && registry.get(code)?.ungetId === String(scopeInfo.ungetId));
+  /** Meses anteriores al corte con sus 12 meses de consumo en el archivo, calculados igual que el corte. */
+  const backfillPlans = (existing: HistoryData | null): HistorySavePlan[] => {
+    if (!fullData || fullData.months.length <= HISTORY_WINDOW) return [];
+    const enrich = (r: ParsedTformdet["rows"][number]) => {
+      if (r.microred && r.red) return r;
+      const info = registry.get(r.ipressCode);
+      return info ? { ...r, microred: r.microred || info.microred || "", red: r.red || info.red || "", category: r.category || info.category || "" } : r;
+    };
+    const base = groupByIpress([...fullData.rows, ...(fullData.dormantRows ?? [])].map(enrich), (code) => registry.get(code)?.name);
+    const opts = classifyOptionsOf(config.formula);
+    return backfillMonths(fullData.months).map((k) => {
+      const month = fullData.months[k];
+      const rows = rowsAtMonth(base, k);
+      const asOfMonth = cutDateOf(month);
+      return planHistorySave({
+        month,
+        window: HISTORY_WINDOW,
+        items: {
+          all: buildItems(rows, undefined, asOfMonth, opts),
+          essential: fullData.hasClassification ? buildItems(essentialRows(rows, config.fused.groups), undefined, asOfMonth, opts) : null,
+        },
+        vitals: vitalCodes,
+        nameOf: (code) => registry.get(code)?.name,
+        inRegistry: (code) => registry.has(code),
+        inScope,
+        reported: (code) => !fullData.reportedMonths || !!fullData.reportedMonths[code]?.includes(month),
+        existing,
+      });
+    }).reverse();
+  };
+  const openSave = async () => {
+    if (!computed || !cut || preparing) return;
+    setPreparing(true);
+    try {
+      // Lo ya guardado de esos meses, para avisar qué se reemplaza y de quién.
+      const first = fullData && fullData.months.length > HISTORY_WINDOW ? fullData.months[HISTORY_WINDOW - 1] : cut;
+      const existing = await availabilityHistoryApi.list(storeUser, first, cut).catch(() => null);
+      const reported = (dispFile?.data as Partial<ParsedTformdet> | undefined)?.reportedMonths;
+      setSavePlan(planHistorySave({
+        month: cut,
+        window: months.length,
+        items: { all: computed.all, essential: source?.classified === false ? null : computed.essential },
+        vitals: vitalCodes,
+        nameOf: (code) => registry.get(code)?.name,
+        inRegistry: (code) => registry.has(code),
+        inScope,
+        reported: (code) => !reported || !!reported[code]?.includes(cut),
+        existing,
+      }));
+      // Por omisión se llenan solo los meses vacíos: lo ya guardado se reemplaza solo si se marca.
+      setBackfill(backfillPlans(existing).map((plan) => ({ plan, selected: !plan.previous.length && !plan.blocked && plan.establishments > 0 })));
+    } finally {
+      setPreparing(false);
+    }
+  };
+  const saveMeta = (sourceCut: string) => ({ subMax: config.formula.subMax, sobreMin: config.formula.sobreMin, truncate: config.formula.truncate, fusedVersion: config.fused.version, sourceCut });
+  const capitalMonth = (month: string) => monthFull(month).replace(/^./, (c) => c.toUpperCase());
+  const doSave = async () => {
+    if (!savePlan || !cut) return;
+    setSaving(true);
+    const done: string[] = [];
+    let rejected = 0;
+    try {
+      for (const plan of [savePlan, ...backfill.filter((b) => b.selected).map((b) => b.plan)]) {
+        const res = await availabilityHistoryApi.save(plan, saveMeta(cut));
+        rejected += res?.rejected?.length ?? 0;
+        done.push(plan.month);
+      }
+      toast.success(done.length === 1
+        ? `${capitalMonth(savePlan.month)} quedó en el historial: ${formatNumber(savePlan.establishments)} establecimientos.`
+        : `Quedaron en el historial ${done.length} meses, de ${monthFull(done[done.length - 1])} a ${monthFull(done[0])}.`);
+      if (rejected) toast.warning(`${rejected} establecimientos no se guardaron: fuera de su jurisdicción o fuera del registro.`);
+      setSavePlan(null);
+      setBackfill([]);
+    } catch (e: any) {
+      const saved = done.length ? ` Se guardaron: ${done.map(monthFull).join(", ")}.` : "";
+      toast.error(`${e?.message || "No se pudo guardar en el historial."}${saved}`);
+    } finally {
+      setSaving(false);
+      if (done.length) loadHistory(historyYear);
+    }
+  };
+  const removeMonth = async (month: string) => {
+    try {
+      await availabilityHistoryApi.remove(month);
+      toast.success(`${capitalMonth(month)} se quitó del historial.`);
+      loadHistory(historyYear);
+    } catch (e: any) {
+      toast.error(e?.message || "No se pudo quitar el mes.");
+    }
+  };
   const reds = useMemo(() => [...new Set(ipressItems.map((i) => i.red).filter(Boolean))], [ipressItems]);
   const title = reds.length === 1 ? `UNGET ${reds[0]}` : "Todas las redes";
   const levelCounts = useMemo(() => {
@@ -380,7 +540,11 @@ export const AvailabilityModule: React.FC = () => {
   const closeProduct = useCallback(() => setProductState(null), []);
   const closeGap = useCallback(() => setGapState(null), []);
   const openEstablishmentName = openCode ? (report.establishments.find((e) => e.code === openCode) ?? pharmacyReport?.establishments.find((e) => e.code === openCode))?.name : undefined;
-  useModuleHeaderOverride(calculated && openCode ? { title: openEstablishmentName || openCode, subtitle: "Disponibilidad", onBack: closeEstablishment } : null);
+  useModuleHeaderOverride(
+    screen !== "report" ? null
+      : calculated && openCode ? { title: openEstablishmentName || openCode, subtitle: "Disponibilidad", onBack: closeEstablishment }
+      : { title: "Reporte del mes", subtitle: "Disponibilidad", onBack: () => setScreen("history") },
+  );
 
   /**
    * Riesgo de vencimiento como lo muestra la web (FEFO por lote, por farmacia o puesto), para el
@@ -436,6 +600,40 @@ export const AvailabilityModule: React.FC = () => {
 
   const startResults = () => { setTab("summary"); setOpenCode(null); setLevel("ALL"); setMicrored("ALL"); setCalculated(true); };
 
+  /* ------------------------------------------------------------ Historial */
+  if (screen === "history") {
+    const reds = [...new Set((history?.records ?? []).map((r) => registry.get(r.code)?.red).filter(Boolean))];
+    return (
+      <>
+        <AvailabilityHistory
+          data={history}
+          status={historyStatus}
+          error={historyError}
+          offline={historyOffline}
+          registry={registry}
+          formula={config.formula}
+          scopeTitle={reds.length === 1 ? `UNGET ${reds[0]}` : scopeInfo.level === "GLOBAL" ? "Todas las UNGET" : scopeInfo.label}
+          year={historyYear}
+          years={historyYears}
+          onYear={setHistoryYear}
+          onOpenReport={() => setScreen("report")}
+          storedReport={dispFile && cut ? monthLabel(cut) : null}
+          canRemove={canSaveHistory && online}
+          onRemoveMonth={removeMonth}
+          isAdmin={isAdmin}
+          onConfig={() => setConfigOpen(true)}
+        />
+        <AvailabilityConfigDialog open={configOpen} onClose={() => setConfigOpen(false)} config={config} onSaved={setConfig} previewRows={baseRows?.ipress ?? null} lots={lotsFile?.data} />
+      </>
+    );
+  }
+
+  const backButton = (
+    <button type="button" onClick={() => setScreen("history")} aria-label="Volver al historial" title="Volver al historial" className="hidden h-11 w-11 shrink-0 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 md:grid">
+      <ArrowLeft className="h-5 w-5" />
+    </button>
+  );
+
   /* ------------------------------------------------------------ Pantalla de carga */
   if (restoring && !calculated) {
     return (
@@ -451,8 +649,9 @@ export const AvailabilityModule: React.FC = () => {
     return (
       <div className="mx-auto max-w-4xl px-4 pb-24 pt-2 md:px-0 md:pb-8">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
-          <div className="flex items-start gap-3">
-            <h2 className="flex-1 text-[18px] font-black text-slate-900">Calcular la disponibilidad</h2>
+          <div className="flex items-center gap-3">
+            {backButton}
+            <h2 className="flex-1 text-[18px] font-black text-slate-900">Reporte del mes</h2>
             {isAdmin && (
               <button type="button" onClick={() => setConfigOpen(true)} className="flex h-9 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50">
                 <Settings2 className="h-4 w-4" />Configuración
@@ -463,7 +662,7 @@ export const AvailabilityModule: React.FC = () => {
           <div className="mt-5">
             <DropZone
               title="Consulta TFORMDET"
-              hint="Descárguela del Toolkit de escritorio con los meses que quiera: se calcula con todos. Los lotes y vencimientos salen del último mes."
+              hint="Descárguela del Toolkit de escritorio con 12 meses o más: el reporte usa los últimos 12, y los anteriores sirven para llenar el historial. Los lotes y vencimientos salen del último mes."
               fileName={dispFile?.name}
               detail={d ? `${formatNumber(d.rows.length)} filas` : undefined}
               onFile={handleDispFile}
@@ -486,6 +685,7 @@ export const AvailabilityModule: React.FC = () => {
               <span>
                 Mes de corte: <b className="text-slate-900">{monthLabel(cut)}</b> · consumo de {monthLabel(months[0])} a {monthLabel(cut)} ·{" "}
                 {months.length} {months.length === 1 ? "mes" : "meses"} · {d.hasPharmacies ? `${pharmacyCount} farmacias en ${ipressCount} establecimientos` : `${ipressCount} establecimientos`}
+                {fullData && fullData.months.length > months.length ? ` · el archivo trae ${fullData.months.length} meses: el reporte usa los últimos ${months.length} y los anteriores sirven para llenar el historial` : ""}
                 {source?.skipped.length ? ` · sin contar ${source.skipped.join(", ")} (no son establecimientos)` : ""}
               </span>
             </div>
@@ -562,7 +762,7 @@ export const AvailabilityModule: React.FC = () => {
       {/* Título del reporte: UNGET y corte a la izquierda; alcance y Exportar a la derecha; Configuración y otro TFORMDET en ⋯ */}
       <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <span className="hidden h-11 w-11 shrink-0 place-items-center rounded-2xl bg-teal-50 text-teal-700 sm:grid"><CalendarClock className="h-5 w-5" /></span>
+          {backButton}
           <div className="min-w-0">
             <h2 className="truncate text-[18px] font-black text-slate-900 md:text-[20px]">{title}</h2>
             <p className="truncate text-[12.5px] text-slate-500">
@@ -573,6 +773,18 @@ export const AvailabilityModule: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex-1 md:flex-none">{scopeSwitch(true)}</div>
+          {canSaveHistory && cut && (
+            <button
+              type="button"
+              onClick={openSave}
+              disabled={!online || preparing}
+              aria-label="Guardar en el historial"
+              title={online ? `Guardar ${monthLabel(cut)} en el historial` : "Necesita internet"}
+              className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 text-[13px] font-bold text-teal-700 transition-colors hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50 md:px-4"
+            >
+              {preparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}<span className="hidden lg:inline">Guardar en el historial</span>
+            </button>
+          )}
           {can("AVAILABILITY", "export") && (
             <button type="button" onClick={handleExport} disabled={exporting} aria-label="Exportar Excel" className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-teal-600 px-3 text-[13px] font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60 md:px-4">
               {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}<span className="hidden sm:inline">{exporting ? "Generando…" : "Exportar"}</span>
@@ -643,6 +855,18 @@ export const AvailabilityModule: React.FC = () => {
         onSaved={setConfig}
         previewRows={baseRows?.ipress ?? null}
         lots={lotsFile?.data}
+      />
+      <AvailabilityHistorySaveDialog
+        open={!!savePlan}
+        onClose={() => { setSavePlan(null); setBackfill([]); }}
+        plan={savePlan}
+        backfill={backfill}
+        onToggleBackfill={(month) => setBackfill((list) => list.map((b) => (b.plan.month === month ? { ...b, selected: !b.selected } : b)))}
+        pcts={planPcts}
+        formula={config.formula}
+        monthsInFile={months.length}
+        busy={saving}
+        onSave={doSave}
       />
     </div>
   );

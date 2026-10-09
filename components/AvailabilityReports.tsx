@@ -24,7 +24,7 @@ import { BottomSheet } from "./ui/BottomSheet";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type HeadAlign } from "./ui/FloatingTableHead";
 import {
-  ChartCard, Donut, Gauge, HBars, InfoTip, LEVEL_COLOR, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar, TipBox, useChartTip,
+  ChartCard, Donut, Gauge, HBars, InfoTip, LEVEL_COLOR, LEVEL_SOFT, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar, TipBox, useChartTip,
 } from "./AvailabilityCharts";
 
 /**
@@ -79,7 +79,7 @@ export type PlanEdits = Record<string, PlanEdit>;
 export type ReportTab = "summary" | "establishments" | "gaps" | "expiry" | "consumption" | "abc" | "overstock" | "redistribution" | "warehouse";
 
 const PAGE_SIZE = 25;
-const MONTH_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"];
+export const MONTH_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"];
 export const monthShort = (key: string) => `${MONTH_SHORT[Number(key.slice(4, 6)) - 1] ?? key.slice(4, 6)}${key.slice(2, 4)}`;
 
 export const LEVEL_TONE: Record<DmeLevel, Tone> = { OPTIMO: "success", ALTO: "info", REGULAR: "warning", BAJO: "danger" };
@@ -507,7 +507,7 @@ export function Pills<V extends string>({ value, options, onChange }: { value: V
 
 /* ---------------------------------------------------------------- Explicaciones */
 
-const P: React.FC<{ children: React.ReactNode }> = ({ children }) => <span className="mt-1.5 block first:mt-0">{children}</span>;
+export const P: React.FC<{ children: React.ReactNode }> = ({ children }) => <span className="mt-1.5 block first:mt-0">{children}</span>;
 const Ex: React.FC<{ children: React.ReactNode }> = ({ children }) => <span className="mt-2 block rounded-lg bg-slate-50 px-3 py-2 text-[12px] text-slate-600">{children}</span>;
 
 const INFO = {
@@ -1078,7 +1078,7 @@ export function drawerNav<T>(current: T, list: T[], open: (item: T) => void): Dr
 }
 
 /** Teclas del panel: Esc cierra; ← y → pasan al registro anterior o siguiente (no mientras se escribe). */
-const useDrawerKeys = (active: boolean, onClose: () => void, nav?: DrawerNav) => {
+export const useDrawerKeys = (active: boolean, onClose: () => void, nav?: DrawerNav) => {
   // Al cerrar el panel, la tabla de donde se abrió resalta el último registro visto.
   useEffect(() => (active ? followDrawerClose : undefined), [active]);
   useEffect(() => {
@@ -1095,7 +1095,7 @@ const useDrawerKeys = (active: boolean, onClose: () => void, nav?: DrawerNav) =>
 };
 
 /** Botones ‹ 3 de 112 › del encabezado de un panel. */
-const DrawerNavButtons: React.FC<{ nav?: DrawerNav }> = ({ nav }) => {
+export const DrawerNavButtons: React.FC<{ nav?: DrawerNav }> = ({ nav }) => {
   if (!nav) return null;
   const btn = "grid h-9 w-9 place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent";
   return (
@@ -1298,6 +1298,22 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
     </div>
   );
 };
+
+/* ---------------------------------------------------------------- Porcentaje y variación (historial) */
+
+/** Variación en puntos porcentuales: «+2,1 pp». */
+export const pp = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${formatOneDecimal(Math.abs(v)).replace(".", ",")} pp`;
+
+/** Porcentaje con el color de su nivel; «—» sin dato. */
+export const LevelPct: React.FC<{ pct: number | null; levelOf: (v: number) => DmeLevel; dim?: boolean }> = ({ pct, levelOf, dim }) => {
+  if (pct === null) return <span className="text-slate-300">—</span>;
+  const l = levelOf(pct);
+  return <span className={`inline-block min-w-[54px] rounded-md px-1.5 py-0.5 text-center font-mono text-[12px] font-bold ${dim ? "opacity-60" : ""}`} style={{ background: LEVEL_SOFT[l], color: LEVEL_COLOR[l] }}>{dec(pct)}</span>;
+};
+
+/** Variación en pp: verde si sube, rojo si baja. */
+export const Delta: React.FC<{ value: number | null }> = ({ value }) =>
+  value === null ? <span className="text-slate-300">—</span> : <span className={`font-mono text-[12.5px] font-bold ${value > 0.05 ? "text-emerald-700" : value < -0.05 ? "text-red-700" : "text-slate-500"}`}>{pp(value)}</span>;
 
 /* ---------------------------------------------------------------- ¿Dónde falta? */
 

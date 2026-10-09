@@ -4,6 +4,7 @@ import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
 import type { LevelThresholds } from "../services/availabilityReport";
 import { formatNumber } from "../services/numberFormat";
+import { useIsDesktop } from "./ui/useIsDesktop";
 
 /**
  * Gráficos del módulo Disponibilidad (2026-10-07), en SVG y HTML: velocímetro, dona, columnas
@@ -361,6 +362,116 @@ export const RankingChart: React.FC<{ rows: RankRow[]; levels: LevelThresholds; 
     </div>
   );
 };
+
+/* ---------------------------------------------------------------- Historial mes a mes */
+
+/**
+ * Disponibilidad mes a mes guardada en el historial (2026-10-09), sobre las franjas de nivel:
+ * el año elegido en línea continua y el anterior punteado. Un mes sin guardar corta la línea
+ * (no se inventa el punto) y uno con menos establecimientos que el resto va hueco con borde
+ * ámbar. El mes elegido lleva una franja detrás.
+ */
+export const HistoryChart: React.FC<{
+  labels: string[];
+  /** Nombre largo de cada mes para el recuadro («Septiembre 2026»). */
+  titles: string[];
+  values: Array<number | null>;
+  previous: Array<number | null>;
+  currentLabel: string;
+  previousLabel: string;
+  previousTitles: string[];
+  /** Establecimientos con datos cada mes y el total esperado. */
+  coverage: Array<{ establishments: number; expected: number }>;
+  selected: number | null;
+  onSelect?: (index: number) => void;
+  levels: LevelThresholds;
+  levelLabels: Record<DmeLevel, string>;
+  levelOf: (pct: number) => DmeLevel;
+}> = ({ labels, titles, values, previous, currentLabel, previousLabel, previousTitles, coverage, selected, onSelect, levels, levelLabels, levelOf }) => {
+  const n = labels.length;
+  const compact = !useIsDesktop();
+  const all = [...values, ...previous].filter((v): v is number => v !== null);
+  const minPct = Math.max(0, Math.min(levels.regular - 10, Math.floor((Math.min(...all, 100) - 5) / 10) * 10));
+  const left = compact ? 28 : 36, right = compact ? 6 : 64, top = 22, plotH = compact ? 190 : 220, bottom = 30;
+  const slot = compact ? 27 : 46;
+  const width = left + right + n * slot;
+  const height = top + plotH + bottom;
+  const y = (v: number) => top + plotH - ((Math.max(minPct, Math.min(100, v)) - minPct) / (100 - minPct)) * plotH;
+  const x = (i: number) => left + i * slot + slot / 2;
+  const bands: Array<[number, number, DmeLevel]> = [[levels.optimo, 100, "OPTIMO"], [levels.alto, levels.optimo, "ALTO"], [levels.regular, levels.alto, "REGULAR"], [minPct, levels.regular, "BAJO"]];
+  const ticks: number[] = [];
+  for (let v = minPct; v <= 100; v += compact ? 20 : 10) ticks.push(v);
+  const [hover, setHover] = useState<number | null>(null);
+  const tip = useChartTip();
+  // Tramos entre meses seguidos con dato: un mes sin guardar corta la línea.
+  const path = (series: Array<number | null>) => {
+    let d = "";
+    series.forEach((v, i) => {
+      if (v === null) return;
+      d += `${i > 0 && series[i - 1] !== null ? "L" : "M"}${x(i)},${y(v)} `;
+    });
+    return d.trim();
+  };
+  const incomplete = (i: number) => coverage[i] && coverage[i].establishments > 0 && coverage[i].establishments < coverage[i].expected;
+  return (
+    <div>
+      {tip.layer}
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label={`Disponibilidad mes a mes, ${currentLabel} y ${previousLabel}`}>
+        {bands.map(([a, b, l]) => (
+          <g key={l}>
+            <rect x={left} y={y(b)} width={width - left - right} height={Math.max(0, y(a) - y(b))} fill={LEVEL_SOFT[l]} opacity={0.55} />
+            {!compact && <text x={width - right + 8} y={(y(a) + y(b)) / 2} dominantBaseline="middle" className="text-[11.5px] font-bold" fill={LEVEL_COLOR[l]}>{levelLabels[l]}</text>}
+          </g>
+        ))}
+        {selected !== null && <rect x={x(selected) - slot / 2 + 2} y={top} width={slot - 4} height={plotH} rx={6} fill="#0f172a" opacity={0.06} />}
+        {ticks.map((t) => (
+          <text key={t} x={left - 6} y={y(t)} textAnchor="end" dominantBaseline="middle" className="fill-slate-400 text-[10.5px]">{t}</text>
+        ))}
+        <path d={path(previous)} fill="none" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 4" />
+        {previous.map((v, i) => (v === null ? null : <circle key={`p${i}`} cx={x(i)} cy={y(v)} r={3} fill="#fff" stroke="#94a3b8" strokeWidth={1.5} />))}
+        <path d={path(values)} fill="none" stroke="#0f766e" strokeWidth={2.5} strokeLinejoin="round" />
+        {labels.map((label, i) => {
+          const v = values[i], p = previous[i];
+          const cov = coverage[i];
+          const rows: Array<[string, React.ReactNode]> = [];
+          if (v !== null) rows.push([currentLabel, pct1(v)], ["Nivel", levelLabels[levelOf(v)]]);
+          if (p !== null) rows.push([previousTitles[i], pct1(p)]);
+          if (v !== null && p !== null) rows.push(["Variación", `${v - p >= 0 ? "+" : "−"}${Math.abs(v - p).toFixed(1).replace(".", ",")} pp`]);
+          if (v !== null && cov) rows.push(["Establecimientos", `${formatNumber(cov.establishments)} de ${formatNumber(cov.expected)}`]);
+          const b = tip.bind(<TipBox title={titles[i]} color={v !== null ? LEVEL_COLOR[levelOf(v)] : undefined} rows={rows} note={v === null ? "Mes sin guardar" : incomplete(i) ? "Faltan establecimientos en este mes" : undefined} />);
+          return (
+            <g
+              key={i}
+              onMouseEnter={() => setHover(i)}
+              onMouseMove={b.onMouseMove}
+              onMouseLeave={() => { b.onMouseLeave(); setHover(null); }}
+              onClick={() => v !== null && onSelect?.(i)}
+              className={v !== null && onSelect ? "cursor-pointer" : undefined}
+            >
+              <rect x={x(i) - slot / 2} y={top} width={slot} height={plotH + bottom} fill="transparent" />
+              {hover === i && <line x1={x(i)} x2={x(i)} y1={top} y2={top + plotH} stroke="#cbd5e1" strokeDasharray="3 3" />}
+              {v !== null && (
+                <circle cx={x(i)} cy={y(v)} r={hover === i || selected === i ? 6.5 : compact ? 4.5 : 5.5} fill={incomplete(i) ? "#fff" : LEVEL_COLOR[levelOf(v)]} stroke={incomplete(i) ? "#d97706" : "#fff"} strokeWidth={2} />
+              )}
+              {v !== null && !compact && (
+                <text x={x(i)} y={y(v) - 11} textAnchor="middle" className="fill-slate-700 text-[10.5px] font-bold" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{v.toFixed(1).replace(".", ",")}</text>
+              )}
+              <text x={x(i)} y={top + plotH + 19} textAnchor="middle" className={`text-[10.5px] ${selected === i ? "fill-slate-900 font-black" : v === null ? "fill-slate-300" : "fill-slate-600 font-semibold"}`}>{label}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
+
+/** Leyenda del historial: año elegido (línea) y año anterior (punteada). */
+export const HistoryLegend: React.FC<{ current: string; previous: string }> = ({ current, previous }) => (
+  <span className="flex items-center gap-3 text-[11.5px] font-semibold text-slate-500">
+    <span className="flex items-center gap-1.5"><svg width="18" height="8" aria-hidden><line x1="1" y1="4" x2="17" y2="4" stroke="#0f766e" strokeWidth="2.5" /></svg>{current}</span>
+    <span className="flex items-center gap-1.5"><svg width="18" height="8" aria-hidden><line x1="1" y1="4" x2="17" y2="4" stroke="#94a3b8" strokeWidth="2" strokeDasharray="4 3" /></svg>{previous}</span>
+  </span>
+);
 
 /* ---------------------------------------------------------------- Consumo mensual con CPA */
 

@@ -159,6 +159,10 @@ describe("disponibilidad", () => {
     expect(f1.otherOut).toBeUndefined();
     expect(isEstablishmentCode("06502F01")).toBe(true);
     expect(isEstablishmentCode("030S05")).toBe(false);
+    // Meses en que informó cada establecimiento (por IPRESS), para el historial.
+    expect(parsed.reportedMonths).toEqual({ "06502": ["202608", "202609"], "06503": ["202608"], "06504": ["202608"] });
+    // Stock de cada mes, para llenar el historial hacia atrás.
+    expect(f1.stockByMonth).toEqual([30, 20]);
   });
 
   it("guarda las otras salidas (OTRAS_SAL) aparte del consumo y las suma por IPRESS", () => {

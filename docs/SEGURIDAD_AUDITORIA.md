@@ -137,6 +137,10 @@ nueva no está instalada, la aplicación vuelve sola al camino anterior (solo AD
 - **Se retiró un ingreso sin servidor.** `api.login`, si fallaba la conexión, buscaba el usuario en una lista escrita en el código (`admin` / `123`, `farmacia` / `123`) y entraba como Administrador. Con la app funcionando sin internet eso habría dejado entrar a cualquiera en cualquier equipo y ver lo guardado en él. Ahora, sin internet, solo se entra con una sesión mantenida en ese equipo, y el login lo dice. También se retiraron los establecimientos de prueba que devolvía `getFacilities` sin conexión: sin internet y sin copia, la lista sale vacía.
 - **Sesión mantenida.** Con «Mantener sesión iniciada», el token va en `localStorage` en vez de `sessionStorage` y el servidor lo alarga a 45 días desde el último uso con internet (`app_session_keep`, `SUPABASE_SESION_MANTENIDA.sql`). Desactivar la cuenta lo invalida al instante (`app_session_user` exige `is_active`), cambiar la contraseña cierra las sesiones mantenidas en todos los equipos, y cerrar sesión sin internet lo cierra en el servidor apenas vuelve la conexión. Riesgo aceptado por el usuario: en una PC compartida la sesión queda abierta; por eso la casilla explica que se desmarque en ese caso.
 
+## Historial de disponibilidad (2026-10-09)
+
+`supabase/SUPABASE_DISPONIBILIDAD_HISTORIAL.sql` crea `availability_history` con RLS y sin políticas: nadie la lee ni la escribe directo. Todo pasa por tres funciones `SECURITY DEFINER` que exigen sesión (`app_availability_history_list`, `_save`, `_remove`). El servidor recorta lo que cada uno ve por su jurisdicción (OGESS solo sus UNGET, el responsable de un establecimiento solo el suyo) y solo deja guardar o quitar a ADMIN, DIRESA y UNGET con la acción `AVAILABILITY:saveHistory`, dentro de su jurisdicción. Valida cada fila (código de IPRESS, conteos enteros que suman el total, mes cerrado). Probado en un PostgreSQL local: detalle en `docs/DISPONIBILIDAD_HISTORIAL.md`.
+
 ## Lo que queda pendiente
 
 - **Alcance por rol dentro de la sesión.** Hoy la política distingue "con sesión" de "sin
