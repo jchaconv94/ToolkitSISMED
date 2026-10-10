@@ -284,9 +284,11 @@ const downloadTableExcel = async <T,>(spec: ExcelSpec<T>, rows: T[]) => {
 const TEXT_COLUMNS = new Set(["description", "name", "microred", "from", "to", "site"]);
 const alignOf = (key: string): HeadAlign => (TEXT_COLUMNS.has(key) ? "left" : "center");
 
-export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRowClick, itemLabel, searchOf, placeholder, toolbar, minWidth = 900, subRows, subLabel = "subregistros", anchorRef, excel }: {
+export function ReportTable<T>({ title, info, lead, rows, columns, rowKey, card, onRowClick, itemLabel, searchOf, placeholder, toolbar, minWidth = 900, subRows, subLabel = "subregistros", anchorRef, excel }: {
   title?: string;
   info?: React.ReactNode;
+  /** Lo que va antes del buscador en la barra (por ejemplo, pestañas que cambian la tabla). */
+  lead?: React.ReactNode;
   rows: T[];
   columns: Column<T>[];
   rowKey: (row: T) => string;
@@ -378,6 +380,7 @@ export function ReportTable<T>({ title, info, rows, columns, rowKey, card, onRow
             {info && <InfoTip title={title}>{info}</InfoTip>}
           </div>
         )}
+        {lead}
         {searchOf && <TableSearch value={search} onChange={setSearch} placeholder={placeholder || "Buscar…"} className="md:min-w-[280px]" />}
         {toolbar}
         {excel && (
