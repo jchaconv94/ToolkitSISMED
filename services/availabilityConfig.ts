@@ -65,6 +65,14 @@ export const DEFAULT_DME_EXCLUDED: ExcludedEntry[] = [
 /** Soluciones de gran volumen de fábrica: del catálogo SISMED (ver `services/largeVolumeProducts.ts`). */
 export { DEFAULT_LARGE_VOLUME };
 
+/**
+ * Versión de la lista de fábrica de gran volumen. Una lista guardada con otra versión se pone al día:
+ * toma la de fábrica vigente con lo que se agregó o quitó a mano sobre la anterior.
+ */
+export const LARGE_VOLUME_VERSION = "catalogo-sismed-2026-10-10";
+/** La de fábrica anterior (2026-10-10, 13 medicamentos), para saber qué se cambió a mano sobre ella. */
+const PREVIOUS_LARGE_VOLUME = ["08013", "03789", "03783", "08166", "05598", "19879", "21013", "21012", "21859", "50096", "02506", "04288", "06544"];
+
 export interface ScopeRule {
   normostock: boolean;
   sobrestock: boolean;
@@ -94,6 +102,8 @@ export interface AvailabilityFormula {
    * destino de cada grupo de fusionados). Se guarda en Supabase con la fórmula.
    */
   largeVolumeList: CodeEntry[];
+  /** Versión de la lista de fábrica con que se armó `largeVolumeList` (`LARGE_VOLUME_VERSION`). */
+  largeVolumeVersion: string;
   /** Medicamentos que no entran en la DME (ficha 28, criterios de exclusión). Solo la DME. */
   dmeExcluded: ExcludedEntry[];
   levels: { optimo: number; alto: number; regular: number };
@@ -109,6 +119,7 @@ export const DEFAULT_AVAILABILITY_FORMULA: AvailabilityFormula = {
   sobreMin: 6,
   largeVolumeMonths: 1,
   largeVolumeList: DEFAULT_LARGE_VOLUME,
+  largeVolumeVersion: LARGE_VOLUME_VERSION,
   dmeExcluded: DEFAULT_DME_EXCLUDED,
   levels: { optimo: 90, alto: 80, regular: 70 },
   aggregate: "average",
@@ -161,6 +172,18 @@ const legacyLargeVolume = (o: Record<string, unknown>): CodeEntry[] => {
   for (const e of entryList(o.largeVolumeAdd)) if (!skip.has(e.code) && !list.some((x) => x.code === e.code)) list.push(e);
   return list;
 };
+/**
+ * Una lista guardada con la de fábrica anterior (13): la vigente, sin lo que se quitó a mano de la
+ * anterior y con lo que se agregó a mano.
+ */
+const upgradeLargeVolume = (stored: CodeEntry[]): CodeEntry[] => {
+  const previous = new Set(PREVIOUS_LARGE_VOLUME);
+  const kept = new Set(stored.map((e) => e.code));
+  const removed = new Set(PREVIOUS_LARGE_VOLUME.filter((c) => !kept.has(c)));
+  const list = DEFAULT_LARGE_VOLUME.filter((e) => !removed.has(e.code));
+  for (const e of stored) if (!previous.has(e.code) && !list.some((x) => x.code === e.code)) list.push(e);
+  return list;
+};
 const reasonOf = (v: unknown): ExclusionReason | undefined => (v === "strategic" || v === "national" || v === "other" ? v : undefined);
 const rule = (v: unknown, fallback: ScopeRule, allowVital: boolean): ScopeRule => {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
@@ -191,7 +214,12 @@ export const normalizeFormula = (value: unknown): AvailabilityFormula => {
     largeVolumeMonths: Math.min(subMax, num(o.largeVolumeMonths, d.largeVolumeMonths, 0, 24)),
     // Una fórmula guardada antes de la lista no la trae: la de fábrica, con lo que se había
     // agregado o quitado a mano entonces.
-    largeVolumeList: Array.isArray(o.largeVolumeList) ? entryList(o.largeVolumeList) : legacyLargeVolume(o),
+    largeVolumeList: !Array.isArray(o.largeVolumeList)
+      ? legacyLargeVolume(o)
+      : o.largeVolumeVersion === LARGE_VOLUME_VERSION
+        ? entryList(o.largeVolumeList)
+        : upgradeLargeVolume(entryList(o.largeVolumeList)),
+    largeVolumeVersion: LARGE_VOLUME_VERSION,
     // Una fórmula guardada antes del 2026-10-10 no la trae: vale la de fábrica. Una lista vacía
     // guardada a propósito se respeta.
     dmeExcluded: Array.isArray(o.dmeExcluded)
@@ -319,7 +347,8 @@ export const availabilityConfigApi = {
         },
         fromServer: true,
         stored: {
-          largeVolume: Array.isArray((data.formula?.value as any)?.largeVolumeList),
+          // Guardada y con la lista de fábrica vigente; si no, falta guardarla.
+          largeVolume: Array.isArray((data.formula?.value as any)?.largeVolumeList) && (data.formula?.value as any)?.largeVolumeVersion === LARGE_VOLUME_VERSION,
           excluded: Array.isArray((data.formula?.value as any)?.dmeExcluded),
         },
       };

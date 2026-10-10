@@ -22,8 +22,8 @@ import { TablePagination } from "./ui/TablePagination";
 
 type Tab = "formula" | "largeVolume" | "excluded" | "fused" | "vitals";
 const PAGE = 25;
-/** Las listas de gran volumen y de excluidos van de 10 en 10 (pedido del usuario). */
-const LIST_PAGE = 10;
+/** Las listas de gran volumen y de excluidos van de 6 en 6 (pedido del usuario). */
+const LIST_PAGE = 6;
 
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const padCode = (v: string) => {
@@ -245,10 +245,10 @@ const nameLookup = (rows: AvailabilityRow[] | null, groups: FusedGroups) => {
   return (code: string) => groups[code]?.name || byCode.get(code) || Object.entries(groups).find(([, g]) => g.codes.includes(code))?.[1].name;
 };
 
-/** Solo mientras la lista todavía no está en la base (rige la de fábrica): se ve una vez, hasta guardar. */
+/** Solo mientras la lista todavía no está en la base (o se actualizó la de fábrica): se ve hasta guardar. */
 const SavedStatus: React.FC<{ stored: boolean; fromServer: boolean }> = ({ stored, fromServer }) =>
   fromServer && !stored ? (
-    <p className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[12px] font-semibold text-amber-800"><Info className="mt-0.5 h-4 w-4 shrink-0" />Lista de fábrica: todavía no está guardada en Supabase. Pulse «Guardar».</p>
+    <p className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[12px] font-semibold text-amber-800"><Info className="mt-0.5 h-4 w-4 shrink-0" />Esta lista todavía no está guardada en Supabase. Pulse «Guardar».</p>
   ) : null;
 
 type ListStatus = { stored: boolean; fromServer: boolean };
