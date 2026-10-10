@@ -8,10 +8,12 @@ de consumo, y el usuario pidió que el consumo sea siempre de 12 meses.
 ## Cómo funciona
 
 - **El historial es la pantalla principal de Disponibilidad** (`components/AvailabilityHistory.tsx`).
-  Muestra año y mes, cuatro indicadores (todos, esenciales, establecimientos con datos y meses
-  guardados), dos gráficos con el año anterior punteado (`HistoryChart`), las tablas mes a mes por
-  microred (o por UNGET, si se ven varias) y por establecimiento, y un panel por establecimiento
-  con sus situaciones del mes. **No hay detalle por producto**: para verlo, se abre el reporte del
+  Desde el 2026-10-10: año, mes y el selector «Ver» (la jurisdicción, una UNGET, una microred o un
+  establecimiento); cuatro indicadores, de los que «Todos los productos» y «Medicamentos
+  esenciales» eligen la vista de toda la pantalla; el gráfico de evolución de lo elegido con el año
+  anterior punteado (`HistoryChart`) y el ranking del mes al lado (lo que hay debajo de lo elegido;
+  con un establecimiento, sus situaciones); una tabla con pestañas Microredes (o UNGET) ·
+  Establecimientos · Fuera del análisis, y un panel por establecimiento con sus situaciones del mes. **No hay detalle por producto**: para verlo, se abre el reporte del
   mes con el TFORMDET de ese mes.
 - **El reporte del mes** (el tablero de siempre) se abre con «Reporte del mes» y se vuelve con la
   flecha. Ahí está el botón **«Guardar en el historial»**

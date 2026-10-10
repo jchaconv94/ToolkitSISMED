@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, CalendarRange, FileSpreadsheet, History, ListChecks, MoreVertical, Settings2, Trash2, WifiOff, X } from "lucide-react";
-import { EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption } from "./ui/kit";
+import { AlertTriangle, ArrowRight, CalendarRange, Check, ChevronDown, FileSpreadsheet, History, ListChecks, MapPin, MoreVertical, Settings2, Trash2, WifiOff, X } from "lucide-react";
+import { EmptyState, KpiCard, KpiStrip, TableSearch } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
 import { BottomSheet } from "./ui/BottomSheet";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
@@ -10,7 +10,7 @@ import { ResponsiveDialog, dialogSecondaryButton } from "./ui/ResponsiveDialog";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import { ChartCard, HistoryChart, HistoryLegend } from "./AvailabilityCharts";
 import {
-  CodeChip, Delta, DrawerNavButtons, LEVEL_TONE, LevelChip, LevelPct, MONTH_SHORT, P, Pills, ReportTable, dateText, drawerNav, pctText, pp, useDrawerKeys,
+  CodeChip, Delta, DrawerNavButtons, LEVEL_TONE, LevelChip, LevelPct, MONTH_SHORT, P, ReportTable, dateText, drawerNav, pctText, pp, useDrawerKeys,
   type Column,
 } from "./AvailabilityReports";
 import { DME_LEVEL_LABEL, dmeLevelOf, type EstablishmentInfo } from "../services/availabilityReport";
@@ -21,6 +21,7 @@ import {
   type HistoryCounts, type HistoryData, type HistoryEntityRow, type HistoryOptions, type HistorySave, type HistoryView,
 } from "../services/availabilityHistory";
 import { formatNumber } from "../services/numberFormat";
+import type { DmeLevel } from "../services/stockStatus";
 
 /**
  * Historial de disponibilidad (2026-10-09): pantalla principal del módulo Disponibilidad. Muestra
@@ -34,6 +35,7 @@ const VIEW_LABEL: Record<HistoryView, string> = { all: "Todos los productos", es
 const monthName = (key: string) => { const t = monthFull(key); return t.charAt(0).toUpperCase() + t.slice(1); };
 const shortName = (key: string) => MONTH_SHORT[Number(key.slice(4, 6)) - 1] ?? key.slice(4, 6);
 const ALL = "ALL";
+const fold = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 export type HistoryStatus = "loading" | "ready" | "missing-sql" | "error";
 
@@ -56,18 +58,21 @@ export const AvailabilityHistory: React.FC<{
   onRemoveMonth: (month: string) => Promise<void>;
   isAdmin: boolean;
   onConfig: () => void;
-  /** ¿Está fuera del análisis? (selección personal de «Establecimientos del análisis»). */
+  /** ¿Está fuera del análisis? (lista de «Establecimientos del análisis»). */
   isOut: (code: string) => boolean;
   onEditSites: () => void;
 }> = ({ data, status, error, offline, registry, formula, scopeTitle, year, years, onYear, onOpenReport, storedReport, canRemove, onRemoveMonth, isAdmin, onConfig, isOut, onEditSites }) => {
   const isDesktop = useIsDesktop();
+  // La vista la eligen las dos tarjetas de arriba (Todos / Esenciales) y vale para toda la pantalla.
   const [view, setView] = useState<HistoryView>("all");
+  // Qué se mira (selector «Ver»): toda la jurisdicción, una UNGET, una microred o un establecimiento.
   const [unget, setUnget] = useState(ALL);
   const [microred, setMicrored] = useState(ALL);
+  const [site, setSite] = useState(ALL);
+  const [tab, setTab] = useState<TableTab>("groups");
   const [picked, setPicked] = useState<number | null>(null);
   const [openState, setOpenState] = useState<{ row: HistoryEntityRow; list: HistoryEntityRow[] } | null>(null);
   const [monthsOpen, setMonthsOpen] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const opts: HistoryOptions = useMemo(() => ({ rules: { all: formula.all, essential: formula.essential }, aggregate: formula.aggregate, levels: formula.levels }), [formula]);
@@ -78,11 +83,12 @@ export const AvailabilityHistory: React.FC<{
 
   const ungetOf = (code: string) => registry.get(code)?.red || "Sin registro";
   const microredOf = (code: string) => registry.get(code)?.microred || "Sin microred";
+  const nameOf = (code: string) => registry.get(code)?.name || code;
   const codes = useMemo(() => [...new Set((data?.records ?? []).map((r) => r.code))], [data]);
   const ungets = useMemo(() => [...new Set(codes.map(ungetOf))].sort((a, b) => a.localeCompare(b, "es")), [codes, registry]); // eslint-disable-line react-hooks/exhaustive-deps
   const microredes = useMemo(() => [...new Set(codes.filter((c) => unget === ALL || ungetOf(c) === unget).map(microredOf))].sort((a, b) => a.localeCompare(b, "es")), [codes, unget, registry]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Los establecimientos fuera del análisis no cuentan: se ven aparte, en su propia tabla.
-  const inPlace = (code: string) => (unget === ALL || ungetOf(code) === unget) && (microred === ALL || microredOf(code) === microred);
+  // Los establecimientos fuera del análisis no cuentan: se ven aparte, en su propia pestaña.
+  const inPlace = (code: string) => (unget === ALL || ungetOf(code) === unget) && (microred === ALL || microredOf(code) === microred) && (site === ALL || code === site);
   const inFilter = (code: string) => inPlace(code) && !isOut(code);
 
   const series = useMemo(() => ({
@@ -90,14 +96,14 @@ export const AvailabilityHistory: React.FC<{
     essential: historySeries(index, "essential", months, inFilter, opts),
     prevAll: historySeries(index, "all", prevMonths, inFilter, opts),
     prevEssential: historySeries(index, "essential", prevMonths, inFilter, opts),
-  }), [index, months, prevMonths, opts, unget, microred, registry, isOut]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [index, months, prevMonths, opts, unget, microred, site, registry, isOut]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Establecimientos esperados: los que tienen algo guardado en el año, dentro del filtro.
+  // Establecimientos esperados: los que tienen algo guardado en el año, dentro de lo que se mira.
   const expected = useMemo(() => {
     const set = new Set<string>();
     for (const v of ["all", "essential"] as HistoryView[]) for (const m of months) for (const code of index.get(v)?.get(m)?.keys() ?? []) if (inFilter(code)) set.add(code);
     return set;
-  }, [index, months, unget, microred, registry, isOut]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [index, months, unget, microred, site, registry, isOut]); // eslint-disable-line react-hooks/exhaustive-deps
   const coverage = series.all.map((p, i) => ({ establishments: Math.max(p.establishments, series.essential[i].establishments), expected: expected.size }));
   const withData = months.map((_, i) => series.all[i].pct !== null || series.essential[i].pct !== null);
   const lastIdx = withData.lastIndexOf(true);
@@ -111,19 +117,20 @@ export const AvailabilityHistory: React.FC<{
   const selMonth = sel !== null ? months[sel] : null;
   const lastSave = selMonth ? savesOf(selMonth)[0] : undefined;
 
-  // Microred o UNGET, según el alcance: sin elegir UNGET y con varias, por UNGET.
+  // Microred o UNGET, según lo que se mira: con varias UNGET y ninguna elegida, por UNGET.
   const byUnget = unget === ALL && ungets.length > 1;
   const groupRows = useMemo(() => {
-    if (!byUnget && microredes.length < 2) return null;
+    // Con una microred o un establecimiento elegidos, la pestaña de microredes sobra (sería una fila).
+    if (!byUnget && (microredes.length < 2 || microred !== ALL || site !== ALL)) return null;
     return historyRows(index, view, months, (code) => (inFilter(code) ? (byUnget ? ungetOf(code) : microredOf(code)) : null), (key) => ({ name: key, group: "" }), opts);
-  }, [index, view, months, byUnget, microredes, opts, unget, microred, registry, isOut]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [index, view, months, byUnget, microredes, opts, unget, microred, site, registry, isOut]); // eslint-disable-line react-hooks/exhaustive-deps
   const establishmentRows = useMemo(
-    () => historyRows(index, view, months, (code) => (inFilter(code) ? code : null), (code) => ({ name: registry.get(code)?.name || code, group: byUnget ? `${ungetOf(code)} · ${microredOf(code)}` : microredOf(code) }), opts),
-    [index, view, months, opts, unget, microred, registry, byUnget, isOut], // eslint-disable-line react-hooks/exhaustive-deps
+    () => historyRows(index, view, months, (code) => (inFilter(code) ? code : null), (code) => ({ name: nameOf(code), group: byUnget ? `${ungetOf(code)} · ${microredOf(code)}` : microredOf(code) }), opts),
+    [index, view, months, opts, unget, microred, site, registry, byUnget, isOut], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const outsideRows = useMemo(
-    () => historyRows(index, view, months, (code) => (inPlace(code) && isOut(code) ? code : null), (code) => ({ name: registry.get(code)?.name || code, group: byUnget ? `${ungetOf(code)} · ${microredOf(code)}` : microredOf(code) }), opts),
-    [index, view, months, opts, unget, microred, registry, byUnget, isOut], // eslint-disable-line react-hooks/exhaustive-deps
+    () => historyRows(index, view, months, (code) => (inPlace(code) && isOut(code) ? code : null), (code) => ({ name: nameOf(code), group: byUnget ? `${ungetOf(code)} · ${microredOf(code)}` : microredOf(code) }), opts),
+    [index, view, months, opts, unget, microred, site, registry, byUnget, isOut], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   if (status === "loading") {
@@ -132,7 +139,7 @@ export const AvailabilityHistory: React.FC<{
 
   const reportButton = (
     <button type="button" onClick={onOpenReport} className="hidden h-10 shrink-0 items-center gap-2 rounded-xl bg-teal-600 px-4 text-[13px] font-bold text-white transition-colors hover:bg-teal-700 md:flex" title={storedReport ? `Guardado en este equipo: ${storedReport}` : "Subir el TFORMDET del mes"}>
-      <FileSpreadsheet className="h-4 w-4" />Reporte del mes
+      <FileSpreadsheet className="h-4 w-4" />Reporte del mes<ArrowRight className="h-4 w-4" />
     </button>
   );
   const fab = <FloatingActionButton icon={<FileSpreadsheet />} label="Reporte del mes" onClick={onOpenReport} />;
@@ -149,7 +156,7 @@ export const AvailabilityHistory: React.FC<{
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <EmptyState icon={<History className="h-6 w-6" />} title={title} description={description} action={
             <button type="button" onClick={onOpenReport} className="flex h-10 items-center gap-2 rounded-xl bg-teal-600 px-4 text-[13px] font-bold text-white hover:bg-teal-700">
-              <FileSpreadsheet className="h-4 w-4" />{storedReport ? `Abrir el reporte de ${storedReport}` : "Reporte del mes"}
+              <FileSpreadsheet className="h-4 w-4" />{storedReport ? `Abrir el reporte de ${storedReport}` : "Reporte del mes"}<ArrowRight className="h-4 w-4" />
             </button>
           } />
         </div>
@@ -162,10 +169,11 @@ export const AvailabilityHistory: React.FC<{
   const kpi = (v: HistoryView) => {
     const cur = pctAt(v === "all" ? series.all : series.essential, sel);
     const prev = pctAt(v === "all" ? series.prevAll : series.prevEssential, sel);
-    if (cur === null) return <KpiCard watermark tone="neutral" label={VIEW_LABEL[v]} value="—" hint={v === "essential" ? "Sin datos: el TFORMDET no traía la clasificación" : "Sin datos ese mes"} />;
+    const pick = { onClick: () => setView(v), active: view === v };
+    if (cur === null) return <KpiCard watermark tone="neutral" label={VIEW_LABEL[v]} value="—" hint={v === "essential" ? "Sin datos: el TFORMDET no traía la clasificación" : "Sin datos ese mes"} {...pick} />;
     const level = levelOf(cur);
     const hint = prev === null ? `Nivel ${DME_LEVEL_LABEL[level]} · sin datos de ${monthName(prevMonths[sel!])}` : `Nivel ${DME_LEVEL_LABEL[level]} · ${pp(cur - prev)} vs ${shortName(prevMonths[sel!]).toLowerCase()} ${year - 1}`;
-    return <KpiCard watermark tone={LEVEL_TONE[level]} label={VIEW_LABEL[v]} value={pctText(cur)} hint={hint} />;
+    return <KpiCard watermark tone={LEVEL_TONE[level]} label={VIEW_LABEL[v]} value={pctText(cur)} hint={hint} {...pick} />;
   };
   const cov = sel !== null ? coverage[sel] : null;
   const complete = !!cov && cov.establishments >= cov.expected;
@@ -179,18 +187,44 @@ export const AvailabilityHistory: React.FC<{
   }));
   const deltaOf = (r: HistoryEntityRow) => (sel === null || r.pct[sel] === null || r.previous[sel] === null ? null : r.pct[sel]! - r.previous[sel]!);
   const deltaLabel = sel !== null ? `vs ${shortName(months[sel])} ${String(year - 1).slice(2)}` : "Variación";
-  const viewPills = (
-    <Pills value={view} onChange={setView} options={[{ value: "all", label: "Todos los productos" }, { value: "essential", label: "Medicamentos esenciales" }]} />
-  );
   const excelMonths = months.slice(0, shown).map((m, i) => ({ header: monthName(m), width: 11, fmt: "dec1" as const, value: (r: HistoryEntityRow) => r.pct[i] ?? "" }));
 
-  const ungetOptions = [{ value: ALL, label: "Todas las UNGET" }, ...ungets.map((u) => ({ value: u, label: u }))];
-  const microredOptions = [{ value: ALL, label: "Todas las microredes" }, ...microredes.map((m) => ({ value: m, label: m }))];
   const yearOptions = years.map((y) => ({ value: String(y), label: String(y) }));
   const monthOptions = months.map((m, i) => ({ value: String(i), label: monthName(m), disabled: !withData[i] })).filter((o) => !o.disabled);
   const outsideCount = codes.filter((c) => isOut(c)).length;
-  const subtitle = `${scopeTitle} · ${savedCount} ${savedCount === 1 ? "mes guardado" : "meses guardados"} en ${year}${outsideCount ? ` · ${outsideCount} fuera del análisis` : ""}`;
-  const filterCount = (unget !== ALL ? 1 : 0) + (microred !== ALL ? 1 : 0);
+
+  // Selector «Ver»: la jurisdicción, sus UNGET, sus microredes y sus establecimientos del análisis.
+  const focusValue = site !== ALL ? `s:${site}` : microred !== ALL ? `m:${unget}|${microred}` : unget !== ALL ? `u:${unget}` : "all";
+  const focusLabel = site !== ALL ? nameOf(site) : microred !== ALL ? `Microred ${microred}` : unget !== ALL ? `UNGET ${unget}` : ungets.length > 1 ? "Todas las UNGET" : scopeTitle;
+  const setFocus = (value: string) => {
+    if (value === "all") { setUnget(ALL); setMicrored(ALL); setSite(ALL); }
+    else if (value.startsWith("u:")) { setUnget(value.slice(2)); setMicrored(ALL); setSite(ALL); }
+    else if (value.startsWith("m:")) { const [u, m] = value.slice(2).split("|"); setUnget(u); setMicrored(m); setSite(ALL); }
+    else if (value.startsWith("s:")) { const code = value.slice(2); setUnget(ungetOf(code)); setMicrored(microredOf(code)); setSite(code); }
+  };
+  const inAnalysis = codes.filter((c) => !isOut(c));
+  const microredPairs = [...new Map(inAnalysis.map((c) => [`${ungetOf(c)}|${microredOf(c)}`, { unget: ungetOf(c), microred: microredOf(c) }])).values()].sort((a, b) => a.microred.localeCompare(b.microred, "es"));
+  const focusGroups: FocusGroup[] = [
+    { title: ungets.length > 1 ? "Jurisdicción" : "UNGET", items: [{ value: "all", label: ungets.length > 1 ? "Todas las UNGET" : scopeTitle }] },
+    ...(ungets.length > 1 ? [{ title: "UNGET", items: ungets.map((u) => ({ value: `u:${u}`, label: `UNGET ${u}` })) }] : []),
+    ...(microredPairs.length > 1 ? [{ title: "Microredes", items: microredPairs.map((p) => ({ value: `m:${p.unget}|${p.microred}`, label: p.microred, hint: ungets.length > 1 ? p.unget : undefined })) }] : []),
+    { title: "Establecimientos", items: inAnalysis.map((c) => ({ value: `s:${c}`, label: nameOf(c), hint: microredOf(c), search: c })).sort((a, b) => a.label.localeCompare(b.label, "es")) },
+  ];
+  const subtitle = `${focusLabel}${outsideCount ? ` · ${outsideCount} fuera del análisis` : ""}`;
+
+  // Ranking del mes, al lado de la evolución: lo que hay debajo de lo que se mira.
+  const rankingLevel: "unget" | "microred" | "site" | "situations" = site !== ALL ? "situations" : byUnget ? "unget" : microred === ALL && microredes.length > 1 ? "microred" : "site";
+  const rankingItems = sel === null ? [] : rankingLevel === "situations" ? [] : (rankingLevel === "site" ? establishmentRows : groupRows ?? [])
+    .map((r) => ({ key: r.key, name: r.name, pct: r.pct[sel] }))
+    .filter((r): r is { key: string; name: string; pct: number } => r.pct !== null)
+    .sort((a, b) => b.pct - a.pct);
+  const situationCounts = site !== ALL && selMonth ? (() => {
+    const raw = index.get(view)?.get(selMonth)?.get(site);
+    return raw ? evaluatedCounts(raw, opts.rules[view], view) : undefined;
+  })() : undefined;
+  const drill = (key: string) => setFocus(rankingLevel === "unget" ? `u:${key}` : rankingLevel === "microred" ? `m:${unget !== ALL ? unget : ungetOf(codes.find((c) => microredOf(c) === key) ?? "")}|${key}` : `s:${key}`);
+  const rankingTitle = rankingLevel === "situations" ? "Situaciones" : rankingLevel === "unget" ? "UNGET" : rankingLevel === "microred" ? "Microredes" : "Establecimientos";
+  const currentPct = pctAt(view === "all" ? series.all : series.essential, sel);
 
   const menuItems = (
     <>
@@ -209,6 +243,101 @@ export const AvailabilityHistory: React.FC<{
     </>
   );
 
+  // Una sola tabla con pestañas: microredes (o UNGET), establecimientos y los de fuera del análisis.
+  const tabs: Array<[TableTab, string, number]> = [
+    ...(groupRows ? [["groups", byUnget ? "UNGET" : "Microredes", groupRows.length] as [TableTab, string, number]] : []),
+    ["sites", "Establecimientos", establishmentRows.length],
+    ...(outsideRows.length ? [["outside", "Fuera del análisis", outsideRows.length] as [TableTab, string, number]] : []),
+  ];
+  const activeTab: TableTab = tabs.some(([t]) => t === tab) ? tab : tabs[0][0];
+  const tabBar = (
+    <div className="hide-scrollbar flex shrink-0 overflow-x-auto rounded-xl bg-slate-100 p-1 text-[13px] font-bold">
+      {tabs.map(([t, label, n]) => (
+        <button key={t} type="button" onClick={() => setTab(t)} className={`shrink-0 rounded-lg px-3 py-1.5 transition-colors ${activeTab === t ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+          {label} <span className="text-slate-400">{n}</span>
+        </button>
+      ))}
+    </div>
+  );
+  const siteColumns: Column<HistoryEntityRow>[] = [
+    { key: "name", label: "Establecimiento", sort: (r) => r.name, render: (r) => <span className="block max-w-[260px]"><span className="block truncate font-semibold text-slate-800">{r.name}</span><span className="block truncate text-[11.5px] text-slate-500">{r.group}</span></span> },
+    ...monthCols,
+    { key: "delta", label: deltaLabel, sort: (r) => deltaOf(r), render: (r) => <Delta value={deltaOf(r)} /> },
+  ];
+  const siteCard = (r: HistoryEntityRow) => (
+    <>
+      <p className="font-semibold text-slate-800">{r.name}</p>
+      <p className="text-[12px] text-slate-500">{r.group}</p>
+      {sel !== null && (
+        <div className="mt-2 flex items-center justify-between text-[12.5px]">
+          <span className="flex items-center gap-2 text-slate-600">{shortName(months[sel])} <LevelPct pct={r.pct[sel]} levelOf={levelOf} /></span>
+          <Delta value={deltaOf(r)} />
+        </div>
+      )}
+    </>
+  );
+  const table = activeTab === "groups" && groupRows ? (
+    <ReportTable
+      key="groups"
+      lead={tabBar}
+      rows={groupRows}
+      columns={[
+        { key: "name", label: byUnget ? "UNGET" : "Microred", sort: (r) => r.name, render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> },
+        ...monthCols,
+        { key: "delta", label: deltaLabel, sort: (r) => deltaOf(r), render: (r) => <Delta value={deltaOf(r)} /> },
+      ]}
+      rowKey={(r) => r.key}
+      itemLabel={byUnget ? "UNGET" : "microredes"}
+      onRowClick={(r) => drill(r.key)}
+      minWidth={260 + shown * 76}
+      excel={{ name: byUnget ? "UNGET" : "Microredes", title: `${byUnget ? "UNGET" : "Microredes"} mes a mes · ${VIEW_LABEL[view]}`, subtitle: `${focusLabel} · ${year}`, columns: [
+        { header: byUnget ? "UNGET" : "Microred", width: 26, value: (r) => r.name }, ...excelMonths,
+      ] }}
+      card={(r) => (
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-semibold text-slate-800">{r.name}</span>
+          <span className="flex items-center gap-2 text-[12.5px] text-slate-500">{sel !== null && <>{shortName(months[sel])} <LevelPct pct={r.pct[sel]} levelOf={levelOf} /></>}<Delta value={deltaOf(r)} /></span>
+        </div>
+      )}
+    />
+  ) : activeTab === "outside" ? (
+    <ReportTable
+      key="outside"
+      lead={tabBar}
+      rows={outsideRows}
+      columns={siteColumns}
+      rowKey={(r) => r.key}
+      itemLabel="establecimientos"
+      searchOf={(r) => `${r.key} ${r.name} ${r.group}`}
+      placeholder="Buscar establecimiento…"
+      toolbar={
+        <button type="button" onClick={onEditSites} className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12.5px] font-bold text-slate-700 hover:bg-slate-50">
+          <ListChecks className="h-4 w-4" />Cambiar
+        </button>
+      }
+      onRowClick={(row, list) => setOpenState({ row, list })}
+      minWidth={300 + shown * 76}
+      card={siteCard}
+    />
+  ) : (
+    <ReportTable
+      key="sites"
+      lead={tabBar}
+      rows={establishmentRows}
+      columns={siteColumns}
+      rowKey={(r) => r.key}
+      itemLabel="establecimientos"
+      searchOf={(r) => `${r.key} ${r.name} ${r.group}`}
+      placeholder="Buscar establecimiento o microred…"
+      onRowClick={(row, list) => setOpenState({ row, list })}
+      minWidth={300 + shown * 76}
+      excel={{ name: "Establecimientos", title: `Establecimientos mes a mes · ${VIEW_LABEL[view]}`, subtitle: `${focusLabel} · ${year}`, columns: [
+        { header: "Código", width: 9, value: (r) => r.key }, { header: "Establecimiento", width: 34, value: (r) => r.name }, { header: "Microred", width: 20, value: (r) => r.group }, ...excelMonths,
+      ] }}
+      card={siteCard}
+    />
+  );
+
   return (
     <div className="space-y-4 pb-24 md:pb-8">
       <HistoryTitle
@@ -220,8 +349,7 @@ export const AvailabilityHistory: React.FC<{
               <>
                 <CustomSelect value={String(year)} onChange={(v) => { onYear(Number(v)); setPicked(null); }} options={yearOptions} ariaLabel="Año" className="h-10 w-[96px]" searchable={false} />
                 <CustomSelect value={sel !== null ? String(sel) : ""} onChange={(v) => setPicked(Number(v))} options={monthOptions} ariaLabel="Mes" className="h-10 w-[170px]" searchable={false} />
-                {ungets.length > 1 && <CustomSelect value={unget} onChange={(v) => { setUnget(v); setMicrored(ALL); }} options={ungetOptions} ariaLabel="UNGET" className="h-10 w-[190px]" />}
-                {microredes.length > 1 && <CustomSelect value={microred} onChange={setMicrored} options={microredOptions} ariaLabel="Microred" className="h-10 w-[200px]" />}
+                <FocusPicker value={focusValue} label={focusLabel} groups={focusGroups} onChange={setFocus} />
               </>
             )}
             {reportButton}
@@ -238,10 +366,12 @@ export const AvailabilityHistory: React.FC<{
       />
 
       {!isDesktop && (
-        <div className="flex items-center gap-2">
-          <div className="w-[104px] shrink-0"><CustomSelect value={String(year)} onChange={(v) => { onYear(Number(v)); setPicked(null); }} options={yearOptions} ariaLabel="Año" className="h-10" searchable={false} /></div>
-          <div className="min-w-0 flex-1"><CustomSelect value={sel !== null ? String(sel) : ""} onChange={(v) => setPicked(Number(v))} options={monthOptions} ariaLabel="Mes" className="h-10" searchable={false} /></div>
-          {(ungets.length > 1 || microredes.length > 1) && <MobileFilterButton onClick={() => setFiltersOpen(true)} active={filterCount > 0} />}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <div className="w-[104px] shrink-0"><CustomSelect value={String(year)} onChange={(v) => { onYear(Number(v)); setPicked(null); }} options={yearOptions} ariaLabel="Año" className="h-10" searchable={false} /></div>
+            <div className="min-w-0 flex-1"><CustomSelect value={sel !== null ? String(sel) : ""} onChange={(v) => setPicked(Number(v))} options={monthOptions} ariaLabel="Mes" className="h-10" searchable={false} /></div>
+          </div>
+          <FocusPicker value={focusValue} label={focusLabel} groups={focusGroups} onChange={setFocus} />
         </div>
       )}
 
@@ -279,137 +409,59 @@ export const AvailabilityHistory: React.FC<{
         />
       </KpiStrip>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        {(["all", "essential"] as HistoryView[]).map((v) => {
-          const values = (v === "all" ? series.all : series.essential).map((p) => p.pct);
-          const empty = [...values, ...(v === "all" ? series.prevAll : series.prevEssential).map((p) => p.pct)].every((x) => x === null);
+      <div className="grid gap-4 xl:grid-cols-[3fr_2fr]">
+        {(() => {
+          const values = (view === "all" ? series.all : series.essential).map((p) => p.pct);
+          const previous = (view === "all" ? series.prevAll : series.prevEssential).map((p) => p.pct);
+          const empty = [...values, ...previous].every((x) => x === null);
           return (
-          <ChartCard
-            key={v}
-            title={VIEW_LABEL[v]}
-            info={<><P>Disponibilidad guardada de cada mes de {year}, con la fórmula vigente; la línea punteada es {year - 1}.</P><P>Un mes sin guardar corta la línea. Un punto hueco con borde ámbar es un mes en que faltan establecimientos. Toque un mes para verlo en los indicadores.</P></>}
-            action={empty ? undefined : <HistoryLegend current={String(year)} previous={String(year - 1)} />}
-          >
-            {empty ? (
-              <EmptyState
-                title={`Sin datos de ${VIEW_LABEL[v].toLowerCase()} en ${year}`}
-                description={v === "essential" ? "Se guardan cuando el TFORMDET trae la clasificación de los productos (Toolkit 2.2.5 o posterior)." : undefined}
-              />
-            ) : (
-            <HistoryChart
-              labels={months.map(shortName)}
-              titles={months.map(monthName)}
-              values={values}
-              previous={(v === "all" ? series.prevAll : series.prevEssential).map((p) => p.pct)}
-              currentLabel={String(year)}
-              previousLabel={String(year - 1)}
-              previousTitles={prevMonths.map(monthName)}
-              coverage={coverage}
-              selected={sel}
-              onSelect={setPicked}
-              levels={formula.levels}
-              levelLabels={DME_LEVEL_LABEL}
-              levelOf={levelOf}
-            />
-            )}
-          </ChartCard>
+            <ChartCard
+              title={`Evolución · ${VIEW_LABEL[view]}`}
+              info={<><P>Disponibilidad guardada de cada mes de {year} de lo elegido en «Ver», con la fórmula vigente; la línea punteada es {year - 1}. La vista (todos los productos o medicamentos esenciales) se cambia tocando su tarjeta.</P><P>Un mes sin guardar corta la línea. Un punto hueco con borde ámbar es un mes en que faltan establecimientos. Toque un mes para verlo en los indicadores.</P></>}
+              action={empty ? undefined : <HistoryLegend current={String(year)} previous={String(year - 1)} />}
+            >
+              {empty ? (
+                <EmptyState
+                  title={`Sin datos de ${VIEW_LABEL[view].toLowerCase()} en ${year}`}
+                  description={view === "essential" ? "Se guardan cuando el TFORMDET trae la clasificación de los productos (Toolkit 2.2.5 o posterior)." : undefined}
+                />
+              ) : (
+                <HistoryChart
+                  labels={months.map(shortName)}
+                  titles={months.map(monthName)}
+                  values={values}
+                  previous={previous}
+                  currentLabel={String(year)}
+                  previousLabel={String(year - 1)}
+                  previousTitles={prevMonths.map(monthName)}
+                  coverage={site !== ALL ? [] : coverage}
+                  selected={sel}
+                  onSelect={setPicked}
+                  levels={formula.levels}
+                  levelLabels={DME_LEVEL_LABEL}
+                  levelOf={levelOf}
+                />
+              )}
+            </ChartCard>
           );
-        })}
+        })()}
+        <ChartCard
+          title={`${rankingTitle} · ${selMonth ? monthName(selMonth) : ""}`}
+          className="flex flex-col"
+          info={<P>{rankingLevel === "situations" ? "Cuántos ítems del establecimiento quedaron en cada situación ese mes, en la vista elegida." : `Disponibilidad de cada ${rankingLevel === "unget" ? "UNGET" : rankingLevel === "microred" ? "microred" : "establecimiento"} en el mes elegido, de mayor a menor; la línea punteada es el total de lo que se mira. Toque una barra para verla en «Ver».`}</P>}
+          action={site !== ALL ? (
+            <button type="button" onClick={() => { const row = establishmentRows.find((r) => r.key === site); if (row) setOpenState({ row, list: [row] }); }} className="text-[12px] font-bold text-teal-700 hover:underline">Ver detalle</button>
+          ) : rankingItems.length > 1 ? <span className="hidden text-[11.5px] font-semibold text-slate-400 md:inline">Toque una para verla</span> : undefined}
+        >
+          {rankingLevel === "situations" ? (
+            <SituationBars counts={situationCounts} />
+          ) : (
+            <RankingBars items={rankingItems} average={currentPct} averageLabel={focusLabel} levelOf={levelOf} onPick={drill} />
+          )}
+        </ChartCard>
       </div>
 
-      {groupRows && (
-        <ReportTable
-          title={byUnget ? "UNGET mes a mes" : "Microredes mes a mes"}
-          info={<P>{byUnget ? "Cada UNGET" : "Cada microred"} con sus establecimientos de ese mes ({formula.aggregate === "sum" ? "suma de sus ítems" : "promedio de sus establecimientos"}). La variación compara el mes elegido con el mismo mes de {year - 1}.</P>}
-          rows={groupRows}
-          columns={[
-            { key: "name", label: byUnget ? "UNGET" : "Microred", sort: (r) => r.name, render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> },
-            ...monthCols,
-            { key: "delta", label: deltaLabel, sort: (r) => deltaOf(r), render: (r) => <Delta value={deltaOf(r)} /> },
-          ]}
-          rowKey={(r) => r.key}
-          itemLabel={byUnget ? "UNGET" : "microredes"}
-          toolbar={viewPills}
-          minWidth={260 + shown * 76}
-          excel={{ name: byUnget ? "UNGET" : "Microredes", title: `${byUnget ? "UNGET" : "Microredes"} mes a mes · ${VIEW_LABEL[view]}`, subtitle: `${scopeTitle} · ${year}`, columns: [
-            { header: byUnget ? "UNGET" : "Microred", width: 26, value: (r) => r.name }, ...excelMonths,
-          ] }}
-          card={(r) => (
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-semibold text-slate-800">{r.name}</span>
-              <span className="flex items-center gap-2 text-[12.5px] text-slate-500">{sel !== null && <>{shortName(months[sel])} <LevelPct pct={r.pct[sel]} levelOf={levelOf} /></>}<Delta value={deltaOf(r)} /></span>
-            </div>
-          )}
-        />
-      )}
-
-      <ReportTable
-        title="Establecimientos mes a mes"
-        info={<P>Cada establecimiento con lo guardado de cada mes. Clic para ver sus situaciones del mes elegido. El detalle por producto no se guarda: está en el reporte del mes, con el TFORMDET de ese mes.</P>}
-        rows={establishmentRows}
-        columns={[
-          { key: "name", label: "Establecimiento", sort: (r) => r.name, render: (r) => <span className="block max-w-[260px]"><span className="block truncate font-semibold text-slate-800">{r.name}</span><span className="block truncate text-[11.5px] text-slate-500">{r.group}</span></span> },
-          ...monthCols,
-          { key: "delta", label: deltaLabel, sort: (r) => deltaOf(r), render: (r) => <Delta value={deltaOf(r)} /> },
-        ]}
-        rowKey={(r) => r.key}
-        itemLabel="establecimientos"
-        searchOf={(r) => `${r.key} ${r.name} ${r.group}`}
-        placeholder="Buscar establecimiento o microred…"
-        toolbar={viewPills}
-        onRowClick={(row, list) => setOpenState({ row, list })}
-        minWidth={300 + shown * 76}
-        excel={{ name: "Establecimientos", title: `Establecimientos mes a mes · ${VIEW_LABEL[view]}`, subtitle: `${scopeTitle} · ${year}`, columns: [
-          { header: "Código", width: 9, value: (r) => r.key }, { header: "Establecimiento", width: 34, value: (r) => r.name }, { header: "Microred", width: 20, value: (r) => r.group }, ...excelMonths,
-        ] }}
-        card={(r) => (
-          <>
-            <p className="font-semibold text-slate-800">{r.name}</p>
-            <p className="text-[12px] text-slate-500">{r.group}</p>
-            {sel !== null && (
-              <div className="mt-2 flex items-center justify-between text-[12.5px]">
-                <span className="flex items-center gap-2 text-slate-600">{shortName(months[sel])} <LevelPct pct={r.pct[sel]} levelOf={levelOf} /></span>
-                <Delta value={deltaOf(r)} />
-              </div>
-            )}
-          </>
-        )}
-      />
-
-      {outsideRows.length > 0 && (
-        <ReportTable
-          title="Fuera del análisis"
-          info={<P>Establecimientos desmarcados en «Establecimientos del análisis» (la lista la definen la DIRESA y cada UNGET): están guardados, pero no cuentan en los indicadores, los gráficos ni las microredes. Los centros de salud mental comunitario van fuera por omisión.</P>}
-          rows={outsideRows}
-          columns={[
-            { key: "name", label: "Establecimiento", sort: (r) => r.name, render: (r) => <span className="block max-w-[260px]"><span className="block truncate font-semibold text-slate-800">{r.name}</span><span className="block truncate text-[11.5px] text-slate-500">{r.group}</span></span> },
-            ...monthCols,
-            { key: "delta", label: deltaLabel, sort: (r) => deltaOf(r), render: (r) => <Delta value={deltaOf(r)} /> },
-          ]}
-          rowKey={(r) => r.key}
-          itemLabel="establecimientos"
-          toolbar={
-            <button type="button" onClick={onEditSites} className="flex h-9 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12.5px] font-bold text-slate-700 hover:bg-slate-50">
-              <ListChecks className="h-4 w-4" />Cambiar
-            </button>
-          }
-          onRowClick={(row, list) => setOpenState({ row, list })}
-          minWidth={300 + shown * 76}
-          card={(r) => (
-            <>
-              <p className="font-semibold text-slate-800">{r.name}</p>
-              <p className="text-[12px] text-slate-500">{r.group}</p>
-              {sel !== null && (
-                <div className="mt-2 flex items-center justify-between text-[12.5px]">
-                  <span className="flex items-center gap-2 text-slate-600">{shortName(months[sel])} <LevelPct pct={r.pct[sel]} levelOf={levelOf} /></span>
-                  <Delta value={deltaOf(r)} />
-                </div>
-              )}
-            </>
-          )}
-        />
-      )}
-
+      {table}
       </>
       )}
 
@@ -441,22 +493,136 @@ export const AvailabilityHistory: React.FC<{
         formula={formula}
       />
 
-      <BottomSheet open={filtersOpen} title="Filtros" onClose={() => setFiltersOpen(false)}>
-        {ungets.length > 1 && (
-          <>
-            <SheetGroupTitle>UNGET</SheetGroupTitle>
-            {ungetOptions.map((o) => <SheetOption key={o.value} active={unget === o.value} label={o.label} onClick={() => { setUnget(o.value); setMicrored(ALL); }} />)}
-          </>
-        )}
-        {microredes.length > 1 && (
-          <>
-            <SheetGroupTitle>Microred</SheetGroupTitle>
-            {microredOptions.map((o) => <SheetOption key={o.value} active={microred === o.value} label={o.label} onClick={() => setMicrored(o.value)} />)}
-          </>
-        )}
-      </BottomSheet>
       <BottomSheet open={menuOpen && !isDesktop} title="Acciones" onClose={() => setMenuOpen(false)}>{menuItems}</BottomSheet>
       {fab}
+    </div>
+  );
+};
+
+type TableTab = "groups" | "sites" | "outside";
+
+/* ---------------------------------------------------------------- Selector «Ver» */
+
+type FocusGroup = { title: string; items: Array<{ value: string; label: string; hint?: string; search?: string }> };
+const FOCUS_LIMIT = 40;
+
+/**
+ * Qué se mira en el historial: la jurisdicción, una UNGET, una microred o un establecimiento.
+ * Desplegable con buscador en escritorio; panel inferior en el celular.
+ */
+const FocusPicker: React.FC<{ value: string; label: string; groups: FocusGroup[]; onChange: (value: string) => void }> = ({ value, label, groups, onChange }) => {
+  const isDesktop = useIsDesktop();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const q = fold(query.trim());
+  const pick = (v: string) => { onChange(v); setOpen(false); setQuery(""); };
+  const filtered = groups.map((g) => {
+    const items = q ? g.items.filter((i) => fold(`${i.label} ${i.hint ?? ""} ${i.search ?? ""}`).includes(q)) : g.items;
+    return { ...g, items: items.slice(0, FOCUS_LIMIT), more: Math.max(0, items.length - FOCUS_LIMIT) };
+  }).filter((g) => g.items.length);
+  const list = (
+    <>
+      {filtered.length === 0 && <p className="px-3 py-6 text-center text-[13px] text-slate-500">Nada coincide con la búsqueda.</p>}
+      {filtered.map((g) => (
+        <div key={g.title}>
+          <p className="px-3 pb-1 pt-3 text-[10.5px] font-black uppercase tracking-wider text-slate-400">{g.title}</p>
+          {g.items.map((i) => (
+            <button key={i.value} type="button" onClick={() => pick(i.value)} className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left ${value === i.value ? "bg-teal-50 text-teal-800" : "text-slate-700 hover:bg-slate-50"}`}>
+              <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-bold">{i.label}</span>{i.hint && <span className="block truncate text-[11.5px] font-semibold text-slate-400">{i.hint}</span>}</span>
+              {value === i.value && <Check className="h-4 w-4 shrink-0" />}
+            </button>
+          ))}
+          {g.more > 0 && <p className="px-3 py-1.5 text-[12px] text-slate-400">y {formatNumber(g.more)} más · escriba para buscar</p>}
+        </div>
+      ))}
+    </>
+  );
+  const trigger = (
+    <button type="button" onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open} className={`flex h-10 w-full items-center gap-2 rounded-xl border bg-white px-3 text-left text-[13px] font-bold text-slate-700 md:w-[250px] ${open ? "border-teal-300 ring-2 ring-teal-500/20" : "border-slate-200 hover:bg-slate-50"}`}>
+      <MapPin className="h-4 w-4 shrink-0 text-teal-600" /><span className="min-w-0 flex-1 truncate">{label}</span><ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+    </button>
+  );
+  if (!isDesktop) {
+    return (
+      <>
+        {trigger}
+        <BottomSheet open={open} title="Ver" onClose={() => { setOpen(false); setQuery(""); }}>
+          <TableSearch value={query} onChange={setQuery} placeholder="Buscar microred o establecimiento…" className="md:max-w-none" />
+          {list}
+        </BottomSheet>
+      </>
+    );
+  }
+  return (
+    <div className="relative">
+      {trigger}
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => { setOpen(false); setQuery(""); }} />
+          <div className="absolute right-0 top-12 z-40 w-[340px] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+            <TableSearch value={query} onChange={setQuery} placeholder="Buscar microred o establecimiento…" className="md:max-w-none" />
+            <div className="hide-scrollbar max-h-[380px] overflow-y-auto">{list}</div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+/* ---------------------------------------------------------------- Ranking del mes */
+
+const BAR_TONE: Record<DmeLevel, string> = { OPTIMO: "bg-emerald-500", ALTO: "bg-teal-500", REGULAR: "bg-amber-400", BAJO: "bg-red-400" };
+
+/**
+ * Barras del mes de mayor a menor. Las filas reparten el alto de la tarjeta (sin espacio en
+ * blanco debajo, pedido del usuario); si son muchas, la lista se desplaza dentro.
+ */
+const RankingBars: React.FC<{ items: Array<{ key: string; name: string; pct: number }>; average: number | null; averageLabel: string; levelOf: (v: number) => DmeLevel; onPick: (key: string) => void }> = ({ items, average, averageLabel, levelOf, onPick }) => {
+  if (!items.length) return <EmptyState title="Sin datos ese mes" />;
+  const min = Math.max(0, Math.floor((Math.min(...items.map((i) => i.pct), average ?? 100) - 10) / 10) * 10);
+  const x = (v: number) => `${Math.max(2, ((v - min) / (100 - min)) * 100)}%`;
+  return (
+    <div className="flex flex-1 flex-col">
+      <div className="relative min-h-[230px] flex-1">
+        <div className="hide-scrollbar absolute inset-0 flex flex-col overflow-y-auto">
+          {items.map((i) => (
+            <button key={i.key} type="button" onClick={() => onPick(i.key)} title={`${i.name}: ${pctText(i.pct)}`} className="group flex min-h-[34px] flex-1 items-center gap-3 rounded-lg px-1 text-left hover:bg-slate-50">
+              <span className="w-[42%] shrink-0 truncate text-[12.5px] font-semibold text-slate-700 group-hover:text-teal-700 md:w-[150px]">{i.name}</span>
+              <span className="relative h-6 flex-1 rounded-md bg-slate-50">
+                <span className={`absolute inset-y-0 left-0 rounded-md ${BAR_TONE[levelOf(i.pct)]}`} style={{ width: x(i.pct) }} />
+                {average !== null && <span className="absolute inset-y-[-4px] border-l-2 border-dashed border-slate-400" style={{ left: x(average) }} />}
+              </span>
+              <span className="w-11 shrink-0 text-right font-mono text-[12.5px] font-bold text-slate-700">{i.pct.toFixed(1).replace(".", ",")}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      {average !== null && <p className="flex items-center gap-2 pt-2 text-[11.5px] text-slate-500"><span className="inline-block w-4 border-t-2 border-dashed border-slate-400" /><span className="truncate">{averageLabel} {pctText(average)}</span></p>}
+    </div>
+  );
+};
+
+const SITUATION_TONE: Record<keyof HistoryCounts, string> = {
+  desabastecido: "bg-red-400", substock: "bg-amber-400", normostock: "bg-emerald-500", sobrestock: "bg-sky-500", sinRotacion: "bg-slate-400", sinRotacionVital: "bg-slate-400", total: "bg-slate-400",
+};
+
+/** Situaciones de un establecimiento en el mes, con lo que ocupa cada una del total. */
+const SituationBars: React.FC<{ counts: HistoryCounts | undefined }> = ({ counts }) => {
+  if (!counts || !counts.total) return <EmptyState title="Sin datos ese mes" />;
+  return (
+    <div className="flex min-h-[230px] flex-1 flex-col">
+      {SITUATIONS.map((s) => {
+        const n = counts[s.key];
+        const share = n / counts.total;
+        return (
+          <div key={s.key} className="flex min-h-[34px] flex-1 items-center gap-3 px-1">
+            <span className="w-[42%] shrink-0 text-[12.5px] font-semibold text-slate-700 md:w-[150px]">{s.label}</span>
+            <span className="relative h-6 flex-1 rounded-md bg-slate-50"><span className={`absolute inset-y-0 left-0 rounded-md ${SITUATION_TONE[s.key]}`} style={{ width: `${Math.max(n ? 2 : 0, share * 100)}%` }} /></span>
+            <span className="w-16 shrink-0 text-right font-mono text-[12.5px] font-bold text-slate-700">{formatNumber(n)} <span className="font-semibold text-slate-400">{Math.round(share * 100)}%</span></span>
+          </div>
+        );
+      })}
+      <p className="pt-2 text-[11.5px] text-slate-500">{formatNumber(counts.total)} ítems evaluados</p>
     </div>
   );
 };
