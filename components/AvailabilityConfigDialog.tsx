@@ -22,8 +22,9 @@ import { TablePagination } from "./ui/TablePagination";
 
 type Tab = "formula" | "largeVolume" | "excluded" | "fused" | "vitals";
 const PAGE = 25;
-/** Las listas de gran volumen y de excluidos van de 6 en 6 (pedido del usuario). */
+/** Gran volumen va de 6 en 6 y excluidos de 7 en 7, para que cada tabla llene su pestaña (pedido del usuario). */
 const LIST_PAGE = 6;
+const EXCLUDED_PAGE = 7;
 
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const padCode = (v: string) => {
@@ -519,7 +520,7 @@ const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availa
           search={search} onSearch={setSearch} placeholder="Buscar medicamento, código o motivo…" onAdd={() => setEditing("new")}
           empty={f.dmeExcluded.length === 0 ? "No hay medicamentos excluidos: la DME evalúa todos." : null}
           head={<><th className="px-3 py-3 text-center">Motivo</th><th className="px-3 py-3 text-center" title="Establecimientos del archivo cargado donde estaría en la DME">EESS</th></>}
-          rows={shown.slice((page - 1) * LIST_PAGE, page * LIST_PAGE).map((e) => ({
+          rows={shown.slice((page - 1) * EXCLUDED_PAGE, page * EXCLUDED_PAGE).map((e) => ({
             key: e.code, code: e.code, name: e.name || nameOf(e.code) || "",
             action: (
               <span className="inline-flex">
@@ -534,7 +535,7 @@ const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availa
             chips: <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${EXCLUSION_TONE[e.reason]}`}>{EXCLUSION_REASON_LABEL[e.reason]}</span>,
             detail: sitesOf ? (sitesOf.get(e.code) ? `Sale de la DME en ${sitesOf.get(e.code)} establecimientos del archivo` : "No está en el archivo cargado") : "Cargue el TFORMDET para ver en cuántos establecimientos está",
           }))}
-          pagination={<TablePagination page={page} pageSize={LIST_PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />}
+          pagination={<TablePagination page={page} pageSize={EXCLUDED_PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />}
         />
       </div>
       <div className="space-y-4">
