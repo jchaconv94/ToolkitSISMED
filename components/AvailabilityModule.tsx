@@ -26,7 +26,7 @@ import { monthFull, monthLabel } from "../services/availabilityExport";
 import { exportAvailabilityExcel } from "../services/availabilityExportClient";
 import type { DmeLevel } from "../services/stockStatus";
 import { asSupplier, isSeparateSite, lotRiskReport, type ProductGap } from "../services/availabilityInsights";
-import { availabilityConfigApi, classifyOptionsOf, describeFormula, factoryConfig, summaryOptionsOf, vitalCodeSet, type AvailabilityConfig } from "../services/availabilityConfig";
+import { availabilityConfigApi, classifyOptionsOf, describeFormula, dmeExcludedCodes, factoryConfig, summaryOptionsOf, vitalCodeSet, type AvailabilityConfig } from "../services/availabilityConfig";
 import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
 import { formatNumber } from "../services/numberFormat";
 import { tformdetFromSheet, type TformdetFileResult } from "../services/tformdetFile";
@@ -381,7 +381,8 @@ export const AvailabilityModule: React.FC = () => {
     const groups = config.fused.groups;
     // Cada vista con sus límites: la regla de gran volumen puede ir solo en la DME.
     const all = (rows: typeof baseRows.ipress | null) => (rows ? buildItems(rows, lots, asOf, classifyOptionsOf(config.formula, "all")) : null);
-    const ess = (rows: typeof baseRows.ipress | null) => (rows ? buildItems(essentialRows(rows, groups), lots, asOf, classifyOptionsOf(config.formula, "essential")) : null);
+    const excluded = dmeExcludedCodes(config.formula);
+    const ess = (rows: typeof baseRows.ipress | null) => (rows ? buildItems(essentialRows(rows, groups, excluded), lots, asOf, classifyOptionsOf(config.formula, "essential")) : null);
     return {
       all: all(baseRows.ipress)!,
       essential: ess(baseRows.ipress)!,
@@ -508,7 +509,7 @@ export const AvailabilityModule: React.FC = () => {
         window: HISTORY_WINDOW,
         items: {
           all: buildItems(rows, undefined, asOfMonth, optsAll),
-          essential: fullData.hasClassification ? buildItems(essentialRows(rows, config.fused.groups), undefined, asOfMonth, optsEssential) : null,
+          essential: fullData.hasClassification ? buildItems(essentialRows(rows, config.fused.groups, dmeExcludedCodes(config.formula)), undefined, asOfMonth, optsEssential) : null,
         },
         vitals: vitalCodes,
         nameOf: (code) => registry.get(code)?.name,
@@ -654,7 +655,8 @@ export const AvailabilityModule: React.FC = () => {
         rule: scope === "all" ? config.formula.all : config.formula.essential,
         limits: { subMax: config.formula.subMax, sobreMin: config.formula.sobreMin },
         largeVolumeMonths: classifyOptionsOf(config.formula, scope).largeVolumeMonths,
-        largeVolumeManual: { add: config.formula.largeVolumeAdd, skip: config.formula.largeVolumeSkip },
+        largeVolumeManual: { add: config.formula.largeVolumeAdd.map((e) => e.code), skip: config.formula.largeVolumeSkip },
+        dmeExcluded: scope === "essential" ? config.formula.dmeExcluded : undefined,
         outside: outReport.establishments.map((e) => ({ code: e.code, name: e.name, pct: e.pct })),
         aggregate: config.formula.aggregate,
         tformdet: tformdetSheet,

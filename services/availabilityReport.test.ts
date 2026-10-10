@@ -140,6 +140,21 @@ describe("disponibilidad", () => {
     expect(buildItems(fused)[0].status).toBe(StockStatus.NORMOSTOCK);
   });
 
+  it("DME: deja fuera los medicamentos excluidos (ficha 28), por su código o el de su grupo", () => {
+    const groups = { "00091": { name: "AAS 100 mg TABLETA", codes: ["00091", "00096"] } };
+    const { rows } = parseAvailabilitySheet([HEADER,
+      row("06499", "A", "00091", [...zeros.slice(1), 10], 0),
+      row("06499", "A", "00096", [...zeros.slice(1), 10], 40, "M", "_", "S"),
+      row("06499", "A", "05873", [...zeros.slice(1), 10], 30),
+      row("06499", "A", "05253", [...zeros.slice(1), 10], 30)]);
+    expect(essentialRows(rows, groups).map((r) => r.medCode)).toEqual(["00091", "05873", "05253"]);
+    expect(essentialRows(rows, groups, new Set(["05873"])).map((r) => r.medCode)).toEqual(["00091", "05253"]);
+    // Excluir el código destino saca a todo el grupo; excluir un código del grupo, solo a ese.
+    expect(essentialRows(rows, groups, new Set(["00091"])).map((r) => r.medCode)).toEqual(["05873", "05253"]);
+    const partial = essentialRows(rows, groups, new Set(["00096"]));
+    expect(partial[0]).toMatchObject({ medCode: "00091", stock: 0, fusedFrom: ["00091"] });
+  });
+
   it("arma la disponibilidad desde el TFORMDET de varios meses", () => {
     const H = ["ANNOMES", "CODIGO_PRE", "EESS", "CODIGO_MED", "DESCRIPCION MED", "MEDLOTE", "FEC_EXP", "PRECIO", "VENTA", "SIS", "INTERSAN", "EXO", "SOAT", "CREDHOSP", "OTR_CONV", "REINGRE", "STOCK_FIN", "MEDFF", "MEDTIP", "MEDPET", "MEDEST"];
     const r = (m: string, pre: string, med: string, lot: string, venta: number, sis: number, exo: number, stock: number) =>

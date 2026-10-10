@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
-import { Calculator, Check, Droplets, FileSpreadsheet, HeartPulse, Info, Layers, Loader2, Pencil, Plus, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { Ban, Calculator, Check, Droplets, FileSpreadsheet, HeartPulse, Info, Layers, Loader2, Pencil, Plus, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import {
-  DEFAULT_AVAILABILITY_FORMULA, availabilityConfigApi, classifyOptionsOf, diffFusedGroups, parseFusedCodesSheet, summaryOptionsOf, vitalCodeSet,
-  type AvailabilityConfig, type AvailabilityFormula, type FusedCatalog, type FusedGroups, type ScopeRule, type SinRotacionRule,
+  DEFAULT_AVAILABILITY_FORMULA, DEFAULT_DME_EXCLUDED, EXCLUSION_REASON_LABEL, availabilityConfigApi, classifyOptionsOf, diffFusedGroups, dmeExcludedCodes, parseFusedCodesSheet, summaryOptionsOf, vitalCodeSet,
+  type AvailabilityConfig, type AvailabilityFormula, type CodeEntry, type ExcludedEntry, type ExclusionReason, type FusedCatalog, type FusedGroups, type ScopeRule, type SinRotacionRule,
 } from "../services/availabilityConfig";
 import { StockStatus } from "../types";
 import { buildItems, essentialRows, largeVolumeRow, summarize, type AvailabilityRow, type Lot } from "../services/availabilityReport";
@@ -19,7 +19,7 @@ import { TablePagination } from "./ui/TablePagination";
  * de gran volumen de la ficha 28. Solo el administrador la abre; vale para todos.
  */
 
-type Tab = "formula" | "largeVolume" | "fused" | "vitals";
+type Tab = "formula" | "largeVolume" | "excluded" | "fused" | "vitals";
 const PAGE = 25;
 
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -161,6 +161,89 @@ const FormulaTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availab
   );
 };
 
+/* ------------------------------------------------------------------ Listas a mano (gran volumen y excluidos) */
+
+/**
+ * Agregar o editar un medicamento de una lista a mano: el código SISMED y su nombre. El nombre
+ * se completa solo con el del TFORMDET cargado o el del listado de códigos fusionados; si no
+ * está en ninguno, se escribe (así la lista se entiende aunque no haya archivo cargado).
+ */
+const CodeEntryDialog: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  subtitle: string;
+  initial: { code: string; name: string; reason?: ExclusionReason } | null;
+  withReason?: boolean;
+  nameOf: (code: string) => string | undefined;
+  taken: (code: string) => boolean;
+  onSave: (entry: { code: string; name: string; reason: ExclusionReason }) => void;
+}> = ({ open, onClose, title, subtitle, initial, withReason = false, nameOf, taken, onSave }) => {
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [reason, setReason] = useState<ExclusionReason>("strategic");
+  const [autoName, setAutoName] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setCode(initial?.code ?? "");
+    setName(initial?.name ?? "");
+    setReason(initial?.reason ?? "strategic");
+    setAutoName("");
+  }, [open, initial]);
+  const editing = !!initial;
+  const padded = padCode(code);
+  // Al escribir el código, el nombre se completa solo (si no se escribió otro a mano).
+  useEffect(() => {
+    if (editing || !open) return;
+    const found = padded.length >= 5 ? nameOf(padded) || "" : "";
+    if (!name || name === autoName) { setName(found); setAutoName(found); }
+  }, [padded]); // eslint-disable-line react-hooks/exhaustive-deps
+  const duplicate = !editing && !!padded && taken(padded);
+  const valid = /^\d{5}$/.test(padded) && !duplicate;
+  return (
+    <ResponsiveDialog open={open} onClose={onClose} title={title} subtitle={subtitle}
+      footer={<><button type="button" onClick={onClose} className={`${dialogSecondaryButton} md:ml-auto`}>Cancelar</button><button type="button" disabled={!valid} onClick={() => onSave({ code: padded, name: name.trim(), reason })} className={`${dialogPrimaryButton} md:!ml-0`}><Check className="h-4 w-4" />{editing ? "Listo" : "Agregar"}</button></>}>
+      <div className="space-y-4">
+        <label className="block">
+          <span className="mb-1.5 block text-[12.5px] font-bold text-slate-700">Código SISMED</span>
+          <input autoFocus={!editing} value={code} disabled={editing} onChange={(e) => setCode(e.target.value)} className={`${inputClass} font-mono`} placeholder="05873" inputMode="numeric" />
+          {duplicate && <span className="mt-1 block text-[12px] font-semibold text-amber-700">Ese código ya está en la lista.</span>}
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-[12.5px] font-bold text-slate-700">Medicamento</span>
+          <input autoFocus={editing} value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder="SODIO CLORURO 900 mg/100 mL (0.9 %) 1 L INYECTABLE" />
+          <span className="mt-1 block text-[12px] text-slate-500">
+            {editing
+              ? "El cálculo usa solo el código; el nombre sirve para reconocerlo en la lista."
+              : autoName && name === autoName
+                ? "Se completó con el TFORMDET cargado o el listado de fusionados."
+                : "Se completa solo si el código está en el TFORMDET cargado o en el listado de fusionados; si no, escríbalo. El cálculo usa solo el código."}
+          </span>
+        </label>
+        {withReason && (
+          <div>
+            <span className="mb-1.5 block text-[12.5px] font-bold text-slate-700">Motivo</span>
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(EXCLUSION_REASON_LABEL) as ExclusionReason[]).map((r) => (
+                <button key={r} type="button" onClick={() => setReason(r)} className={`rounded-xl border px-3 py-2 text-[12.5px] font-bold ${reason === r ? "border-teal-300 bg-teal-50 text-teal-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{EXCLUSION_REASON_LABEL[r]}</button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </ResponsiveDialog>
+  );
+};
+
+const iconButton = "grid h-8 w-8 place-items-center rounded-lg text-slate-400 [display:inline-grid]";
+
+/** Nombre de un código en el archivo cargado o en el listado de fusionados. */
+const nameLookup = (rows: AvailabilityRow[] | null, groups: FusedGroups) => {
+  const byCode = new Map<string, string>();
+  for (const r of rows ?? []) if (!byCode.has(r.medCode)) byCode.set(r.medCode, r.description);
+  return (code: string) => groups[code]?.name || byCode.get(code) || Object.entries(groups).find(([, g]) => g.codes.includes(code))?.[1].name;
+};
+
 /* ------------------------------------------------------------------ Gran volumen */
 
 type LvOrigin = "detected" | "added" | "skipped";
@@ -175,93 +258,68 @@ const LargeVolumeNote: React.FC<{ months: number; className?: string }> = ({ mon
   <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${className}`}>
     <p className="flex items-center gap-2 text-[13px] font-bold text-slate-900"><Droplets className="h-4 w-4 shrink-0 text-sky-700" />Ficha 28 · Consideraciones</p>
     <p className="mt-2 text-[12px] italic leading-relaxed text-slate-600">«Para un medicamento que corresponde a una solución de gran volumen (igual o mayor 1 litro) la disponibilidad se considera con un mes de existencia disponible.»</p>
-    <p className="mt-2 text-[12px] leading-relaxed text-slate-500">Se reconocen solos los medicamentos con 1 L o más en la presentación, como «SODIO CLORURO 1 L». Con la regla, desde {monthsLabel(months)} de existencia cuentan como Normostock. Si a uno le falta el volumen en la descripción, se agrega a mano; si uno no corresponde, se quita.</p>
+    <p className="mt-2 text-[12px] leading-relaxed text-slate-500">Con la regla, desde {monthsLabel(months)} de existencia cuentan como Normostock.</p>
+    <p className="mt-2 text-[12px] leading-relaxed text-slate-500"><b className="text-slate-700">Cómo se arma la lista:</b> cada fila es un código SISMED. Se agregan solos los medicamentos con 1 L o más en la descripción del TFORMDET («Presentación»); el nombre sale de ese archivo. Si a uno le falta el volumen en la descripción, se agrega con «Agregar» (código y nombre, que se puede editar con el lápiz). Si uno no corresponde, se quita con el tacho. Los excluidos de la DME no aparecen.</p>
   </div>
 );
 
-/** Agregar a mano códigos de gran volumen (su descripción no dice el volumen). */
-const AddLargeVolumeDialog: React.FC<{ open: boolean; onClose: () => void; nameOf: (code: string) => string | undefined; onAdd: (codes: string[]) => void }> = ({ open, onClose, nameOf, onAdd }) => {
-  const [value, setValue] = useState("");
-  useEffect(() => { if (open) setValue(""); }, [open]);
-  const codes = [...new Set(value.split(/[\s,;]+/).map(padCode).filter(Boolean))];
-  return (
-    <ResponsiveDialog open={open} onClose={onClose} title="Agregar medicamentos" subtitle="Soluciones de gran volumen cuya descripción no dice el volumen"
-      footer={<><button type="button" onClick={onClose} className={`${dialogSecondaryButton} md:ml-auto`}>Cancelar</button><button type="button" disabled={!codes.length} onClick={() => onAdd(codes)} className={`${dialogPrimaryButton} md:!ml-0`}><Plus className="h-4 w-4" />Agregar{codes.length > 1 ? ` ${codes.length}` : ""}</button></>}>
-      <label className="block">
-        <span className="mb-1.5 block text-[12.5px] font-bold text-slate-700">Códigos SISMED</span>
-        <textarea autoFocus value={value} onChange={(e) => setValue(e.target.value)} rows={3} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-[13px] outline-none focus:border-teal-500" placeholder="05873, 08166" />
-        <span className="mt-1 block text-[12px] text-slate-500">Separados por coma o espacio.</span>
-      </label>
-      {codes.length > 0 && (
-        <div className="mt-4 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
-          {codes.map((c) => (
-            <div key={c} className="flex items-center gap-3 px-3 py-2.5 text-[13px]">
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{c}</span>
-              <span className={`min-w-0 flex-1 truncate ${nameOf(c) ? "font-semibold text-slate-800" : "text-slate-400"}`}>{nameOf(c) || "No está en el archivo cargado"}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </ResponsiveDialog>
-  );
-};
-
-/**
- * Soluciones de gran volumen (ficha 28, consideración a): se reconocen solas por la presentación
- * de la descripción (1 L o más) y se clasifican con su propio límite de Normostock. La lista se
- * corrige a mano: agregar los que no dicen el volumen y quitar los que no corresponden.
- */
 const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: AvailabilityFormula) => void; preview: Preview; rows: AvailabilityRow[] | null; groups: FusedGroups }> = ({ formula: f, onChange, preview, rows, groups }) => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<CodeEntry | "new" | null>(null);
   const months = Math.min(f.subMax, f.largeVolumeMonths);
-  const add = useMemo(() => new Set(f.largeVolumeAdd), [f.largeVolumeAdd]);
+  const addCodes = useMemo(() => f.largeVolumeAdd.map((e) => e.code), [f.largeVolumeAdd]);
+  const add = useMemo(() => new Set(addCodes), [addCodes]);
   const skip = useMemo(() => new Set(f.largeVolumeSkip), [f.largeVolumeSkip]);
+  const excluded = useMemo(() => dmeExcludedCodes(f), [f]);
+  const nameOf = useMemo(() => nameLookup(rows, groups), [rows, groups]);
   // Filas del archivo cargado: las de la DME, o las de todos los productos si no hay clasificación.
   const source = useMemo(() => {
     if (!rows) return null;
-    const dme = essentialRows(rows, groups);
+    const dme = essentialRows(rows, groups, excluded);
     return { rows: dme.length ? dme : rows, dme: dme.length > 0, classified: rows.some((r) => r.medtip) };
-  }, [rows, groups]);
+  }, [rows, groups, excluded]);
   // Cada medicamento de gran volumen (reconocido, agregado o quitado): en cuántos establecimientos
   // está y en cuántos pasa de Substock a Normostock con la regla.
   const list = useMemo(() => {
     const by = new Map<string, { code: string; name: string; origin: LvOrigin; sites: number; changed: number }>();
     if (source) {
-      const candidates = source.rows.filter((r) => largeVolumeRow(r, add, new Set()) );
+      const candidates = source.rows.filter((r) => largeVolumeRow(r, add, new Set()));
       const base = { truncate: f.truncate, subMax: f.subMax, sobreMin: f.sobreMin };
       const without = buildItems(candidates, undefined, new Date(), base);
-      const withRule = buildItems(candidates, undefined, new Date(), { ...base, largeVolumeMonths: f.largeVolumeMonths, largeVolumeAdd: f.largeVolumeAdd, largeVolumeSkip: f.largeVolumeSkip });
+      const withRule = buildItems(candidates, undefined, new Date(), { ...base, largeVolumeMonths: f.largeVolumeMonths, largeVolumeAdd: addCodes, largeVolumeSkip: f.largeVolumeSkip });
       without.forEach((it, i) => {
         const origin: LvOrigin = skip.has(it.medCode) ? "skipped" : add.has(it.medCode) || it.fusedFrom?.some((c) => add.has(c)) ? "added" : "detected";
-        const e = by.get(it.medCode) || { code: it.medCode, name: it.description, origin, sites: 0, changed: 0 };
+        const stored = f.largeVolumeAdd.find((e) => e.code === it.medCode || it.fusedFrom?.includes(e.code))?.name;
+        const e = by.get(it.medCode) || { code: it.medCode, name: stored || it.description, origin, sites: 0, changed: 0 };
         e.sites++;
         if (it.status === StockStatus.SUBSTOCK && withRule[i].status === StockStatus.NORMOSTOCK) e.changed++;
         by.set(it.medCode, e);
       });
     }
-    // Los agregados a mano que no están en el archivo también se ven, para poder quitarlos.
+    // Los agregados a mano que no están en el archivo también se ven, con el nombre que se guardó.
     const fused = new Set([...by.values()].flatMap((e) => groups[e.code]?.codes ?? []));
-    for (const c of f.largeVolumeAdd) if (!by.has(c) && !fused.has(c)) by.set(c, { code: c, name: groups[c]?.name || "", origin: "added", sites: 0, changed: 0 });
+    for (const e of f.largeVolumeAdd) if (!by.has(e.code) && !fused.has(e.code)) by.set(e.code, { code: e.code, name: e.name || nameOf(e.code) || "", origin: "added", sites: 0, changed: 0 });
     // Sin reordenar por origen: al quitar uno, su fila se queda donde estaba.
     return [...by.values()].sort((a, b) => b.changed - a.changed || a.name.localeCompare(b.name, "es"));
-  }, [source, groups, add, skip, f.truncate, f.subMax, f.sobreMin, f.largeVolumeMonths, f.largeVolumeAdd, f.largeVolumeSkip]);
-  const nameOf = (code: string) => source?.rows.find((r) => r.medCode === code || r.fusedFrom?.includes(code))?.description || groups[code]?.name;
+  }, [source, groups, add, addCodes, skip, nameOf, f.truncate, f.subMax, f.sobreMin, f.largeVolumeMonths, f.largeVolumeAdd, f.largeVolumeSkip]);
   const q = norm(search.trim());
   const shown = list.filter((p) => !q || norm(`${p.code} ${p.name}`).includes(q));
   useEffect(() => setPage(1), [q]);
   const changed = list.reduce((a, p) => a + (p.origin === "skipped" ? 0 : p.changed), 0);
   const active = list.filter((p) => p.origin !== "skipped").length;
   const setRule = (scope: "all" | "essential", v: boolean) => onChange({ ...f, [scope]: { ...f[scope], largeVolume: v } });
-  const setLists = (nextAdd: string[], nextSkip: string[]) => onChange({ ...f, largeVolumeAdd: [...new Set(nextAdd)].sort(), largeVolumeSkip: [...new Set(nextSkip)].sort() });
+  const setLists = (nextAdd: CodeEntry[], nextSkip: string[]) => onChange({ ...f, largeVolumeAdd: nextAdd, largeVolumeSkip: [...new Set(nextSkip)].sort() });
   const action = (p: (typeof list)[number]) =>
     p.origin === "detected" ? (
-      <button type="button" onClick={() => setLists(f.largeVolumeAdd, [...f.largeVolumeSkip, p.code])} aria-label={`Quitar ${p.code}`} title="No contarlo como gran volumen" className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 [display:inline-grid]"><Trash2 className="h-4 w-4" /></button>
+      <button type="button" onClick={() => setLists(f.largeVolumeAdd, [...f.largeVolumeSkip, p.code])} aria-label={`Quitar ${p.code}`} title="No contarlo como gran volumen" className={`${iconButton} hover:bg-red-50 hover:text-red-600`}><Trash2 className="h-4 w-4" /></button>
     ) : p.origin === "skipped" ? (
-      <button type="button" onClick={() => setLists(f.largeVolumeAdd, f.largeVolumeSkip.filter((c) => c !== p.code))} aria-label={`Volver a contar ${p.code}`} title="Volver a contarlo" className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 [display:inline-grid]"><RotateCcw className="h-4 w-4" /></button>
+      <button type="button" onClick={() => setLists(f.largeVolumeAdd, f.largeVolumeSkip.filter((c) => c !== p.code))} aria-label={`Volver a contar ${p.code}`} title="Volver a contarlo" className={`${iconButton} hover:bg-slate-100 hover:text-slate-700`}><RotateCcw className="h-4 w-4" /></button>
     ) : (
-      <button type="button" onClick={() => setLists(f.largeVolumeAdd.filter((c) => c !== p.code && !groups[p.code]?.codes.includes(c)), f.largeVolumeSkip)} aria-label={`Quitar ${p.code}`} title="Quitar de la lista" className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 [display:inline-grid]"><Trash2 className="h-4 w-4" /></button>
+      <span className="inline-flex">
+        <button type="button" onClick={() => setEditing(f.largeVolumeAdd.find((e) => e.code === p.code) ?? { code: p.code, name: p.name })} aria-label={`Editar ${p.code}`} title="Editar el nombre" className={`${iconButton} hover:bg-slate-100 hover:text-slate-700`}><Pencil className="h-4 w-4" /></button>
+        <button type="button" onClick={() => setLists(f.largeVolumeAdd.filter((e) => e.code !== p.code && !groups[p.code]?.codes.includes(e.code)), f.largeVolumeSkip)} aria-label={`Quitar ${p.code}`} title="Quitar de la lista" className={`${iconButton} hover:bg-red-50 hover:text-red-600`}><Trash2 className="h-4 w-4" /></button>
+      </span>
     );
   const empty = !source
     ? "Cargue y calcule el TFORMDET para ver qué medicamentos son de gran volumen y en cuántos establecimientos cambia su situación."
@@ -281,55 +339,22 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
             <NumberBox value={f.largeVolumeMonths} onChange={(v) => onChange({ ...f, largeVolumeMonths: Math.max(0, Math.min(f.subMax, v)) })} suffix="meses" label="Normostock desde" step={0.5} />
           </Row>
         </Card>
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <div className="flex items-center gap-2 border-b border-slate-100 p-3">
-            <TableSearch value={search} onChange={setSearch} placeholder="Buscar medicamento o código…" className="md:max-w-none" />
-            <button type="button" onClick={() => setAdding(true)} aria-label="Agregar medicamentos" title="Agregar medicamentos" className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 px-3 text-[13px] font-bold text-slate-700 hover:bg-slate-50"><Plus className="h-4 w-4" /><span className="hidden sm:inline">Agregar</span></button>
-          </div>
-          {list.length === 0 ? (
-            <p className="px-4 py-6 text-center text-[12.5px] text-slate-500">{empty}</p>
-          ) : (
-            <>
-              {/* Celular: tarjetas. */}
-              <div className="divide-y divide-slate-100 md:hidden">
-                {shown.slice((page - 1) * PAGE, page * PAGE).map((p) => (
-                  <div key={p.code} className={`flex items-start gap-3 px-4 py-3 ${p.origin === "skipped" ? "opacity-60" : ""}`}>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{p.code}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${LV_ORIGIN[p.origin].className}`}>{LV_ORIGIN[p.origin].label}</span>
-                      </div>
-                      <p className={`mt-1 text-[13px] font-semibold leading-snug ${p.name ? "text-slate-900" : "text-slate-400"}`}>{p.name || "No está en el archivo cargado"}</p>
-                      <p className="mt-0.5 text-[12px] text-slate-500">
-                        {p.sites ? `${p.sites} establecimientos` : "Sin establecimientos en el archivo"}
-                        {p.origin !== "skipped" && p.changed > 0 && <> · <b className="text-emerald-700">{p.changed}</b> pasan a Normostock</>}
-                      </p>
-                    </div>
-                    {action(p)}
-                  </div>
-                ))}
-              </div>
-              <div className="scrollbar-x hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[560px]">
-                  <thead><tr className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wide text-slate-500"><th className="px-4 py-3">Código</th><th className="px-4 py-3">Medicamento</th><th className="px-3 py-3 text-center">Origen</th><th className="px-3 py-3 text-center" title="Establecimientos donde está">EESS</th><th className="px-3 py-3 text-center">Pasan a Normostock</th><th className="px-2 py-3" /></tr></thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {shown.slice((page - 1) * PAGE, page * PAGE).map((p) => (
-                      <tr key={p.code} className={`h-12 ${p.origin === "skipped" ? "opacity-60" : ""}`}>
-                        <td className="px-4"><span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{p.code}</span></td>
-                        <td className={`min-w-[220px] px-4 py-2 text-[12.5px] font-semibold leading-snug ${p.name ? "text-slate-900" : "text-slate-400"}`}>{p.name || "No está en el archivo cargado"}</td>
-                        <td className="px-3 text-center"><span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${LV_ORIGIN[p.origin].className}`}>{LV_ORIGIN[p.origin].label}</span></td>
-                        <td className="px-3 text-center font-mono text-[12.5px] text-slate-600">{p.sites || "—"}</td>
-                        <td className={`px-3 text-center font-mono text-[12.5px] font-bold ${p.changed && p.origin !== "skipped" ? "text-emerald-700" : "text-slate-300"}`}>{p.origin !== "skipped" && p.changed ? p.changed : "—"}</td>
-                        <td className="px-2 text-right">{action(p)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <TablePagination page={page} pageSize={PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />
-            </>
-          )}
-        </div>
+        <EntryTable
+          search={search} onSearch={setSearch} placeholder="Buscar medicamento o código…" onAdd={() => setEditing("new")}
+          empty={list.length === 0 ? empty : null}
+          head={<><th className="px-3 py-3 text-center">Origen</th><th className="px-3 py-3 text-center" title="Establecimientos donde está">EESS</th><th className="px-3 py-3 text-center">Pasan a Normostock</th></>}
+          rows={shown.slice((page - 1) * PAGE, page * PAGE).map((p) => ({
+            key: p.code, code: p.code, name: p.name, dim: p.origin === "skipped", action: action(p),
+            cells: <>
+              <td className="px-3 text-center"><span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${LV_ORIGIN[p.origin].className}`}>{LV_ORIGIN[p.origin].label}</span></td>
+              <td className="px-3 text-center font-mono text-[12.5px] text-slate-600">{p.sites || "—"}</td>
+              <td className={`px-3 text-center font-mono text-[12.5px] font-bold ${p.changed && p.origin !== "skipped" ? "text-emerald-700" : "text-slate-300"}`}>{p.origin !== "skipped" && p.changed ? p.changed : "—"}</td>
+            </>,
+            chips: <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${LV_ORIGIN[p.origin].className}`}>{LV_ORIGIN[p.origin].label}</span>,
+            detail: <>{p.sites ? `${p.sites} establecimientos` : "Sin establecimientos en el archivo"}{p.origin !== "skipped" && p.changed > 0 && <> · <b className="text-emerald-700">{p.changed}</b> pasan a Normostock</>}</>,
+          }))}
+          pagination={<TablePagination page={page} pageSize={PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />}
+        />
       </div>
       <div className="space-y-4">
         <PreviewCard preview={preview} />
@@ -349,11 +374,168 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
           <RotateCcw className="h-4 w-4" />Restablecer ficha 28
         </button>
       </div>
-      <AddLargeVolumeDialog
-        open={adding}
-        onClose={() => setAdding(false)}
+      <CodeEntryDialog
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title={editing === "new" ? "Agregar medicamento de gran volumen" : "Editar medicamento"}
+        subtitle="Para una solución de 1 L o más cuya descripción no dice el volumen"
+        initial={editing === "new" || !editing ? null : editing}
         nameOf={nameOf}
-        onAdd={(codes) => { setLists([...f.largeVolumeAdd, ...codes], f.largeVolumeSkip.filter((c) => !codes.includes(c))); setAdding(false); }}
+        taken={(code) => list.some((p) => p.code === code && p.origin !== "skipped")}
+        onSave={(e) => {
+          const entry = { code: e.code, name: e.name };
+          setLists(editing === "new" ? [...f.largeVolumeAdd, entry] : f.largeVolumeAdd.map((x) => (x.code === entry.code ? entry : x)), f.largeVolumeSkip.filter((c) => c !== entry.code));
+          setEditing(null);
+        }}
+      />
+    </div>
+  );
+};
+
+/**
+ * Tabla de una lista a mano: buscador y «Agregar» en una línea, tabla en escritorio y tarjetas
+ * en el celular. Cada fila trae sus celdas propias y su acción.
+ */
+const EntryTable: React.FC<{
+  search: string;
+  onSearch: (v: string) => void;
+  placeholder: string;
+  onAdd: () => void;
+  empty: string | null;
+  head: React.ReactNode;
+  rows: Array<{ key: string; code: string; name: string; dim?: boolean; action: React.ReactNode; cells: React.ReactNode; chips: React.ReactNode; detail: React.ReactNode }>;
+  pagination: React.ReactNode;
+}> = ({ search, onSearch, placeholder, onAdd, empty, head, rows, pagination }) => (
+  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+    <div className="flex items-center gap-2 border-b border-slate-100 p-3">
+      <TableSearch value={search} onChange={onSearch} placeholder={placeholder} className="md:max-w-none" />
+      <button type="button" onClick={onAdd} aria-label="Agregar medicamento" title="Agregar medicamento" className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 px-3 text-[13px] font-bold text-slate-700 hover:bg-slate-50"><Plus className="h-4 w-4" /><span className="hidden sm:inline">Agregar</span></button>
+    </div>
+    {empty ? (
+      <p className="px-4 py-6 text-center text-[12.5px] text-slate-500">{empty}</p>
+    ) : (
+      <>
+        <div className="divide-y divide-slate-100 md:hidden">
+          {rows.map((r) => (
+            <div key={r.key} className={`flex items-start gap-3 px-4 py-3 ${r.dim ? "opacity-60" : ""}`}>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5"><span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{r.code}</span>{r.chips}</div>
+                <p className={`mt-1 text-[13px] font-semibold leading-snug ${r.name ? "text-slate-900" : "text-slate-400"}`}>{r.name || "Sin nombre"}</p>
+                <p className="mt-0.5 text-[12px] text-slate-500">{r.detail}</p>
+              </div>
+              {r.action}
+            </div>
+          ))}
+        </div>
+        <div className="scrollbar-x hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[560px]">
+            <thead><tr className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wide text-slate-500"><th className="px-4 py-3">Código</th><th className="px-4 py-3">Medicamento</th>{head}<th className="px-2 py-3" /></tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r) => (
+                <tr key={r.key} className={`h-12 ${r.dim ? "opacity-60" : ""}`}>
+                  <td className="px-4"><span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{r.code}</span></td>
+                  <td className={`min-w-[220px] px-4 py-2 text-[12.5px] font-semibold leading-snug ${r.name ? "text-slate-900" : "text-slate-400"}`}>{r.name || "Sin nombre"}</td>
+                  {r.cells}
+                  <td className="whitespace-nowrap px-2 text-right">{r.action}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {pagination}
+      </>
+    )}
+  </div>
+);
+
+/* ------------------------------------------------------------------ Excluidos de la DME */
+
+const EXCLUSION_TONE: Record<ExclusionReason, string> = {
+  strategic: "bg-amber-50 text-amber-800",
+  national: "bg-slate-100 text-slate-600",
+  other: "bg-slate-100 text-slate-500",
+};
+
+const ExcludedNote: React.FC<{ className?: string }> = ({ className = "" }) => (
+  <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${className}`}>
+    <p className="flex items-center gap-2 text-[13px] font-bold text-slate-900"><Ban className="h-4 w-4 shrink-0 text-amber-700" />Ficha 28 · Criterios de exclusión</p>
+    <p className="mt-2 text-[12px] italic leading-relaxed text-slate-600">«Medicamento que corresponde a la atención exclusiva para Intervención Estratégica de Salud Pública. Basado en el listado comunicado por DGIESP […] (exclusión automática para todos los EESS evaluados).»</p>
+    <p className="mt-2 text-[12px] leading-relaxed text-slate-500">DGIESP no publica ese listado. La lista de fábrica son los medicamentos que el tablero nacional de DIGEMID no evalúa (agosto 2026): los que marca «NO APLICA» y los que no incluye. Con ella, la DME de Bellavista coincide con la nacional. Solo cambia la DME.</p>
+    <p className="mt-2 text-[12px] leading-relaxed text-slate-500"><b className="text-slate-700">Cómo se arma la lista:</b> cada fila es un código SISMED con su nombre y el motivo. Se agrega con «Agregar», se corrige con el lápiz y se quita con el tacho.</p>
+  </div>
+);
+
+const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: AvailabilityFormula) => void; preview: Preview; rows: AvailabilityRow[] | null; groups: FusedGroups }> = ({ formula: f, onChange, preview, rows, groups }) => {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [editing, setEditing] = useState<ExcludedEntry | "new" | null>(null);
+  const nameOf = useMemo(() => nameLookup(rows, groups), [rows, groups]);
+  // En cuántos establecimientos del archivo cargado entraría cada uno en la DME.
+  const sitesOf = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!rows) return null;
+    for (const r of essentialRows(rows, groups)) {
+      const codes = [r.medCode, ...(r.fusedFrom ?? [])];
+      for (const e of f.dmeExcluded) if (codes.includes(e.code)) m.set(e.code, (m.get(e.code) || 0) + 1);
+    }
+    return m;
+  }, [rows, groups, f.dmeExcluded]);
+  const q = norm(search.trim());
+  const shown = f.dmeExcluded.filter((e) => !q || norm(`${e.code} ${e.name} ${EXCLUSION_REASON_LABEL[e.reason]}`).includes(q));
+  useEffect(() => setPage(1), [q]);
+  const items = sitesOf ? [...sitesOf.values()].reduce((a, n) => a + n, 0) : 0;
+  const isFactory = JSON.stringify(f.dmeExcluded) === JSON.stringify(DEFAULT_DME_EXCLUDED);
+  const setList = (list: ExcludedEntry[]) => onChange({ ...f, dmeExcluded: list });
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="space-y-4">
+        <ExcludedNote className="lg:hidden" />
+        <EntryTable
+          search={search} onSearch={setSearch} placeholder="Buscar medicamento, código o motivo…" onAdd={() => setEditing("new")}
+          empty={f.dmeExcluded.length === 0 ? "No hay medicamentos excluidos: la DME evalúa todos." : null}
+          head={<><th className="px-3 py-3 text-center">Motivo</th><th className="px-3 py-3 text-center" title="Establecimientos del archivo cargado donde estaría en la DME">EESS</th></>}
+          rows={shown.slice((page - 1) * PAGE, page * PAGE).map((e) => ({
+            key: e.code, code: e.code, name: e.name || nameOf(e.code) || "",
+            action: (
+              <span className="inline-flex">
+                <button type="button" onClick={() => setEditing(e)} aria-label={`Editar ${e.code}`} title="Editar nombre y motivo" className={`${iconButton} hover:bg-slate-100 hover:text-slate-700`}><Pencil className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setList(f.dmeExcluded.filter((x) => x.code !== e.code))} aria-label={`Quitar ${e.code}`} title="Volver a evaluarlo en la DME" className={`${iconButton} hover:bg-red-50 hover:text-red-600`}><Trash2 className="h-4 w-4" /></button>
+              </span>
+            ),
+            cells: <>
+              <td className="px-3 text-center"><span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${EXCLUSION_TONE[e.reason]}`}>{EXCLUSION_REASON_LABEL[e.reason]}</span></td>
+              <td className="px-3 text-center font-mono text-[12.5px] text-slate-600">{sitesOf ? sitesOf.get(e.code) || "—" : "—"}</td>
+            </>,
+            chips: <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${EXCLUSION_TONE[e.reason]}`}>{EXCLUSION_REASON_LABEL[e.reason]}</span>,
+            detail: sitesOf ? (sitesOf.get(e.code) ? `Sale de la DME en ${sitesOf.get(e.code)} establecimientos del archivo` : "No está en el archivo cargado") : "Cargue el TFORMDET para ver en cuántos establecimientos está",
+          }))}
+          pagination={<TablePagination page={page} pageSize={PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />}
+        />
+      </div>
+      <div className="space-y-4">
+        <PreviewCard preview={preview} />
+        <ExcludedNote className="hidden lg:block" />
+        <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-[12px] text-slate-600">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+          <span>{f.dmeExcluded.length} {f.dmeExcluded.length === 1 ? "medicamento excluido" : "medicamentos excluidos"}.{sitesOf ? ` En el archivo cargado salen ${items} ${items === 1 ? "ítem" : "ítems"} de la DME.` : ""}</span>
+        </div>
+        <button type="button" disabled={isFactory} onClick={() => setList(DEFAULT_DME_EXCLUDED)} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+          <RotateCcw className="h-4 w-4" />Restablecer lista de fábrica
+        </button>
+      </div>
+      <CodeEntryDialog
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title={editing === "new" ? "Agregar medicamento excluido" : "Editar medicamento excluido"}
+        subtitle="No entra en la DME en ningún establecimiento"
+        initial={editing === "new" || !editing ? null : editing}
+        withReason
+        nameOf={nameOf}
+        taken={(code) => f.dmeExcluded.some((e) => e.code === code)}
+        onSave={(e) => {
+          setList(editing === "new" ? [...f.dmeExcluded, e] : f.dmeExcluded.map((x) => (x.code === e.code ? e : x)));
+          setEditing(null);
+        }}
       />
     </div>
   );
@@ -590,7 +772,8 @@ export const AvailabilityConfigDialog: React.FC<{
   // La regla de gran volumen se guarda dentro de la fórmula, pero tiene su propia pestaña.
   const lvOf = (f: AvailabilityFormula) => JSON.stringify([f.all.largeVolume, f.essential.largeVolume, f.largeVolumeMonths, f.largeVolumeAdd, f.largeVolumeSkip]);
   const dirtyLargeVolume = lvOf(formula) !== lvOf(config.formula);
-  const restOf = (f: AvailabilityFormula) => JSON.stringify({ ...f, largeVolumeMonths: 0, largeVolumeAdd: [], largeVolumeSkip: [], all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: false } });
+  const dirtyExcluded = JSON.stringify(formula.dmeExcluded) !== JSON.stringify(config.formula.dmeExcluded);
+  const restOf = (f: AvailabilityFormula) => JSON.stringify({ ...f, largeVolumeMonths: 0, largeVolumeAdd: [], largeVolumeSkip: [], dmeExcluded: [], all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: false } });
   const dirtyFormulaRest = restOf(formula) !== restOf(config.formula);
   const dirtyFused = fused !== config.fused;
   const dirtyVitals = JSON.stringify(vitals) !== JSON.stringify(config.vitals);
@@ -604,7 +787,7 @@ export const AvailabilityConfigDialog: React.FC<{
       const vc = vitalCodeSet(vit);
       return [
         summarize(buildItems(previewRows, undefined, today, classifyOptionsOf(f, "all")), summaryOptionsOf(f, "all", vc)).pct,
-        summarize(buildItems(essentialRows(previewRows, groups), undefined, today, classifyOptionsOf(f, "essential")), summaryOptionsOf(f, "essential", vc)).pct,
+        summarize(buildItems(essentialRows(previewRows, groups, dmeExcludedCodes(f)), undefined, today, classifyOptionsOf(f, "essential")), summaryOptionsOf(f, "essential", vc)).pct,
       ];
     };
     return { current: pct(config.formula, config.fused.groups, config.vitals), draft: pct(formula, fused.groups, vitals) };
@@ -629,6 +812,7 @@ export const AvailabilityConfigDialog: React.FC<{
   const tabs: Array<[Tab, string, React.ReactNode, boolean]> = [
     ["formula", "Fórmula", <Calculator key="f" className="h-4 w-4" />, dirtyFormulaRest],
     ["largeVolume", "Gran volumen", <Droplets key="g" className="h-4 w-4" />, dirtyLargeVolume],
+    ["excluded", "Excluidos de la DME", <Ban key="e" className="h-4 w-4" />, dirtyExcluded],
     ["fused", "Códigos fusionados", <Layers key="c" className="h-4 w-4" />, dirtyFused],
     ["vitals", "Vitales", <HeartPulse key="v" className="h-4 w-4" />, dirtyVitals],
   ];
@@ -666,6 +850,7 @@ export const AvailabilityConfigDialog: React.FC<{
     >
       {tab === "formula" && <FormulaTab formula={formula} onChange={setFormula} preview={preview} />}
       {tab === "largeVolume" && <LargeVolumeTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} />}
+      {tab === "excluded" && <ExcludedTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} />}
       {tab === "fused" && <FusedTab catalog={fused} onChange={setFused} prev={config.fusedPrev} meta={config.meta.fused} />}
       {tab === "vitals" && <VitalsTab vitals={vitals} onChange={setVitals} />}
     </ResponsiveDialog>

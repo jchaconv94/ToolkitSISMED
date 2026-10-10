@@ -17,6 +17,50 @@ const SQL = "SUPABASE_DISPONIBILIDAD_CONFIGURACION.sql";
 
 export type SinRotacionRule = "no" | "vital" | "yes";
 
+/** Un medicamento de una lista a mano (código SISMED y su nombre, para mostrarlo sin el TFORMDET). */
+export interface CodeEntry {
+  code: string;
+  name: string;
+}
+
+/** Por qué un medicamento no entra en la DME (ficha 28, criterios de exclusión). */
+export type ExclusionReason = "strategic" | "national" | "other";
+export const EXCLUSION_REASON_LABEL: Record<ExclusionReason, string> = {
+  strategic: "Intervención estratégica",
+  national: "No figura en el tablero nacional",
+  other: "Otro motivo",
+};
+
+export interface ExcludedEntry extends CodeEntry {
+  reason: ExclusionReason;
+}
+
+/**
+ * Medicamentos que el tablero nacional de DIGEMID no evalúa en la DME (agosto 2026, todos los
+ * establecimientos de Bellavista; los cuatro primeros, «NO APLICA» en todas las DIRESA del país).
+ * Con esta lista, agosto da 84,03 % frente al 84,04 % nacional y 29 de 33 establecimientos
+ * coinciden exactos (`docs/DISPONIBILIDAD_AUDITORIA.md`, punto I). La ficha 28 excluye los
+ * medicamentos «de atención exclusiva para Intervención Estratégica de Salud Pública» según el
+ * listado que comunica DGIESP, que no está publicado.
+ */
+export const DEFAULT_DME_EXCLUDED: ExcludedEntry[] = [
+  { code: "05873", name: "SODIO CLORURO 900 mg/100 mL (0.9 %) 1 L INYECTABLE", reason: "strategic" },
+  { code: "05872", name: "SODIO CLORURO 900 mg/100 mL (0.9 %) 100 mL INYECTABLE", reason: "strategic" },
+  { code: "05253", name: "OXITOCINA 10 UI 1 mL INYECTABLE", reason: "strategic" },
+  { code: "01467", name: "CALCIO GLUCONATO 100 mg/mL (Equiv. a 8.4 mg/mL de Calcio) 10 mL INYECTABLE", reason: "strategic" },
+  { code: "03576", name: "FITOMENADIONA 10 mg/mL 1 mL INYECTABLE", reason: "strategic" },
+  { code: "04085", name: "INSULINA HUMANA (ADN RECOMBINANTE) 100 UI/mL 10 mL INYECTABLE", reason: "strategic" },
+  { code: "22187", name: "INSULINA ISOFANA HUMANA (NPH) ADN RECOMBINANTE 100 UI/mL 10 mL INYECTABLE", reason: "strategic" },
+  { code: "10221", name: "ALCOHOL ETILICO (ETANOL) 70° 1 L SOLUCION", reason: "national" },
+  { code: "02187", name: "CLORHEXIDINA GLUCONATO 4 g/100 mL (4 %) 1 L SOLUCION", reason: "national" },
+  { code: "16862", name: "PEROXIDO DE HIDROGENO (AGUA OXIGENADA 10 V) 3 % 1 L SOLUCION", reason: "national" },
+  { code: "06517", name: "YODO POVIDONA 10 g/100 mL 1 L SOLUCION", reason: "national" },
+  { code: "18077", name: "YODO POVIDONA (ESPUMA) 8.5 g/100 mL 1 L SOLUCION", reason: "national" },
+  { code: "25036", name: "YODO POVIDONA (ESPUMA) 7.5 g/100 mL 1 L SOLUCION", reason: "national" },
+  { code: "03560", name: "HIERRO POLIMALTOSA 50 mg/mL 30 mL SOLUCION", reason: "national" },
+  { code: "06111", name: "TETRACICLINA CLORHIDRATO (UNGÜENTO OFTALMICO) 1 g/100 g (1 %) 6 g UNGÜENTO", reason: "national" },
+];
+
 export interface ScopeRule {
   normostock: boolean;
   sobrestock: boolean;
@@ -41,10 +85,12 @@ export interface AvailabilityFormula {
   sobreMin: number;
   /** Soluciones de gran volumen: Normostock desde estos meses (la ficha 28 dice 1). */
   largeVolumeMonths: number;
-  /** Códigos agregados a mano como gran volumen (su descripción no dice el volumen). */
-  largeVolumeAdd: string[];
+  /** Agregados a mano como gran volumen (su descripción no dice el volumen). */
+  largeVolumeAdd: CodeEntry[];
   /** Códigos que se reconocen solos por la presentación pero no deben contar como gran volumen. */
   largeVolumeSkip: string[];
+  /** Medicamentos que no entran en la DME (ficha 28, criterios de exclusión). Solo la DME. */
+  dmeExcluded: ExcludedEntry[];
   levels: { optimo: number; alto: number; regular: number };
   /** Microred y UNGET: promedio de sus establecimientos o suma de sus ítems. */
   aggregate: "average" | "sum";
@@ -59,6 +105,7 @@ export const DEFAULT_AVAILABILITY_FORMULA: AvailabilityFormula = {
   largeVolumeMonths: 1,
   largeVolumeAdd: [],
   largeVolumeSkip: [],
+  dmeExcluded: DEFAULT_DME_EXCLUDED,
   levels: { optimo: 90, alto: 80, regular: 70 },
   aggregate: "average",
 };
@@ -91,6 +138,17 @@ const num = (v: unknown, fallback: number, min: number, max: number) => {
 const bool = (v: unknown, fallback: boolean) => (typeof v === "boolean" ? v : fallback);
 /** Lista de códigos SISMED con sus ceros, sin repetidos. */
 const codeList = (v: unknown): string[] => (Array.isArray(v) ? [...new Set(v.map(padCode).filter(Boolean))].sort() : []);
+/** Lista de { código, nombre } (acepta también solo códigos, como se guardaba antes). */
+const entryList = (v: unknown): CodeEntry[] => {
+  if (!Array.isArray(v)) return [];
+  const out = new Map<string, CodeEntry>();
+  for (const x of v) {
+    const code = padCode(x && typeof x === "object" ? (x as any).code : x);
+    if (code && !out.has(code)) out.set(code, { code, name: x && typeof x === "object" ? String((x as any).name ?? "").trim() : "" });
+  }
+  return [...out.values()];
+};
+const reasonOf = (v: unknown): ExclusionReason | undefined => (v === "strategic" || v === "national" || v === "other" ? v : undefined);
 const rule = (v: unknown, fallback: ScopeRule, allowVital: boolean): ScopeRule => {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
   const sr = o.sinRotacion === "yes" || o.sinRotacion === "no" || (allowVital && o.sinRotacion === "vital") ? (o.sinRotacion as SinRotacionRule) : fallback.sinRotacion;
@@ -118,8 +176,13 @@ export const normalizeFormula = (value: unknown): AvailabilityFormula => {
     sobreMin,
     // Una fórmula guardada antes del 2026-10-09 no lo trae: vale la de la ficha 28.
     largeVolumeMonths: Math.min(subMax, num(o.largeVolumeMonths, d.largeVolumeMonths, 0, 24)),
-    largeVolumeAdd: codeList(o.largeVolumeAdd),
+    largeVolumeAdd: entryList(o.largeVolumeAdd),
     largeVolumeSkip: codeList(o.largeVolumeSkip),
+    // Una fórmula guardada antes del 2026-10-10 no la trae: vale la de fábrica. Una lista vacía
+    // guardada a propósito se respeta.
+    dmeExcluded: Array.isArray(o.dmeExcluded)
+      ? entryList(o.dmeExcluded).map((e) => ({ ...e, reason: reasonOf((o.dmeExcluded as any[]).find((x) => padCode(x?.code ?? x) === e.code)?.reason) ?? "other" }))
+      : d.dmeExcluded,
     levels: { optimo, alto, regular },
     aggregate: o.aggregate === "sum" ? "sum" : "average",
   };
@@ -252,13 +315,16 @@ export const availabilityConfigApi = {
 
 /* ------------------------------------------------------------ Uso en el cálculo */
 
+/** Códigos excluidos de la DME, para `essentialRows`. */
+export const dmeExcludedCodes = (f: AvailabilityFormula): Set<string> => new Set(f.dmeExcluded.map((e) => e.code));
+
 /** Límites de la situación según la fórmula, para una vista (la regla de gran volumen va por vista). */
 export const classifyOptionsOf = (f: AvailabilityFormula, scope: "all" | "essential") => ({
   truncate: f.truncate,
   subMax: f.subMax,
   sobreMin: f.sobreMin,
   ...((scope === "all" ? f.all : f.essential).largeVolume
-    ? { largeVolumeMonths: f.largeVolumeMonths, largeVolumeAdd: f.largeVolumeAdd, largeVolumeSkip: f.largeVolumeSkip }
+    ? { largeVolumeMonths: f.largeVolumeMonths, largeVolumeAdd: f.largeVolumeAdd.map((e) => e.code), largeVolumeSkip: f.largeVolumeSkip }
     : {}),
 });
 
@@ -280,5 +346,6 @@ export const describeFormula = (f: AvailabilityFormula, scope: "all" | "essentia
   const agg = f.aggregate === "sum" ? "suma de sus ítems" : "promedio de sus establecimientos";
   const manual = [f.largeVolumeAdd.length && `${f.largeVolumeAdd.length} agregados`, f.largeVolumeSkip.length && `${f.largeVolumeSkip.length} quitados`].filter(Boolean).join(", ");
   const lv = r.largeVolume ? ` · soluciones de 1 L o más: Normostock desde ${monthsText(Math.min(f.subMax, f.largeVolumeMonths))}${manual ? ` (${manual} a mano)` : ""}` : "";
-  return `Disponibilidad = (${parts.join(" + ") || "nada"}) ÷ total de ítems${r.sinRotacion === "vital" ? " (los demás sin rotación no se evalúan)" : ""} · meses ${f.truncate ? "cortados a un decimal" : "sin cortar"} · Substock < ${f.subMax}, Sobrestock > ${f.sobreMin}${lv} · microred y UNGET: ${agg}.`;
+  const excluded = scope === "essential" && f.dmeExcluded.length ? ` · ${f.dmeExcluded.length} medicamentos excluidos (ficha 28)` : "";
+  return `Disponibilidad = (${parts.join(" + ") || "nada"}) ÷ total de ítems${r.sinRotacion === "vital" ? " (los demás sin rotación no se evalúan)" : ""}${excluded} · meses ${f.truncate ? "cortados a un decimal" : "sin cortar"} · Substock < ${f.subMax}, Sobrestock > ${f.sobreMin}${lv} · microred y UNGET: ${agg}.`;
 };
