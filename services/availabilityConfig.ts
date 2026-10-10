@@ -89,6 +89,11 @@ export interface AvailabilityFormula {
   largeVolumeAdd: CodeEntry[];
   /** Códigos que se reconocen solos por la presentación pero no deben contar como gran volumen. */
   largeVolumeSkip: string[];
+  /**
+   * Nombre con que se ve en la lista un medicamento reconocido por la presentación, si se cambió
+   * a mano (código → nombre). Solo se muestra: el cálculo usa el código.
+   */
+  largeVolumeNames: Record<string, string>;
   /** Medicamentos que no entran en la DME (ficha 28, criterios de exclusión). Solo la DME. */
   dmeExcluded: ExcludedEntry[];
   levels: { optimo: number; alto: number; regular: number };
@@ -105,6 +110,7 @@ export const DEFAULT_AVAILABILITY_FORMULA: AvailabilityFormula = {
   largeVolumeMonths: 1,
   largeVolumeAdd: [],
   largeVolumeSkip: [],
+  largeVolumeNames: {},
   dmeExcluded: DEFAULT_DME_EXCLUDED,
   levels: { optimo: 90, alto: 80, regular: 70 },
   aggregate: "average",
@@ -148,6 +154,17 @@ const entryList = (v: unknown): CodeEntry[] => {
   }
   return [...out.values()];
 };
+/** Código → nombre, con los ceros del código y sin nombres vacíos. */
+const nameMap = (v: unknown): Record<string, string> => {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, n] of Object.entries(v as Record<string, unknown>)) {
+    const code = padCode(k);
+    const name = typeof n === "string" ? n.trim() : "";
+    if (code && name) out[code] = name;
+  }
+  return out;
+};
 const reasonOf = (v: unknown): ExclusionReason | undefined => (v === "strategic" || v === "national" || v === "other" ? v : undefined);
 const rule = (v: unknown, fallback: ScopeRule, allowVital: boolean): ScopeRule => {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
@@ -178,6 +195,7 @@ export const normalizeFormula = (value: unknown): AvailabilityFormula => {
     largeVolumeMonths: Math.min(subMax, num(o.largeVolumeMonths, d.largeVolumeMonths, 0, 24)),
     largeVolumeAdd: entryList(o.largeVolumeAdd),
     largeVolumeSkip: codeList(o.largeVolumeSkip),
+    largeVolumeNames: nameMap(o.largeVolumeNames),
     // Una fórmula guardada antes del 2026-10-10 no la trae: vale la de fábrica. Una lista vacía
     // guardada a propósito se respeta.
     dmeExcluded: Array.isArray(o.dmeExcluded)
