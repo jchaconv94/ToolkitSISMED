@@ -182,11 +182,11 @@ const CodeEntryDialog: React.FC<{
   withReason?: boolean;
   /** Mostrar «¿Cuenta como gran volumen?». */
   withCounts?: boolean;
-  notice?: React.ReactNode;
   nameOf: (code: string) => string | undefined;
-  taken: (code: string) => boolean;
+  /** Por qué no se puede usar ese código (ya está en la lista, o en otra), o nada. */
+  taken: (code: string) => string | null;
   onSave: (entry: { code: string; name: string; reason: ExclusionReason; counts: boolean }) => void;
-}> = ({ open, onClose, title, subtitle, initial, codeLocked, fileName, withReason = false, withCounts = false, notice, nameOf, taken, onSave }) => {
+}> = ({ open, onClose, title, subtitle, initial, codeLocked, fileName, withReason = false, withCounts = false, nameOf, taken, onSave }) => {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [reason, setReason] = useState<ExclusionReason>("strategic");
@@ -209,7 +209,7 @@ const CodeEntryDialog: React.FC<{
     const found = padded.length >= 5 ? nameOf(padded) || "" : "";
     if (!name || name === autoName || (editing && name === initial?.name)) { setName(found); setAutoName(found); }
   }, [padded]); // eslint-disable-line react-hooks/exhaustive-deps
-  const duplicate = changedCode && !!padded && taken(padded);
+  const duplicate = changedCode && !!padded ? taken(padded) : null;
   const valid = /^\d{5}$/.test(padded) && !duplicate;
   const label = "mb-1.5 block text-[12.5px] font-bold text-slate-700";
   const choice = (on: boolean) => `rounded-xl border px-3 py-2 text-[12.5px] font-bold ${on ? "border-teal-300 bg-teal-50 text-teal-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
@@ -217,11 +217,10 @@ const CodeEntryDialog: React.FC<{
     <ResponsiveDialog open={open} onClose={onClose} title={title} subtitle={subtitle}
       footer={<><button type="button" onClick={onClose} className={`${dialogSecondaryButton} md:ml-auto`}>Cancelar</button><button type="button" disabled={!valid} onClick={() => onSave({ code: padded, name: name.trim(), reason, counts })} className={`${dialogPrimaryButton} md:!ml-0`}><Check className="h-4 w-4" />{editing ? "Listo" : "Agregar"}</button></>}>
       <div className="space-y-4">
-        {notice && <p className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800"><Info className="mt-0.5 h-4 w-4 shrink-0" />{notice}</p>}
         <label className="block">
           <span className={label}>Código SISMED</span>
           <input autoFocus={!editing} value={code} disabled={!!codeLocked} onChange={(e) => setCode(e.target.value)} className={`${inputClass} font-mono`} placeholder="05873" inputMode="numeric" />
-          {duplicate ? <span className="mt-1 block text-[12px] font-semibold text-amber-700">Ese código ya está en la lista.</span>
+          {duplicate ? <span className="mt-1 block text-[12px] font-semibold text-amber-700">{duplicate}</span>
             : codeLocked ? <span className="mt-1 block text-[12px] text-slate-500">{codeLocked}</span> : null}
         </label>
         <label className="block">
@@ -283,12 +282,11 @@ const LV_ORIGIN: Record<LvOrigin, { label: string; className: string }> = {
   detected: { label: "Presentación", className: "bg-sky-50 text-sky-700" },
   added: { label: "Agregado", className: "bg-teal-50 text-teal-700" },
 };
-/** Si cuenta, si se quitó a mano o si no entra en la DME (pestaña «Excluidos de la DME»). */
-type LvState = "counts" | "skipped" | "excluded";
+/** Si cuenta o si se quitó a mano. */
+type LvState = "counts" | "skipped";
 const LV_STATE: Record<LvState, { label: string; className: string; title: string }> = {
   counts: { label: "Cuenta", className: "bg-emerald-50 text-emerald-700", title: "Cuenta como gran volumen" },
   skipped: { label: "Quitado", className: "bg-slate-100 text-slate-500", title: "Se quitó: no cuenta como gran volumen" },
-  excluded: { label: "Excluido", className: "bg-amber-50 text-amber-800", title: "Está en «Excluidos de la DME»: no entra en la DME" },
 };
 
 /** Texto de la ficha y cómo se aplica: va en la columna derecha (y arriba en el celular). */
@@ -310,17 +308,18 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
   const skip = useMemo(() => new Set(f.largeVolumeSkip), [f.largeVolumeSkip]);
   const excluded = useMemo(() => dmeExcludedCodes(f), [f]);
   const nameOf = useMemo(() => nameLookup(rows, groups), [rows, groups]);
-  // Filas del archivo cargado: las de la DME (con los excluidos, que se ven con su estado), o las
-  // de todos los productos si no hay clasificación.
+  // Filas del archivo cargado: las de la DME, o las de todos los productos si no hay clasificación.
+  // Los excluidos de la DME no se listan (tienen su pestaña); solo se cuentan.
   const source = useMemo(() => {
     if (!rows) return null;
     const dme = essentialRows(rows, groups);
     return { rows: dme.length ? dme : rows, dme: dme.length > 0, classified: rows.some((r) => r.medtip) };
   }, [rows, groups]);
-  // Cada medicamento de gran volumen (reconocido, agregado, quitado o excluido): en cuántos
-  // establecimientos está y en cuántos pasa de Substock a Normostock con la regla.
-  const list = useMemo(() => {
+  // Cada medicamento de gran volumen (reconocido, agregado o quitado): en cuántos establecimientos
+  // está y en cuántos pasa de Substock a Normostock con la regla.
+  const { list, outOfDme } = useMemo(() => {
     const by = new Map<string, LvEntry>();
+    const out = new Set<string>();
     if (source) {
       const candidates = source.rows.filter((r) => largeVolumeRow(r, add, new Set()));
       const base = { truncate: f.truncate, subMax: f.subMax, sobreMin: f.sobreMin };
@@ -329,7 +328,8 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
       without.forEach((it, i) => {
         const codes = [it.medCode, ...(it.fusedFrom ?? [])];
         const origin: LvOrigin = it.medtip === "M" && isLargeVolume(it.description) ? "detected" : "added";
-        const state: LvState = skip.has(it.medCode) ? "skipped" : source.dme && codes.some((c) => excluded.has(c)) ? "excluded" : "counts";
+        if (source.dme && codes.some((c) => excluded.has(c))) { out.add(it.medCode); return; }
+        const state: LvState = skip.has(it.medCode) ? "skipped" : "counts";
         const stored = f.largeVolumeAdd.find((e) => codes.includes(e.code))?.name;
         const e = by.get(it.medCode) || { code: it.medCode, name: f.largeVolumeNames[it.medCode] || stored || it.description, fileName: it.description, origin, state, sites: 0, changed: 0 };
         e.sites++;
@@ -340,18 +340,18 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
     // Los agregados a mano que no están en el archivo también se ven, con el nombre que se guardó.
     const fused = new Set([...by.values()].flatMap((e) => groups[e.code]?.codes ?? []));
     for (const e of f.largeVolumeAdd) {
-      if (by.has(e.code) || fused.has(e.code)) continue;
-      by.set(e.code, { code: e.code, name: e.name || nameOf(e.code) || "", origin: "added", state: skip.has(e.code) ? "skipped" : excluded.has(e.code) ? "excluded" : "counts", sites: 0, changed: 0 });
+      if (by.has(e.code) || fused.has(e.code) || out.has(e.code)) continue;
+      if (excluded.has(e.code)) { out.add(e.code); continue; }
+      by.set(e.code, { code: e.code, name: e.name || nameOf(e.code) || "", origin: "added", state: skip.has(e.code) ? "skipped" : "counts", sites: 0, changed: 0 });
     }
-    // Los excluidos van al final; quitar uno no lo mueve de su lugar.
-    return [...by.values()].sort((a, b) => Number(a.state === "excluded") - Number(b.state === "excluded") || b.changed - a.changed || a.name.localeCompare(b.name, "es"));
+    // Sin reordenar por estado: al quitar uno, su fila se queda donde estaba.
+    return { list: [...by.values()].sort((a, b) => b.changed - a.changed || a.name.localeCompare(b.name, "es")), outOfDme: out.size };
   }, [source, groups, add, addCodes, skip, excluded, nameOf, f.truncate, f.subMax, f.sobreMin, f.largeVolumeMonths, f.largeVolumeAdd, f.largeVolumeSkip, f.largeVolumeNames]);
   const q = norm(search.trim());
   const shown = list.filter((p) => !q || norm(`${p.code} ${p.name} ${LV_STATE[p.state].label} ${LV_ORIGIN[p.origin].label}`).includes(q));
   useEffect(() => setPage(1), [q]);
   const changed = list.reduce((a, p) => a + p.changed, 0);
   const active = list.filter((p) => p.state === "counts").length;
-  const outOfDme = list.filter((p) => p.state === "excluded").length;
   const setRule = (scope: "all" | "essential", v: boolean) => onChange({ ...f, [scope]: { ...f[scope], largeVolume: v } });
   const update = (patch: Partial<Pick<AvailabilityFormula, "largeVolumeAdd" | "largeVolumeSkip" | "largeVolumeNames">>) =>
     onChange({ ...f, ...patch, largeVolumeSkip: [...new Set(patch.largeVolumeSkip ?? f.largeVolumeSkip)].sort() });
@@ -390,7 +390,9 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
     ? "Cargue y calcule el TFORMDET para ver qué medicamentos son de gran volumen y en cuántos establecimientos cambia su situación."
     : !source.classified
       ? "Este TFORMDET no trae la clasificación de los productos (MEDTIP): no se reconocen solos los medicamentos. Descárguelo con el Toolkit 2.2.5 o posterior, o agréguelos a mano."
-      : "El archivo cargado no trae medicamentos de 1 L o más.";
+      : outOfDme > 0
+        ? "Los medicamentos de 1 L o más del archivo están en «Excluidos de la DME»."
+        : "El archivo cargado no trae medicamentos de 1 L o más.";
   const cur = editing === "new" ? null : editing;
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
@@ -426,14 +428,15 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
       <div className="space-y-4">
         <PreviewCard preview={preview} />
         <LargeVolumeNote months={months} className="hidden lg:block" />
-        {list.length > 0 && (
+        {(list.length > 0 || outOfDme > 0) && (
           <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-[12px] text-slate-600">
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
             <span>
-              {active} {active === 1 ? "medicamento cuenta" : "medicamentos cuentan"} como gran volumen{outOfDme ? ` y ${outOfDme} ${outOfDme === 1 ? "está excluido" : "están excluidos"} de la DME` : ""}.{" "}
+              {active} {active === 1 ? "medicamento cuenta" : "medicamentos cuentan"} como gran volumen.{" "}
               {f.essential.largeVolume || f.all.largeVolume
                 ? <>Con {monthsLabel(months)}, {changed} {changed === 1 ? "ítem pasa" : "ítems pasan"} de Substock a Normostock en los establecimientos del archivo.</>
                 : <>La regla está apagada; encendida, {changed} {changed === 1 ? "ítem pasaría" : "ítems pasarían"} de Substock a Normostock.</>}
+              {outOfDme > 0 && <> Otros {outOfDme} de 1 L no se listan: están en «Excluidos de la DME».</>}
             </span>
           </div>
         )}
@@ -450,9 +453,8 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
         codeLocked={cur?.origin === "detected" ? "Viene del TFORMDET: su descripción dice 1 L o más." : undefined}
         fileName={cur?.origin === "detected" ? cur.fileName : undefined}
         withCounts={cur?.origin === "detected"}
-        notice={cur?.state === "excluded" ? "Está en «Excluidos de la DME»: no entra en la DME, así que la regla no le cambia nada ahí." : undefined}
         nameOf={nameOf}
-        taken={(code) => list.some((p) => p.code === code && p.state !== "skipped")}
+        taken={(code) => excluded.has(code) ? "Ese código está en «Excluidos de la DME»: no entra en la DME." : list.some((p) => p.code === code && p.state !== "skipped") ? "Ese código ya está en la lista." : null}
         onSave={save}
       />
     </div>
@@ -607,7 +609,7 @@ const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availa
         initial={editing === "new" || !editing ? null : editing}
         withReason
         nameOf={nameOf}
-        taken={(code) => f.dmeExcluded.some((e) => e.code === code)}
+        taken={(code) => (f.dmeExcluded.some((e) => e.code === code) ? "Ese código ya está en la lista." : null)}
         onSave={({ code, name, reason }) => {
           const entry = { code, name, reason };
           setList(editing === "new" || !editing ? [...f.dmeExcluded, entry] : f.dmeExcluded.map((x) => (x.code === editing.code ? entry : x)));
