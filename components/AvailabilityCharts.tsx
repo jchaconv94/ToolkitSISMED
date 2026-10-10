@@ -352,7 +352,7 @@ export const RankingChart: React.FC<{ rows: RankRow[]; levels: LevelThresholds; 
             >
               <rect x={x - 4} y={top} width={bw + 8} height={plotH} fill="transparent" />
               <rect x={x} y={y(r.pct)} width={bw} height={top + plotH - y(r.pct)} rx={3} fill={LEVEL_COLOR[r.level]} />
-              <text x={x + bw / 2} y={y(r.pct) - 6} textAnchor="middle" className="fill-slate-700 text-[11px] font-bold">{Math.round(r.pct)}</text>
+              <text x={x + bw / 2} y={y(r.pct) - 6} textAnchor="middle" className="fill-slate-700 text-[11px] font-bold">{Math.round(r.pct)} %</text>
               <text x={x + bw / 2} y={top + plotH + 10} transform={`rotate(-50 ${x + bw / 2} ${top + plotH + 10})`} textAnchor="end" className="fill-slate-600 text-[11px]">
                 {r.label.length > 22 ? `${r.label.slice(0, 21)}…` : r.label}
               </text>
@@ -455,7 +455,7 @@ export const HistoryChart: React.FC<{
                 <circle cx={x(i)} cy={y(v)} r={hover === i || selected === i ? 6.5 : compact ? 4.5 : 5.5} fill={incomplete(i) ? "#fff" : LEVEL_COLOR[levelOf(v)]} stroke={incomplete(i) ? "#d97706" : "#fff"} strokeWidth={2} />
               )}
               {v !== null && !compact && (
-                <text x={x(i)} y={y(v) - 11} textAnchor="middle" className="fill-slate-700 text-[10.5px] font-bold" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{v.toFixed(1).replace(".", ",")}</text>
+                <text x={x(i)} y={y(v) - 11} textAnchor="middle" className="fill-slate-700 text-[10.5px] font-bold" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{pct1(v)}</text>
               )}
               <text x={x(i)} y={top + plotH + 19} textAnchor="middle" className={`text-[10.5px] ${selected === i ? "fill-slate-900 font-black" : v === null ? "fill-slate-300" : "fill-slate-600 font-semibold"}`}>{label}</text>
             </g>

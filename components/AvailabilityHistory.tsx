@@ -623,7 +623,7 @@ const RankingBars: React.FC<{
   const min = Math.max(0, Math.min(levels.regular - 10, Math.floor((Math.min(...items.map((i) => i.pct), average ?? 100) - 5) / 10) * 10));
   const pos = (v: number) => ((Math.max(min, Math.min(100, v)) - min) / (100 - min)) * 100;
   const nameW = isDesktop ? 150 : 104;
-  const valueW = 48;
+  const valueW = 58;
   const bands: Array<[number, number, DmeLevel]> = ([[min, levels.regular, "BAJO"], [levels.regular, levels.alto, "REGULAR"], [levels.alto, levels.optimo, "ALTO"], [levels.optimo, 100, "OPTIMO"]] as Array<[number, number, DmeLevel]>).filter(([a, b]) => b > a && b > min);
   const avgPos = average !== null ? pos(average) : null;
   return (
@@ -666,7 +666,7 @@ const RankingBars: React.FC<{
                 <span className="relative h-[18px] flex-1">
                   <span className="absolute inset-y-0 left-0 rounded-r-[4px] transition-[filter]" style={{ width: `${Math.max(1.5, pos(i.pct))}%`, background: LEVEL_COLOR[level], filter: hover && hover !== i.key ? "saturate(0.35) opacity(0.6)" : undefined }} />
                 </span>
-                <span className="shrink-0 text-right font-mono text-[12.5px] font-bold text-slate-700" style={{ width: valueW }}>{i.pct.toFixed(1).replace(".", ",")}</span>
+                <span className="shrink-0 text-right font-mono text-[12.5px] font-bold text-slate-700" style={{ width: valueW }}>{pctText(i.pct)}</span>
               </button>
             );
           })}
