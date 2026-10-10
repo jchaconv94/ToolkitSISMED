@@ -57,8 +57,15 @@ describe("configuración de disponibilidad", () => {
     expect(old.largeVolumeList).toEqual(DEFAULT_LARGE_VOLUME);
     expect(classifyOptionsOf(old, "essential").largeVolumeCodes).toEqual(DEFAULT_LARGE_VOLUME.map((e) => e.code));
     expect(describeFormula(old, "essential")).toMatch(new RegExp(`${DEFAULT_LARGE_VOLUME.length} soluciones de gran volumen`));
-    // Ninguna de fábrica repite un excluido de la DME.
+    // La de fábrica sale del catálogo SISMED: códigos únicos, las soluciones de siempre y ningún
+    // excluido de la DME (ni los que DIGEMID fusiona con uno de ellos, como el NaCl circuito cerrado).
+    const codes = DEFAULT_LARGE_VOLUME.map((e) => e.code);
+    expect(new Set(codes).size).toBe(codes.length);
+    expect(codes.every((c) => /^\d{5}$/.test(c))).toBe(true);
+    expect(codes).toEqual(expect.arrayContaining(["08013", "03789", "03783", "08166", "05598", "21013", "04565"]));
     expect(DEFAULT_LARGE_VOLUME.filter((e) => DEFAULT_DME_EXCLUDED.some((x) => x.code === e.code))).toEqual([]);
+    expect(codes).not.toContain("26368");
+    expect(DEFAULT_LARGE_VOLUME.length).toBeGreaterThan(200);
     // La guardada manda (con sus ceros y sin repetidos); una vacía se respeta.
     const saved = normalizeFormula({ largeVolumeList: ["8166", { code: "08166", name: "X" }, { code: "3789", name: " DEXTROSA 5 % 1 L " }] });
     expect(saved.largeVolumeList).toEqual([{ code: "08166", name: "" }, { code: "03789", name: "DEXTROSA 5 % 1 L" }]);
