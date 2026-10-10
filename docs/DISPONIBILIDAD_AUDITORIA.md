@@ -198,9 +198,10 @@ tablero (33 establecimientos, 84,04 %), establecimiento por establecimiento:
    considera a salud mental»). Su porcentaje está cerca del promedio, así que no explica la
    diferencia. La ficha no excluye a los centros de salud mental (entran «los EE.SS.
    registrados en RENIPRESS y en el Catálogo de prestadores del SISMED»). **Decisión del
-   usuario (2026-10-09):** una lista personal, «Establecimientos del análisis», para dejar
-   establecimientos fuera; los C.S.M.C. van fuera por omisión y se ven aparte
-   (`services/availabilitySites.ts`).
+   usuario (2026-10-09, ajustada el 2026-10-10):** una lista, «Establecimientos del análisis», para
+   dejar establecimientos fuera, por jurisdicción como el registro de Establecimientos (la cambian
+   la DIRESA y cada UNGET en lo suyo); los C.S.M.C. van fuera por omisión y se ven aparte
+   (`services/availabilitySites.ts`, `SUPABASE_DISPONIBILIDAD_ESTABLECIMIENTOS.sql`).
 3. **Medicamentos que la web cuenta y el nacional no.** En casi todos los establecimientos la
    web tiene ~6 normostock y ~2 desabastecidos más. Los que aparecen en todos o casi todos y
    el nacional no cuenta: betametasona crema 20 g, clorfenamina 4 mg, sodio cloruro 0,9 %

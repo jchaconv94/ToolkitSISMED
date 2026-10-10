@@ -815,7 +815,7 @@ export const EstablishmentsReport: React.FC<{
       {view === "eess" && ctx.outside && (
         <ReportTable
           title="Fuera del análisis"
-          info={<P>Establecimientos desmarcados en «Establecimientos del análisis»: no cuentan en la disponibilidad de la microred ni de la UNGET, ni en los demás reportes. Se calculan aparte, con la misma fórmula. Los centros de salud mental comunitario van fuera por omisión.</P>}
+          info={<P>Establecimientos desmarcados en «Establecimientos del análisis» (la lista la definen la DIRESA y cada UNGET): no cuentan en la disponibilidad de la microred ni de la UNGET, ni en los demás reportes. Se calculan aparte, con la misma fórmula. Los centros de salud mental comunitario van fuera por omisión.</P>}
           rows={ctx.outside.establishments}
           minWidth={1150}
           columns={eessColumns}

@@ -279,7 +279,7 @@ export interface AvailabilityExportParams {
   largeVolumeMonths?: number;
   /** Códigos agregados o quitados a mano de la regla de gran volumen. */
   largeVolumeManual?: { add: readonly string[]; skip: readonly string[] };
-  /** Establecimientos que quien generó el reporte dejó fuera del análisis (no cuentan en nada). */
+  /** Establecimientos fuera del análisis (los definen la DIRESA y cada UNGET; no cuentan en nada). */
   outside?: Array<{ code: string; name: string; pct: number }>;
   aggregate?: "average" | "sum";
   /** Stock de los almacenes al corte (no cuenta en la disponibilidad). */
@@ -716,7 +716,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       : "Todos los productos con stock al cierre o con consumo en el periodo."],
     ["", "No se incluyen", "Los almacenes (códigos como 030S05): su stock se muestra en la hoja «Almacén». Los productos sin stock y sin consumo en todo el periodo."],
     ...(p.outside?.length
-      ? [["", "Fuera del análisis", `Establecimientos que quien generó el reporte dejó fuera (no cuentan en la disponibilidad ni en las demás hojas): ${p.outside.map((o) => `${o.name} (${o.code}, ${pctText(o.pct)})`).join("; ")}. Los centros de salud mental comunitario van fuera por omisión.`]]
+      ? [["", "Fuera del análisis", `Establecimientos fuera del análisis, definidos por la DIRESA y cada UNGET (no cuentan en la disponibilidad ni en las demás hojas): ${p.outside.map((o) => `${o.name} (${o.code}, ${pctText(o.pct)})`).join("; ")}. Los centros de salud mental comunitario van fuera por omisión.`]]
       : []),
     ...(p.largeVolumeMonths !== undefined
       ? [["", "Soluciones de gran volumen", `Las de 1 L o más (se reconocen por la presentación) son Normostock desde ${n(Math.min(lim.subMax, p.largeVolumeMonths))} ${p.largeVolumeMonths === 1 ? "mes" : "meses"} de provisión: «la disponibilidad se considera con un mes de existencia disponible» (ficha 28, consideración a).${p.largeVolumeManual?.add.length ? ` Agregados a mano: ${p.largeVolumeManual.add.join(", ")}.` : ""}${p.largeVolumeManual?.skip.length ? ` Quitados a mano: ${p.largeVolumeManual.skip.join(", ")}.` : ""}`]]

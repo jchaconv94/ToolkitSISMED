@@ -22,8 +22,10 @@ de consumo, y el usuario pidió que el consumo sea siempre de 12 meses.
   calcula como si fuera el corte, con su stock al cierre (`stockByMonth`) y su ventana de 12 meses
   (`rowsAtMonth`). Una prueba comprueba que el corte calculado así da lo mismo que el tablero.
 
-- **Establecimientos fuera del análisis** (2026-10-09): la lista personal de «Establecimientos
-  del análisis» (⋯) aparta establecimientos de los indicadores, los gráficos y las microredes;
+- **Establecimientos fuera del análisis** (2026-10-09; por jurisdicción desde el 2026-10-10): la
+  lista de «Establecimientos del análisis» (⋯), que definen la DIRESA y cada UNGET
+  (`SUPABASE_DISPONIBILIDAD_ESTABLECIMIENTOS.sql`), aparta establecimientos de los indicadores, los
+  gráficos y las microredes;
   se ven en su propia tabla «Fuera del análisis». Solo cambia cómo se muestra: el historial
   guarda todos los establecimientos, así que volver a marcar uno lo trae sin guardar otra vez.
   Los centros de salud mental comunitario van fuera por omisión.
