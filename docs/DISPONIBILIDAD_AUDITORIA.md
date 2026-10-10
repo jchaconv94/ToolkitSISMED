@@ -217,8 +217,8 @@ tablero (33 establecimientos, 84,04 %), establecimiento por establecimiento:
    Ahora un medicamento de la lista de soluciones de gran volumen es Normostock desde 1 mes, solo
    en la DME de fábrica. Al principio se reconocía por la presentación en la descripción; desde el
    2026-10-10 es una **lista guardada en Supabase** (pestaña «Gran volumen» de Configuración,
-   `DEFAULT_LARGE_VOLUME`: 13 medicamentos en solución o inyectable de 1 L o más del TFORMDET de
-   Bellavista, del reporte nacional y del listado de fusionados, sin los excluidos de la DME). En
+   `DEFAULT_LARGE_VOLUME`: los 229 medicamentos en solución o inyectable de 1 L o más del catálogo
+   de productos SISMED, sin los excluidos de la DME). En
    Bellavista da lo mismo que la detección: entran dextrosa 5 % y 10 %, lactato de Ringer, solución
    polielectrolítica y agua para inyección. Agosto
    pasa de 82,67 % a 83,17 % (17 ítems cambian; tres de los nueve del punto 3 son yodo

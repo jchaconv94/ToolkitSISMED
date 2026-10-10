@@ -323,7 +323,12 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
     return [...out.values()];
   }, [source, codes]);
   const q = norm(search.trim());
-  const shown = f.largeVolumeList.filter((e) => !q || norm(`${e.code} ${e.name}`).includes(q));
+  // Primero los que están en el archivo cargado (la lista entera son más de 200).
+  const shown = f.largeVolumeList
+    .filter((e) => !q || norm(`${e.code} ${e.name}`).includes(q))
+    .map((e, i) => ({ e, i, sites: stats?.get(e.code)?.sites ?? 0 }))
+    .sort((a, b) => Number(b.sites > 0) - Number(a.sites > 0) || a.i - b.i)
+    .map(({ e }) => e);
   useEffect(() => setPage(1), [q]);
   const changed = stats ? [...stats.values()].reduce((a, s) => a + s.changed, 0) : 0;
   const setRule = (scope: "all" | "essential", v: boolean) => onChange({ ...f, [scope]: { ...f[scope], largeVolume: v } });

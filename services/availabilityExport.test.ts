@@ -91,7 +91,7 @@ describe("Excel de disponibilidad", () => {
     expect(all).toMatch(/C\.S\.M\.C\. BELLAVISTA \(31456, 73,2 %\)/);
     expect(all).toMatch(/Soluciones de gran volumen/);
     expect(all).toMatch(/Soluciones de gran volumen: desde 1/);
-    expect(all).toMatch(/Lista: 08166 SOLUCION DE LACTATO/);
+    expect(all).toMatch(/En este reporte: 08166 SOLUCION DE LACTATO/);
   });
 });
 

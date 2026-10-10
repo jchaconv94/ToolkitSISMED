@@ -9,6 +9,7 @@
  */
 
 import { callSendKeysRpc } from "./sendKeys";
+import { DEFAULT_LARGE_VOLUME } from "./largeVolumeProducts";
 import { FUSED_CODE_GROUPS, FUSED_CODES_VERSION } from "./fusedCodes";
 import { DEFAULT_VITAL_PRODUCTS, type VitalProduct } from "./vitalProducts";
 import { withOfflineCache } from "./offlineCache";
@@ -61,29 +62,8 @@ export const DEFAULT_DME_EXCLUDED: ExcludedEntry[] = [
   { code: "06111", name: "TETRACICLINA CLORHIDRATO (UNGÜENTO OFTALMICO) 1 g/100 g (1 %) 6 g UNGÜENTO", reason: "national" },
 ];
 
-/**
- * Soluciones de gran volumen de fábrica (ficha 28, consideración a: «solución de gran volumen
- * (igual o mayor 1 litro)»): los medicamentos en solución o inyectable de 1 L o más del TFORMDET
- * de Bellavista, del reporte nacional de la DME y del listado de códigos fusionados de DIGEMID
- * (2026-10-10), con el código destino de su grupo. No se repiten los que están en
- * `DEFAULT_DME_EXCLUDED` (no entran en la DME). Quedan fuera el manitol 20 % 1 L (DIGEMID lo
- * fusiona con el de 500 mL) y el benzoato de bencilo 1 L (es loción, no solución).
- */
-export const DEFAULT_LARGE_VOLUME: CodeEntry[] = [
-  { code: "08013", name: "AGUA PARA INYECCION 1 L INYECTABLE" },
-  { code: "03789", name: "DEXTROSA 5 g/100 mL (5 %) 1 L INYECTABLE" },
-  { code: "03783", name: "DEXTROSA 10 g/100 mL (10 %) 1 L INYECTABLE" },
-  { code: "08166", name: "SOLUCION DE LACTATO SODICO COMPUESTA (LACTATO RINGER) 1 L INYECTABLE" },
-  { code: "05598", name: "SOLUCION POLIELECTROLITICA 1 L SOLUCION" },
-  { code: "19879", name: "SOLUCION PARA DIALISIS PERITONEAL 1.5 % 2 L SOLUCION" },
-  { code: "21013", name: "SOLUCION PARA DIALISIS PERITONEAL 2.5 % 2 L SOLUCION" },
-  { code: "21012", name: "SOLUCION PARA DIALISIS PERITONEAL 4.25 % 2 L SOLUCION" },
-  { code: "21859", name: "SOLUCION PARA HEMODIALISIS CON BICARBONATO 4 L SOLUCION" },
-  { code: "50096", name: "SOLUCION CONCENTRADA PARA HEMODIALISIS ACIDA X 3.6 L" },
-  { code: "02506", name: "HEMODIALITICOS CONCENTRADOS 4 L INYECTABLE" },
-  { code: "04288", name: "LACTULOSA 3.33 g/5 mL 1 L SOLUCION" },
-  { code: "06544", name: "YODO POVIDONA 8 g/100 mL 1 L SOLUCION" },
-];
+/** Soluciones de gran volumen de fábrica: del catálogo SISMED (ver `services/largeVolumeProducts.ts`). */
+export { DEFAULT_LARGE_VOLUME };
 
 export interface ScopeRule {
   normostock: boolean;
