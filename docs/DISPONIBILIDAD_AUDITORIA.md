@@ -214,7 +214,8 @@ tablero (33 establecimientos, 84,04 %), establecimiento por establecimiento:
    disponibilidad se considera con un mes de existencia disponible». La web no lo aplicaba.
    Ahora un medicamento (MEDTIP «M») de 1 L o más es Normostock desde 1 mes, solo en la DME de
    fábrica; se reconoce por la presentación en la descripción («SODIO CLORURO 1 L…»,
-   `presentationLiters`) y se configura en la pestaña «Gran volumen» de Configuración. Agosto
+   `presentationLiters`) y se configura en la pestaña «Gran volumen» de Configuración, donde la
+   lista se corrige a mano (agregar los que no dicen el volumen, quitar los que no correspondan). Agosto
    pasa de 82,67 % a 83,17 % (17 ítems cambian; tres de los nueve del punto 3 son yodo
    povidona de 1 L). Los meses del historial guardados antes de este cambio no la aplican:
    hay que volver a guardarlos con el TFORMDET.

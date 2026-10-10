@@ -173,7 +173,7 @@ const LV_ORIGIN: Record<LvOrigin, { label: string; className: string }> = {
 /** Texto de la ficha y cómo se aplica: va en la columna derecha (y arriba en el celular). */
 const LargeVolumeNote: React.FC<{ months: number; className?: string }> = ({ months, className = "" }) => (
   <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${className}`}>
-    <p className="flex items-center gap-2 text-[13px] font-bold text-slate-900"><Droplets className="h-4 w-4 shrink-0 text-sky-700" />Ficha 28, consideración a)</p>
+    <p className="flex items-center gap-2 text-[13px] font-bold text-slate-900"><Droplets className="h-4 w-4 shrink-0 text-sky-700" />Ficha 28 · Consideraciones</p>
     <p className="mt-2 text-[12px] italic leading-relaxed text-slate-600">«Para un medicamento que corresponde a una solución de gran volumen (igual o mayor 1 litro) la disponibilidad se considera con un mes de existencia disponible.»</p>
     <p className="mt-2 text-[12px] leading-relaxed text-slate-500">Se reconocen solos los medicamentos con 1 L o más en la presentación, como «SODIO CLORURO 1 L». Con la regla, desde {monthsLabel(months)} de existencia cuentan como Normostock. Si a uno le falta el volumen en la descripción, se agrega a mano; si uno no corresponde, se quita.</p>
   </div>
