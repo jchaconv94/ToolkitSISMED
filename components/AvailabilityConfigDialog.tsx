@@ -271,8 +271,8 @@ const nameLookup = (rows: AvailabilityRow[] | null, groups: FusedGroups) => {
   return (code: string) => groups[code]?.name || byCode.get(code) || Object.entries(groups).find(([, g]) => g.codes.includes(code))?.[1].name;
 };
 
-const Chip: React.FC<{ className: string; children: React.ReactNode }> = ({ className, children }) => (
-  <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${className}`}>{children}</span>
+const Chip: React.FC<{ className: string; title?: string; children: React.ReactNode }> = ({ className, title, children }) => (
+  <span title={title} className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${className}`}>{children}</span>
 );
 
 /* ------------------------------------------------------------------ Gran volumen */
@@ -285,10 +285,10 @@ const LV_ORIGIN: Record<LvOrigin, { label: string; className: string }> = {
 };
 /** Si cuenta, si se quitó a mano o si no entra en la DME (pestaña «Excluidos de la DME»). */
 type LvState = "counts" | "skipped" | "excluded";
-const LV_STATE: Record<LvState, { label: string; className: string }> = {
-  counts: { label: "Cuenta", className: "bg-emerald-50 text-emerald-700" },
-  skipped: { label: "Quitado", className: "bg-slate-100 text-slate-500" },
-  excluded: { label: "Excluido", className: "bg-amber-50 text-amber-800" },
+const LV_STATE: Record<LvState, { label: string; className: string; title: string }> = {
+  counts: { label: "Cuenta", className: "bg-emerald-50 text-emerald-700", title: "Cuenta como gran volumen" },
+  skipped: { label: "Quitado", className: "bg-slate-100 text-slate-500", title: "Se quitó: no cuenta como gran volumen" },
+  excluded: { label: "Excluido", className: "bg-amber-50 text-amber-800", title: "Está en «Excluidos de la DME»: no entra en la DME" },
 };
 
 /** Texto de la ficha y cómo se aplica: va en la columna derecha (y arriba en el celular). */
@@ -297,8 +297,6 @@ const LargeVolumeNote: React.FC<{ months: number; className?: string }> = ({ mon
     <p className="flex items-center gap-2 text-[13px] font-bold text-slate-900"><Droplets className="h-4 w-4 shrink-0 text-sky-700" />Ficha 28 · Consideraciones</p>
     <p className="mt-2 text-[12px] italic leading-relaxed text-slate-600">«Para un medicamento que corresponde a una solución de gran volumen (igual o mayor 1 litro) la disponibilidad se considera con un mes de existencia disponible.»</p>
     <p className="mt-2 text-[12px] leading-relaxed text-slate-500">Con la regla, desde {monthsLabel(months)} de existencia cuentan como Normostock.</p>
-    <p className="mt-2 text-[12px] leading-relaxed text-slate-500"><b className="text-slate-700">Cómo se arma la lista:</b> cada fila es un código SISMED. Entran solos los medicamentos con 1 L o más en la descripción del TFORMDET (origen «Presentación»), y el nombre sale de ese archivo. Con «Agregar» se suma uno al que le falta el volumen en la descripción. El lápiz edita cualquier fila: el nombre, si cuenta y, en los agregados, el código. El tacho la quita.</p>
-    <p className="mt-2 text-[12px] leading-relaxed text-slate-500"><b className="text-slate-700">Estado «Excluido»:</b> está en la pestaña «Excluidos de la DME». No entra en la DME, así que la regla no le cambia nada ahí.</p>
   </div>
 );
 
@@ -415,11 +413,11 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
             key: p.code, code: p.code, name: p.name, dim: p.state !== "counts", action: action(p),
             cells: <>
               <td className="px-2 text-center"><Chip className={LV_ORIGIN[p.origin].className}>{LV_ORIGIN[p.origin].label}</Chip></td>
-              <td className="px-2 text-center"><Chip className={LV_STATE[p.state].className}>{LV_STATE[p.state].label}</Chip></td>
+              <td className="px-2 text-center"><Chip className={LV_STATE[p.state].className} title={LV_STATE[p.state].title}>{LV_STATE[p.state].label}</Chip></td>
               <td className="px-2 text-center font-mono text-[12.5px] text-slate-600">{p.sites || "—"}</td>
               <td className={`px-2 text-center font-mono text-[12.5px] font-bold ${p.changed ? "text-emerald-700" : "text-slate-300"}`}>{p.changed || "—"}</td>
             </>,
-            chips: <><Chip className={LV_ORIGIN[p.origin].className}>{LV_ORIGIN[p.origin].label}</Chip><Chip className={LV_STATE[p.state].className}>{LV_STATE[p.state].label}</Chip></>,
+            chips: <><Chip className={LV_ORIGIN[p.origin].className}>{LV_ORIGIN[p.origin].label}</Chip><Chip className={LV_STATE[p.state].className} title={LV_STATE[p.state].title}>{LV_STATE[p.state].label}</Chip></>,
             detail: <>{p.sites ? `${p.sites} establecimientos` : "Sin establecimientos en el archivo"}{p.changed > 0 && <> · <b className="text-emerald-700">{p.changed}</b> pasan a Normostock</>}</>,
           }))}
           pagination={<TablePagination page={page} pageSize={PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />}
@@ -540,8 +538,6 @@ const ExcludedNote: React.FC<{ className?: string }> = ({ className = "" }) => (
   <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${className}`}>
     <p className="flex items-center gap-2 text-[13px] font-bold text-slate-900"><Ban className="h-4 w-4 shrink-0 text-amber-700" />Ficha 28 · Criterios de exclusión</p>
     <p className="mt-2 text-[12px] italic leading-relaxed text-slate-600">«Medicamento que corresponde a la atención exclusiva para Intervención Estratégica de Salud Pública. Basado en el listado comunicado por DGIESP […] (exclusión automática para todos los EESS evaluados).»</p>
-    <p className="mt-2 text-[12px] leading-relaxed text-slate-500">DGIESP no publica ese listado. La lista de fábrica son los medicamentos que el tablero nacional de DIGEMID no evalúa (agosto 2026): los que marca «NO APLICA» y los que no incluye. Con ella, la DME de Bellavista coincide con la nacional. Solo cambia la DME.</p>
-    <p className="mt-2 text-[12px] leading-relaxed text-slate-500"><b className="text-slate-700">Cómo se arma la lista:</b> cada fila es un código SISMED con su nombre y el motivo. Se agrega con «Agregar», se corrige con el lápiz y se quita con el tacho.</p>
   </div>
 );
 
