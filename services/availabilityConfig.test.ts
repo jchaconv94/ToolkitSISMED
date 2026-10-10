@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_AVAILABILITY_FORMULA, DEFAULT_DME_EXCLUDED, DEFAULT_LARGE_VOLUME, classifyOptionsOf, describeFormula, dmeExcludedCodes, diffFusedGroups, normalizeFormula, normalizeFusedCatalog, parseFusedCodesSheet } from "./availabilityConfig";
+import { DEFAULT_AVAILABILITY_FORMULA, DEFAULT_DME_EXCLUDED, DEFAULT_LARGE_VOLUME, LARGE_VOLUME_VERSION, classifyOptionsOf, describeFormula, dmeExcludedCodes, diffFusedGroups, normalizeFormula, normalizeFusedCatalog, parseFusedCodesSheet } from "./availabilityConfig";
 import { DEFAULT_VITAL_PRODUCTS } from "./vitalProducts";
 
 describe("configuración de disponibilidad", () => {
@@ -66,10 +66,19 @@ describe("configuración de disponibilidad", () => {
     expect(DEFAULT_LARGE_VOLUME.filter((e) => DEFAULT_DME_EXCLUDED.some((x) => x.code === e.code))).toEqual([]);
     expect(codes).not.toContain("26368");
     expect(DEFAULT_LARGE_VOLUME.length).toBeGreaterThan(200);
-    // La guardada manda (con sus ceros y sin repetidos); una vacía se respeta.
-    const saved = normalizeFormula({ largeVolumeList: ["8166", { code: "08166", name: "X" }, { code: "3789", name: " DEXTROSA 5 % 1 L " }] });
+    // La guardada con la versión vigente manda (con sus ceros y sin repetidos); una vacía se respeta.
+    const saved = normalizeFormula({ largeVolumeVersion: LARGE_VOLUME_VERSION, largeVolumeList: ["8166", { code: "08166", name: "X" }, { code: "3789", name: " DEXTROSA 5 % 1 L " }] });
     expect(saved.largeVolumeList).toEqual([{ code: "08166", name: "" }, { code: "03789", name: "DEXTROSA 5 % 1 L" }]);
-    expect(normalizeFormula({ largeVolumeList: [] }).largeVolumeList).toEqual([]);
+    expect(normalizeFormula({ largeVolumeVersion: LARGE_VOLUME_VERSION, largeVolumeList: [] }).largeVolumeList).toEqual([]);
+    // Guardada con la de fábrica anterior (13): se pone al día con la del catálogo, sin lo quitado y con
+    // lo agregado a mano sobre aquella.
+    const previous13 = ["08013", "03789", "03783", "08166", "05598", "19879", "21013", "21012", "21859", "50096", "04288", "06544"].map((code) => ({ code, name: "" }));
+    const upgraded = normalizeFormula({ largeVolumeList: [...previous13, { code: "99999", name: "SOLUCION X 1 L" }] });
+    expect(upgraded.largeVolumeVersion).toBe(LARGE_VOLUME_VERSION);
+    expect(upgraded.largeVolumeList.map((e) => e.code)).not.toContain("02506"); // se había quitado
+    expect(upgraded.largeVolumeList.map((e) => e.code)).toContain("03790"); // nueva del catálogo
+    expect(upgraded.largeVolumeList.at(-1)).toEqual({ code: "99999", name: "SOLUCION X 1 L" });
+    expect(upgraded.largeVolumeList).toHaveLength(DEFAULT_LARGE_VOLUME.length);
     // Lo que se agregó o quitó a mano con la regla anterior (2026-10-09) no se pierde.
     const legacy = normalizeFormula({ largeVolumeAdd: [{ code: "99999", name: "SOLUCION X" }], largeVolumeSkip: ["08013"] });
     expect(legacy.largeVolumeList.map((e) => e.code)).not.toContain("08013");
