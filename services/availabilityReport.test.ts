@@ -290,38 +290,37 @@ describe("soluciones de gran volumen (ficha 28, consideración a)", () => {
     expect(isLargeVolume("PARACETAMOL 500 mg TABLETA")).toBe(false);
   });
 
-  it("con la regla, una de 1 L con 1,5 meses es Normostock; sin ella, Substock", () => {
+  it("con la regla, uno de la lista con 1,5 meses es Normostock; sin ella, Substock", () => {
     const base = { code: "06499", ipressCode: "06499", name: "P.S. A", microred: "MR", red: "R", category: "I-2", price: 1, medtip: "M", medpet: "P", medest: "S" };
     const rows = [
-      { ...base, medCode: "05873", description: "SODIO CLORURO 1 L 900 mg/100 mL (0.9 %)", consumption: [10, 10], stock: 15 },
+      { ...base, medCode: "08166", description: "SOLUCION DE LACTATO SODICO COMPUESTA (LACTATO RINGER) 1 L", consumption: [10, 10], stock: 15 },
       { ...base, medCode: "05872", description: "SODIO CLORURO 100 mL 900 mg/100 mL (0.9 %)", consumption: [10, 10], stock: 15 },
       { ...base, medCode: "03789", description: "DEXTROSA 1 L 5 g/100 mL (5 %)", consumption: [10, 10], stock: 5 },
-      // Un insumo de 1 L no es «un medicamento que corresponde a una solución».
+      // Dice 1 L, pero no está en la lista: la regla no lo toca.
       { ...base, medCode: "11338", description: "JABON GERMICIDA LIQUIDO 1 L", medtip: "I", consumption: [10, 10], stock: 15 },
     ] as any[];
     const opts = { truncate: false, subMax: 2, sobreMin: 6 };
-    const withRule = buildItems(rows, undefined, new Date(), { ...opts, largeVolumeMonths: 1 });
+    const withRule = buildItems(rows, undefined, new Date(), { ...opts, largeVolumeMonths: 1, largeVolumeCodes: ["08166", "03789"] });
     expect(withRule.map((i) => i.status)).toEqual([StockStatus.NORMOSTOCK, StockStatus.SUBSTOCK, StockStatus.SUBSTOCK, StockStatus.SUBSTOCK]);
     expect(withRule.map((i) => !!i.largeVolume)).toEqual([true, false, true, false]);
     const without = buildItems(rows, undefined, new Date(), opts);
     expect(without.map((i) => i.status)).toEqual([StockStatus.SUBSTOCK, StockStatus.SUBSTOCK, StockStatus.SUBSTOCK, StockStatus.SUBSTOCK]);
     expect(without.some((i) => i.largeVolume)).toBe(false);
+    // Sin la lista no hay gran volumen, aunque la descripción diga 1 L.
+    expect(buildItems(rows, undefined, new Date(), { ...opts, largeVolumeMonths: 1 }).some((i) => i.largeVolume)).toBe(false);
   });
 
-  it("se corrige a mano: agregar uno sin volumen en la descripción y quitar uno reconocido", () => {
+  it("en una fila fusionada manda el código destino del grupo, como lo cuenta DIGEMID", () => {
     const base = { code: "06499", ipressCode: "06499", name: "P.S. A", microred: "MR", red: "R", category: "I-2", price: 1, medtip: "M", medpet: "P", medest: "S", consumption: [10, 10], stock: 15 };
     const rows = [
-      { ...base, medCode: "05873", description: "SODIO CLORURO 1 L 900 mg/100 mL (0.9 %)" },
-      { ...base, medCode: "99999", description: "SOLUCION SIN VOLUMEN EN LA DESCRIPCION" },
-      { ...base, medCode: "03789", description: "DEXTROSA 5 %", fusedFrom: ["03789", "03794"] },
+      { ...base, medCode: "03789", description: "DEXTROSA 5 % 1 L", fusedFrom: ["03789", "03794"] },
+      // El manitol 1 L (04565) se suma en el de 500 mL (04567): el grupo no es de gran volumen.
+      { ...base, medCode: "04567", description: "MANITOL 20 % 500 mL", fusedFrom: ["04565", "04567"] },
     ] as any[];
-    const opts = { truncate: false, subMax: 2, sobreMin: 6, largeVolumeMonths: 1, largeVolumeAdd: ["99999", "03794"], largeVolumeSkip: ["05873"] };
-    const items = buildItems(rows, undefined, new Date(), opts);
+    const items = buildItems(rows, undefined, new Date(), { truncate: false, subMax: 2, sobreMin: 6, largeVolumeMonths: 1, largeVolumeCodes: ["03789", "04565"] });
     expect(items.map((i) => [i.medCode, i.status, !!i.largeVolume])).toEqual([
-      ["05873", StockStatus.SUBSTOCK, false], // quitado a mano
-      ["99999", StockStatus.NORMOSTOCK, true], // agregado a mano
-      ["03789", StockStatus.NORMOSTOCK, true], // agregado por uno de sus códigos fusionados
+      ["03789", StockStatus.NORMOSTOCK, true],
+      ["04567", StockStatus.SUBSTOCK, false],
     ]);
   });
 });
-
