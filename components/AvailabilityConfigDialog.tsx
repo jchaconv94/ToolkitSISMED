@@ -3,13 +3,14 @@ import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { Ban, Calculator, Check, Droplets, FileSpreadsheet, HeartPulse, Info, Layers, Loader2, Pencil, Plus, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import {
-  DEFAULT_AVAILABILITY_FORMULA, DEFAULT_DME_EXCLUDED, DEFAULT_LARGE_VOLUME, EXCLUSION_REASON_LABEL, availabilityConfigApi, classifyOptionsOf, diffFusedGroups, dmeExcludedCodes, parseFusedCodesSheet, summaryOptionsOf, vitalCodeSet,
+  DEFAULT_AVAILABILITY_FORMULA, EXCLUSION_REASON_LABEL, availabilityConfigApi, classifyOptionsOf, diffFusedGroups, dmeExcludedCodes, parseFusedCodesSheet, summaryOptionsOf, vitalCodeSet,
   type AvailabilityConfig, type AvailabilityFormula, type CodeEntry, type ExcludedEntry, type ExclusionReason, type FusedCatalog, type FusedGroups, type ScopeRule, type SinRotacionRule,
 } from "../services/availabilityConfig";
 import { StockStatus } from "../types";
 import { buildItems, essentialRows, isLargeVolume, summarize, type AvailabilityRow, type Lot } from "../services/availabilityReport";
 import type { VitalProduct } from "../services/vitalProducts";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
+import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TableSearch, inputClass } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
 
@@ -21,6 +22,8 @@ import { TablePagination } from "./ui/TablePagination";
 
 type Tab = "formula" | "largeVolume" | "excluded" | "fused" | "vitals";
 const PAGE = 25;
+/** Las listas de gran volumen y de excluidos van de 10 en 10 (pedido del usuario). */
+const LIST_PAGE = 10;
 
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const padCode = (v: string) => {
@@ -242,19 +245,32 @@ const nameLookup = (rows: AvailabilityRow[] | null, groups: FusedGroups) => {
   return (code: string) => groups[code]?.name || byCode.get(code) || Object.entries(groups).find(([, g]) => g.codes.includes(code))?.[1].name;
 };
 
-/** ¿La lista ya está guardada en Supabase? Lo dice debajo de la nota de cada pestaña. */
-const SavedStatus: React.FC<{ stored: boolean; fromServer: boolean; dirty: boolean; meta?: { updatedBy?: string | null; updatedAt?: string | null } }> = ({ stored, fromServer, dirty, meta }) => {
-  const [tone, text] = !fromServer
-    ? ["border-slate-200 bg-slate-50 text-slate-600", "Sin conexión con la base: rige la lista de fábrica."]
-    : !stored
-      ? ["border-amber-200 bg-amber-50 text-amber-800", "Lista de fábrica: todavía no está guardada en Supabase. Pulse «Guardar»."]
-      : dirty
-        ? ["border-amber-200 bg-amber-50 text-amber-800", "Hay cambios sin guardar. Pulse «Guardar» para guardarlos en Supabase."]
-        : ["border-emerald-200 bg-emerald-50 text-emerald-800", `Guardada en Supabase${meta?.updatedAt ? ` · ${meta.updatedBy || "—"} · ${dateText(meta.updatedAt)}` : ""}.`];
-  return <p className={`flex items-start gap-2 rounded-2xl border p-3 text-[12px] font-semibold ${tone}`}>{fromServer && stored && !dirty ? <Check className="mt-0.5 h-4 w-4 shrink-0" /> : <Info className="mt-0.5 h-4 w-4 shrink-0" />}{text}</p>;
-};
+/** Solo mientras la lista todavía no está en la base (rige la de fábrica): se ve una vez, hasta guardar. */
+const SavedStatus: React.FC<{ stored: boolean; fromServer: boolean }> = ({ stored, fromServer }) =>
+  fromServer && !stored ? (
+    <p className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[12px] font-semibold text-amber-800"><Info className="mt-0.5 h-4 w-4 shrink-0" />Lista de fábrica: todavía no está guardada en Supabase. Pulse «Guardar».</p>
+  ) : null;
 
-type ListStatus = { stored: boolean; fromServer: boolean; dirty: boolean; meta?: { updatedBy?: string | null; updatedAt?: string | null } };
+type ListStatus = { stored: boolean; fromServer: boolean };
+
+/** Pide confirmación antes de eliminar (pedido del usuario: nada se elimina sin preguntar). */
+const useConfirmDelete = () => {
+  const [pending, setPending] = useState<{ title: string; description: string; run: () => void } | null>(null);
+  const dialog = (
+    <ConfirmationDialog
+      isOpen={!!pending}
+      title={pending?.title ?? ""}
+      description={pending?.description ?? ""}
+      confirmLabel="Sí, eliminar"
+      cancelLabel="No"
+      tone="danger"
+      onConfirm={() => { pending?.run(); setPending(null); }}
+      onCancel={() => setPending(null)}
+    />
+  );
+  return [setPending, dialog] as const;
+};
+const SAVE_HINT = "Se quita de la lista; queda eliminado en la base al pulsar «Guardar».";
 
 /* ------------------------------------------------------------------ Gran volumen */
 
@@ -312,6 +328,7 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
   const changed = stats ? [...stats.values()].reduce((a, s) => a + s.changed, 0) : 0;
   const setRule = (scope: "all" | "essential", v: boolean) => onChange({ ...f, [scope]: { ...f[scope], largeVolume: v } });
   const setList = (list: CodeEntry[]) => onChange({ ...f, largeVolumeList: list });
+  const [confirmDelete, confirmDialog] = useConfirmDelete();
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
       <div className="space-y-4">
@@ -343,14 +360,14 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
           search={search} onSearch={setSearch} placeholder="Buscar medicamento o código…" onAdd={() => setEditing("new")}
           empty={f.largeVolumeList.length === 0 ? "La lista está vacía: la regla no se aplica a ningún medicamento." : null}
           head={<><th className="px-2 py-3 text-center" title="Establecimientos del archivo cargado donde está">EESS</th><th className="w-24 px-2 py-3 text-center">Pasan a Normostock</th></>}
-          rows={shown.slice((page - 1) * PAGE, page * PAGE).map((e) => {
+          rows={shown.slice((page - 1) * LIST_PAGE, page * LIST_PAGE).map((e) => {
             const st = stats?.get(e.code);
             return {
               key: e.code, code: e.code, name: e.name || nameOf(e.code) || "",
               action: (
                 <span className="inline-flex">
                   <button type="button" onClick={() => setEditing(e)} aria-label={`Editar ${e.code}`} title="Editar código y nombre" className={`${iconButton} hover:bg-slate-100 hover:text-slate-700`}><Pencil className="h-4 w-4" /></button>
-                  <button type="button" onClick={() => setList(f.largeVolumeList.filter((x) => x.code !== e.code))} aria-label={`Quitar ${e.code}`} title="Quitar de la lista" className={`${iconButton} hover:bg-red-50 hover:text-red-600`}><Trash2 className="h-4 w-4" /></button>
+                  <button type="button" onClick={() => confirmDelete({ title: "¿Eliminar este medicamento de la lista?", description: `${e.code} ${e.name || nameOf(e.code) || ""}. ${SAVE_HINT}`, run: () => setList(f.largeVolumeList.filter((x) => x.code !== e.code)) })} aria-label={`Quitar ${e.code}`} title="Eliminar de la lista" className={`${iconButton} hover:bg-red-50 hover:text-red-600`}><Trash2 className="h-4 w-4" /></button>
                 </span>
               ),
               cells: <>
@@ -361,7 +378,7 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
               detail: !stats ? "Cargue el TFORMDET para ver en cuántos establecimientos está" : st ? <>{st.sites} establecimientos{st.changed > 0 && <> · <b className="text-emerald-700">{st.changed}</b> pasan a Normostock</>}</> : "No está en el archivo cargado",
             };
           })}
-          pagination={<TablePagination page={page} pageSize={PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />}
+          pagination={<TablePagination page={page} pageSize={LIST_PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />}
         />
       </div>
       <div className="space-y-4">
@@ -377,10 +394,8 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
               : <> La regla está apagada; encendida, {changed} {changed === 1 ? "ítem pasaría" : "ítems pasarían"} de Substock a Normostock.</>)}
           </span>
         </div>
-        <button type="button" disabled={JSON.stringify(f.largeVolumeList) === JSON.stringify(DEFAULT_LARGE_VOLUME) && f.largeVolumeMonths === DEFAULT_AVAILABILITY_FORMULA.largeVolumeMonths && !f.all.largeVolume && !!f.essential.largeVolume} onClick={() => onChange({ ...f, largeVolumeMonths: DEFAULT_AVAILABILITY_FORMULA.largeVolumeMonths, largeVolumeList: DEFAULT_LARGE_VOLUME, all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: true } })} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40">
-          <RotateCcw className="h-4 w-4" />Restablecer lista de fábrica
-        </button>
       </div>
+      {confirmDialog}
       <CodeEntryDialog
         open={editing !== null}
         onClose={() => setEditing(null)}
@@ -489,8 +504,8 @@ const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availa
   const shown = f.dmeExcluded.filter((e) => !q || norm(`${e.code} ${e.name} ${EXCLUSION_REASON_LABEL[e.reason]}`).includes(q));
   useEffect(() => setPage(1), [q]);
   const items = sitesOf ? [...sitesOf.values()].reduce((a, n) => a + n, 0) : 0;
-  const isFactory = JSON.stringify(f.dmeExcluded) === JSON.stringify(DEFAULT_DME_EXCLUDED);
   const setList = (list: ExcludedEntry[]) => onChange({ ...f, dmeExcluded: list });
+  const [confirmDelete, confirmDialog] = useConfirmDelete();
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
       <div className="space-y-4">
@@ -499,12 +514,12 @@ const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availa
           search={search} onSearch={setSearch} placeholder="Buscar medicamento, código o motivo…" onAdd={() => setEditing("new")}
           empty={f.dmeExcluded.length === 0 ? "No hay medicamentos excluidos: la DME evalúa todos." : null}
           head={<><th className="px-3 py-3 text-center">Motivo</th><th className="px-3 py-3 text-center" title="Establecimientos del archivo cargado donde estaría en la DME">EESS</th></>}
-          rows={shown.slice((page - 1) * PAGE, page * PAGE).map((e) => ({
+          rows={shown.slice((page - 1) * LIST_PAGE, page * LIST_PAGE).map((e) => ({
             key: e.code, code: e.code, name: e.name || nameOf(e.code) || "",
             action: (
               <span className="inline-flex">
                 <button type="button" onClick={() => setEditing(e)} aria-label={`Editar ${e.code}`} title="Editar código, nombre y motivo" className={`${iconButton} hover:bg-slate-100 hover:text-slate-700`}><Pencil className="h-4 w-4" /></button>
-                <button type="button" onClick={() => setList(f.dmeExcluded.filter((x) => x.code !== e.code))} aria-label={`Quitar ${e.code}`} title="Volver a evaluarlo en la DME" className={`${iconButton} hover:bg-red-50 hover:text-red-600`}><Trash2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => confirmDelete({ title: "¿Eliminar este medicamento de los excluidos?", description: `${e.code} ${e.name || nameOf(e.code) || ""}. Volverá a evaluarse en la DME. ${SAVE_HINT}`, run: () => setList(f.dmeExcluded.filter((x) => x.code !== e.code)) })} aria-label={`Quitar ${e.code}`} title="Eliminar de los excluidos" className={`${iconButton} hover:bg-red-50 hover:text-red-600`}><Trash2 className="h-4 w-4" /></button>
               </span>
             ),
             cells: <>
@@ -514,7 +529,7 @@ const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availa
             chips: <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${EXCLUSION_TONE[e.reason]}`}>{EXCLUSION_REASON_LABEL[e.reason]}</span>,
             detail: sitesOf ? (sitesOf.get(e.code) ? `Sale de la DME en ${sitesOf.get(e.code)} establecimientos del archivo` : "No está en el archivo cargado") : "Cargue el TFORMDET para ver en cuántos establecimientos está",
           }))}
-          pagination={<TablePagination page={page} pageSize={PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />}
+          pagination={<TablePagination page={page} pageSize={LIST_PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />}
         />
       </div>
       <div className="space-y-4">
@@ -525,10 +540,8 @@ const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availa
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
           <span>{f.dmeExcluded.length} {f.dmeExcluded.length === 1 ? "medicamento excluido" : "medicamentos excluidos"}.{sitesOf ? ` En el archivo cargado salen ${items} ${items === 1 ? "ítem" : "ítems"} de la DME.` : ""}</span>
         </div>
-        <button type="button" disabled={isFactory} onClick={() => setList(DEFAULT_DME_EXCLUDED)} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40">
-          <RotateCcw className="h-4 w-4" />Restablecer lista de fábrica
-        </button>
       </div>
+      {confirmDialog}
       <CodeEntryDialog
         open={editing !== null}
         onClose={() => setEditing(null)}
@@ -630,11 +643,16 @@ const FusedTab: React.FC<{ catalog: FusedCatalog; onChange: (c: FusedCatalog) =>
     );
   }
 
-  const removeGroup = (target: string) => {
-    const groups = { ...catalog.groups };
-    delete groups[target];
-    onChange({ ...catalog, groups });
-  };
+  const [confirmDelete, confirmDialog] = useConfirmDelete();
+  const removeGroup = (target: string) => confirmDelete({
+    title: "¿Eliminar este grupo de códigos fusionados?",
+    description: `${target} ${catalog.groups[target]?.name ?? ""}. ${SAVE_HINT}`,
+    run: () => {
+      const groups = { ...catalog.groups };
+      delete groups[target];
+      onChange({ ...catalog, groups });
+    },
+  });
 
   return (
     <div className="space-y-4">
@@ -681,6 +699,7 @@ const FusedTab: React.FC<{ catalog: FusedCatalog; onChange: (c: FusedCatalog) =>
         onClose={() => setEditing(null)}
         onSave={(g) => { onChange({ ...catalog, groups: { ...catalog.groups, [g.target]: { name: g.name, codes: g.codes } } }); setEditing(null); }}
       />
+      {confirmDialog}
     </div>
   );
 };
@@ -696,6 +715,7 @@ const VitalsTab: React.FC<{ vitals: VitalProduct[]; onChange: (v: VitalProduct[]
   const q = norm(search.trim());
   const rows = vitals.filter((v) => (!onlyMissing || v.codes.length === 0) && (!q || norm(`${v.n} ${v.name} ${v.concentration} ${v.codes.join(" ")}`).includes(q)));
   const setCodes = (n: number, codes: string[]) => onChange(vitals.map((v) => (v.n === n ? { ...v, codes } : v)));
+  const [confirmDelete, confirmDialog] = useConfirmDelete();
   const add = (v: VitalProduct) => {
     const codes = value.split(/[\s,;]+/).map(padCode).filter(Boolean);
     if (codes.length) setCodes(v.n, [...new Set([...v.codes, ...codes])]);
@@ -730,7 +750,7 @@ const VitalsTab: React.FC<{ vitals: VitalProduct[]; onChange: (v: VitalProduct[]
                     <div className="flex flex-wrap items-center gap-1">
                       {v.codes.map((c) => (
                         <span key={c} className="inline-flex items-center gap-1 rounded bg-slate-100 py-0.5 pl-1.5 pr-0.5 font-mono text-[11px] font-bold text-slate-600">
-                          {c}<button type="button" onClick={() => setCodes(v.n, v.codes.filter((x) => x !== c))} aria-label={`Quitar ${c}`} className="grid h-4 w-4 place-items-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"><X className="h-3 w-3" /></button>
+                          {c}<button type="button" onClick={() => confirmDelete({ title: "¿Quitar este código del vital?", description: `${c} de ${v.name}. ${SAVE_HINT}`, run: () => setCodes(v.n, v.codes.filter((x) => x !== c)) })} aria-label={`Quitar ${c}`} className="grid h-4 w-4 place-items-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"><X className="h-3 w-3" /></button>
                         </span>
                       ))}
                       {v.codes.length === 0 && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold text-amber-700">Sin código</span>}
@@ -747,6 +767,7 @@ const VitalsTab: React.FC<{ vitals: VitalProduct[]; onChange: (v: VitalProduct[]
           </table>
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 };
@@ -811,8 +832,7 @@ export const AvailabilityConfigDialog: React.FC<{
       if (dirtyFused) await availabilityConfigApi.saveFused(fused);
       if (dirtyVitals) await availabilityConfigApi.saveVitals(vitals);
       onSaved(await availabilityConfigApi.load());
-      toast.success("Configuración guardada. Se aplica a todos los usuarios.");
-      onClose();
+      toast.success("Configuración guardada en Supabase. Se aplica a todos los usuarios.");
     } catch (e: any) {
       toast.error(e?.message || "No se pudo guardar la configuración.");
     } finally {
@@ -860,8 +880,8 @@ export const AvailabilityConfigDialog: React.FC<{
       }
     >
       {tab === "formula" && <FormulaTab formula={formula} onChange={setFormula} preview={preview} />}
-      {tab === "largeVolume" && <LargeVolumeTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} status={{ stored: config.stored.largeVolume, fromServer: config.fromServer, dirty: editedLargeVolume, meta: config.meta.formula }} />}
-      {tab === "excluded" && <ExcludedTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} status={{ stored: config.stored.excluded, fromServer: config.fromServer, dirty: editedExcluded, meta: config.meta.formula }} />}
+      {tab === "largeVolume" && <LargeVolumeTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} status={{ stored: config.stored.largeVolume, fromServer: config.fromServer }} />}
+      {tab === "excluded" && <ExcludedTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} status={{ stored: config.stored.excluded, fromServer: config.fromServer }} />}
       {tab === "fused" && <FusedTab catalog={fused} onChange={setFused} prev={config.fusedPrev} meta={config.meta.fused} />}
       {tab === "vitals" && <VitalsTab vitals={vitals} onChange={setVitals} />}
     </ResponsiveDialog>
