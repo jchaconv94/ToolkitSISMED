@@ -277,8 +277,8 @@ export interface AvailabilityExportParams {
   limits?: { subMax: number; sobreMin: number };
   /** Soluciones de gran volumen (1 L o más): Normostock desde estos meses, si la regla va en esta vista. */
   largeVolumeMonths?: number;
-  /** Códigos agregados o quitados a mano de la regla de gran volumen. */
-  largeVolumeManual?: { add: readonly string[]; skip: readonly string[] };
+  /** Lista de soluciones de gran volumen (Configuración), si la regla va en esta vista. */
+  largeVolumeList?: ReadonlyArray<{ code: string; name: string }>;
   /** Medicamentos excluidos de la DME (ficha 28, criterios de exclusión), si se exporta la DME. */
   dmeExcluded?: ReadonlyArray<{ code: string; name: string }>;
   /** Establecimientos fuera del análisis (los definen la DIRESA y cada UNGET; no cuentan en nada). */
@@ -724,7 +724,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       ? [["", "Fuera del análisis", `Establecimientos fuera del análisis, definidos por la DIRESA y cada UNGET (no cuentan en la disponibilidad ni en las demás hojas): ${p.outside.map((o) => `${o.name} (${o.code}, ${pctText(o.pct)})`).join("; ")}. Los centros de salud mental comunitario van fuera por omisión.`]]
       : []),
     ...(p.largeVolumeMonths !== undefined
-      ? [["", "Soluciones de gran volumen", `Las de 1 L o más (se reconocen por la presentación) son Normostock desde ${n(Math.min(lim.subMax, p.largeVolumeMonths))} ${p.largeVolumeMonths === 1 ? "mes" : "meses"} de provisión: «la disponibilidad se considera con un mes de existencia disponible» (ficha 28, consideración a).${p.largeVolumeManual?.add.length ? ` Agregados a mano: ${p.largeVolumeManual.add.join(", ")}.` : ""}${p.largeVolumeManual?.skip.length ? ` Quitados a mano: ${p.largeVolumeManual.skip.join(", ")}.` : ""}`]]
+      ? [["", "Soluciones de gran volumen", `Las de la lista de Configuración son Normostock desde ${n(Math.min(lim.subMax, p.largeVolumeMonths))} ${p.largeVolumeMonths === 1 ? "mes" : "meses"} de provisión: «la disponibilidad se considera con un mes de existencia disponible» (ficha 28, consideración a).${p.largeVolumeList?.length ? ` Lista: ${p.largeVolumeList.map((e) => `${e.code} ${e.name}`).join("; ")}.` : ""}`]]
       : []),
   ]);
 
@@ -744,7 +744,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   meSection("4. Situaciones");
   const counts = (yes: boolean) => (yes ? "Sí" : "No");
   const lvMonths = Math.min(lim.subMax, p.largeVolumeMonths ?? lim.subMax);
-  const lvNote = (text: string) => (p.largeVolumeMonths !== undefined ? ` Soluciones de 1 L o más: ${text}.` : "");
+  const lvNote = (text: string) => (p.largeVolumeMonths !== undefined ? ` Soluciones de gran volumen: ${text}.` : "");
   const sitRows: Array<[StockStatus, string, string]> = [
     [StockStatus.DESABASTECIDO, "No hay stock (stock 0).", "No"],
     [StockStatus.SUBSTOCK, `Menos de ${n(lim.subMax)} meses de provisión.${lvNote(`menos de ${n(lvMonths)}`)}`, counts(rule.substock)],

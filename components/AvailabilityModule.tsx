@@ -655,7 +655,7 @@ export const AvailabilityModule: React.FC = () => {
         rule: scope === "all" ? config.formula.all : config.formula.essential,
         limits: { subMax: config.formula.subMax, sobreMin: config.formula.sobreMin },
         largeVolumeMonths: classifyOptionsOf(config.formula, scope).largeVolumeMonths,
-        largeVolumeManual: { add: config.formula.largeVolumeAdd.map((e) => e.code), skip: config.formula.largeVolumeSkip },
+        largeVolumeList: config.formula.largeVolumeList,
         dmeExcluded: scope === "essential" ? config.formula.dmeExcluded : undefined,
         outside: outReport.establishments.map((e) => ({ code: e.code, name: e.name, pct: e.pct })),
         aggregate: config.formula.aggregate,

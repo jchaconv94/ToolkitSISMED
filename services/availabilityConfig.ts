@@ -61,6 +61,30 @@ export const DEFAULT_DME_EXCLUDED: ExcludedEntry[] = [
   { code: "06111", name: "TETRACICLINA CLORHIDRATO (UNGÜENTO OFTALMICO) 1 g/100 g (1 %) 6 g UNGÜENTO", reason: "national" },
 ];
 
+/**
+ * Soluciones de gran volumen de fábrica (ficha 28, consideración a: «solución de gran volumen
+ * (igual o mayor 1 litro)»): los medicamentos en solución o inyectable de 1 L o más del TFORMDET
+ * de Bellavista, del reporte nacional de la DME y del listado de códigos fusionados de DIGEMID
+ * (2026-10-10), con el código destino de su grupo. No se repiten los que están en
+ * `DEFAULT_DME_EXCLUDED` (no entran en la DME). Quedan fuera el manitol 20 % 1 L (DIGEMID lo
+ * fusiona con el de 500 mL) y el benzoato de bencilo 1 L (es loción, no solución).
+ */
+export const DEFAULT_LARGE_VOLUME: CodeEntry[] = [
+  { code: "08013", name: "AGUA PARA INYECCION 1 L INYECTABLE" },
+  { code: "03789", name: "DEXTROSA 5 g/100 mL (5 %) 1 L INYECTABLE" },
+  { code: "03783", name: "DEXTROSA 10 g/100 mL (10 %) 1 L INYECTABLE" },
+  { code: "08166", name: "SOLUCION DE LACTATO SODICO COMPUESTA (LACTATO RINGER) 1 L INYECTABLE" },
+  { code: "05598", name: "SOLUCION POLIELECTROLITICA 1 L SOLUCION" },
+  { code: "19879", name: "SOLUCION PARA DIALISIS PERITONEAL 1.5 % 2 L SOLUCION" },
+  { code: "21013", name: "SOLUCION PARA DIALISIS PERITONEAL 2.5 % 2 L SOLUCION" },
+  { code: "21012", name: "SOLUCION PARA DIALISIS PERITONEAL 4.25 % 2 L SOLUCION" },
+  { code: "21859", name: "SOLUCION PARA HEMODIALISIS CON BICARBONATO 4 L SOLUCION" },
+  { code: "50096", name: "SOLUCION CONCENTRADA PARA HEMODIALISIS ACIDA X 3.6 L" },
+  { code: "02506", name: "HEMODIALITICOS CONCENTRADOS 4 L INYECTABLE" },
+  { code: "04288", name: "LACTULOSA 3.33 g/5 mL 1 L SOLUCION" },
+  { code: "06544", name: "YODO POVIDONA 8 g/100 mL 1 L SOLUCION" },
+];
+
 export interface ScopeRule {
   normostock: boolean;
   sobrestock: boolean;
@@ -85,15 +109,11 @@ export interface AvailabilityFormula {
   sobreMin: number;
   /** Soluciones de gran volumen: Normostock desde estos meses (la ficha 28 dice 1). */
   largeVolumeMonths: number;
-  /** Agregados a mano como gran volumen (su descripción no dice el volumen). */
-  largeVolumeAdd: CodeEntry[];
-  /** Códigos que se reconocen solos por la presentación pero no deben contar como gran volumen. */
-  largeVolumeSkip: string[];
   /**
-   * Nombre con que se ve en la lista un medicamento reconocido por la presentación, si se cambió
-   * a mano (código → nombre). Solo se muestra: el cálculo usa el código.
+   * Las soluciones de gran volumen: la regla se aplica solo a estos códigos (en la DME, al código
+   * destino de cada grupo de fusionados). Se guarda en Supabase con la fórmula.
    */
-  largeVolumeNames: Record<string, string>;
+  largeVolumeList: CodeEntry[];
   /** Medicamentos que no entran en la DME (ficha 28, criterios de exclusión). Solo la DME. */
   dmeExcluded: ExcludedEntry[];
   levels: { optimo: number; alto: number; regular: number };
@@ -108,9 +128,7 @@ export const DEFAULT_AVAILABILITY_FORMULA: AvailabilityFormula = {
   subMax: 2,
   sobreMin: 6,
   largeVolumeMonths: 1,
-  largeVolumeAdd: [],
-  largeVolumeSkip: [],
-  largeVolumeNames: {},
+  largeVolumeList: DEFAULT_LARGE_VOLUME,
   dmeExcluded: DEFAULT_DME_EXCLUDED,
   levels: { optimo: 90, alto: 80, regular: 70 },
   aggregate: "average",
@@ -135,6 +153,8 @@ export interface AvailabilityConfig {
   meta: Partial<Record<"formula" | "fused" | "vitals", { updatedBy?: string | null; updatedAt?: string | null }>>;
   /** ¿Se pudo leer de la base? Si no, todo es de fábrica y no se puede guardar. */
   fromServer: boolean;
+  /** ¿Las listas de gran volumen y de excluidos ya están guardadas en la base? Si no, rigen las de fábrica. */
+  stored: { largeVolume: boolean; excluded: boolean };
 }
 
 const num = (v: unknown, fallback: number, min: number, max: number) => {
@@ -154,16 +174,12 @@ const entryList = (v: unknown): CodeEntry[] => {
   }
   return [...out.values()];
 };
-/** Código → nombre, con los ceros del código y sin nombres vacíos. */
-const nameMap = (v: unknown): Record<string, string> => {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
-  const out: Record<string, string> = {};
-  for (const [k, n] of Object.entries(v as Record<string, unknown>)) {
-    const code = padCode(k);
-    const name = typeof n === "string" ? n.trim() : "";
-    if (code && name) out[code] = name;
-  }
-  return out;
+/** La lista de fábrica con los agregados y quitados a mano de la regla anterior (2026-10-09). */
+const legacyLargeVolume = (o: Record<string, unknown>): CodeEntry[] => {
+  const skip = new Set(codeList(o.largeVolumeSkip));
+  const list = DEFAULT_LARGE_VOLUME.filter((e) => !skip.has(e.code));
+  for (const e of entryList(o.largeVolumeAdd)) if (!skip.has(e.code) && !list.some((x) => x.code === e.code)) list.push(e);
+  return list;
 };
 const reasonOf = (v: unknown): ExclusionReason | undefined => (v === "strategic" || v === "national" || v === "other" ? v : undefined);
 const rule = (v: unknown, fallback: ScopeRule, allowVital: boolean): ScopeRule => {
@@ -193,9 +209,9 @@ export const normalizeFormula = (value: unknown): AvailabilityFormula => {
     sobreMin,
     // Una fórmula guardada antes del 2026-10-09 no lo trae: vale la de la ficha 28.
     largeVolumeMonths: Math.min(subMax, num(o.largeVolumeMonths, d.largeVolumeMonths, 0, 24)),
-    largeVolumeAdd: entryList(o.largeVolumeAdd),
-    largeVolumeSkip: codeList(o.largeVolumeSkip),
-    largeVolumeNames: nameMap(o.largeVolumeNames),
+    // Una fórmula guardada antes de la lista no la trae: la de fábrica, con lo que se había
+    // agregado o quitado a mano entonces.
+    largeVolumeList: Array.isArray(o.largeVolumeList) ? entryList(o.largeVolumeList) : legacyLargeVolume(o),
     // Una fórmula guardada antes del 2026-10-10 no la trae: vale la de fábrica. Una lista vacía
     // guardada a propósito se respeta.
     dmeExcluded: Array.isArray(o.dmeExcluded)
@@ -246,6 +262,7 @@ export const factoryConfig = (): AvailabilityConfig => ({
   vitals: DEFAULT_VITAL_PRODUCTS,
   meta: {},
   fromServer: false,
+  stored: { largeVolume: false, excluded: false },
 });
 
 /* ------------------------------------------------------------ Listado de DIGEMID en Excel */
@@ -321,6 +338,10 @@ export const availabilityConfigApi = {
           vitals: data.vital_products ? { updatedBy: data.vital_products.updatedBy, updatedAt: data.vital_products.updatedAt } : undefined,
         },
         fromServer: true,
+        stored: {
+          largeVolume: Array.isArray((data.formula?.value as any)?.largeVolumeList),
+          excluded: Array.isArray((data.formula?.value as any)?.dmeExcluded),
+        },
       };
     } catch {
       return base;
@@ -342,7 +363,7 @@ export const classifyOptionsOf = (f: AvailabilityFormula, scope: "all" | "essent
   subMax: f.subMax,
   sobreMin: f.sobreMin,
   ...((scope === "all" ? f.all : f.essential).largeVolume
-    ? { largeVolumeMonths: f.largeVolumeMonths, largeVolumeAdd: f.largeVolumeAdd.map((e) => e.code), largeVolumeSkip: f.largeVolumeSkip }
+    ? { largeVolumeMonths: f.largeVolumeMonths, largeVolumeCodes: f.largeVolumeList.map((e) => e.code) }
     : {}),
 });
 
@@ -362,8 +383,7 @@ export const describeFormula = (f: AvailabilityFormula, scope: "all" | "essentia
   const r = scope === "all" ? f.all : f.essential;
   const parts = [r.normostock && "Normostock", r.sobrestock && "Sobrestock", r.substock && "Substock", r.sinRotacion === "yes" ? "Sin rotación" : r.sinRotacion === "vital" ? "Sin rotación de vitales" : null].filter(Boolean);
   const agg = f.aggregate === "sum" ? "suma de sus ítems" : "promedio de sus establecimientos";
-  const manual = [f.largeVolumeAdd.length && `${f.largeVolumeAdd.length} agregados`, f.largeVolumeSkip.length && `${f.largeVolumeSkip.length} quitados`].filter(Boolean).join(", ");
-  const lv = r.largeVolume ? ` · soluciones de 1 L o más: Normostock desde ${monthsText(Math.min(f.subMax, f.largeVolumeMonths))}${manual ? ` (${manual} a mano)` : ""}` : "";
+  const lv = r.largeVolume ? ` · ${f.largeVolumeList.length} soluciones de gran volumen: Normostock desde ${monthsText(Math.min(f.subMax, f.largeVolumeMonths))}` : "";
   const excluded = scope === "essential" && f.dmeExcluded.length ? ` · ${f.dmeExcluded.length} medicamentos excluidos (ficha 28)` : "";
   return `Disponibilidad = (${parts.join(" + ") || "nada"}) ÷ total de ítems${r.sinRotacion === "vital" ? " (los demás sin rotación no se evalúan)" : ""}${excluded} · meses ${f.truncate ? "cortados a un decimal" : "sin cortar"} · Substock < ${f.subMax}, Sobrestock > ${f.sobreMin}${lv} · microred y UNGET: ${agg}.`;
 };

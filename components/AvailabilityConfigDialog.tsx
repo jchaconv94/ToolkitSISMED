@@ -3,11 +3,11 @@ import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { Ban, Calculator, Check, Droplets, FileSpreadsheet, HeartPulse, Info, Layers, Loader2, Pencil, Plus, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import {
-  DEFAULT_AVAILABILITY_FORMULA, DEFAULT_DME_EXCLUDED, EXCLUSION_REASON_LABEL, availabilityConfigApi, classifyOptionsOf, diffFusedGroups, dmeExcludedCodes, parseFusedCodesSheet, summaryOptionsOf, vitalCodeSet,
+  DEFAULT_AVAILABILITY_FORMULA, DEFAULT_DME_EXCLUDED, DEFAULT_LARGE_VOLUME, EXCLUSION_REASON_LABEL, availabilityConfigApi, classifyOptionsOf, diffFusedGroups, dmeExcludedCodes, parseFusedCodesSheet, summaryOptionsOf, vitalCodeSet,
   type AvailabilityConfig, type AvailabilityFormula, type CodeEntry, type ExcludedEntry, type ExclusionReason, type FusedCatalog, type FusedGroups, type ScopeRule, type SinRotacionRule,
 } from "../services/availabilityConfig";
 import { StockStatus } from "../types";
-import { buildItems, essentialRows, isLargeVolume, largeVolumeRow, summarize, type AvailabilityRow, type Lot } from "../services/availabilityReport";
+import { buildItems, essentialRows, isLargeVolume, summarize, type AvailabilityRow, type Lot } from "../services/availabilityReport";
 import type { VitalProduct } from "../services/vitalProducts";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
 import { TableSearch, inputClass } from "./ui/kit";
@@ -161,43 +161,34 @@ const FormulaTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availab
   );
 };
 
-/* ------------------------------------------------------------------ Listas a mano (gran volumen y excluidos) */
+/* ------------------------------------------------------------------ Listas guardadas (gran volumen y excluidos) */
 
 /**
  * Agregar o editar un medicamento de una lista: el código SISMED y su nombre. El nombre se
  * completa solo con el del TFORMDET cargado o el del listado de códigos fusionados; si no está
- * en ninguno, se escribe (así la lista se entiende aunque no haya archivo cargado). El código de
- * un medicamento que viene del TFORMDET no se cambia (`codeLocked`).
+ * en ninguno, se escribe.
  */
 const CodeEntryDialog: React.FC<{
   open: boolean;
   onClose: () => void;
   title: string;
   subtitle: string;
-  initial: { code: string; name: string; reason?: ExclusionReason; counts?: boolean } | null;
-  /** Por qué no se puede cambiar el código (viene del archivo). */
-  codeLocked?: string;
-  /** Nombre del TFORMDET, para volver a él si se cambió. */
-  fileName?: string;
+  initial: { code: string; name: string; reason?: ExclusionReason } | null;
   withReason?: boolean;
-  /** Mostrar «¿Cuenta como gran volumen?». */
-  withCounts?: boolean;
   nameOf: (code: string) => string | undefined;
   /** Por qué no se puede usar ese código (ya está en la lista, o en otra), o nada. */
   taken: (code: string) => string | null;
-  onSave: (entry: { code: string; name: string; reason: ExclusionReason; counts: boolean }) => void;
-}> = ({ open, onClose, title, subtitle, initial, codeLocked, fileName, withReason = false, withCounts = false, nameOf, taken, onSave }) => {
+  onSave: (entry: { code: string; name: string; reason: ExclusionReason }) => void;
+}> = ({ open, onClose, title, subtitle, initial, withReason = false, nameOf, taken, onSave }) => {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [reason, setReason] = useState<ExclusionReason>("strategic");
-  const [counts, setCounts] = useState(true);
   const [autoName, setAutoName] = useState("");
   useEffect(() => {
     if (!open) return;
     setCode(initial?.code ?? "");
     setName(initial?.name ?? "");
     setReason(initial?.reason ?? "strategic");
-    setCounts(initial?.counts ?? true);
     setAutoName("");
   }, [open, initial]);
   const editing = !!initial;
@@ -215,37 +206,18 @@ const CodeEntryDialog: React.FC<{
   const choice = (on: boolean) => `rounded-xl border px-3 py-2 text-[12.5px] font-bold ${on ? "border-teal-300 bg-teal-50 text-teal-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
   return (
     <ResponsiveDialog open={open} onClose={onClose} title={title} subtitle={subtitle}
-      footer={<><button type="button" onClick={onClose} className={`${dialogSecondaryButton} md:ml-auto`}>Cancelar</button><button type="button" disabled={!valid} onClick={() => onSave({ code: padded, name: name.trim(), reason, counts })} className={`${dialogPrimaryButton} md:!ml-0`}><Check className="h-4 w-4" />{editing ? "Listo" : "Agregar"}</button></>}>
+      footer={<><button type="button" onClick={onClose} className={`${dialogSecondaryButton} md:ml-auto`}>Cancelar</button><button type="button" disabled={!valid} onClick={() => onSave({ code: padded, name: name.trim(), reason })} className={`${dialogPrimaryButton} md:!ml-0`}><Check className="h-4 w-4" />{editing ? "Listo" : "Agregar"}</button></>}>
       <div className="space-y-4">
         <label className="block">
           <span className={label}>Código SISMED</span>
-          <input autoFocus={!editing} value={code} disabled={!!codeLocked} onChange={(e) => setCode(e.target.value)} className={`${inputClass} font-mono`} placeholder="05873" inputMode="numeric" />
-          {duplicate ? <span className="mt-1 block text-[12px] font-semibold text-amber-700">{duplicate}</span>
-            : codeLocked ? <span className="mt-1 block text-[12px] text-slate-500">{codeLocked}</span> : null}
+          <input autoFocus={!editing} value={code} onChange={(e) => setCode(e.target.value)} className={`${inputClass} font-mono`} placeholder="08166" inputMode="numeric" />
+          {duplicate && <span className="mt-1 block text-[12px] font-semibold text-amber-700">{duplicate}</span>}
         </label>
         <label className="block">
           <span className={label}>Medicamento</span>
-          <input autoFocus={editing} value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder="SODIO CLORURO 900 mg/100 mL (0.9 %) 1 L INYECTABLE" />
-          <span className="mt-1 block text-[12px] text-slate-500">
-            {autoName && name === autoName
-              ? "Se completó con el TFORMDET cargado o el listado de fusionados."
-              : fileName
-                ? "Sale del TFORMDET; puede cambiarse para reconocerlo mejor. El cálculo usa solo el código."
-                : "Se completa solo si el código está en el TFORMDET cargado o en el listado de fusionados; si no, escríbalo. El cálculo usa solo el código."}
-            {fileName && name.trim() !== fileName && (
-              <button type="button" onClick={() => setName(fileName)} className="ml-1 font-bold text-teal-700 hover:underline">Volver al del TFORMDET</button>
-            )}
-          </span>
+          <input autoFocus={editing} value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder="SOLUCION DE LACTATO SODICO COMPUESTA (LACTATO RINGER) 1 L INYECTABLE" />
+          <span className="mt-1 block text-[12px] text-slate-500">{autoName && name === autoName ? "Se completó con el TFORMDET cargado o el listado de fusionados." : "Se completa solo si el código está en el TFORMDET cargado o en el listado de fusionados."}</span>
         </label>
-        {withCounts && (
-          <div>
-            <span className={label}>¿Cuenta como gran volumen?</span>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => setCounts(true)} className={choice(counts)}>Sí, cuenta</button>
-              <button type="button" onClick={() => setCounts(false)} className={choice(!counts)}>No, quitarlo</button>
-            </div>
-          </div>
-        )}
         {withReason && (
           <div>
             <span className={label}>Motivo</span>
@@ -270,130 +242,76 @@ const nameLookup = (rows: AvailabilityRow[] | null, groups: FusedGroups) => {
   return (code: string) => groups[code]?.name || byCode.get(code) || Object.entries(groups).find(([, g]) => g.codes.includes(code))?.[1].name;
 };
 
-const Chip: React.FC<{ className: string; title?: string; children: React.ReactNode }> = ({ className, title, children }) => (
-  <span title={title} className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${className}`}>{children}</span>
-);
+/** ¿La lista ya está guardada en Supabase? Lo dice debajo de la nota de cada pestaña. */
+const SavedStatus: React.FC<{ stored: boolean; fromServer: boolean; dirty: boolean; meta?: { updatedBy?: string | null; updatedAt?: string | null } }> = ({ stored, fromServer, dirty, meta }) => {
+  const [tone, text] = !fromServer
+    ? ["border-slate-200 bg-slate-50 text-slate-600", "Sin conexión con la base: rige la lista de fábrica."]
+    : !stored
+      ? ["border-amber-200 bg-amber-50 text-amber-800", "Lista de fábrica: todavía no está guardada en Supabase. Pulse «Guardar»."]
+      : dirty
+        ? ["border-amber-200 bg-amber-50 text-amber-800", "Hay cambios sin guardar. Pulse «Guardar» para guardarlos en Supabase."]
+        : ["border-emerald-200 bg-emerald-50 text-emerald-800", `Guardada en Supabase${meta?.updatedAt ? ` · ${meta.updatedBy || "—"} · ${dateText(meta.updatedAt)}` : ""}.`];
+  return <p className={`flex items-start gap-2 rounded-2xl border p-3 text-[12px] font-semibold ${tone}`}>{fromServer && stored && !dirty ? <Check className="mt-0.5 h-4 w-4 shrink-0" /> : <Info className="mt-0.5 h-4 w-4 shrink-0" />}{text}</p>;
+};
+
+type ListStatus = { stored: boolean; fromServer: boolean; dirty: boolean; meta?: { updatedBy?: string | null; updatedAt?: string | null } };
 
 /* ------------------------------------------------------------------ Gran volumen */
 
-/** De dónde sale cada fila: la presentación del TFORMDET dice 1 L o más, o se agregó a mano. */
-type LvOrigin = "detected" | "added";
-const LV_ORIGIN: Record<LvOrigin, { label: string; className: string }> = {
-  detected: { label: "Presentación", className: "bg-sky-50 text-sky-700" },
-  added: { label: "Agregado", className: "bg-teal-50 text-teal-700" },
-};
-/** Si cuenta o si se quitó a mano. */
-type LvState = "counts" | "skipped";
-const LV_STATE: Record<LvState, { label: string; className: string; title: string }> = {
-  counts: { label: "Cuenta", className: "bg-emerald-50 text-emerald-700", title: "Cuenta como gran volumen" },
-  skipped: { label: "Quitado", className: "bg-slate-100 text-slate-500", title: "Se quitó: no cuenta como gran volumen" },
-};
-
-/** Texto de la ficha y cómo se aplica: va en la columna derecha (y arriba en el celular). */
+/** Texto de la ficha: va en la columna derecha (y arriba en el celular). */
 const LargeVolumeNote: React.FC<{ months: number; className?: string }> = ({ months, className = "" }) => (
   <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${className}`}>
     <p className="flex items-center gap-2 text-[13px] font-bold text-slate-900"><Droplets className="h-4 w-4 shrink-0 text-sky-700" />Ficha 28 · Consideraciones</p>
     <p className="mt-2 text-[12px] italic leading-relaxed text-slate-600">«Para un medicamento que corresponde a una solución de gran volumen (igual o mayor 1 litro) la disponibilidad se considera con un mes de existencia disponible.»</p>
-    <p className="mt-2 text-[12px] leading-relaxed text-slate-500">Con la regla, desde {monthsLabel(months)} de existencia cuentan como Normostock.</p>
+    <p className="mt-2 text-[12px] leading-relaxed text-slate-500">Con la regla, los medicamentos de la lista cuentan como Normostock desde {monthsLabel(months)} de existencia.</p>
   </div>
 );
 
-const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: AvailabilityFormula) => void; preview: Preview; rows: AvailabilityRow[] | null; groups: FusedGroups }> = ({ formula: f, onChange, preview, rows, groups }) => {
+const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: AvailabilityFormula) => void; preview: Preview; rows: AvailabilityRow[] | null; groups: FusedGroups; status: ListStatus }> = ({ formula: f, onChange, preview, rows, groups, status }) => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [editing, setEditing] = useState<LvEntry | "new" | null>(null);
+  const [editing, setEditing] = useState<CodeEntry | "new" | null>(null);
   const months = Math.min(f.subMax, f.largeVolumeMonths);
-  const addCodes = useMemo(() => f.largeVolumeAdd.map((e) => e.code), [f.largeVolumeAdd]);
-  const add = useMemo(() => new Set(addCodes), [addCodes]);
-  const skip = useMemo(() => new Set(f.largeVolumeSkip), [f.largeVolumeSkip]);
+  const codes = useMemo(() => f.largeVolumeList.map((e) => e.code), [f.largeVolumeList]);
   const excluded = useMemo(() => dmeExcludedCodes(f), [f]);
   const nameOf = useMemo(() => nameLookup(rows, groups), [rows, groups]);
   // Filas del archivo cargado: las de la DME, o las de todos los productos si no hay clasificación.
-  // Los excluidos de la DME no se listan (tienen su pestaña); solo se cuentan.
   const source = useMemo(() => {
     if (!rows) return null;
-    const dme = essentialRows(rows, groups);
-    return { rows: dme.length ? dme : rows, dme: dme.length > 0, classified: rows.some((r) => r.medtip) };
-  }, [rows, groups]);
-  // Cada medicamento de gran volumen (reconocido, agregado o quitado): en cuántos establecimientos
-  // está y en cuántos pasa de Substock a Normostock con la regla.
-  const { list, outOfDme } = useMemo(() => {
-    const by = new Map<string, LvEntry>();
-    const out = new Set<string>();
-    if (source) {
-      const candidates = source.rows.filter((r) => largeVolumeRow(r, add, new Set()));
-      const base = { truncate: f.truncate, subMax: f.subMax, sobreMin: f.sobreMin };
-      const without = buildItems(candidates, undefined, new Date(), base);
-      const withRule = buildItems(candidates, undefined, new Date(), { ...base, largeVolumeMonths: f.largeVolumeMonths, largeVolumeAdd: addCodes, largeVolumeSkip: f.largeVolumeSkip });
-      without.forEach((it, i) => {
-        const codes = [it.medCode, ...(it.fusedFrom ?? [])];
-        const origin: LvOrigin = it.medtip === "M" && isLargeVolume(it.description) ? "detected" : "added";
-        if (source.dme && codes.some((c) => excluded.has(c))) { out.add(it.medCode); return; }
-        const state: LvState = skip.has(it.medCode) ? "skipped" : "counts";
-        const stored = f.largeVolumeAdd.find((e) => codes.includes(e.code))?.name;
-        const e = by.get(it.medCode) || { code: it.medCode, name: f.largeVolumeNames[it.medCode] || stored || it.description, fileName: it.description, origin, state, sites: 0, changed: 0 };
-        e.sites++;
-        if (state === "counts" && it.status === StockStatus.SUBSTOCK && withRule[i].status === StockStatus.NORMOSTOCK) e.changed++;
-        by.set(it.medCode, e);
-      });
-    }
-    // Los agregados a mano que no están en el archivo también se ven, con el nombre que se guardó.
-    const fused = new Set([...by.values()].flatMap((e) => groups[e.code]?.codes ?? []));
-    for (const e of f.largeVolumeAdd) {
-      if (by.has(e.code) || fused.has(e.code) || out.has(e.code)) continue;
-      if (excluded.has(e.code)) { out.add(e.code); continue; }
-      by.set(e.code, { code: e.code, name: e.name || nameOf(e.code) || "", origin: "added", state: skip.has(e.code) ? "skipped" : "counts", sites: 0, changed: 0 });
-    }
-    // Sin reordenar por estado: al quitar uno, su fila se queda donde estaba.
-    return { list: [...by.values()].sort((a, b) => b.changed - a.changed || a.name.localeCompare(b.name, "es")), outOfDme: out.size };
-  }, [source, groups, add, addCodes, skip, excluded, nameOf, f.truncate, f.subMax, f.sobreMin, f.largeVolumeMonths, f.largeVolumeAdd, f.largeVolumeSkip, f.largeVolumeNames]);
+    const dme = essentialRows(rows, groups, excluded);
+    return dme.length ? dme : rows.filter((r) => !excluded.has(r.medCode));
+  }, [rows, groups, excluded]);
+  // De cada medicamento de la lista: en cuántos establecimientos del archivo está y en cuántos
+  // pasa de Substock a Normostock con la regla.
+  const stats = useMemo(() => {
+    if (!source) return null;
+    const set = new Set(codes);
+    const candidates = source.filter((r) => set.has(r.medCode));
+    const base = { truncate: f.truncate, subMax: f.subMax, sobreMin: f.sobreMin };
+    const without = buildItems(candidates, undefined, new Date(), base);
+    const withRule = buildItems(candidates, undefined, new Date(), { ...base, largeVolumeMonths: f.largeVolumeMonths, largeVolumeCodes: codes });
+    const m = new Map<string, { sites: number; changed: number }>();
+    without.forEach((it, i) => {
+      const e = m.get(it.medCode) || { sites: 0, changed: 0 };
+      e.sites++;
+      if (it.status === StockStatus.SUBSTOCK && withRule[i].status === StockStatus.NORMOSTOCK) e.changed++;
+      m.set(it.medCode, e);
+    });
+    return m;
+  }, [source, codes, f.truncate, f.subMax, f.sobreMin, f.largeVolumeMonths]);
+  // Medicamentos del archivo que dicen 1 L o más y no están en la lista: se avisan, no entran solos.
+  const suggestions = useMemo(() => {
+    const out = new Map<string, CodeEntry>();
+    const set = new Set(codes);
+    for (const r of source ?? []) if (r.medtip === "M" && isLargeVolume(r.description) && !set.has(r.medCode) && !out.has(r.medCode)) out.set(r.medCode, { code: r.medCode, name: r.description });
+    return [...out.values()];
+  }, [source, codes]);
   const q = norm(search.trim());
-  const shown = list.filter((p) => !q || norm(`${p.code} ${p.name} ${LV_STATE[p.state].label} ${LV_ORIGIN[p.origin].label}`).includes(q));
+  const shown = f.largeVolumeList.filter((e) => !q || norm(`${e.code} ${e.name}`).includes(q));
   useEffect(() => setPage(1), [q]);
-  const changed = list.reduce((a, p) => a + p.changed, 0);
-  const active = list.filter((p) => p.state === "counts").length;
+  const changed = stats ? [...stats.values()].reduce((a, s) => a + s.changed, 0) : 0;
   const setRule = (scope: "all" | "essential", v: boolean) => onChange({ ...f, [scope]: { ...f[scope], largeVolume: v } });
-  const update = (patch: Partial<Pick<AvailabilityFormula, "largeVolumeAdd" | "largeVolumeSkip" | "largeVolumeNames">>) =>
-    onChange({ ...f, ...patch, largeVolumeSkip: [...new Set(patch.largeVolumeSkip ?? f.largeVolumeSkip)].sort() });
-  const remove = (p: LvEntry) =>
-    p.origin === "detected"
-      ? update({ largeVolumeSkip: [...f.largeVolumeSkip, p.code] })
-      : update({ largeVolumeAdd: f.largeVolumeAdd.filter((e) => e.code !== p.code && !groups[p.code]?.codes.includes(e.code)) });
-  const action = (p: LvEntry) => (
-    <span className="inline-flex">
-      <button type="button" onClick={() => setEditing(p)} aria-label={`Editar ${p.code}`} title="Editar" className={`${iconButton} hover:bg-slate-100 hover:text-slate-700`}><Pencil className="h-4 w-4" /></button>
-      {p.state === "skipped" ? (
-        <button type="button" onClick={() => update({ largeVolumeSkip: f.largeVolumeSkip.filter((c) => c !== p.code) })} aria-label={`Volver a contar ${p.code}`} title="Volver a contarlo" className={`${iconButton} hover:bg-slate-100 hover:text-slate-700`}><RotateCcw className="h-4 w-4" /></button>
-      ) : (
-        <button type="button" onClick={() => remove(p)} aria-label={`Quitar ${p.code}`} title={p.origin === "detected" ? "No contarlo como gran volumen" : "Quitar de la lista"} className={`${iconButton} hover:bg-red-50 hover:text-red-600`}><Trash2 className="h-4 w-4" /></button>
-      )}
-    </span>
-  );
-  const save = (e: { code: string; name: string; counts: boolean }) => {
-    const cur = editing === "new" ? null : editing;
-    if (!cur) {
-      update({ largeVolumeAdd: [...f.largeVolumeAdd, { code: e.code, name: e.name }], largeVolumeSkip: f.largeVolumeSkip.filter((c) => c !== e.code) });
-    } else if (cur.origin === "detected") {
-      // Del TFORMDET: el código no cambia; el nombre solo se guarda si es distinto al del archivo.
-      const names = { ...f.largeVolumeNames };
-      if (e.name && e.name !== cur.fileName) names[cur.code] = e.name; else delete names[cur.code];
-      update({ largeVolumeNames: names, largeVolumeSkip: e.counts ? f.largeVolumeSkip.filter((c) => c !== cur.code) : [...f.largeVolumeSkip, cur.code] });
-    } else {
-      const entry = { code: e.code, name: e.name };
-      const index = f.largeVolumeAdd.findIndex((x) => x.code === cur.code || groups[cur.code]?.codes.includes(x.code));
-      const nextAdd = index >= 0 ? f.largeVolumeAdd.map((x, i) => (i === index ? entry : x)) : [...f.largeVolumeAdd, entry];
-      update({ largeVolumeAdd: nextAdd, largeVolumeSkip: f.largeVolumeSkip.filter((c) => c !== e.code) });
-    }
-    setEditing(null);
-  };
-  const empty = !source
-    ? "Cargue y calcule el TFORMDET para ver qué medicamentos son de gran volumen y en cuántos establecimientos cambia su situación."
-    : !source.classified
-      ? "Este TFORMDET no trae la clasificación de los productos (MEDTIP): no se reconocen solos los medicamentos. Descárguelo con el Toolkit 2.2.5 o posterior, o agréguelos a mano."
-      : outOfDme > 0
-        ? "Los medicamentos de 1 L o más del archivo están en «Excluidos de la DME»."
-        : "El archivo cargado no trae medicamentos de 1 L o más.";
-  const cur = editing === "new" ? null : editing;
+  const setList = (list: CodeEntry[]) => onChange({ ...f, largeVolumeList: list });
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
       <div className="space-y-4">
@@ -403,74 +321,83 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
             <span className="flex items-center gap-2 text-[12px] font-semibold text-slate-500">Todos <Switch on={!!f.all.largeVolume} onChange={(v) => setRule("all", v)} label="Gran volumen en todos los productos" /></span>
             <span className="flex items-center gap-2 text-[12px] font-semibold text-slate-500">DME <Switch on={!!f.essential.largeVolume} onChange={(v) => setRule("essential", v)} label="Gran volumen en la DME" /></span>
           </Row>
-          <Row title="Normostock desde" hint={`Para las demás, ${monthsLabel(f.subMax)} (límite de Substock de la pestaña Fórmula)`}>
+          <Row title="Normostock desde" hint={`Para los demás, ${monthsLabel(f.subMax)} (límite de Substock de la pestaña Fórmula)`}>
             <NumberBox value={f.largeVolumeMonths} onChange={(v) => onChange({ ...f, largeVolumeMonths: Math.max(0, Math.min(f.subMax, v)) })} suffix="meses" label="Normostock desde" step={0.5} />
           </Row>
         </Card>
+        {suggestions.length > 0 && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-3">
+            <p className="px-1 text-[12.5px] font-bold text-amber-900">{suggestions.length === 1 ? "1 medicamento del archivo dice 1 L o más y no está en la lista" : `${suggestions.length} medicamentos del archivo dicen 1 L o más y no están en la lista`}</p>
+            <div className="mt-2 divide-y divide-amber-100 overflow-hidden rounded-xl border border-amber-100 bg-white">
+              {suggestions.map((s) => (
+                <div key={s.code} className="flex items-center gap-3 px-3 py-2">
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{s.code}</span>
+                  <span className="min-w-0 flex-1 text-[12.5px] font-semibold leading-snug text-slate-800">{s.name}</span>
+                  <button type="button" onClick={() => setList([...f.largeVolumeList, s])} className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-[12px] font-bold text-slate-700 hover:bg-slate-50"><Plus className="h-3.5 w-3.5" />Agregar</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <EntryTable
-          search={search} onSearch={setSearch} placeholder="Buscar medicamento, código o estado…" onAdd={() => setEditing("new")}
-          empty={list.length === 0 ? empty : null}
-          head={<><th className="px-2 py-3 text-center">Origen</th><th className="px-2 py-3 text-center">Estado</th><th className="px-2 py-3 text-center" title="Establecimientos donde está">EESS</th><th className="w-24 px-2 py-3 text-center">Pasan a Normostock</th></>}
-          rows={shown.slice((page - 1) * PAGE, page * PAGE).map((p) => ({
-            key: p.code, code: p.code, name: p.name, dim: p.state !== "counts", action: action(p),
-            cells: <>
-              <td className="px-2 text-center"><Chip className={LV_ORIGIN[p.origin].className}>{LV_ORIGIN[p.origin].label}</Chip></td>
-              <td className="px-2 text-center"><Chip className={LV_STATE[p.state].className} title={LV_STATE[p.state].title}>{LV_STATE[p.state].label}</Chip></td>
-              <td className="px-2 text-center font-mono text-[12.5px] text-slate-600">{p.sites || "—"}</td>
-              <td className={`px-2 text-center font-mono text-[12.5px] font-bold ${p.changed ? "text-emerald-700" : "text-slate-300"}`}>{p.changed || "—"}</td>
-            </>,
-            chips: <><Chip className={LV_ORIGIN[p.origin].className}>{LV_ORIGIN[p.origin].label}</Chip><Chip className={LV_STATE[p.state].className} title={LV_STATE[p.state].title}>{LV_STATE[p.state].label}</Chip></>,
-            detail: <>{p.sites ? `${p.sites} establecimientos` : "Sin establecimientos en el archivo"}{p.changed > 0 && <> · <b className="text-emerald-700">{p.changed}</b> pasan a Normostock</>}</>,
-          }))}
+          search={search} onSearch={setSearch} placeholder="Buscar medicamento o código…" onAdd={() => setEditing("new")}
+          empty={f.largeVolumeList.length === 0 ? "La lista está vacía: la regla no se aplica a ningún medicamento." : null}
+          head={<><th className="px-2 py-3 text-center" title="Establecimientos del archivo cargado donde está">EESS</th><th className="w-24 px-2 py-3 text-center">Pasan a Normostock</th></>}
+          rows={shown.slice((page - 1) * PAGE, page * PAGE).map((e) => {
+            const st = stats?.get(e.code);
+            return {
+              key: e.code, code: e.code, name: e.name || nameOf(e.code) || "",
+              action: (
+                <span className="inline-flex">
+                  <button type="button" onClick={() => setEditing(e)} aria-label={`Editar ${e.code}`} title="Editar código y nombre" className={`${iconButton} hover:bg-slate-100 hover:text-slate-700`}><Pencil className="h-4 w-4" /></button>
+                  <button type="button" onClick={() => setList(f.largeVolumeList.filter((x) => x.code !== e.code))} aria-label={`Quitar ${e.code}`} title="Quitar de la lista" className={`${iconButton} hover:bg-red-50 hover:text-red-600`}><Trash2 className="h-4 w-4" /></button>
+                </span>
+              ),
+              cells: <>
+                <td className="px-2 text-center font-mono text-[12.5px] text-slate-600">{st?.sites || "—"}</td>
+                <td className={`px-2 text-center font-mono text-[12.5px] font-bold ${st?.changed ? "text-emerald-700" : "text-slate-300"}`}>{st?.changed || "—"}</td>
+              </>,
+              chips: null,
+              detail: !stats ? "Cargue el TFORMDET para ver en cuántos establecimientos está" : st ? <>{st.sites} establecimientos{st.changed > 0 && <> · <b className="text-emerald-700">{st.changed}</b> pasan a Normostock</>}</> : "No está en el archivo cargado",
+            };
+          })}
           pagination={<TablePagination page={page} pageSize={PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />}
         />
       </div>
       <div className="space-y-4">
         <PreviewCard preview={preview} />
         <LargeVolumeNote months={months} className="hidden lg:block" />
-        {(list.length > 0 || outOfDme > 0) && (
-          <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-[12px] text-slate-600">
-            <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-            <span>
-              {active} {active === 1 ? "medicamento cuenta" : "medicamentos cuentan"} como gran volumen.{" "}
-              {f.essential.largeVolume || f.all.largeVolume
-                ? <>Con {monthsLabel(months)}, {changed} {changed === 1 ? "ítem pasa" : "ítems pasan"} de Substock a Normostock en los establecimientos del archivo.</>
-                : <>La regla está apagada; encendida, {changed} {changed === 1 ? "ítem pasaría" : "ítems pasarían"} de Substock a Normostock.</>}
-              {outOfDme > 0 && <> Otros {outOfDme} de 1 L no se listan: están en «Excluidos de la DME».</>}
-            </span>
-          </div>
-        )}
-        <button type="button" onClick={() => onChange({ ...f, largeVolumeMonths: DEFAULT_AVAILABILITY_FORMULA.largeVolumeMonths, largeVolumeAdd: [], largeVolumeSkip: [], largeVolumeNames: {}, all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: true } })} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 hover:bg-slate-50">
-          <RotateCcw className="h-4 w-4" />Restablecer ficha 28
+        <SavedStatus {...status} />
+        <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-[12px] text-slate-600">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+          <span>
+            {f.largeVolumeList.length} {f.largeVolumeList.length === 1 ? "medicamento" : "medicamentos"} en la lista.
+            {stats && (f.essential.largeVolume || f.all.largeVolume
+              ? <> Con {monthsLabel(months)}, {changed} {changed === 1 ? "ítem pasa" : "ítems pasan"} de Substock a Normostock en el archivo cargado.</>
+              : <> La regla está apagada; encendida, {changed} {changed === 1 ? "ítem pasaría" : "ítems pasarían"} de Substock a Normostock.</>)}
+          </span>
+        </div>
+        <button type="button" disabled={JSON.stringify(f.largeVolumeList) === JSON.stringify(DEFAULT_LARGE_VOLUME) && f.largeVolumeMonths === DEFAULT_AVAILABILITY_FORMULA.largeVolumeMonths && !f.all.largeVolume && !!f.essential.largeVolume} onClick={() => onChange({ ...f, largeVolumeMonths: DEFAULT_AVAILABILITY_FORMULA.largeVolumeMonths, largeVolumeList: DEFAULT_LARGE_VOLUME, all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: true } })} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+          <RotateCcw className="h-4 w-4" />Restablecer lista de fábrica
         </button>
       </div>
       <CodeEntryDialog
         open={editing !== null}
         onClose={() => setEditing(null)}
-        title={cur ? "Editar medicamento" : "Agregar medicamento de gran volumen"}
-        subtitle={cur ? (cur.origin === "detected" ? "Reconocido por la presentación del TFORMDET" : "Agregado a mano") : "Para una solución de 1 L o más cuya descripción no dice el volumen"}
-        initial={cur ? { code: cur.code, name: cur.name, counts: cur.state !== "skipped" } : null}
-        codeLocked={cur?.origin === "detected" ? "Viene del TFORMDET: su descripción dice 1 L o más." : undefined}
-        fileName={cur?.origin === "detected" ? cur.fileName : undefined}
-        withCounts={cur?.origin === "detected"}
+        title={editing === "new" ? "Agregar solución de gran volumen" : "Editar solución de gran volumen"}
+        subtitle="Medicamento en solución de 1 L o más (ficha 28)"
+        initial={editing === "new" || !editing ? null : editing}
         nameOf={nameOf}
-        taken={(code) => excluded.has(code) ? "Ese código está en «Excluidos de la DME»: no entra en la DME." : list.some((p) => p.code === code && p.state !== "skipped") ? "Ese código ya está en la lista." : null}
-        onSave={save}
+        taken={(code) => (excluded.has(code) ? "Ese código está en «Excluidos de la DME»." : codes.includes(code) ? "Ese código ya está en la lista." : null)}
+        onSave={({ code, name }) => {
+          const entry = { code, name };
+          setList(editing === "new" || !editing ? [...f.largeVolumeList, entry] : f.largeVolumeList.map((x) => (x.code === editing.code ? entry : x)));
+          setEditing(null);
+        }}
       />
     </div>
   );
 };
-
-interface LvEntry {
-  code: string;
-  name: string;
-  /** Descripción del TFORMDET (si está en el archivo). */
-  fileName?: string;
-  origin: LvOrigin;
-  state: LvState;
-  sites: number;
-  changed: number;
-}
 
 /**
  * Tabla de una lista a mano: buscador y «Agregar» en una línea, tabla en escritorio y tarjetas
@@ -543,7 +470,7 @@ const ExcludedNote: React.FC<{ className?: string }> = ({ className = "" }) => (
   </div>
 );
 
-const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: AvailabilityFormula) => void; preview: Preview; rows: AvailabilityRow[] | null; groups: FusedGroups }> = ({ formula: f, onChange, preview, rows, groups }) => {
+const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: AvailabilityFormula) => void; preview: Preview; rows: AvailabilityRow[] | null; groups: FusedGroups; status: ListStatus }> = ({ formula: f, onChange, preview, rows, groups, status }) => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<ExcludedEntry | "new" | null>(null);
@@ -593,6 +520,7 @@ const ExcludedTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availa
       <div className="space-y-4">
         <PreviewCard preview={preview} />
         <ExcludedNote className="hidden lg:block" />
+        <SavedStatus {...status} />
         <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-[12px] text-slate-600">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
           <span>{f.dmeExcluded.length} {f.dmeExcluded.length === 1 ? "medicamento excluido" : "medicamentos excluidos"}.{sitesOf ? ` En el archivo cargado salen ${items} ${items === 1 ? "ítem" : "ítems"} de la DME.` : ""}</span>
@@ -847,12 +775,16 @@ export const AvailabilityConfigDialog: React.FC<{
     setVitals(config.vitals);
   }, [open, config]);
 
-  const dirtyFormula = JSON.stringify(formula) !== JSON.stringify(config.formula);
-  // La regla de gran volumen se guarda dentro de la fórmula, pero tiene su propia pestaña.
-  const lvOf = (f: AvailabilityFormula) => JSON.stringify([f.all.largeVolume, f.essential.largeVolume, f.largeVolumeMonths, f.largeVolumeAdd, f.largeVolumeSkip, f.largeVolumeNames]);
-  const dirtyLargeVolume = lvOf(formula) !== lvOf(config.formula);
-  const dirtyExcluded = JSON.stringify(formula.dmeExcluded) !== JSON.stringify(config.formula.dmeExcluded);
-  const restOf = (f: AvailabilityFormula) => JSON.stringify({ ...f, largeVolumeMonths: 0, largeVolumeAdd: [], largeVolumeSkip: [], largeVolumeNames: {}, dmeExcluded: [], all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: false } });
+  // La regla de gran volumen y los excluidos se guardan dentro de la fórmula, pero tienen su propia
+  // pestaña. Una lista que todavía no está en la base (rige la de fábrica) cuenta como cambio sin
+  // guardar, para que «Guardar» la deje en Supabase.
+  const lvOf = (f: AvailabilityFormula) => JSON.stringify([f.all.largeVolume, f.essential.largeVolume, f.largeVolumeMonths, f.largeVolumeList]);
+  const editedLargeVolume = lvOf(formula) !== lvOf(config.formula);
+  const editedExcluded = JSON.stringify(formula.dmeExcluded) !== JSON.stringify(config.formula.dmeExcluded);
+  const dirtyLargeVolume = editedLargeVolume || (config.fromServer && !config.stored.largeVolume);
+  const dirtyExcluded = editedExcluded || (config.fromServer && !config.stored.excluded);
+  const dirtyFormula = JSON.stringify(formula) !== JSON.stringify(config.formula) || dirtyLargeVolume || dirtyExcluded;
+  const restOf = (f: AvailabilityFormula) => JSON.stringify({ ...f, largeVolumeMonths: 0, largeVolumeList: [], dmeExcluded: [], all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: false } });
   const dirtyFormulaRest = restOf(formula) !== restOf(config.formula);
   const dirtyFused = fused !== config.fused;
   const dirtyVitals = JSON.stringify(vitals) !== JSON.stringify(config.vitals);
@@ -928,8 +860,8 @@ export const AvailabilityConfigDialog: React.FC<{
       }
     >
       {tab === "formula" && <FormulaTab formula={formula} onChange={setFormula} preview={preview} />}
-      {tab === "largeVolume" && <LargeVolumeTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} />}
-      {tab === "excluded" && <ExcludedTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} />}
+      {tab === "largeVolume" && <LargeVolumeTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} status={{ stored: config.stored.largeVolume, fromServer: config.fromServer, dirty: editedLargeVolume, meta: config.meta.formula }} />}
+      {tab === "excluded" && <ExcludedTab formula={formula} onChange={setFormula} preview={preview} rows={previewRows} groups={fused.groups} status={{ stored: config.stored.excluded, fromServer: config.fromServer, dirty: editedExcluded, meta: config.meta.formula }} />}
       {tab === "fused" && <FusedTab catalog={fused} onChange={setFused} prev={config.fusedPrev} meta={config.meta.fused} />}
       {tab === "vitals" && <VitalsTab vitals={vitals} onChange={setVitals} />}
     </ResponsiveDialog>

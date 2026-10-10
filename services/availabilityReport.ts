@@ -393,10 +393,8 @@ export interface ClassifyOptions {
    * Sin valor, la regla no se aplica.
    */
   largeVolumeMonths?: number;
-  /** Códigos que cuentan como gran volumen aunque la descripción no diga el volumen. */
-  largeVolumeAdd?: readonly string[];
-  /** Códigos que no cuentan como gran volumen aunque la descripción diga 1 L o más. */
-  largeVolumeSkip?: readonly string[];
+  /** Los códigos de la lista de soluciones de gran volumen (en la DME, el código destino del grupo). */
+  largeVolumeCodes?: readonly string[];
 }
 
 export const DEFAULT_CLASSIFY: ClassifyOptions = { truncate: false, subMax: 2, sobreMin: 6 };
@@ -418,16 +416,11 @@ export const presentationLiters = (description?: string): number | null => {
   return best;
 };
 
-/** Presentación de 1 L o más (en el cálculo, solo cuenta para medicamentos: MEDTIP «M»). */
-export const isLargeVolume = (description?: string) => (presentationLiters(description) ?? 0) >= 1;
-
 /**
- * ¿Se clasifica como solución de gran volumen? Un código quitado a mano nunca; uno agregado a
- * mano siempre (también si es uno de los códigos sumados en una fila fusionada); los demás, si
- * son medicamentos de 1 L o más.
+ * Presentación de 1 L o más. No decide la regla (la decide la lista guardada): solo sirve para
+ * avisar de un medicamento del archivo que podría faltar en la lista.
  */
-export const largeVolumeRow = (r: Pick<AvailabilityRow, "medCode" | "medtip" | "description" | "fusedFrom">, add: ReadonlySet<string>, skip: ReadonlySet<string>) =>
-  !skip.has(r.medCode) && (add.has(r.medCode) || !!r.fusedFrom?.some((c) => add.has(c)) || (r.medtip === "M" && isLargeVolume(r.description)));
+export const isLargeVolume = (description?: string) => (presentationLiters(description) ?? 0) >= 1;
 
 /** Situación de un producto con los límites configurados. */
 export const classifyAvailability = (stock: number, cpa: number, opts: ClassifyOptions = DEFAULT_CLASSIFY): { months: number; status: StockStatus } => {
@@ -455,12 +448,11 @@ export const buildItems = (rows: AvailabilityRow[], lots?: Map<string, Lot[]>, t
   }
   const lotsOf = (code: string, medCode: string) => [...(lots?.get(`${code}|${medCode}`) || []), ...(byIpress.get(`${code}|${medCode}`) || [])];
   const lvOpts = opts.largeVolumeMonths !== undefined ? { ...opts, subMax: Math.min(opts.subMax, opts.largeVolumeMonths) } : null;
-  const lvAdd = new Set(opts.largeVolumeAdd ?? []);
-  const lvSkip = new Set(opts.largeVolumeSkip ?? []);
+  const lvCodes = new Set(opts.largeVolumeCodes ?? []);
   return rows.map((r) => {
     const cpa = averageConsumption(r.consumption);
-    // Solo medicamentos: la ficha habla de «un medicamento que corresponde a una solución».
-    const largeVolume = !!lvOpts && largeVolumeRow(r, lvAdd, lvSkip);
+    // Solo los de la lista; en una fila fusionada, por su código destino (como la cuenta DIGEMID).
+    const largeVolume = !!lvOpts && lvCodes.has(r.medCode);
     const { months, status } = classifyAvailability(r.stock, cpa, largeVolume ? lvOpts! : opts);
     const codes = r.fusedFrom?.length ? r.fusedFrom : [r.medCode];
     const list = lots ? codes.flatMap((med) => lotsOf(r.code, med)).sort(byExpiry) : [];

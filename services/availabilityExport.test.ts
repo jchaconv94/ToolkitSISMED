@@ -74,12 +74,13 @@ describe("Excel de disponibilidad", () => {
 
   it("la metodología dice qué establecimientos quedaron fuera y explica la regla de 1 litro", async () => {
     const { rows } = parseAvailabilitySheet([HEADER,
-      ["R", "MR", "06503", "P.S. A", "I-1", "05873", "SODIO CLORURO 1 L 900 mg/100 mL (0.9 %)", "INY", 1, "M", "P", "S", 10, 10, 15]]);
-    const items = buildItems(rows, undefined, new Date(), { truncate: false, subMax: 2, sobreMin: 6, largeVolumeMonths: 1 });
+      ["R", "MR", "06503", "P.S. A", "I-1", "08166", "SOLUCION DE LACTATO SODICO COMPUESTA (LACTATO RINGER) 1 L", "INY", 1, "M", "P", "S", 10, 10, 15]]);
+    const items = buildItems(rows, undefined, new Date(), { truncate: false, subMax: 2, sobreMin: 6, largeVolumeMonths: 1, largeVolumeCodes: ["08166"] });
     expect(items[0].status).toBe(StockStatus.NORMOSTOCK);
     const wb = await buildAvailabilityWorkbook({
       report: summarize(items), pharmacyItems: null, months: ["202608", "202609"], scope: "essential", title: "UNGET X", formulaText: "f",
       levels: { optimo: 90, alto: 80, regular: 70 }, source: "s", largeVolumeMonths: 1,
+      largeVolumeList: [{ code: "08166", name: "SOLUCION DE LACTATO SODICO COMPUESTA (LACTATO RINGER) 1 L INYECTABLE" }],
       outside: [{ code: "31456", name: "C.S.M.C. BELLAVISTA", pct: 73.17 }],
     });
     const me = wb.getWorksheet("Metodología")!;
@@ -89,7 +90,8 @@ describe("Excel de disponibilidad", () => {
     expect(all).toMatch(/Fuera del análisis/);
     expect(all).toMatch(/C\.S\.M\.C\. BELLAVISTA \(31456, 73,2 %\)/);
     expect(all).toMatch(/Soluciones de gran volumen/);
-    expect(all).toMatch(/Soluciones de 1 L o más: desde 1/);
+    expect(all).toMatch(/Soluciones de gran volumen: desde 1/);
+    expect(all).toMatch(/Lista: 08166 SOLUCION DE LACTATO/);
   });
 });
 

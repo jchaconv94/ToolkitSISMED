@@ -214,10 +214,13 @@ tablero (33 establecimientos, 84,04 %), establecimiento por establecimiento:
 4. **Soluciones de gran volumen (corregido).** La ficha (consideración a) dice: «Para un
    medicamento que corresponde a una solución de gran volumen (igual o mayor 1 litro) la
    disponibilidad se considera con un mes de existencia disponible». La web no lo aplicaba.
-   Ahora un medicamento (MEDTIP «M») de 1 L o más es Normostock desde 1 mes, solo en la DME de
-   fábrica; se reconoce por la presentación en la descripción («SODIO CLORURO 1 L…»,
-   `presentationLiters`) y se configura en la pestaña «Gran volumen» de Configuración, donde la
-   lista se corrige a mano (agregar los que no dicen el volumen, quitar los que no correspondan). Agosto
+   Ahora un medicamento de la lista de soluciones de gran volumen es Normostock desde 1 mes, solo
+   en la DME de fábrica. Al principio se reconocía por la presentación en la descripción; desde el
+   2026-10-10 es una **lista guardada en Supabase** (pestaña «Gran volumen» de Configuración,
+   `DEFAULT_LARGE_VOLUME`: 13 medicamentos en solución o inyectable de 1 L o más del TFORMDET de
+   Bellavista, del reporte nacional y del listado de fusionados, sin los excluidos de la DME). En
+   Bellavista da lo mismo que la detección: entran dextrosa 5 % y 10 %, lactato de Ringer, solución
+   polielectrolítica y agua para inyección. Agosto
    pasa de 82,67 % a 83,17 % (17 ítems cambian; tres de los nueve del punto 3 son yodo
    povidona de 1 L). Los meses del historial guardados antes de este cambio no la aplican:
    hay que volver a guardarlos con el TFORMDET.

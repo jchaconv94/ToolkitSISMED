@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_AVAILABILITY_FORMULA, DEFAULT_DME_EXCLUDED, classifyOptionsOf, describeFormula, dmeExcludedCodes, diffFusedGroups, normalizeFormula, normalizeFusedCatalog, parseFusedCodesSheet } from "./availabilityConfig";
+import { DEFAULT_AVAILABILITY_FORMULA, DEFAULT_DME_EXCLUDED, DEFAULT_LARGE_VOLUME, classifyOptionsOf, describeFormula, dmeExcludedCodes, diffFusedGroups, normalizeFormula, normalizeFusedCatalog, parseFusedCodesSheet } from "./availabilityConfig";
 import { DEFAULT_VITAL_PRODUCTS } from "./vitalProducts";
 
 describe("configuración de disponibilidad", () => {
@@ -51,20 +51,22 @@ describe("configuración de disponibilidad", () => {
     expect(normalizeFormula({ subMax: 2, largeVolumeMonths: 5 }).largeVolumeMonths).toBe(2);
     expect(classifyOptionsOf(old, "essential").largeVolumeMonths).toBe(1);
     expect(classifyOptionsOf(old, "all").largeVolumeMonths).toBeUndefined();
-    expect(describeFormula(old, "essential")).toMatch(/soluciones de 1 L o más: Normostock desde 1 mes/);
-    expect(describeFormula(old, "all")).not.toMatch(/1 L/);
-    // Las listas a mano: con sus ceros y sin repetidos.
-    // Antes se guardaban solo códigos; ahora código y nombre. Las dos formas se leen.
-    const manual = normalizeFormula({ largeVolumeAdd: ["8166", "08166", 5873, { code: "6517", name: " YODO POVIDONA 1 L " }], largeVolumeSkip: "x" });
-    expect(manual.largeVolumeAdd).toEqual([{ code: "08166", name: "" }, { code: "05873", name: "" }, { code: "06517", name: "YODO POVIDONA 1 L" }]);
-    expect(manual.largeVolumeSkip).toEqual([]);
-    expect(old.largeVolumeAdd).toEqual([]);
-    expect(classifyOptionsOf(manual, "essential").largeVolumeAdd).toEqual(["08166", "05873", "06517"]);
-    expect(describeFormula(manual, "essential")).toMatch(/3 agregados a mano/);
-    // Nombres cambiados a mano de los reconocidos por la presentación: con sus ceros y sin vacíos.
-    expect(old.largeVolumeNames).toEqual({});
-    expect(normalizeFormula({ largeVolumeNames: { "3789": " DEXTROSA 5 % 1 L ", "08166": "", "05598": 7 } }).largeVolumeNames).toEqual({ "03789": "DEXTROSA 5 % 1 L" });
-    expect(normalizeFormula({ largeVolumeNames: ["03789"] }).largeVolumeNames).toEqual({});
+    expect(describeFormula(old, "essential")).toMatch(/soluciones de gran volumen: Normostock desde 1 mes/);
+    expect(describeFormula(old, "all")).not.toMatch(/gran volumen/);
+    // La lista de fábrica, si la fórmula guardada no trae la suya.
+    expect(old.largeVolumeList).toEqual(DEFAULT_LARGE_VOLUME);
+    expect(classifyOptionsOf(old, "essential").largeVolumeCodes).toEqual(DEFAULT_LARGE_VOLUME.map((e) => e.code));
+    expect(describeFormula(old, "essential")).toMatch(new RegExp(`${DEFAULT_LARGE_VOLUME.length} soluciones de gran volumen`));
+    // Ninguna de fábrica repite un excluido de la DME.
+    expect(DEFAULT_LARGE_VOLUME.filter((e) => DEFAULT_DME_EXCLUDED.some((x) => x.code === e.code))).toEqual([]);
+    // La guardada manda (con sus ceros y sin repetidos); una vacía se respeta.
+    const saved = normalizeFormula({ largeVolumeList: ["8166", { code: "08166", name: "X" }, { code: "3789", name: " DEXTROSA 5 % 1 L " }] });
+    expect(saved.largeVolumeList).toEqual([{ code: "08166", name: "" }, { code: "03789", name: "DEXTROSA 5 % 1 L" }]);
+    expect(normalizeFormula({ largeVolumeList: [] }).largeVolumeList).toEqual([]);
+    // Lo que se agregó o quitó a mano con la regla anterior (2026-10-09) no se pierde.
+    const legacy = normalizeFormula({ largeVolumeAdd: [{ code: "99999", name: "SOLUCION X" }], largeVolumeSkip: ["08013"] });
+    expect(legacy.largeVolumeList.map((e) => e.code)).not.toContain("08013");
+    expect(legacy.largeVolumeList.at(-1)).toEqual({ code: "99999", name: "SOLUCION X" });
   });
 
   it("excluidos de la DME: la lista de fábrica si no hay una guardada; una vacía se respeta", () => {
