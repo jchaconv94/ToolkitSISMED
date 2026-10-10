@@ -208,7 +208,8 @@ tablero (33 establecimientos, 84,04 %), establecimiento por establecimiento:
    100 mL, tetraciclina ungüento oftálmico, fitomenadiona 10 mg/mL, calcio gluconato y tres
    yodo povidona de 1 L (dos de espuma salen desabastecidas en 24 y 26 establecimientos). Sin
    ellos, agosto da 83,5 %. Pueden ser la exclusión por intervención estratégica (listado de
-   DGIESP) o un listado de fusionados distinto; **no se aplicó**: falta el listado oficial.
+   DGIESP) o un listado de fusionados distinto. **Resuelto el 2026-10-10** con el detalle por
+   producto del tablero (ver «Excluidos de la DME» más abajo).
 
 4. **Soluciones de gran volumen (corregido).** La ficha (consideración a) dice: «Para un
    medicamento que corresponde a una solución de gran volumen (igual o mayor 1 litro) la
@@ -231,8 +232,25 @@ Bellavista los nueve medicamentos del punto 3 salen casi todo por SIS y casi nad
 así que tampoco se puede deducir de los datos. Hay que pedirlo a DIGEMID o al responsable SISMED
 de la DIRESA.
 
-**Lo que falta.** Con las dos reglas quedan 0,87 puntos (83,17 % frente a 84,04 %). El nacional
-evalúa unos 11 ítems menos por establecimiento: 3 247 frente a 3 606 en los 33 (por ejemplo,
-P.S. Fausa Lamista 06499: 92 frente a 101), la mayoría en Normostock. Para saber cuáles hace
-falta el detalle por producto de un establecimiento del tablero nacional; el usuario lo va a
-descargar.
+**Excluidos de la DME (corregido el 2026-10-10).** Con las dos reglas quedaban 0,87 puntos
+(83,17 % frente a 84,04 %): el nacional evaluaba 3 247 ítems frente a 3 606. El usuario pasó el
+detalle por producto del tablero (agosto 2026, Bellavista: 3 397 filas, 150 «NO APLICA»). Los
+medicamentos que el nacional no evalúa son 15: siete marcados «NO APLICA» en todos los
+establecimientos (sodio cloruro 0,9 % 1 L y 100 mL, oxitocina, calcio gluconato, fitomenadiona y
+dos insulinas) y ocho que no incluye (alcohol 70°, clorhexidina 4 %, agua oxigenada, tres yodo
+povidona de 1 L, hierro polimaltosa 50 mg/mL y tetraciclina ungüento oftálmico). El reporte
+nacional completo (todas las DIRESA, solo las 10 000 filas con más stock) confirma «NO APLICA» en
+todo el país para sodio cloruro 1 L y 100 mL, oxitocina y calcio gluconato. Sin esos 15, agosto da
+**84,03 % frente a 84,04 %**, 29 de 33 establecimientos coinciden exactos y los otros 4 difieren
+en menos de 0,9 puntos.
+
+Ahora son la lista de fábrica de la pestaña «Excluidos de la DME» de Configuración
+(`DEFAULT_DME_EXCLUDED` y `dmeExcluded` de la fórmula en `services/availabilityConfig.ts`; el
+filtro, en `essentialRows`, por el código o el de su grupo de fusionados). Cada uno lleva su
+motivo: «Intervención estratégica» los siete «NO APLICA» y «No figura en el tablero nacional»
+los ocho ausentes. El ADMIN la cambia (agregar, editar nombre y motivo, quitar, restablecer); se
+guarda en `availability_config` dentro de la fórmula, sin SQL nuevo. Solo cambia la DME. Como
+NaCl 1 L, el alcohol, la clorhexidina, el agua oxigenada y los yodo povidona son de 1 L, la regla
+de gran volumen ya casi no cambia nada en agosto: quedan dextrosa, lactato de Ringer, solución
+polielectrolítica y agua para inyección. Los meses del historial guardados antes no la aplican:
+hay que volver a guardarlos con el TFORMDET.

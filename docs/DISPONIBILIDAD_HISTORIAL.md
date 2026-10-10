@@ -72,6 +72,7 @@ botón.
 | Relleno hacia atrás sobre meses ya guardados | Por omisión solo se marcan los meses vacíos; los guardados muestran quién los guardó y se reemplazan solo si se marcan. |
 | Cambia la fórmula | Lo que se recalcula cambia en todos los meses; lo demás queda anotado por mes. |
 | Cambia la regla de gran volumen (ficha 28, 2026-10-09) | Cambia la situación de algunos productos, que se guarda ya contada: los meses guardados antes no la aplican. Se corrige guardando otra vez el mes (o el relleno hacia atrás) con el TFORMDET. |
+| Cambia la lista de excluidos de la DME (ficha 28, 2026-10-10) | Esos medicamentos salen del total de la DME y el mes se guarda ya contado: los meses guardados antes los siguen contando. Se corrige guardando otra vez el mes (o el relleno hacia atrás) con el TFORMDET. |
 | Un establecimiento cambia de microred o UNGET | Se agrupa con el registro actual; la nueva UNGET ve su historia. |
 | Un establecimiento sale del registro | Su historial no se borra; lo ve la DIRESA. |
 | Meses sin guardar o incompletos | La línea se corta en un mes sin guardar; un mes con menos establecimientos va con punto hueco ámbar, y el indicador dice «N de M». |

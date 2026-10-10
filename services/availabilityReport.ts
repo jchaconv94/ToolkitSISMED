@@ -601,12 +601,15 @@ const DEFAULT_FUSION_INDEX = buildFusionIndex(FUSED_CODE_GROUPS);
 export const essentialRows = (
   rows: AvailabilityRow[],
   groups: Record<string, { name: string; codes: string[] }> = FUSED_CODE_GROUPS,
+  /** Medicamentos que no entran en la DME (ficha 28, criterios de exclusión): por su código o el de su grupo. */
+  excluded?: ReadonlySet<string>,
 ): AvailabilityRow[] => {
   const index = groups === FUSED_CODE_GROUPS ? DEFAULT_FUSION_INDEX : buildFusionIndex(groups);
   const out = new Map<string, AvailabilityRow>();
   for (const r of rows) {
     const target = index.get(r.medCode);
     if (r.medtip !== "M" || !(r.medest === "S" || r.medest === "_") || !(r.medpet === "P" || target)) continue;
+    if (excluded?.size && (excluded.has(r.medCode) || (target && excluded.has(target)))) continue;
     const medCode = target || r.medCode;
     const key = `${r.code}|${medCode}`;
     const g = out.get(key);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_AVAILABILITY_FORMULA, classifyOptionsOf, describeFormula, diffFusedGroups, normalizeFormula, normalizeFusedCatalog, parseFusedCodesSheet } from "./availabilityConfig";
+import { DEFAULT_AVAILABILITY_FORMULA, DEFAULT_DME_EXCLUDED, classifyOptionsOf, describeFormula, dmeExcludedCodes, diffFusedGroups, normalizeFormula, normalizeFusedCatalog, parseFusedCodesSheet } from "./availabilityConfig";
 import { DEFAULT_VITAL_PRODUCTS } from "./vitalProducts";
 
 describe("configuración de disponibilidad", () => {
@@ -54,11 +54,29 @@ describe("configuración de disponibilidad", () => {
     expect(describeFormula(old, "essential")).toMatch(/soluciones de 1 L o más: Normostock desde 1 mes/);
     expect(describeFormula(old, "all")).not.toMatch(/1 L/);
     // Las listas a mano: con sus ceros y sin repetidos.
-    const manual = normalizeFormula({ largeVolumeAdd: ["8166", "08166", 5873], largeVolumeSkip: "x" });
-    expect(manual.largeVolumeAdd).toEqual(["05873", "08166"]);
+    // Antes se guardaban solo códigos; ahora código y nombre. Las dos formas se leen.
+    const manual = normalizeFormula({ largeVolumeAdd: ["8166", "08166", 5873, { code: "6517", name: " YODO POVIDONA 1 L " }], largeVolumeSkip: "x" });
+    expect(manual.largeVolumeAdd).toEqual([{ code: "08166", name: "" }, { code: "05873", name: "" }, { code: "06517", name: "YODO POVIDONA 1 L" }]);
     expect(manual.largeVolumeSkip).toEqual([]);
     expect(old.largeVolumeAdd).toEqual([]);
-    expect(classifyOptionsOf(manual, "essential").largeVolumeAdd).toEqual(["05873", "08166"]);
-    expect(describeFormula(manual, "essential")).toMatch(/2 agregados a mano/);
+    expect(classifyOptionsOf(manual, "essential").largeVolumeAdd).toEqual(["08166", "05873", "06517"]);
+    expect(describeFormula(manual, "essential")).toMatch(/3 agregados a mano/);
+  });
+
+  it("excluidos de la DME: la lista de fábrica si no hay una guardada; una vacía se respeta", () => {
+    const old = normalizeFormula({ subMax: 2 });
+    expect(old.dmeExcluded).toEqual(DEFAULT_DME_EXCLUDED);
+    expect(DEFAULT_DME_EXCLUDED).toHaveLength(15);
+    expect(dmeExcludedCodes(old).has("05873")).toBe(true);
+    expect(describeFormula(old, "essential")).toMatch(/15 medicamentos excluidos/);
+    expect(describeFormula(old, "all")).not.toMatch(/excluidos/);
+    expect(normalizeFormula({ dmeExcluded: [] }).dmeExcluded).toEqual([]);
+    // Con sus ceros, sin repetidos y con «Otro motivo» si el motivo no se reconoce.
+    const saved = normalizeFormula({ dmeExcluded: [{ code: "5253", name: "OXITOCINA", reason: "strategic" }, { code: "05253", reason: "national" }, { code: "1467", reason: "x" }, "3576"] });
+    expect(saved.dmeExcluded).toEqual([
+      { code: "05253", name: "OXITOCINA", reason: "strategic" },
+      { code: "01467", name: "", reason: "other" },
+      { code: "03576", name: "", reason: "other" },
+    ]);
   });
 });

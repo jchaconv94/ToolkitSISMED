@@ -279,6 +279,8 @@ export interface AvailabilityExportParams {
   largeVolumeMonths?: number;
   /** Códigos agregados o quitados a mano de la regla de gran volumen. */
   largeVolumeManual?: { add: readonly string[]; skip: readonly string[] };
+  /** Medicamentos excluidos de la DME (ficha 28, criterios de exclusión), si se exporta la DME. */
+  dmeExcluded?: ReadonlyArray<{ code: string; name: string }>;
   /** Establecimientos fuera del análisis (los definen la DIRESA y cada UNGET; no cuentan en nada). */
   outside?: Array<{ code: string; name: string; pct: number }>;
   aggregate?: "average" | "sum";
@@ -715,6 +717,9 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       ? `Medicamentos esenciales (DME): tipo M, de estrategia «S» o «_», del petitorio o del listado de códigos fusionados de DIGEMID${p.fusedVersion ? ` (${p.fusedVersion})` : ""}. Las presentaciones de un mismo grupo se suman en su código destino (columna «Fusiona»).`
       : "Todos los productos con stock al cierre o con consumo en el periodo."],
     ["", "No se incluyen", "Los almacenes (códigos como 030S05): su stock se muestra en la hoja «Almacén». Los productos sin stock y sin consumo en todo el periodo."],
+    ...(p.dmeExcluded?.length
+      ? [["", "Medicamentos excluidos", `No entran en la DME (ficha 28, criterios de exclusión; los mismos que el tablero nacional no evalúa): ${p.dmeExcluded.map((e) => `${e.code} ${e.name}`).join("; ")}.`]]
+      : []),
     ...(p.outside?.length
       ? [["", "Fuera del análisis", `Establecimientos fuera del análisis, definidos por la DIRESA y cada UNGET (no cuentan en la disponibilidad ni en las demás hojas): ${p.outside.map((o) => `${o.name} (${o.code}, ${pctText(o.pct)})`).join("; ")}. Los centros de salud mental comunitario van fuera por omisión.`]]
       : []),
