@@ -1,26 +1,47 @@
 /**
- * Establecimientos del análisis de disponibilidad (2026-10-09, pedido del usuario): cada persona
- * puede dejar establecimientos fuera del cálculo. Los desmarcados no cuentan en la disponibilidad
- * de la microred ni de la UNGET, ni en los demás reportes, y se ven aparte («Fuera del análisis»).
+ * Establecimientos del análisis de disponibilidad (2026-10-09; por jurisdicción desde el
+ * 2026-10-10, pedido del usuario: «igualito como se manejan los establecimientos»). Los
+ * establecimientos fuera del análisis no cuentan en la disponibilidad de la microred ni de la
+ * UNGET, ni en los demás reportes, y se ven aparte («Fuera del análisis»).
  *
- * Los centros de salud mental comunitario salen desmarcados por omisión: el tablero nacional de
+ * Los centros de salud mental comunitario van fuera por omisión: el tablero nacional de
  * DIGEMID no los incluye en la disponibilidad de medicamentos esenciales (comprobado con
  * Bellavista, agosto 2026). Se reconocen por el nombre, que viene igual en el registro de
  * Establecimientos y en el TFORMDET («C.S.M.C. BELLAVISTA»).
  *
- * La selección es personal y se guarda en este navegador, por usuario: no cambia lo que ven los
- * demás ni lo que se guarda en el historial (que guarda todos y los aparta al mostrarlos).
+ * La lista es una sola y vive en Supabase (`supabase/SUPABASE_DISPONIBILIDAD_ESTABLECIMIENTOS.sql`):
+ * cada uno la ve en su jurisdicción (ADMIN y DIRESA todo; OGESS sus UNGET; UNGET sus
+ * establecimientos…) y la cambian el ADMIN, la DIRESA y cada UNGET en lo suyo. Solo se guardan
+ * las decisiones que difieren de lo de omisión. El historial guarda todos los establecimientos y
+ * aparta los de fuera al mostrarlos.
  */
 
-/** Lo que la persona cambió respecto de lo de omisión. */
-export interface SitePrefs {
-  /** Desmarcados a mano. */
-  out: string[];
-  /** Marcados a mano aunque por omisión van fuera (un centro de salud mental). */
-  in: string[];
+import { callSendKeysRpc } from "./sendKeys";
+import { withOfflineCache } from "./offlineCache";
+
+export const SITES_SQL = "SUPABASE_DISPONIBILIDAD_ESTABLECIMIENTOS.sql";
+
+/** Decisión guardada de un establecimiento: dentro o fuera, quién y cuándo. */
+export interface SiteDecision {
+  inAnalysis: boolean;
+  updatedByName: string;
+  updatedAt: string;
 }
 
-export const EMPTY_SITE_PREFS: SitePrefs = { out: [], in: [] };
+/** Código → decisión. Un establecimiento sin decisión sigue la regla de omisión. */
+export type SiteDecisions = Map<string, SiteDecision>;
+
+export interface SitesState {
+  decisions: SiteDecisions;
+  /** ¿Puede cambiar la lista? (lo dice el servidor). */
+  canEdit: boolean;
+  /** "missing-sql": sin el SQL solo rige la regla de omisión y no se puede cambiar. */
+  status: "loading" | "ready" | "missing-sql" | "error";
+  /** Lo que se ve es la última copia guardada en este equipo (sin internet). */
+  offline: boolean;
+}
+
+export const EMPTY_SITES: SitesState = { decisions: new Map(), canEdit: false, status: "loading", offline: false };
 
 /** «C.S.M.C. BELLAVISTA», «CSMC …», «CENTRO DE SALUD MENTAL COMUNITARIO …». */
 export const isMentalHealthCenter = (name?: string) => !!name && /(^|[^A-Z])C\.?\s*S\.?\s*M\.?\s*C(\.|[^A-Z]|$)|SALUD\s+MENTAL/i.test(name);
@@ -28,54 +49,43 @@ export const isMentalHealthCenter = (name?: string) => !!name && /(^|[^A-Z])C\.?
 export const outByDefault = (name?: string) => isMentalHealthCenter(name);
 
 /** ¿Va fuera del análisis? */
-export const isOutOfAnalysis = (code: string, name: string | undefined, prefs: SitePrefs) =>
-  prefs.out.includes(code) || (outByDefault(name) && !prefs.in.includes(code));
+export const isOutOfAnalysis = (code: string, name: string | undefined, decisions: SiteDecisions) => {
+  const d = decisions.get(code);
+  return d ? !d.inAnalysis : outByDefault(name);
+};
 
 /**
- * Preferencias que resultan de la lista marcada en la ventana. Solo se anota lo que difiere de lo
- * de omisión, y se conserva lo anotado de establecimientos que no estaban en la lista (los de
- * otro archivo o de otro año del historial).
+ * Cambios para el servidor a partir de la lista marcada en la ventana: por cada
+ * establecimiento listado cuya decisión cambia, `true` (dentro), `false` (fuera) o `null`
+ * (volver a lo de omisión: se borra la decisión). Lo que queda igual no se envía.
  */
-export const prefsFromSelection = (
+export const siteChanges = (
   sites: Array<{ code: string; name?: string }>,
   outCodes: ReadonlySet<string>,
-  previous: SitePrefs,
-): SitePrefs => {
-  const listed = new Set(sites.map((s) => s.code));
-  const out = previous.out.filter((c) => !listed.has(c));
-  const inside = previous.in.filter((c) => !listed.has(c));
+  decisions: SiteDecisions,
+): Array<[string, boolean | null]> => {
+  const changes: Array<[string, boolean | null]> = [];
   for (const s of sites) {
-    const def = outByDefault(s.name);
-    const isOut = outCodes.has(s.code);
-    if (isOut && !def) out.push(s.code);
-    if (!isOut && def) inside.push(s.code);
+    const inside = !outCodes.has(s.code);
+    const target = inside === !outByDefault(s.name) ? null : inside;
+    const current = decisions.get(s.code)?.inAnalysis ?? null;
+    if (target !== current) changes.push([s.code, target]);
   }
-  return { out: [...new Set(out)].sort(), in: [...new Set(inside)].sort() };
+  return changes;
 };
 
-const keyFor = (username: string) => `toolkit.disponibilidad.establecimientos.${username}`;
-const safeStorage = (): Storage | null => {
-  try { return typeof window !== "undefined" ? window.localStorage : null; } catch { return null; }
-};
-const codeList = (v: unknown) => (Array.isArray(v) ? v.filter((c): c is string => typeof c === "string") : []);
+type WireItem = [string, boolean, string, string];
 
-export const loadSitePrefs = (username: string, storage: Pick<Storage, "getItem"> | null = safeStorage()): SitePrefs => {
-  if (!username || !storage) return EMPTY_SITE_PREFS;
-  try {
-    const parsed = JSON.parse(storage.getItem(keyFor(username)) || "{}");
-    return { out: codeList(parsed?.out), in: codeList(parsed?.in) };
-  } catch {
-    return EMPTY_SITE_PREFS;
-  }
-};
-
-export const saveSitePrefs = (username: string, prefs: SitePrefs, storage: Pick<Storage, "setItem" | "removeItem"> | null = safeStorage()): boolean => {
-  if (!username || !storage) return false;
-  try {
-    if (!prefs.out.length && !prefs.in.length) storage.removeItem(keyFor(username));
-    else storage.setItem(keyFor(username), JSON.stringify(prefs));
-    return true;
-  } catch {
-    return false;
-  }
+export const availabilitySitesApi = {
+  /** Las decisiones de la jurisdicción. Sin internet, la última copia de este equipo (por usuario). */
+  list: async (username: string): Promise<{ decisions: SiteDecisions; canEdit: boolean }> => {
+    const data = await withOfflineCache(`disponibilidad-establecimientos:${username}`, async () =>
+      (await callSendKeysRpc<{ items?: WireItem[]; canEdit?: boolean } | null>("app_availability_sites_list", {}, SITES_SQL)) || {});
+    return {
+      decisions: new Map((data.items ?? []).map(([code, inAnalysis, updatedByName, updatedAt]) => [code, { inAnalysis: !!inAnalysis, updatedByName: updatedByName || "", updatedAt: updatedAt || "" }])),
+      canEdit: !!data.canEdit,
+    };
+  },
+  save: (changes: Array<[string, boolean | null]>) =>
+    callSendKeysRpc<{ saved: number; rejected: string[] }>("app_availability_sites_save", { p_items: changes }, SITES_SQL),
 };

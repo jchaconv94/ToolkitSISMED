@@ -379,7 +379,7 @@ export const AvailabilityHistory: React.FC<{
       {outsideRows.length > 0 && (
         <ReportTable
           title="Fuera del análisis"
-          info={<P>Establecimientos desmarcados en «Establecimientos del análisis»: están guardados, pero no cuentan en los indicadores, los gráficos ni las microredes. Los centros de salud mental comunitario van fuera por omisión.</P>}
+          info={<P>Establecimientos desmarcados en «Establecimientos del análisis» (la lista la definen la DIRESA y cada UNGET): están guardados, pero no cuentan en los indicadores, los gráficos ni las microredes. Los centros de salud mental comunitario van fuera por omisión.</P>}
           rows={outsideRows}
           columns={[
             { key: "name", label: "Establecimiento", sort: (r) => r.name, render: (r) => <span className="block max-w-[260px]"><span className="block truncate font-semibold text-slate-800">{r.name}</span><span className="block truncate text-[11.5px] text-slate-500">{r.group}</span></span> },

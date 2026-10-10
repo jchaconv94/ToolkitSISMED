@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import {
   Activity, AlertTriangle, ArrowLeft, BarChart3, Building2, CalendarClock, CheckCircle2, Download, FileSpreadsheet, History, LayoutDashboard, ListChecks, Loader2, MoreVertical, PackageX, RefreshCw, Repeat2, SearchX, Settings2, TrendingUp, Upload, Warehouse, X,
 } from "lucide-react";
-import { isOutOfAnalysis, loadSitePrefs, saveSitePrefs, type SitePrefs } from "../services/availabilitySites";
+import { EMPTY_SITES, availabilitySitesApi, isOutOfAnalysis, type SitesState } from "../services/availabilitySites";
 import { AvailabilitySitesDialog, type SiteOption } from "./AvailabilitySitesDialog";
 import { useAuth } from "../contexts/AuthContext";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
@@ -317,16 +317,36 @@ export const AvailabilityModule: React.FC = () => {
     }
   };
 
-  // Establecimientos fuera del análisis (2026-10-09): selección personal, guardada en este equipo.
-  // Los centros de salud mental comunitario van fuera por omisión.
-  const [sitePrefs, setSitePrefs] = useState<SitePrefs>(() => loadSitePrefs(storeUser));
-  useEffect(() => { setSitePrefs(loadSitePrefs(storeUser)); }, [storeUser]);
+  // Establecimientos fuera del análisis: una sola lista por jurisdicción, en Supabase (2026-10-10,
+  // «igualito como se manejan los establecimientos»). Los C.S.M.C. van fuera por omisión.
+  const [sites, setSites] = useState<SitesState>(EMPTY_SITES);
+  const loadSites = useCallback(async () => {
+    const offline = !isOnline();
+    try {
+      const { decisions, canEdit } = await availabilitySitesApi.list(storeUser);
+      setSites({ decisions, canEdit: canEdit && !offline, status: "ready", offline });
+    } catch (e: any) {
+      setSites({ decisions: new Map(), canEdit: false, status: /Falta instalar/.test(e?.message || "") ? "missing-sql" : "error", offline });
+    }
+  }, [storeUser]);
+  // Al abrir y al volver la conexión (sin internet se usa la última copia).
+  useEffect(() => { if (online || sites.status === "loading") loadSites(); }, [online, loadSites]); // eslint-disable-line react-hooks/exhaustive-deps
   const [sitesOpen, setSitesOpen] = useState(false);
-  const applySitePrefs = (prefs: SitePrefs) => {
-    setSitePrefs(prefs);
-    if (!saveSitePrefs(storeUser, prefs)) toast.error("No se pudo guardar la selección en este equipo: se usará hasta recargar la página.");
+  const applySites = async (changes: Array<[string, boolean | null]>): Promise<boolean> => {
+    if (!changes.length) return true;
+    try {
+      const result = await availabilitySitesApi.save(changes);
+      await loadSites();
+      const rejected = result?.rejected ?? [];
+      if (rejected.length) toast.warning(`${rejected.length === 1 ? "Un establecimiento no se cambió" : `${rejected.length} establecimientos no se cambiaron`}: no ${rejected.length === 1 ? "es" : "son"} de su jurisdicción (${rejected.join(", ")}).`);
+      else toast.success("Listo: el cambio vale para todos los que ven estos establecimientos.");
+      return true;
+    } catch (e: any) {
+      toast.error(e?.message || "No se pudo guardar la lista.");
+      return false;
+    }
   };
-  const isOut = useCallback((code: string, name?: string) => isOutOfAnalysis(code, registry.get(code)?.name || name, sitePrefs), [registry, sitePrefs]);
+  const isOut = useCallback((code: string, name?: string) => isOutOfAnalysis(code, registry.get(code)?.name || name, sites.decisions), [registry, sites.decisions]);
 
   // Filas por IPRESS (las farmacias sumadas): no dependen de la fórmula. Las de los establecimientos
   // fuera del análisis van aparte.
@@ -663,7 +683,22 @@ export const AvailabilityModule: React.FC = () => {
       return { code, name: info?.name || name, group: multi ? `${info?.red || "Sin UNGET"} · ${mr}` : mr, category: info?.category || undefined };
     });
   }, [baseRows, history, registry]);
-  const sitesDialog = <AvailabilitySitesDialog open={sitesOpen} onClose={() => setSitesOpen(false)} sites={siteOptions} prefs={sitePrefs} onApply={applySitePrefs} />;
+  const sitesNotice = sites.status === "missing-sql"
+    ? isAdmin ? "Falta aplicar SUPABASE_DISPONIBILIDAD_ESTABLECIMIENTOS.sql en Supabase: mientras tanto solo los centros de salud mental van fuera y la lista no se puede cambiar." : "Por ahora solo los centros de salud mental van fuera."
+    : sites.status === "error" ? "No se pudo leer la lista: solo los centros de salud mental van fuera."
+    : sites.offline ? "Sin conexión: se muestra la última copia guardada en este equipo. Para cambiarla hace falta internet."
+    : !sites.canEdit ? "La definen la DIRESA y la UNGET de cada establecimiento." : undefined;
+  const sitesDialog = (
+    <AvailabilitySitesDialog
+      open={sitesOpen}
+      onClose={() => setSitesOpen(false)}
+      sites={siteOptions}
+      decisions={sites.decisions}
+      canEditSite={(code) => sites.canEdit && inScope(code)}
+      notice={sitesNotice}
+      onApply={applySites}
+    />
+  );
 
   /* ------------------------------------------------------------ Historial */
   if (screen === "history") {
