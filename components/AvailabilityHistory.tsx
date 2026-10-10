@@ -417,7 +417,7 @@ export const AvailabilityHistory: React.FC<{
         />
       </KpiStrip>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {(() => {
           const values = (view === "all" ? series.all : series.essential).map((p) => p.pct);
           const previous = (view === "all" ? series.prevAll : series.prevEssential).map((p) => p.pct);
@@ -461,9 +461,10 @@ export const AvailabilityHistory: React.FC<{
               </button>
             )}
             <nav aria-label="Ruta" className="flex min-w-0 flex-1 items-center gap-1 text-[12.5px]">
-              {crumbs.map((c, i) => (
+              {/* En el celular no cabe la ruta entera: solo el nivel actual (la flecha sube). */}
+              {crumbs.map((c, i) => (isDesktop || i === crumbs.length - 1) && (
                 <React.Fragment key={c.value}>
-                  {i > 0 && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />}
+                  {i > 0 && isDesktop && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />}
                   {i < crumbs.length - 1 ? (
                     <button type="button" onClick={() => setFocus(c.value)} className="min-w-0 shrink truncate font-bold text-teal-700 hover:underline">{c.label}</button>
                   ) : (

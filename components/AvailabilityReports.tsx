@@ -629,7 +629,7 @@ export const SummaryReport: React.FC<{ ctx: ReportContext; levelCounts: Record<D
         <KpiCard watermark tone="danger" icon={<AlertTriangle />} label="Ítems desabastecidos" value={formatNumber(c.desabastecido)} hint={`${pctText(c.total ? (c.desabastecido / c.total) * 100 : 0)} de ${formatNumber(c.total)} ítems`} onClick={() => ctx.goTab("gaps")} />
       </KpiStrip>
 
-      <div className="grid gap-4 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <ChartCard title="Disponibilidad de la UNGET" info={INFO.availability(lv)} className="lg:col-span-5">
           <Gauge pct={report.pct} level={report.level} levels={lv} caption={`Nivel ${DME_LEVEL_LABEL[report.level]} · ${report.establishments.length} establecimientos`} />
         </ChartCard>
@@ -662,7 +662,7 @@ export const SummaryReport: React.FC<{ ctx: ReportContext; levelCounts: Record<D
         ))}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <ChartCard title="Establecimientos por nivel" className="lg:col-span-5">
           <LevelColumns counts={levelCounts} ranges={ranges} labels={DME_LEVEL_LABEL} onSelect={onLevel} />
         </ChartCard>
@@ -1031,7 +1031,7 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
         <KpiCard watermark tone="danger" icon={<CalendarClock />} label="Vence sin usarse" value={money(risk.value)} hint={`${risk.rows.length} lotes`} onClick={() => { setStatus("RISK"); toTable(); }} active={status === "RISK"} />
       </KpiStrip>
 
-      <div className="grid gap-4 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <ChartCard title="Consumo mensual valorizado" info={<P>Suma de lo consumido cada mes por todos los productos del establecimiento, en soles (unidades × precio). La línea es el promedio de los meses con consumo.</P>} className="lg:col-span-8">
           <MonthlyBars values={monthlyValue} labels={ctx.months.map(monthShort)} cpa={avgValue} lineLabel="Promedio" format={moneyShort} fullFormat={money} slot={60} />
         </ChartCard>
@@ -1541,7 +1541,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         <KpiCard watermark tone="neutral" label="De productos sin consumo" value={money(risk.noUseValue)} hint={ctx.hasOutflows ? `${money(risk.stillValue)} no se mueven nada` : `${formatNumber(risk.noUseLots)} lotes sin rotación`} onClick={() => { setBucket("NOUSE"); toTable(); }} active={bucket === "NOUSE" || bucket === "STILL"} />
         <KpiCard watermark tone="warning" label="Total en riesgo" value={money(risk.value)} hint={`${formatNumber(risk.units)} unidades · ${formatNumber(risk.rows.length)} lotes`} onClick={() => { setBucket("ALL"); toTable(); }} active={bucket === "ALL"} />
       </KpiStrip>
-      <div className="grid gap-4 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <ChartCard title="Valor en riesgo según cuándo vence" info={INFO.expiry} className="lg:col-span-5">
           <HBars
             labelWidth="w-28"
@@ -1623,7 +1623,7 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
         <KpiCard watermark tone="warning" label="Consumo variable (Y)" value={formatNumber(data.xyz.Y)} hint={`${pctText(totalXyz ? (data.xyz.Y / totalXyz) * 100 : 0)} de los ítems con consumo`} onClick={() => { setXyz("Y"); toTable(); }} active={xyz === "Y"} />
         <KpiCard watermark tone="danger" label="Consumo irregular (Z)" value={formatNumber(data.xyz.Z)} hint={`${pctText(totalXyz ? (data.xyz.Z / totalXyz) * 100 : 0)} de los ítems con consumo`} onClick={() => { setXyz("Z"); toTable(); }} active={xyz === "Z"} />
       </KpiStrip>
-      <div className="grid gap-4 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <ChartCard title="Picos por mes" info={INFO.peaks} className="lg:col-span-7">
           <MonthlyBars values={data.peaksByMonth} labels={ctx.months.map(monthShort)} color="#dc2626" />
         </ChartCard>
@@ -1834,7 +1834,7 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         <KpiCard watermark tone="success" icon={<Repeat2 />} label="Se puede mover a donde falta" value={money(movable)} hint={`a ${formatNumber(movableNeeds.needs)} necesidades del plan`} onClick={() => ctx.goTab("redistribution")} />
         <KpiCard watermark tone="neutral" icon={<Building2 />} label="Establecimientos con excedente" value={formatNumber(data.establishments.length)} hint={data.establishments[0] ? `el mayor: ${data.establishments[0].name}` : ""} />
       </KpiStrip>
-      <div className="grid gap-4 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <ChartCard title="Cómo se calcula" info={INFO.overstock(ctx.sobreMin)} className="lg:col-span-5">
           {example ? (
             <div>
@@ -2021,7 +2021,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         <KpiCard watermark tone="info" icon={<Store />} label="Internas F01 → puesto" value={`${formatNumber(internalUnits)} u`} hint={`${formatNumber(active.filter((v) => has(v, "internal")).length)} puestos`} onClick={() => { setFilter("INTERNAL"); toTable(); }} active={filter === "INTERNAL"} />
         <KpiCard watermark tone="danger" icon={<PackageX />} label="Sin cubrir" value={formatNumber(shortRows.length)} hint={`faltan ${formatNumber(shortRows.reduce((a, v) => a + v.short, 0))} u`} onClick={() => { setFilter("SHORT"); toTable(); }} active={filter === "SHORT"} />
       </KpiStrip>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ChartCard title="Establecimientos con más excedente para transferir" info={<><P>Establecimientos en sobrestock que más productos transfieren en el plan. El número es la cantidad de productos que entregan.</P><P>Excedente: lo que tienen por encima de {ctx.sobreMin} meses de consumo.</P></>}>
           <HBars labelWidth="w-36 md:w-56" rows={byDonor.map(([code, e]) => ({ key: code, label: e.name, value: e.n, color: "#3b82f6", text: `${e.n}` }))} onSelect={ctx.openEstablishment} />
         </ChartCard>

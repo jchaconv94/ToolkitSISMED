@@ -2211,7 +2211,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                         </span>
                                     </button>
                                 </SettingsRow>
-                                <div className="grid gap-4 px-4 py-4 md:grid-cols-2 md:px-5">
+                                <div className="grid grid-cols-1 gap-4 px-4 py-4 md:grid-cols-2 md:px-5">
                                     <FormField label="Usuarios autorizados para pruebas" hint="Separados por comas o uno por línea.">
                                         <textarea
                                             value={tempConfig.maintenanceAllowedUsers || ''}
@@ -2364,7 +2364,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                 }
             >
                 {userModalStep === 1 && (
-                    <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2">
                         <FormField label="Nombres" required>
                             <input type="text" required className={inputClass} value={userForm.firstName} onChange={e => setUserForm({ ...userForm, firstName: e.target.value })} placeholder="Nombres completos" />
                         </FormField>
@@ -2413,7 +2413,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                 )}
 
                 {userModalStep === 2 && (
-                    <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2">
                         <FormField label="Usuario" required hint={editingUser ? 'El usuario no se puede cambiar.' : undefined}>
                             <input
                                 type="text" required autoCapitalize="none" autoCorrect="off"
@@ -2889,7 +2889,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                         </div>
                     </div>
 
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                         <DialogSection title="Identificación">
                             <DialogRow label="DNI">{detailDni}</DialogRow>
                             <DialogRow label="Profesión">{detailProfession}</DialogRow>
