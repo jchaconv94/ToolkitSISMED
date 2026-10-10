@@ -415,6 +415,14 @@ export const HistoryChart: React.FC<{
     return d.trim();
   };
   const incomplete = (i: number) => coverage[i] && coverage[i].establishments > 0 && coverage[i].establishments < coverage[i].expected;
+  // Cifra de cada punto arriba de él. En el celular los meses van muy juntos: si dos seguidos
+  // quedan casi a la misma altura, la segunda baja debajo de su punto para no encimarse.
+  const below = values.map(() => false);
+  if (compact) values.forEach((v, i) => {
+    const prev = values[i - 1];
+    if (v === null || prev == null || below[i - 1]) return;
+    below[i] = Math.abs(y(v) - y(prev)) < 14 && y(v) + 18 <= top + plotH - 2;
+  });
   return (
     <div>
       {tip.layer}
@@ -457,8 +465,8 @@ export const HistoryChart: React.FC<{
               {v !== null && (
                 <circle cx={x(i)} cy={y(v)} r={hover === i || selected === i ? 6.5 : compact ? 4.5 : 5.5} fill={incomplete(i) ? "#fff" : LEVEL_COLOR[levelOf(v)]} stroke={incomplete(i) ? "#d97706" : "#fff"} strokeWidth={2} />
               )}
-              {v !== null && !compact && (
-                <text x={x(i)} y={y(v) - 11} textAnchor="middle" className="fill-slate-700 text-[10px] font-bold" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{pct1(v)}</text>
+              {v !== null && (
+                <text x={x(i)} y={below[i] ? y(v) + 18 : y(v) - 11} textAnchor="middle" className={`fill-slate-700 font-bold ${compact ? "text-[9.5px]" : "text-[10px]"}`} style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{pct1(v)}</text>
               )}
               <text x={x(i)} y={top + plotH + 19} textAnchor="middle" className={`text-[10.5px] ${selected === i ? "fill-slate-900 font-black" : v === null ? "fill-slate-300" : "fill-slate-600 font-semibold"}`}>{label}</text>
             </g>
