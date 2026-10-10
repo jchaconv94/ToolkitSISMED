@@ -394,7 +394,8 @@ export const HistoryChart: React.FC<{
   const all = [...values, ...previous].filter((v): v is number => v !== null);
   const minPct = Math.max(0, Math.min(levels.regular - 10, Math.floor((Math.min(...all, 100) - 5) / 10) * 10));
   const left = compact ? 28 : 36, right = compact ? 6 : 64, top = 22, plotH = compact ? 190 : 220, bottom = 30;
-  const slot = compact ? 27 : 46;
+  // Comparte la fila con el ranking (mitad del ancho): meses más juntos para que la letra no se achique.
+  const slot = compact ? 27 : 40;
   const width = left + right + n * slot;
   const height = top + plotH + bottom;
   const y = (v: number) => top + plotH - ((Math.max(minPct, Math.min(100, v)) - minPct) / (100 - minPct)) * plotH;
@@ -424,7 +425,6 @@ export const HistoryChart: React.FC<{
             {!compact && <text x={width - right + 8} y={(y(a) + y(b)) / 2} dominantBaseline="middle" className="text-[11.5px] font-bold" fill={LEVEL_COLOR[l]}>{levelLabels[l]}</text>}
           </g>
         ))}
-        {selected !== null && <rect x={x(selected) - slot / 2 + 2} y={top} width={slot - 4} height={plotH} rx={6} fill="#0f172a" opacity={0.06} />}
         {ticks.map((t) => (
           <text key={t} x={left - 6} y={y(t)} textAnchor="end" dominantBaseline="middle" className="fill-slate-400 text-[10.5px]">{t}</text>
         ))}
@@ -450,12 +450,15 @@ export const HistoryChart: React.FC<{
               className={v !== null && onSelect ? "cursor-pointer" : undefined}
             >
               <rect x={x(i) - slot / 2} y={top} width={slot} height={plotH + bottom} fill="transparent" />
-              {hover === i && <line x1={x(i)} x2={x(i)} y1={top} y2={top + plotH} stroke="#cbd5e1" strokeDasharray="3 3" />}
+              {/* Línea punteada del punto al eje (pedido del usuario); el mes elegido o señalado, más oscura. */}
+              {v !== null ? (
+                <line x1={x(i)} x2={x(i)} y1={y(v)} y2={top + plotH} stroke={selected === i || hover === i ? "#334155" : "#94a3b8"} strokeWidth={selected === i ? 2 : 1.5} strokeDasharray="4 4" />
+              ) : hover === i && <line x1={x(i)} x2={x(i)} y1={top} y2={top + plotH} stroke="#cbd5e1" strokeDasharray="3 3" />}
               {v !== null && (
                 <circle cx={x(i)} cy={y(v)} r={hover === i || selected === i ? 6.5 : compact ? 4.5 : 5.5} fill={incomplete(i) ? "#fff" : LEVEL_COLOR[levelOf(v)]} stroke={incomplete(i) ? "#d97706" : "#fff"} strokeWidth={2} />
               )}
               {v !== null && !compact && (
-                <text x={x(i)} y={y(v) - 11} textAnchor="middle" className="fill-slate-700 text-[10.5px] font-bold" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{pct1(v)}</text>
+                <text x={x(i)} y={y(v) - 11} textAnchor="middle" className="fill-slate-700 text-[10px] font-bold" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{pct1(v)}</text>
               )}
               <text x={x(i)} y={top + plotH + 19} textAnchor="middle" className={`text-[10.5px] ${selected === i ? "fill-slate-900 font-black" : v === null ? "fill-slate-300" : "fill-slate-600 font-semibold"}`}>{label}</text>
             </g>

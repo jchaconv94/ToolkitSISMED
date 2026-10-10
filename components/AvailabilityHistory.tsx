@@ -417,7 +417,7 @@ export const AvailabilityHistory: React.FC<{
         />
       </KpiStrip>
 
-      <div className="grid gap-4 xl:grid-cols-[3fr_2fr]">
+      <div className="grid gap-4 xl:grid-cols-2">
         {(() => {
           const values = (view === "all" ? series.all : series.essential).map((p) => p.pct);
           const previous = (view === "all" ? series.prevAll : series.prevEssential).map((p) => p.pct);
@@ -620,7 +620,8 @@ const RankingBars: React.FC<{
   if (!items.length) return <EmptyState title="Sin datos ese mes" />;
   // Al bajar de nivel la fila señalada desaparece sin «mouseleave»: no debe apagar las nuevas.
   const hover = hoverKey && items.some((i) => i.key === hoverKey) ? hoverKey : null;
-  const min = Math.max(0, Math.min(levels.regular - 10, Math.floor((Math.min(...items.map((i) => i.pct), average ?? 100) - 5) / 10) * 10));
+  // Escala desde 40 % como el ranking del reporte (antes se ajustaba a los datos y las barras se veían cortas).
+  const min = Math.max(0, Math.min(40, Math.floor((Math.min(...items.map((i) => i.pct), average ?? 100) - 5) / 10) * 10));
   const pos = (v: number) => ((Math.max(min, Math.min(100, v)) - min) / (100 - min)) * 100;
   const nameW = isDesktop ? 150 : 104;
   // Espacio a la derecha para la cifra de una barra al 100 %; la cifra va pegada al final de su barra.
@@ -630,15 +631,15 @@ const RankingBars: React.FC<{
   const avgPos = average !== null ? pos(average) : null;
   return (
     <div className="flex flex-1 flex-col">
-      {/* En el celular la tarjeta no comparte alto con el gráfico de evolución: crece con las filas (hasta 12). */}
-      <div className="relative flex flex-1 flex-col" style={{ minHeight: isDesktop ? 240 : Math.max(240, Math.min(items.length, 12) * 38 + 56) }}>
+      {/* Crece con las filas (hasta 8 en escritorio y 12 en el celular); si son más, la lista se desplaza dentro. */}
+      <div className="relative flex flex-1 flex-col" style={{ minHeight: Math.max(240, Math.min(items.length, isDesktop ? 8 : 12) * 38 + 56) }}>
         {/* Franjas, etiquetas de nivel y línea de promedio: sobre la columna de las barras. */}
         <div className="pointer-events-none absolute inset-y-0" style={{ left: nameW + 12, right: valueW }}>
           {bands.map(([a, b, l]) => (
             <div key={l} className="absolute bottom-6 top-7" style={{ left: `${pos(a)}%`, width: `${pos(b) - pos(a)}%`, background: LEVEL_SOFT[l] }} />
           ))}
-          {bands.map(([a, b, l]) => (
-            <span key={`t${l}`} className="absolute bottom-0 flex justify-center whitespace-nowrap text-[10px] font-bold md:text-[10.5px]" style={{ left: `${pos(a)}%`, width: `${pos(b) - pos(a)}%`, color: LEVEL_COLOR[l] }}>
+          {isDesktop && bands.map(([a, b, l]) => (
+            <span key={`t${l}`} className="absolute bottom-0 flex justify-center whitespace-nowrap text-[10.5px] font-bold" style={{ left: `${pos(a)}%`, width: `${pos(b) - pos(a)}%`, color: LEVEL_COLOR[l] }}>
               {DME_LEVEL_LABEL[l]}
             </span>
           ))}
@@ -651,6 +652,14 @@ const RankingBars: React.FC<{
             </>
           )}
         </div>
+        {/* En el celular las franjas de arriba son angostas: sus nombres van en una leyenda. */}
+        {!isDesktop && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center gap-3 text-[10.5px] font-bold">
+            {bands.map(([, , l]) => (
+              <span key={`t${l}`} className="flex items-center gap-1" style={{ color: LEVEL_COLOR[l] }}><span className="h-2 w-2 rounded-sm" style={{ background: LEVEL_COLOR[l] }} />{DME_LEVEL_LABEL[l]}</span>
+            ))}
+          </div>
+        )}
         <div className="hide-scrollbar absolute inset-x-0 bottom-6 top-7 flex flex-col overflow-y-auto">
           {items.map((i, n) => {
             const level = levelOf(i.pct);
