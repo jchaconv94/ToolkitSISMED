@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArrowRight, CalendarRange, Check, ChevronDown, FileSpreadsheet, History, ListChecks, MapPin, MoreVertical, Settings2, Trash2, WifiOff, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, CalendarRange, Check, ChevronDown, ChevronRight, FileSpreadsheet, History, ListChecks, MapPin, MoreVertical, Settings2, Trash2, WifiOff, X } from "lucide-react";
 import { EmptyState, KpiCard, KpiStrip, TableSearch } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
 import { BottomSheet } from "./ui/BottomSheet";
@@ -8,7 +8,7 @@ import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { FloatingActionButton } from "./ui/FloatingActionButton";
 import { ResponsiveDialog, dialogSecondaryButton } from "./ui/ResponsiveDialog";
 import { useIsDesktop } from "./ui/useIsDesktop";
-import { ChartCard, HistoryChart, HistoryLegend } from "./AvailabilityCharts";
+import { ChartCard, HistoryChart, HistoryLegend, InfoTip, LEVEL_COLOR, LEVEL_SOFT, TipBox, useChartTip } from "./AvailabilityCharts";
 import {
   CodeChip, Delta, DrawerNavButtons, LEVEL_TONE, LevelChip, LevelPct, MONTH_SHORT, P, ReportTable, dateText, drawerNav, pctText, pp, useDrawerKeys,
   type Column,
@@ -223,7 +223,15 @@ export const AvailabilityHistory: React.FC<{
     return raw ? evaluatedCounts(raw, opts.rules[view], view) : undefined;
   })() : undefined;
   const drill = (key: string) => setFocus(rankingLevel === "unget" ? `u:${key}` : rankingLevel === "microred" ? `m:${unget !== ALL ? unget : ungetOf(codes.find((c) => microredOf(c) === key) ?? "")}|${key}` : `s:${key}`);
-  const rankingTitle = rankingLevel === "situations" ? "Situaciones" : rankingLevel === "unget" ? "UNGET" : rankingLevel === "microred" ? "Microredes" : "Establecimientos";
+  const rankingSubtitle = rankingLevel === "situations" ? "Situaciones del mes" : rankingLevel === "unget" ? "UNGET de mayor a menor" : rankingLevel === "microred" ? "Microredes de mayor a menor" : "Establecimientos de mayor a menor";
+  // Ruta de lo que se mira, para volver atrás desde el ranking (pedido del usuario: «no sé cómo volver»).
+  const rootLabel = ungets.length > 1 ? "Todas las UNGET" : scopeTitle;
+  const crumbs: Array<{ label: string; value: string }> = [
+    { label: rootLabel, value: "all" },
+    ...(unget !== ALL && ungets.length > 1 ? [{ label: `UNGET ${unget}`, value: `u:${unget}` }] : []),
+    ...(microred !== ALL ? [{ label: microred, value: `m:${unget}|${microred}` }] : []),
+    ...(site !== ALL ? [{ label: nameOf(site), value: `s:${site}` }] : []),
+  ];
   const currentPct = pctAt(view === "all" ? series.all : series.essential, sel);
 
   const menuItems = (
@@ -416,7 +424,7 @@ export const AvailabilityHistory: React.FC<{
           const empty = [...values, ...previous].every((x) => x === null);
           return (
             <ChartCard
-              title={`Evolución · ${VIEW_LABEL[view]}`}
+              title={`${VIEW_LABEL[view]} · ${focusLabel}`}
               info={<><P>Disponibilidad guardada de cada mes de {year} de lo elegido en «Ver», con la fórmula vigente; la línea punteada es {year - 1}. La vista (todos los productos o medicamentos esenciales) se cambia tocando su tarjeta.</P><P>Un mes sin guardar corta la línea. Un punto hueco con borde ámbar es un mes en que faltan establecimientos. Toque un mes para verlo en los indicadores.</P></>}
               action={empty ? undefined : <HistoryLegend current={String(year)} previous={String(year - 1)} />}
             >
@@ -445,20 +453,41 @@ export const AvailabilityHistory: React.FC<{
             </ChartCard>
           );
         })()}
-        <ChartCard
-          title={`${rankingTitle} · ${selMonth ? monthName(selMonth) : ""}`}
-          className="flex flex-col"
-          info={<P>{rankingLevel === "situations" ? "Cuántos ítems del establecimiento quedaron en cada situación ese mes, en la vista elegida." : `Disponibilidad de cada ${rankingLevel === "unget" ? "UNGET" : rankingLevel === "microred" ? "microred" : "establecimiento"} en el mes elegido, de mayor a menor; la línea punteada es el total de lo que se mira. Toque una barra para verla en «Ver».`}</P>}
-          action={site !== ALL ? (
-            <button type="button" onClick={() => { const row = establishmentRows.find((r) => r.key === site); if (row) setOpenState({ row, list: [row] }); }} className="text-[12px] font-bold text-teal-700 hover:underline">Ver detalle</button>
-          ) : rankingItems.length > 1 ? <span className="hidden text-[11.5px] font-semibold text-slate-400 md:inline">Toque una para verla</span> : undefined}
-        >
+        <section className="flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+          <div className="mb-1 flex min-h-[28px] items-center gap-2">
+            {crumbs.length > 1 && (
+              <button type="button" onClick={() => setFocus(crumbs[crumbs.length - 2].value)} aria-label={`Volver a ${crumbs[crumbs.length - 2].label}`} title={`Volver a ${crumbs[crumbs.length - 2].label}`} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-teal-50 hover:text-teal-700">
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+            )}
+            <nav aria-label="Ruta" className="flex min-w-0 flex-1 items-center gap-1 text-[12.5px]">
+              {crumbs.map((c, i) => (
+                <React.Fragment key={c.value}>
+                  {i > 0 && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />}
+                  {i < crumbs.length - 1 ? (
+                    <button type="button" onClick={() => setFocus(c.value)} className="min-w-0 shrink truncate font-bold text-teal-700 hover:underline">{c.label}</button>
+                  ) : (
+                    <span className="min-w-0 truncate font-black text-slate-900">{c.label}</span>
+                  )}
+                </React.Fragment>
+              ))}
+            </nav>
+            {site !== ALL ? (
+              <button type="button" onClick={() => { const row = establishmentRows.find((r) => r.key === site); if (row) setOpenState({ row, list: [row] }); }} className="shrink-0 text-[12px] font-bold text-teal-700 hover:underline">Ver detalle</button>
+            ) : (
+              <InfoTip title="Ranking del mes">
+                <P>Disponibilidad de cada {rankingLevel === "unget" ? "UNGET" : rankingLevel === "microred" ? "microred" : "establecimiento"} en el mes elegido, de mayor a menor, sobre las franjas de nivel. La línea punteada es el promedio de lo que se mira.</P>
+                <P>{rankingLevel === "site" ? "Toque un establecimiento para ver sus situaciones del mes." : "Toque una barra para bajar a ella."} Para volver, use la flecha o la ruta de arriba.</P>
+              </InfoTip>
+            )}
+          </div>
+          <p className="mb-2 text-[11.5px] font-semibold text-slate-400">{rankingSubtitle}{selMonth ? ` · ${monthName(selMonth)}` : ""}</p>
           {rankingLevel === "situations" ? (
             <SituationBars counts={situationCounts} />
           ) : (
-            <RankingBars items={rankingItems} average={currentPct} averageLabel={focusLabel} levelOf={levelOf} onPick={drill} />
+            <RankingBars items={rankingItems} average={currentPct} levels={formula.levels} levelOf={levelOf} onPick={drill} pickNote={rankingLevel === "site" ? "Clic para ver sus situaciones" : `Clic para ver sus ${rankingLevel === "unget" ? "microredes" : "establecimientos"}`} />
           )}
-        </ChartCard>
+        </section>
       </div>
 
       {table}
@@ -571,33 +600,79 @@ const FocusPicker: React.FC<{ value: string; label: string; groups: FocusGroup[]
 
 /* ---------------------------------------------------------------- Ranking del mes */
 
-const BAR_TONE: Record<DmeLevel, string> = { OPTIMO: "bg-emerald-500", ALTO: "bg-teal-500", REGULAR: "bg-amber-400", BAJO: "bg-red-400" };
-
 /**
- * Barras del mes de mayor a menor. Las filas reparten el alto de la tarjeta (sin espacio en
- * blanco debajo, pedido del usuario); si son muchas, la lista se desplaza dentro.
+ * Ranking del mes sobre las franjas de nivel (Bajo, Regular, Alto, Óptimo, las mismas del gráfico
+ * de evolución), con una sola línea punteada de promedio que atraviesa todas las barras y dice qué
+ * es. Las filas reparten el alto de la tarjeta (sin espacio en blanco); si son muchas, la lista se
+ * desplaza dentro.
  */
-const RankingBars: React.FC<{ items: Array<{ key: string; name: string; pct: number }>; average: number | null; averageLabel: string; levelOf: (v: number) => DmeLevel; onPick: (key: string) => void }> = ({ items, average, averageLabel, levelOf, onPick }) => {
+const RankingBars: React.FC<{
+  items: Array<{ key: string; name: string; pct: number }>;
+  average: number | null;
+  levels: { optimo: number; alto: number; regular: number };
+  levelOf: (v: number) => DmeLevel;
+  onPick: (key: string) => void;
+  pickNote: string;
+}> = ({ items, average, levels, levelOf, onPick, pickNote }) => {
+  const isDesktop = useIsDesktop();
+  const tip = useChartTip();
+  const [hoverKey, setHover] = useState<string | null>(null);
   if (!items.length) return <EmptyState title="Sin datos ese mes" />;
-  const min = Math.max(0, Math.floor((Math.min(...items.map((i) => i.pct), average ?? 100) - 10) / 10) * 10);
-  const x = (v: number) => `${Math.max(2, ((v - min) / (100 - min)) * 100)}%`;
+  // Al bajar de nivel la fila señalada desaparece sin «mouseleave»: no debe apagar las nuevas.
+  const hover = hoverKey && items.some((i) => i.key === hoverKey) ? hoverKey : null;
+  const min = Math.max(0, Math.min(levels.regular - 10, Math.floor((Math.min(...items.map((i) => i.pct), average ?? 100) - 5) / 10) * 10));
+  const pos = (v: number) => ((Math.max(min, Math.min(100, v)) - min) / (100 - min)) * 100;
+  const nameW = isDesktop ? 150 : 104;
+  const valueW = 48;
+  const bands: Array<[number, number, DmeLevel]> = ([[min, levels.regular, "BAJO"], [levels.regular, levels.alto, "REGULAR"], [levels.alto, levels.optimo, "ALTO"], [levels.optimo, 100, "OPTIMO"]] as Array<[number, number, DmeLevel]>).filter(([a, b]) => b > a && b > min);
+  const avgPos = average !== null ? pos(average) : null;
   return (
     <div className="flex flex-1 flex-col">
-      <div className="relative min-h-[230px] flex-1">
-        <div className="hide-scrollbar absolute inset-0 flex flex-col overflow-y-auto">
-          {items.map((i) => (
-            <button key={i.key} type="button" onClick={() => onPick(i.key)} title={`${i.name}: ${pctText(i.pct)}`} className="group flex min-h-[34px] flex-1 items-center gap-3 rounded-lg px-1 text-left hover:bg-slate-50">
-              <span className="w-[42%] shrink-0 truncate text-[12.5px] font-semibold text-slate-700 group-hover:text-teal-700 md:w-[150px]">{i.name}</span>
-              <span className="relative h-6 flex-1 rounded-md bg-slate-50">
-                <span className={`absolute inset-y-0 left-0 rounded-md ${BAR_TONE[levelOf(i.pct)]}`} style={{ width: x(i.pct) }} />
-                {average !== null && <span className="absolute inset-y-[-4px] border-l-2 border-dashed border-slate-400" style={{ left: x(average) }} />}
-              </span>
-              <span className="w-11 shrink-0 text-right font-mono text-[12.5px] font-bold text-slate-700">{i.pct.toFixed(1).replace(".", ",")}</span>
-            </button>
+      <div className="relative flex min-h-[240px] flex-1 flex-col">
+        {/* Franjas, etiquetas de nivel y línea de promedio: sobre la columna de las barras. */}
+        <div className="pointer-events-none absolute inset-y-0" style={{ left: nameW + 12, right: valueW + 12 }}>
+          {bands.map(([a, b, l]) => (
+            <div key={l} className="absolute bottom-6 top-7" style={{ left: `${pos(a)}%`, width: `${pos(b) - pos(a)}%`, background: LEVEL_SOFT[l] }} />
           ))}
+          {bands.map(([a, b, l]) => (
+            <span key={`t${l}`} className="absolute bottom-0 flex justify-center whitespace-nowrap text-[10px] font-bold md:text-[10.5px]" style={{ left: `${pos(a)}%`, width: `${pos(b) - pos(a)}%`, color: LEVEL_COLOR[l] }}>
+              {DME_LEVEL_LABEL[l]}
+            </span>
+          ))}
+          {avgPos !== null && (
+            <>
+              <div className="absolute bottom-6 top-7 border-l-2 border-dashed border-slate-500" style={{ left: `${avgPos}%` }} />
+              <span className="absolute top-0 whitespace-nowrap rounded-full bg-slate-800 px-2 py-0.5 text-[10.5px] font-bold text-white" style={{ left: `${avgPos}%`, transform: avgPos > 70 ? "translateX(-100%)" : avgPos < 30 ? "none" : "translateX(-50%)" }}>
+                Promedio {pctText(average!)}
+              </span>
+            </>
+          )}
+        </div>
+        <div className="hide-scrollbar absolute inset-x-0 bottom-6 top-7 flex flex-col overflow-y-auto">
+          {items.map((i, n) => {
+            const level = levelOf(i.pct);
+            const diff = average !== null ? i.pct - average : null;
+            const b = tip.bind(<TipBox title={i.name} color={LEVEL_COLOR[level]} rows={[["Disponibilidad", pctText(i.pct)], ["Nivel", DME_LEVEL_LABEL[level]], ...(diff !== null ? [["Frente al promedio", pp(diff)] as [string, string]] : []), ["Puesto", `${n + 1} de ${items.length}`]]} note={pickNote} />);
+            return (
+              <button
+                key={i.key}
+                type="button"
+                onClick={() => { tip.hide(); setHover(null); onPick(i.key); }}
+                onMouseMove={(e) => { b.onMouseMove(e); setHover(i.key); }}
+                onMouseLeave={() => { b.onMouseLeave(); setHover(null); }}
+                className="flex min-h-[32px] flex-1 items-center gap-3 text-left"
+              >
+                <span className={`shrink-0 truncate text-[12.5px] font-semibold ${hover === i.key ? "text-teal-700" : "text-slate-700"}`} style={{ width: nameW }}>{i.name}</span>
+                <span className="relative h-[18px] flex-1">
+                  <span className="absolute inset-y-0 left-0 rounded-r-[4px] transition-[filter]" style={{ width: `${Math.max(1.5, pos(i.pct))}%`, background: LEVEL_COLOR[level], filter: hover && hover !== i.key ? "saturate(0.35) opacity(0.6)" : undefined }} />
+                </span>
+                <span className="shrink-0 text-right font-mono text-[12.5px] font-bold text-slate-700" style={{ width: valueW }}>{i.pct.toFixed(1).replace(".", ",")}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
-      {average !== null && <p className="flex items-center gap-2 pt-2 text-[11.5px] text-slate-500"><span className="inline-block w-4 border-t-2 border-dashed border-slate-400" /><span className="truncate">{averageLabel} {pctText(average)}</span></p>}
+      {tip.layer}
     </div>
   );
 };

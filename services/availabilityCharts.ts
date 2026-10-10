@@ -24,7 +24,7 @@ export const CHART_COLORS = {
   line: "#E2E8F0",
   track: "#F1F5F9",
   level: { OPTIMO: "#059669", ALTO: "#0D9488", REGULAR: "#D97706", BAJO: "#DC2626" } as Record<string, string>,
-  zone: { OPTIMO: "#D1FAE5", ALTO: "#CCFBF1", REGULAR: "#FEF3C7", BAJO: "#FEE2E2" } as Record<string, string>,
+  zone: { OPTIMO: "#BBF7D0", ALTO: "#CFFAFE", REGULAR: "#FEF3C7", BAJO: "#FEE2E2" } as Record<string, string>,
   zoneText: { OPTIMO: "#047857", ALTO: "#0F766E", REGULAR: "#B45309", BAJO: "#B91C1C" } as Record<string, string>,
 };
 

@@ -13,7 +13,8 @@ import { useIsDesktop } from "./ui/useIsDesktop";
  */
 
 export const LEVEL_COLOR: Record<DmeLevel, string> = { OPTIMO: "#10b981", ALTO: "#0d9488", REGULAR: "#d97706", BAJO: "#dc2626" };
-export const LEVEL_SOFT: Record<DmeLevel, string> = { OPTIMO: "#d1fae5", ALTO: "#ccfbf1", REGULAR: "#fef3c7", BAJO: "#fee2e2" };
+// Fondos de las franjas de nivel: Óptimo (verde) y Alto (celeste) en tonos bien distintos, sin opacidad encima.
+export const LEVEL_SOFT: Record<DmeLevel, string> = { OPTIMO: "#bbf7d0", ALTO: "#cffafe", REGULAR: "#fef3c7", BAJO: "#fee2e2" };
 export const STATUS_COLOR: Record<StockStatus, string> = {
   [StockStatus.NORMOSTOCK]: "#10b981",
   [StockStatus.SOBRESTOCK]: "#3b82f6",
@@ -330,7 +331,7 @@ export const RankingChart: React.FC<{ rows: RankRow[]; levels: LevelThresholds; 
       <svg viewBox={`0 0 ${width} ${height}`} style={{ minWidth: Math.min(width, 900) }} className="w-full" role="img" aria-label="Ranking de establecimientos">
         {bands.map(([a, b, l]) => (
           <g key={l}>
-            <rect x={left} y={y(b)} width={width - left - right} height={Math.max(0, y(a) - y(b))} fill={LEVEL_SOFT[l]} opacity={0.75} />
+            <rect x={left} y={y(b)} width={width - left - right} height={Math.max(0, y(a) - y(b))} fill={LEVEL_SOFT[l]} />
             <text x={width - right + 8} y={(y(a) + y(b)) / 2} dominantBaseline="middle" className="text-[12px] font-bold" fill={LEVEL_COLOR[l]}>{labels[l]}</text>
           </g>
         ))}
@@ -419,7 +420,7 @@ export const HistoryChart: React.FC<{
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label={`Disponibilidad mes a mes, ${currentLabel} y ${previousLabel}`}>
         {bands.map(([a, b, l]) => (
           <g key={l}>
-            <rect x={left} y={y(b)} width={width - left - right} height={Math.max(0, y(a) - y(b))} fill={LEVEL_SOFT[l]} opacity={0.55} />
+            <rect x={left} y={y(b)} width={width - left - right} height={Math.max(0, y(a) - y(b))} fill={LEVEL_SOFT[l]} />
             {!compact && <text x={width - right + 8} y={(y(a) + y(b)) / 2} dominantBaseline="middle" className="text-[11.5px] font-bold" fill={LEVEL_COLOR[l]}>{levelLabels[l]}</text>}
           </g>
         ))}
