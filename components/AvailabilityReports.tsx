@@ -1347,7 +1347,7 @@ export const pp = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${formatOne
 export const LevelPct: React.FC<{ pct: number | null; levelOf: (v: number) => DmeLevel; dim?: boolean }> = ({ pct, levelOf, dim }) => {
   if (pct === null) return <span className="text-slate-300">—</span>;
   const l = levelOf(pct);
-  return <span className={`inline-block min-w-[54px] rounded-md px-1.5 py-0.5 text-center font-mono text-[12px] font-bold ${dim ? "opacity-60" : ""}`} style={{ background: LEVEL_SOFT[l], color: LEVEL_COLOR[l] }}>{pct.toFixed(1).replace(".", ",")}</span>;
+  return <span className={`inline-block min-w-[66px] whitespace-nowrap rounded-md px-1.5 py-0.5 text-center font-mono text-[12px] font-bold ${dim ? "opacity-60" : ""}`} style={{ background: LEVEL_SOFT[l], color: LEVEL_COLOR[l] }}>{pctText(pct)}</span>;
 };
 
 /** Variación en pp: verde si sube, rojo si baja. */
