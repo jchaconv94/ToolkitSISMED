@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArrowRight, ChevronDown, Boxes, Building2, CalendarClock, ChevronRight, PackageX, Download, RotateCcw, Repeat2, Store, TrendingUp, Warehouse, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, ChevronDown, Boxes, Building2, CalendarClock, ChevronRight, ListChecks, PackageX, Download, RotateCcw, Repeat2, Store, TrendingUp, Warehouse, X } from "lucide-react";
 import { StockStatus } from "../types";
 import type { DmeLevel } from "../services/stockStatus";
 import { formatOneDecimal } from "../services/stockStatus";
@@ -67,6 +67,12 @@ export interface ReportContext {
   setPlanEdits: React.Dispatch<React.SetStateAction<PlanEdits>>;
   /** Para el título de los Excel: «UNGET Bellavista · set 2026». */
   reportTitle: string;
+  /** Establecimientos fuera del análisis (2026-10-09), con su propio cálculo: se ven aparte. */
+  outside?: AvailabilityReport;
+  /** Abre «Establecimientos del análisis». */
+  editSites?: () => void;
+  /** El detalle abierto es de un establecimiento fuera del análisis. */
+  outsideDetail?: boolean;
 }
 
 /** Lo que el usuario cambió en una fila del plan: no distribuirla o la cantidad de cada fuente. */
@@ -806,6 +812,30 @@ export const EstablishmentsReport: React.FC<{
       )}
     />
       )}
+      {view === "eess" && ctx.outside && (
+        <ReportTable
+          title="Fuera del análisis"
+          info={<P>Establecimientos desmarcados en «Establecimientos del análisis»: no cuentan en la disponibilidad de la microred ni de la UNGET, ni en los demás reportes. Se calculan aparte, con la misma fórmula. Los centros de salud mental comunitario van fuera por omisión.</P>}
+          rows={ctx.outside.establishments}
+          minWidth={1150}
+          columns={eessColumns}
+          rowKey={(r) => r.code}
+          itemLabel="establecimientos"
+          onRowClick={(r) => ctx.openEstablishment(r.code)}
+          toolbar={ctx.editSites && (
+            <button type="button" onClick={ctx.editSites} className="flex h-9 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12.5px] font-bold text-slate-700 hover:bg-slate-50">
+              <ListChecks className="h-4 w-4" />Cambiar
+            </button>
+          )}
+          card={(e) => (
+            <>
+              <div className="flex items-center gap-2"><p className="min-w-0 flex-1 truncate text-[14px] font-bold text-slate-900">{e.name}</p><LevelChip level={e.level} /><ChevronRight className="h-4 w-4 text-slate-300" /></div>
+              <p className="text-[12px] text-slate-500">{e.code} · {e.microred}</p>
+              <div className="mt-2"><PctBar pct={e.pct} color={LEVEL_COLOR[e.level]} width="flex-1" /></div>
+            </>
+          )}
+        />
+      )}
     </div>
   );
 };
@@ -962,7 +992,10 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
         </button>
         <div className="flex flex-col gap-4 md:flex-row md:items-center">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2"><CodeChip code={e.code} /><LevelChip level={e.level} /><KindChip kind={pharmacyKind(e.code, ctx.facilityType(e.code))} /></div>
+            <div className="flex flex-wrap items-center gap-2">
+              <CodeChip code={e.code} /><LevelChip level={e.level} /><KindChip kind={pharmacyKind(e.code, ctx.facilityType(e.code))} />
+              {ctx.outsideDetail && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11.5px] font-bold text-slate-500">Fuera del análisis</span>}
+            </div>
             {siblings.length > 0 && parent ? (
               <PharmacyTitleMenu
                 title={e.name}
@@ -1206,7 +1239,10 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
       <aside role="dialog" aria-label={item.description} className="flex h-full w-full flex-col bg-white shadow-2xl animate-in slide-in-from-right duration-200 md:w-[620px]">
         <div className="flex items-start gap-3 border-b border-slate-200 px-4 py-3.5 md:px-5">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2"><CodeChip code={item.medCode} /><StatusPill status={item.status} /></div>
+            <div className="flex flex-wrap items-center gap-2">
+              <CodeChip code={item.medCode} /><StatusPill status={item.status} />
+              {item.largeVolume && <span title="Ficha 28: una solución de 1 L o más cuenta como disponible desde menos meses de existencia (Configuración › Gran volumen)" className="rounded-full bg-sky-50 px-2 py-0.5 text-[11.5px] font-bold text-sky-700">Gran volumen</span>}
+            </div>
             <h3 className="mt-1 text-[16px] font-black leading-snug text-slate-900">{item.description}</h3>
             <p className="truncate text-[12.5px] text-slate-500">{item.name} · {item.microred}</p>
           </div>
@@ -1308,7 +1344,7 @@ export const pp = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${formatOne
 export const LevelPct: React.FC<{ pct: number | null; levelOf: (v: number) => DmeLevel; dim?: boolean }> = ({ pct, levelOf, dim }) => {
   if (pct === null) return <span className="text-slate-300">—</span>;
   const l = levelOf(pct);
-  return <span className={`inline-block min-w-[54px] rounded-md px-1.5 py-0.5 text-center font-mono text-[12px] font-bold ${dim ? "opacity-60" : ""}`} style={{ background: LEVEL_SOFT[l], color: LEVEL_COLOR[l] }}>{dec(pct)}</span>;
+  return <span className={`inline-block min-w-[54px] rounded-md px-1.5 py-0.5 text-center font-mono text-[12px] font-bold ${dim ? "opacity-60" : ""}`} style={{ background: LEVEL_SOFT[l], color: LEVEL_COLOR[l] }}>{pct.toFixed(1).replace(".", ",")}</span>;
 };
 
 /** Variación en pp: verde si sube, rojo si baja. */
@@ -1880,8 +1916,9 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   const { planEdits: edits, setPlanEdits: setEdits } = ctx;
   const views: PlanView[] = useMemo(() => plan.rows.map((r) => {
     const e = edits[r.key];
-    // Fuentes de la sugerencia más las que el usuario agregó desde el panel.
-    const extra = Object.keys(e?.qty ?? {}).filter((k) => !r.sources.some((x) => x.pool === k)).map((k) => ({ pool: k, qty: 0 }));
+    // Fuentes de la sugerencia más las que el usuario agregó desde el panel (si siguen existiendo:
+    // un establecimiento que luego quedó fuera del análisis ya no es fuente).
+    const extra = Object.keys(e?.qty ?? {}).filter((k) => !!plan.pools[k] && !r.sources.some((x) => x.pool === k)).map((k) => ({ pool: k, qty: 0 }));
     const sources = [...r.sources, ...extra].map((x) => ({ ...x, qty: e?.qty?.[x.pool] ?? x.qty }));
     const covered = sources.reduce((a, x) => a + x.qty, 0);
     return { ...r, sources, excluded: !!e?.excluded, covered, short: Math.max(0, r.need - covered) };

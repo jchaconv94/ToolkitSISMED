@@ -101,6 +101,8 @@ export interface AvailabilityItem extends AvailabilityRow {
    * de lo dispensado; `cpa` lleva entonces también lo que entrega a sus puestos.
    */
   dispensedCpa?: number;
+  /** Solución de gran volumen clasificada con su propio límite (ficha 28, consideración a). */
+  largeVolume?: boolean;
 }
 
 export interface StatusCounts {
@@ -385,9 +387,35 @@ export interface ClassifyOptions {
   truncate: boolean;
   subMax: number;
   sobreMin: number;
+  /**
+   * Soluciones de gran volumen (1 L o más): disponibles desde estos meses (ficha 28,
+   * consideración a: «la disponibilidad se considera con un mes de existencia disponible»).
+   * Sin valor, la regla no se aplica.
+   */
+  largeVolumeMonths?: number;
 }
 
 export const DEFAULT_CLASSIFY: ClassifyOptions = { truncate: false, subMax: 2, sobreMin: 6 };
+
+/**
+ * Litros de la presentación, si la descripción la trae: «SODIO CLORURO 1 L 900 mg/100 mL» → 1,
+ * «DEXTROSA - 5 g/100 mL (5 %) - 1 L - INYECT» → 1, «… 100 mL …» → 0,1. Las concentraciones
+ * («mg/100 mL») no cuentan. Si hay varias, la mayor.
+ */
+export const presentationLiters = (description?: string): number | null => {
+  if (!description) return null;
+  let best: number | null = null;
+  const re = /(^|[^/\d.,])(\d+(?:[.,]\d+)?)\s*(mL|L)\b/gi;
+  for (let m = re.exec(description); m; m = re.exec(description)) {
+    const v = parseFloat(m[2].replace(",", "."));
+    const liters = m[3].toLowerCase() === "ml" ? v / 1000 : v;
+    if (best === null || liters > best) best = liters;
+  }
+  return best;
+};
+
+/** Presentación de 1 L o más (en el cálculo, solo cuenta para medicamentos: MEDTIP «M»). */
+export const isLargeVolume = (description?: string) => (presentationLiters(description) ?? 0) >= 1;
 
 /** Situación de un producto con los límites configurados. */
 export const classifyAvailability = (stock: number, cpa: number, opts: ClassifyOptions = DEFAULT_CLASSIFY): { months: number; status: StockStatus } => {
@@ -414,15 +442,18 @@ export const buildItems = (rows: AvailabilityRow[], lots?: Map<string, Lot[]>, t
     }
   }
   const lotsOf = (code: string, medCode: string) => [...(lots?.get(`${code}|${medCode}`) || []), ...(byIpress.get(`${code}|${medCode}`) || [])];
+  const lvOpts = opts.largeVolumeMonths !== undefined ? { ...opts, subMax: Math.min(opts.subMax, opts.largeVolumeMonths) } : null;
   return rows.map((r) => {
     const cpa = averageConsumption(r.consumption);
-    const { months, status } = classifyAvailability(r.stock, cpa, opts);
+    // Solo medicamentos: la ficha habla de «un medicamento que corresponde a una solución».
+    const largeVolume = !!lvOpts && r.medtip === "M" && isLargeVolume(r.description);
+    const { months, status } = classifyAvailability(r.stock, cpa, largeVolume ? lvOpts! : opts);
     const codes = r.fusedFrom?.length ? r.fusedFrom : [r.medCode];
     const list = lots ? codes.flatMap((med) => lotsOf(r.code, med)).sort(byExpiry) : [];
     const nearestExpiry = list.find((l) => l.expiry)?.expiry ?? null;
     const monthsToExpiry = nearestExpiry ? wholeMonthsBetween(today, nearestExpiry) : null;
     const expiryRisk = monthsToExpiry !== null && Number.isFinite(months) && r.stock > 0 && months > monthsToExpiry;
-    return { ...r, cpa, months, status, nearestExpiry, lots: list, monthsToExpiry, expiryRisk };
+    return { ...r, cpa, months, status, nearestExpiry, lots: list, monthsToExpiry, expiryRisk, ...(largeVolume ? { largeVolume } : {}) };
   });
 };
 

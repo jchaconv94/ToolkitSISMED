@@ -23,6 +23,11 @@ export interface ScopeRule {
   substock: boolean;
   /** En «todos los productos» solo «no» o «yes»; en la DME también «vital». */
   sinRotacion: SinRotacionRule;
+  /**
+   * Soluciones de gran volumen (1 L o más) disponibles desde `largeVolumeMonths` (ficha 28,
+   * consideración a). De fábrica, solo en la DME.
+   */
+  largeVolume?: boolean;
 }
 
 export interface AvailabilityFormula {
@@ -34,17 +39,20 @@ export interface AvailabilityFormula {
   subMax: number;
   /** Sobrestock por encima de estos meses. */
   sobreMin: number;
+  /** Soluciones de gran volumen: Normostock desde estos meses (la ficha 28 dice 1). */
+  largeVolumeMonths: number;
   levels: { optimo: number; alto: number; regular: number };
   /** Microred y UNGET: promedio de sus establecimientos o suma de sus ítems. */
   aggregate: "average" | "sum";
 }
 
 export const DEFAULT_AVAILABILITY_FORMULA: AvailabilityFormula = {
-  all: { normostock: true, sobrestock: true, substock: false, sinRotacion: "no" },
-  essential: { normostock: true, sobrestock: true, substock: false, sinRotacion: "vital" },
+  all: { normostock: true, sobrestock: true, substock: false, sinRotacion: "no", largeVolume: false },
+  essential: { normostock: true, sobrestock: true, substock: false, sinRotacion: "vital", largeVolume: true },
   truncate: false,
   subMax: 2,
   sobreMin: 6,
+  largeVolumeMonths: 1,
   levels: { optimo: 90, alto: 80, regular: 70 },
   aggregate: "average",
 };
@@ -78,7 +86,10 @@ const bool = (v: unknown, fallback: boolean) => (typeof v === "boolean" ? v : fa
 const rule = (v: unknown, fallback: ScopeRule, allowVital: boolean): ScopeRule => {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
   const sr = o.sinRotacion === "yes" || o.sinRotacion === "no" || (allowVital && o.sinRotacion === "vital") ? (o.sinRotacion as SinRotacionRule) : fallback.sinRotacion;
-  return { normostock: bool(o.normostock, fallback.normostock), sobrestock: bool(o.sobrestock, fallback.sobrestock), substock: bool(o.substock, fallback.substock), sinRotacion: sr };
+  return {
+    normostock: bool(o.normostock, fallback.normostock), sobrestock: bool(o.sobrestock, fallback.sobrestock), substock: bool(o.substock, fallback.substock), sinRotacion: sr,
+    largeVolume: bool(o.largeVolume, !!fallback.largeVolume),
+  };
 };
 
 /** Normaliza lo que llega de la base: cualquier campo raro vuelve al de fábrica. */
@@ -97,6 +108,8 @@ export const normalizeFormula = (value: unknown): AvailabilityFormula => {
     truncate: bool(o.truncate, d.truncate),
     subMax,
     sobreMin,
+    // Una fórmula guardada antes del 2026-10-09 no lo trae: vale la de la ficha 28.
+    largeVolumeMonths: Math.min(subMax, num(o.largeVolumeMonths, d.largeVolumeMonths, 0, 24)),
     levels: { optimo, alto, regular },
     aggregate: o.aggregate === "sum" ? "sum" : "average",
   };
@@ -229,8 +242,16 @@ export const availabilityConfigApi = {
 
 /* ------------------------------------------------------------ Uso en el cálculo */
 
-/** Límites de la situación según la fórmula. */
-export const classifyOptionsOf = (f: AvailabilityFormula) => ({ truncate: f.truncate, subMax: f.subMax, sobreMin: f.sobreMin });
+/** Límites de la situación según la fórmula, para una vista (la regla de gran volumen va por vista). */
+export const classifyOptionsOf = (f: AvailabilityFormula, scope: "all" | "essential") => ({
+  truncate: f.truncate,
+  subMax: f.subMax,
+  sobreMin: f.sobreMin,
+  ...((scope === "all" ? f.all : f.essential).largeVolume ? { largeVolumeMonths: f.largeVolumeMonths } : {}),
+});
+
+/** «1 mes», «1,5 meses». */
+const monthsText = (n: number) => `${String(n).replace(".", ",")} ${n === 1 ? "mes" : "meses"}`;
 
 /** Opciones del resumen para una vista (todos los productos o DME). */
 export const summaryOptionsOf = (f: AvailabilityFormula, scope: "all" | "essential", vitals: ReadonlySet<string>) => ({
@@ -245,5 +266,6 @@ export const describeFormula = (f: AvailabilityFormula, scope: "all" | "essentia
   const r = scope === "all" ? f.all : f.essential;
   const parts = [r.normostock && "Normostock", r.sobrestock && "Sobrestock", r.substock && "Substock", r.sinRotacion === "yes" ? "Sin rotación" : r.sinRotacion === "vital" ? "Sin rotación de vitales" : null].filter(Boolean);
   const agg = f.aggregate === "sum" ? "suma de sus ítems" : "promedio de sus establecimientos";
-  return `Disponibilidad = (${parts.join(" + ") || "nada"}) ÷ total de ítems${r.sinRotacion === "vital" ? " (los demás sin rotación no se evalúan)" : ""} · meses ${f.truncate ? "cortados a un decimal" : "sin cortar"} · Substock < ${f.subMax}, Sobrestock > ${f.sobreMin} · microred y UNGET: ${agg}.`;
+  const lv = r.largeVolume ? ` · soluciones de 1 L o más: Normostock desde ${monthsText(Math.min(f.subMax, f.largeVolumeMonths))}` : "";
+  return `Disponibilidad = (${parts.join(" + ") || "nada"}) ÷ total de ítems${r.sinRotacion === "vital" ? " (los demás sin rotación no se evalúan)" : ""} · meses ${f.truncate ? "cortados a un decimal" : "sin cortar"} · Substock < ${f.subMax}, Sobrestock > ${f.sobreMin}${lv} · microred y UNGET: ${agg}.`;
 };

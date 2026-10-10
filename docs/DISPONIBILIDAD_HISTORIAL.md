@@ -22,6 +22,12 @@ de consumo, y el usuario pidió que el consumo sea siempre de 12 meses.
   calcula como si fuera el corte, con su stock al cierre (`stockByMonth`) y su ventana de 12 meses
   (`rowsAtMonth`). Una prueba comprueba que el corte calculado así da lo mismo que el tablero.
 
+- **Establecimientos fuera del análisis** (2026-10-09): la lista personal de «Establecimientos
+  del análisis» (⋯) aparta establecimientos de los indicadores, los gráficos y las microredes;
+  se ven en su propia tabla «Fuera del análisis». Solo cambia cómo se muestra: el historial
+  guarda todos los establecimientos, así que volver a marcar uno lo trae sin guardar otra vez.
+  Los centros de salud mental comunitario van fuera por omisión.
+
 ## Qué se guarda
 
 Tabla `availability_history` (`supabase/SUPABASE_DISPONIBILIDAD_HISTORIAL.sql`): una fila por
@@ -63,6 +69,7 @@ botón.
 | Se guardó mal | «Meses guardados» → quitar el mes, con confirmación (solo lo de la propia jurisdicción). |
 | Relleno hacia atrás sobre meses ya guardados | Por omisión solo se marcan los meses vacíos; los guardados muestran quién los guardó y se reemplazan solo si se marcan. |
 | Cambia la fórmula | Lo que se recalcula cambia en todos los meses; lo demás queda anotado por mes. |
+| Cambia la regla de gran volumen (ficha 28, 2026-10-09) | Cambia la situación de algunos productos, que se guarda ya contada: los meses guardados antes no la aplican. Se corrige guardando otra vez el mes (o el relleno hacia atrás) con el TFORMDET. |
 | Un establecimiento cambia de microred o UNGET | Se agrupa con el registro actual; la nueva UNGET ve su historia. |
 | Un establecimiento sale del registro | Su historial no se borra; lo ve la DIRESA. |
 | Meses sin guardar o incompletos | La línea se corta en un mes sin guardar; un mes con menos establecimientos va con punto hueco ámbar, y el indicador dice «N de M». |

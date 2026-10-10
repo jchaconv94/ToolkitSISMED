@@ -196,7 +196,11 @@ tablero (33 establecimientos, 84,04 %), establecimiento por establecimiento:
    historial se recalcula solo: cada mes guarda aparte sus sin rotación vitales.
 2. **El C.S.M.C. Bellavista (31456) no está en el tablero nacional** (el usuario: «no se
    considera a salud mental»). Su porcentaje está cerca del promedio, así que no explica la
-   diferencia; queda por decidir si se excluye.
+   diferencia. La ficha no excluye a los centros de salud mental (entran «los EE.SS.
+   registrados en RENIPRESS y en el Catálogo de prestadores del SISMED»). **Decisión del
+   usuario (2026-10-09):** una lista personal, «Establecimientos del análisis», para dejar
+   establecimientos fuera; los C.S.M.C. van fuera por omisión y se ven aparte
+   (`services/availabilitySites.ts`).
 3. **Medicamentos que la web cuenta y el nacional no.** En casi todos los establecimientos la
    web tiene ~6 normostock y ~2 desabastecidos más. Los que aparecen en todos o casi todos y
    el nacional no cuenta: betametasona crema 20 g, clorfenamina 4 mg, sodio cloruro 0,9 %
@@ -205,4 +209,28 @@ tablero (33 establecimientos, 84,04 %), establecimiento por establecimiento:
    ellos, agosto da 83,5 %. Pueden ser la exclusión por intervención estratégica (listado de
    DGIESP) o un listado de fusionados distinto; **no se aplicó**: falta el listado oficial.
 
-Quedan 1,4 puntos (82,7 % frente a 84,04 %) que dependen del punto 3.
+4. **Soluciones de gran volumen (corregido).** La ficha (consideración a) dice: «Para un
+   medicamento que corresponde a una solución de gran volumen (igual o mayor 1 litro) la
+   disponibilidad se considera con un mes de existencia disponible». La web no lo aplicaba.
+   Ahora un medicamento (MEDTIP «M») de 1 L o más es Normostock desde 1 mes, solo en la DME de
+   fábrica; se reconoce por la presentación en la descripción («SODIO CLORURO 1 L…»,
+   `presentationLiters`) y se configura en la pestaña «Gran volumen» de Configuración. Agosto
+   pasa de 82,67 % a 83,17 % (17 ítems cambian; tres de los nueve del punto 3 son yodo
+   povidona de 1 L). Los meses del historial guardados antes de este cambio no la aplican:
+   hay que volver a guardarlos con el TFORMDET.
+
+**Investigación del listado de DGIESP (2026-10-09).** La ficha 28 (el PDF que pasó el usuario,
+firmado el 18/12/2025) dice: «Medicamento que corresponde a la atención exclusiva para
+Intervención Estratégica de Salud Pública. Basado en el listado comunicado por DGIESP, que
+corresponden a un medicamento que cubre al 100% de la población, no aplica cuando cubre solo
+un grupo etáreo (exclusión automática para todos los EESS evaluados)». El listado se
+«comunica»: no está publicado en las páginas de DIGEMID, DGIESP ni CENARES. En el TFORMDET de
+Bellavista los nueve medicamentos del punto 3 salen casi todo por SIS y casi nada por INTERSAN,
+así que tampoco se puede deducir de los datos. Hay que pedirlo a DIGEMID o al responsable SISMED
+de la DIRESA.
+
+**Lo que falta.** Con las dos reglas quedan 0,87 puntos (83,17 % frente a 84,04 %). El nacional
+evalúa unos 11 ítems menos por establecimiento: 3 247 frente a 3 606 en los 33 (por ejemplo,
+P.S. Fausa Lamista 06499: 92 frente a 101), la mayoría en Normostock. Para saber cuáles hace
+falta el detalle por producto de un establecimiento del tablero nacional; el usuario lo va a
+descargar.

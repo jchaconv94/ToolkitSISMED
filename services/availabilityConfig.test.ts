@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_AVAILABILITY_FORMULA, diffFusedGroups, normalizeFormula, normalizeFusedCatalog, parseFusedCodesSheet } from "./availabilityConfig";
+import { DEFAULT_AVAILABILITY_FORMULA, classifyOptionsOf, describeFormula, diffFusedGroups, normalizeFormula, normalizeFusedCatalog, parseFusedCodesSheet } from "./availabilityConfig";
 import { DEFAULT_VITAL_PRODUCTS } from "./vitalProducts";
 
 describe("configuración de disponibilidad", () => {
@@ -39,5 +39,19 @@ describe("configuración de disponibilidad", () => {
   it("los 114 vitales de la RM 1288-2018", () => {
     expect(DEFAULT_VITAL_PRODUCTS).toHaveLength(114);
     expect(DEFAULT_VITAL_PRODUCTS.find((v) => v.n === 14)!.codes).toEqual(["00910"]);
+  });
+
+  it("gran volumen (ficha 28, consideración a): de fábrica solo en la DME, desde 1 mes", () => {
+    // Una fórmula guardada antes de la regla no la trae: vale la de la ficha 28.
+    const old = normalizeFormula({ all: { normostock: true }, essential: { sinRotacion: "vital" }, subMax: 2, sobreMin: 6 });
+    expect(old.essential.largeVolume).toBe(true);
+    expect(old.all.largeVolume).toBe(false);
+    expect(old.largeVolumeMonths).toBe(1);
+    // Nunca por encima del límite de Substock.
+    expect(normalizeFormula({ subMax: 2, largeVolumeMonths: 5 }).largeVolumeMonths).toBe(2);
+    expect(classifyOptionsOf(old, "essential").largeVolumeMonths).toBe(1);
+    expect(classifyOptionsOf(old, "all").largeVolumeMonths).toBeUndefined();
+    expect(describeFormula(old, "essential")).toMatch(/soluciones de 1 L o más: Normostock desde 1 mes/);
+    expect(describeFormula(old, "all")).not.toMatch(/1 L/);
   });
 });
