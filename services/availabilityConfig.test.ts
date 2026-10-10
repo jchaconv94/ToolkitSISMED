@@ -61,6 +61,10 @@ describe("configuración de disponibilidad", () => {
     expect(old.largeVolumeAdd).toEqual([]);
     expect(classifyOptionsOf(manual, "essential").largeVolumeAdd).toEqual(["08166", "05873", "06517"]);
     expect(describeFormula(manual, "essential")).toMatch(/3 agregados a mano/);
+    // Nombres cambiados a mano de los reconocidos por la presentación: con sus ceros y sin vacíos.
+    expect(old.largeVolumeNames).toEqual({});
+    expect(normalizeFormula({ largeVolumeNames: { "3789": " DEXTROSA 5 % 1 L ", "08166": "", "05598": 7 } }).largeVolumeNames).toEqual({ "03789": "DEXTROSA 5 % 1 L" });
+    expect(normalizeFormula({ largeVolumeNames: ["03789"] }).largeVolumeNames).toEqual({});
   });
 
   it("excluidos de la DME: la lista de fábrica si no hay una guardada; una vacía se respeta", () => {
