@@ -292,4 +292,21 @@ describe("soluciones de gran volumen (ficha 28, consideración a)", () => {
     expect(without.map((i) => i.status)).toEqual([StockStatus.SUBSTOCK, StockStatus.SUBSTOCK, StockStatus.SUBSTOCK, StockStatus.SUBSTOCK]);
     expect(without.some((i) => i.largeVolume)).toBe(false);
   });
+
+  it("se corrige a mano: agregar uno sin volumen en la descripción y quitar uno reconocido", () => {
+    const base = { code: "06499", ipressCode: "06499", name: "P.S. A", microred: "MR", red: "R", category: "I-2", price: 1, medtip: "M", medpet: "P", medest: "S", consumption: [10, 10], stock: 15 };
+    const rows = [
+      { ...base, medCode: "05873", description: "SODIO CLORURO 1 L 900 mg/100 mL (0.9 %)" },
+      { ...base, medCode: "99999", description: "SOLUCION SIN VOLUMEN EN LA DESCRIPCION" },
+      { ...base, medCode: "03789", description: "DEXTROSA 5 %", fusedFrom: ["03789", "03794"] },
+    ] as any[];
+    const opts = { truncate: false, subMax: 2, sobreMin: 6, largeVolumeMonths: 1, largeVolumeAdd: ["99999", "03794"], largeVolumeSkip: ["05873"] };
+    const items = buildItems(rows, undefined, new Date(), opts);
+    expect(items.map((i) => [i.medCode, i.status, !!i.largeVolume])).toEqual([
+      ["05873", StockStatus.SUBSTOCK, false], // quitado a mano
+      ["99999", StockStatus.NORMOSTOCK, true], // agregado a mano
+      ["03789", StockStatus.NORMOSTOCK, true], // agregado por uno de sus códigos fusionados
+    ]);
+  });
 });
+

@@ -7,7 +7,7 @@ import {
   type AvailabilityConfig, type AvailabilityFormula, type FusedCatalog, type FusedGroups, type ScopeRule, type SinRotacionRule,
 } from "../services/availabilityConfig";
 import { StockStatus } from "../types";
-import { buildItems, essentialRows, isLargeVolume, summarize, type AvailabilityRow, type Lot } from "../services/availabilityReport";
+import { buildItems, essentialRows, largeVolumeRow, summarize, type AvailabilityRow, type Lot } from "../services/availabilityReport";
 import type { VitalProduct } from "../services/vitalProducts";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
 import { TableSearch, inputClass } from "./ui/kit";
@@ -163,50 +163,115 @@ const FormulaTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Availab
 
 /* ------------------------------------------------------------------ Gran volumen */
 
+type LvOrigin = "detected" | "added" | "skipped";
+const LV_ORIGIN: Record<LvOrigin, { label: string; className: string }> = {
+  detected: { label: "Presentación", className: "bg-sky-50 text-sky-700" },
+  added: { label: "Agregado", className: "bg-teal-50 text-teal-700" },
+  skipped: { label: "Quitado", className: "bg-slate-100 text-slate-500" },
+};
+
+/** Texto de la ficha y cómo se aplica: va en la columna derecha (y arriba en el celular). */
+const LargeVolumeNote: React.FC<{ months: number; className?: string }> = ({ months, className = "" }) => (
+  <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${className}`}>
+    <p className="flex items-center gap-2 text-[13px] font-bold text-slate-900"><Droplets className="h-4 w-4 shrink-0 text-sky-700" />Ficha 28 · Consideraciones</p>
+    <p className="mt-2 text-[12px] italic leading-relaxed text-slate-600">«Para un medicamento que corresponde a una solución de gran volumen (igual o mayor 1 litro) la disponibilidad se considera con un mes de existencia disponible.»</p>
+    <p className="mt-2 text-[12px] leading-relaxed text-slate-500">Se reconocen solos los medicamentos con 1 L o más en la presentación, como «SODIO CLORURO 1 L». Con la regla, desde {monthsLabel(months)} de existencia cuentan como Normostock. Si a uno le falta el volumen en la descripción, se agrega a mano; si uno no corresponde, se quita.</p>
+  </div>
+);
+
+/** Agregar a mano códigos de gran volumen (su descripción no dice el volumen). */
+const AddLargeVolumeDialog: React.FC<{ open: boolean; onClose: () => void; nameOf: (code: string) => string | undefined; onAdd: (codes: string[]) => void }> = ({ open, onClose, nameOf, onAdd }) => {
+  const [value, setValue] = useState("");
+  useEffect(() => { if (open) setValue(""); }, [open]);
+  const codes = [...new Set(value.split(/[\s,;]+/).map(padCode).filter(Boolean))];
+  return (
+    <ResponsiveDialog open={open} onClose={onClose} title="Agregar medicamentos" subtitle="Soluciones de gran volumen cuya descripción no dice el volumen"
+      footer={<><button type="button" onClick={onClose} className={`${dialogSecondaryButton} md:ml-auto`}>Cancelar</button><button type="button" disabled={!codes.length} onClick={() => onAdd(codes)} className={`${dialogPrimaryButton} md:!ml-0`}><Plus className="h-4 w-4" />Agregar{codes.length > 1 ? ` ${codes.length}` : ""}</button></>}>
+      <label className="block">
+        <span className="mb-1.5 block text-[12.5px] font-bold text-slate-700">Códigos SISMED</span>
+        <textarea autoFocus value={value} onChange={(e) => setValue(e.target.value)} rows={3} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-[13px] outline-none focus:border-teal-500" placeholder="05873, 08166" />
+        <span className="mt-1 block text-[12px] text-slate-500">Separados por coma o espacio.</span>
+      </label>
+      {codes.length > 0 && (
+        <div className="mt-4 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
+          {codes.map((c) => (
+            <div key={c} className="flex items-center gap-3 px-3 py-2.5 text-[13px]">
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{c}</span>
+              <span className={`min-w-0 flex-1 truncate ${nameOf(c) ? "font-semibold text-slate-800" : "text-slate-400"}`}>{nameOf(c) || "No está en el archivo cargado"}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </ResponsiveDialog>
+  );
+};
+
 /**
  * Soluciones de gran volumen (ficha 28, consideración a): se reconocen solas por la presentación
- * de la descripción (1 L o más) y se clasifican con su propio límite de Normostock.
+ * de la descripción (1 L o más) y se clasifican con su propio límite de Normostock. La lista se
+ * corrige a mano: agregar los que no dicen el volumen y quitar los que no corresponden.
  */
 const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: AvailabilityFormula) => void; preview: Preview; rows: AvailabilityRow[] | null; groups: FusedGroups }> = ({ formula: f, onChange, preview, rows, groups }) => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [adding, setAdding] = useState(false);
   const months = Math.min(f.subMax, f.largeVolumeMonths);
-  // Productos de 1 L o más de la DME (o de todos, si la DME no se puede calcular) en el archivo
-  // cargado: en cuántos establecimientos están y en cuántos pasan a Normostock con la regla.
-  const products = useMemo(() => {
+  const add = useMemo(() => new Set(f.largeVolumeAdd), [f.largeVolumeAdd]);
+  const skip = useMemo(() => new Set(f.largeVolumeSkip), [f.largeVolumeSkip]);
+  // Filas del archivo cargado: las de la DME, o las de todos los productos si no hay clasificación.
+  const source = useMemo(() => {
     if (!rows) return null;
-    // Solo medicamentos (MEDTIP «M»): sin la clasificación del Toolkit 2.2.5 no se puede saber cuáles son.
-    if (!rows.some((r) => r.medtip)) return { list: [], dme: false, classified: false };
     const dme = essentialRows(rows, groups);
-    const source = (dme.length ? dme : rows.filter((r) => r.medtip === "M")).filter((r) => isLargeVolume(r.description));
-    const base = { truncate: f.truncate, subMax: f.subMax, sobreMin: f.sobreMin };
-    const without = buildItems(source, undefined, new Date(), base);
-    const withRule = buildItems(source, undefined, new Date(), { ...base, largeVolumeMonths: f.largeVolumeMonths });
-    const by = new Map<string, { code: string; name: string; sites: number; changed: number }>();
-    without.forEach((it, i) => {
-      const e = by.get(it.medCode) || { code: it.medCode, name: it.description, sites: 0, changed: 0 };
-      e.sites++;
-      if (it.status === StockStatus.SUBSTOCK && withRule[i].status === StockStatus.NORMOSTOCK) e.changed++;
-      by.set(it.medCode, e);
-    });
-    return { list: [...by.values()].sort((a, b) => b.changed - a.changed || a.name.localeCompare(b.name, "es")), dme: dme.length > 0, classified: true };
-  }, [rows, groups, f.truncate, f.subMax, f.sobreMin, f.largeVolumeMonths]);
+    return { rows: dme.length ? dme : rows, dme: dme.length > 0, classified: rows.some((r) => r.medtip) };
+  }, [rows, groups]);
+  // Cada medicamento de gran volumen (reconocido, agregado o quitado): en cuántos establecimientos
+  // está y en cuántos pasa de Substock a Normostock con la regla.
+  const list = useMemo(() => {
+    const by = new Map<string, { code: string; name: string; origin: LvOrigin; sites: number; changed: number }>();
+    if (source) {
+      const candidates = source.rows.filter((r) => largeVolumeRow(r, add, new Set()) );
+      const base = { truncate: f.truncate, subMax: f.subMax, sobreMin: f.sobreMin };
+      const without = buildItems(candidates, undefined, new Date(), base);
+      const withRule = buildItems(candidates, undefined, new Date(), { ...base, largeVolumeMonths: f.largeVolumeMonths, largeVolumeAdd: f.largeVolumeAdd, largeVolumeSkip: f.largeVolumeSkip });
+      without.forEach((it, i) => {
+        const origin: LvOrigin = skip.has(it.medCode) ? "skipped" : add.has(it.medCode) || it.fusedFrom?.some((c) => add.has(c)) ? "added" : "detected";
+        const e = by.get(it.medCode) || { code: it.medCode, name: it.description, origin, sites: 0, changed: 0 };
+        e.sites++;
+        if (it.status === StockStatus.SUBSTOCK && withRule[i].status === StockStatus.NORMOSTOCK) e.changed++;
+        by.set(it.medCode, e);
+      });
+    }
+    // Los agregados a mano que no están en el archivo también se ven, para poder quitarlos.
+    const fused = new Set([...by.values()].flatMap((e) => groups[e.code]?.codes ?? []));
+    for (const c of f.largeVolumeAdd) if (!by.has(c) && !fused.has(c)) by.set(c, { code: c, name: groups[c]?.name || "", origin: "added", sites: 0, changed: 0 });
+    // Sin reordenar por origen: al quitar uno, su fila se queda donde estaba.
+    return [...by.values()].sort((a, b) => b.changed - a.changed || a.name.localeCompare(b.name, "es"));
+  }, [source, groups, add, skip, f.truncate, f.subMax, f.sobreMin, f.largeVolumeMonths, f.largeVolumeAdd, f.largeVolumeSkip]);
+  const nameOf = (code: string) => source?.rows.find((r) => r.medCode === code || r.fusedFrom?.includes(code))?.description || groups[code]?.name;
   const q = norm(search.trim());
-  const shown = (products?.list ?? []).filter((p) => !q || norm(`${p.code} ${p.name}`).includes(q));
+  const shown = list.filter((p) => !q || norm(`${p.code} ${p.name}`).includes(q));
   useEffect(() => setPage(1), [q]);
-  const changed = (products?.list ?? []).reduce((a, p) => a + p.changed, 0);
+  const changed = list.reduce((a, p) => a + (p.origin === "skipped" ? 0 : p.changed), 0);
+  const active = list.filter((p) => p.origin !== "skipped").length;
   const setRule = (scope: "all" | "essential", v: boolean) => onChange({ ...f, [scope]: { ...f[scope], largeVolume: v } });
+  const setLists = (nextAdd: string[], nextSkip: string[]) => onChange({ ...f, largeVolumeAdd: [...new Set(nextAdd)].sort(), largeVolumeSkip: [...new Set(nextSkip)].sort() });
+  const action = (p: (typeof list)[number]) =>
+    p.origin === "detected" ? (
+      <button type="button" onClick={() => setLists(f.largeVolumeAdd, [...f.largeVolumeSkip, p.code])} aria-label={`Quitar ${p.code}`} title="No contarlo como gran volumen" className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 [display:inline-grid]"><Trash2 className="h-4 w-4" /></button>
+    ) : p.origin === "skipped" ? (
+      <button type="button" onClick={() => setLists(f.largeVolumeAdd, f.largeVolumeSkip.filter((c) => c !== p.code))} aria-label={`Volver a contar ${p.code}`} title="Volver a contarlo" className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 [display:inline-grid]"><RotateCcw className="h-4 w-4" /></button>
+    ) : (
+      <button type="button" onClick={() => setLists(f.largeVolumeAdd.filter((c) => c !== p.code && !groups[p.code]?.codes.includes(c)), f.largeVolumeSkip)} aria-label={`Quitar ${p.code}`} title="Quitar de la lista" className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 [display:inline-grid]"><Trash2 className="h-4 w-4" /></button>
+    );
+  const empty = !source
+    ? "Cargue y calcule el TFORMDET para ver qué medicamentos son de gran volumen y en cuántos establecimientos cambia su situación."
+    : !source.classified
+      ? "Este TFORMDET no trae la clasificación de los productos (MEDTIP): no se reconocen solos los medicamentos. Descárguelo con el Toolkit 2.2.5 o posterior, o agréguelos a mano."
+      : "El archivo cargado no trae medicamentos de 1 L o más.";
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
       <div className="space-y-4">
-        <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-50 text-sky-700"><Droplets className="h-5 w-5" /></span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[14px] font-bold text-slate-900">Soluciones de gran volumen · Ficha 28, consideración a)</p>
-            <p className="mt-1 text-[12.5px] italic text-slate-600">«Para un medicamento que corresponde a una solución de gran volumen (igual o mayor 1 litro) la disponibilidad se considera con un mes de existencia disponible.»</p>
-            <p className="mt-2 text-[12px] text-slate-500">Se reconocen solas: medicamentos (MEDTIP «M») con presentación de 1 L o más en la descripción, como «SODIO CLORURO 1 L». Con la regla, desde {monthsLabel(months)} de existencia cuentan como Normostock en vez de Substock. La ficha la aplica solo a la DME.</p>
-          </div>
-        </div>
+        <LargeVolumeNote months={months} className="lg:hidden" />
         <Card title="Regla">
           <Row title="Aplicar en" hint="Todos los productos · Esenciales (DME)">
             <span className="flex items-center gap-2 text-[12px] font-semibold text-slate-500">Todos <Switch on={!!f.all.largeVolume} onChange={(v) => setRule("all", v)} label="Gran volumen en todos los productos" /></span>
@@ -217,56 +282,79 @@ const LargeVolumeTab: React.FC<{ formula: AvailabilityFormula; onChange: (f: Ava
           </Row>
         </Card>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center">
-            <p className="min-w-0 flex-1 px-1 text-[11px] font-black uppercase tracking-widest text-slate-400">
-              {products?.classified ? `${products.list.length} medicamentos de 1 L o más en el archivo cargado${products.dme ? " (DME)" : ""}` : "Medicamentos de 1 L o más"}
-            </p>
-            {products && products.list.length > 0 && <TableSearch value={search} onChange={setSearch} placeholder="Buscar producto o código…" className="md:max-w-xs" />}
+          <div className="flex items-center gap-2 border-b border-slate-100 p-3">
+            <TableSearch value={search} onChange={setSearch} placeholder="Buscar medicamento o código…" className="md:max-w-none" />
+            <button type="button" onClick={() => setAdding(true)} aria-label="Agregar medicamentos" title="Agregar medicamentos" className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 px-3 text-[13px] font-bold text-slate-700 hover:bg-slate-50"><Plus className="h-4 w-4" /><span className="hidden sm:inline">Agregar</span></button>
           </div>
-          {!products ? (
-            <p className="px-4 py-6 text-center text-[12.5px] text-slate-500">Cargue y calcule el TFORMDET para ver qué productos son de gran volumen y en cuántos establecimientos cambia su situación.</p>
-          ) : !products.classified ? (
-            <p className="px-4 py-6 text-center text-[12.5px] text-slate-500">Este TFORMDET no trae la clasificación de los productos (MEDTIP): no se puede saber cuáles son medicamentos. Descárguelo con el Toolkit 2.2.5 o posterior.</p>
-          ) : products.list.length === 0 ? (
-            <p className="px-4 py-6 text-center text-[12.5px] text-slate-500">El archivo cargado no trae medicamentos de 1 L o más.</p>
+          {list.length === 0 ? (
+            <p className="px-4 py-6 text-center text-[12.5px] text-slate-500">{empty}</p>
           ) : (
             <>
-              <div className="scrollbar-x overflow-x-auto">
+              {/* Celular: tarjetas. */}
+              <div className="divide-y divide-slate-100 md:hidden">
+                {shown.slice((page - 1) * PAGE, page * PAGE).map((p) => (
+                  <div key={p.code} className={`flex items-start gap-3 px-4 py-3 ${p.origin === "skipped" ? "opacity-60" : ""}`}>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{p.code}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${LV_ORIGIN[p.origin].className}`}>{LV_ORIGIN[p.origin].label}</span>
+                      </div>
+                      <p className={`mt-1 text-[13px] font-semibold leading-snug ${p.name ? "text-slate-900" : "text-slate-400"}`}>{p.name || "No está en el archivo cargado"}</p>
+                      <p className="mt-0.5 text-[12px] text-slate-500">
+                        {p.sites ? `${p.sites} establecimientos` : "Sin establecimientos en el archivo"}
+                        {p.origin !== "skipped" && p.changed > 0 && <> · <b className="text-emerald-700">{p.changed}</b> pasan a Normostock</>}
+                      </p>
+                    </div>
+                    {action(p)}
+                  </div>
+                ))}
+              </div>
+              <div className="scrollbar-x hidden overflow-x-auto md:block">
                 <table className="w-full min-w-[560px]">
-                  <thead><tr className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wide text-slate-500"><th className="px-4 py-3">Código</th><th className="px-4 py-3">Producto</th><th className="px-4 py-3 text-center">Establecimientos</th><th className="px-4 py-3 text-center">Pasan a Normostock</th></tr></thead>
+                  <thead><tr className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-wide text-slate-500"><th className="px-4 py-3">Código</th><th className="px-4 py-3">Medicamento</th><th className="px-3 py-3 text-center">Origen</th><th className="px-3 py-3 text-center" title="Establecimientos donde está">EESS</th><th className="px-3 py-3 text-center">Pasan a Normostock</th><th className="px-2 py-3" /></tr></thead>
                   <tbody className="divide-y divide-slate-100">
                     {shown.slice((page - 1) * PAGE, page * PAGE).map((p) => (
-                      <tr key={p.code} className="h-12">
+                      <tr key={p.code} className={`h-12 ${p.origin === "skipped" ? "opacity-60" : ""}`}>
                         <td className="px-4"><span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-500">{p.code}</span></td>
-                        <td className="px-4 text-[13px] font-semibold text-slate-900">{p.name}</td>
-                        <td className="px-4 text-center font-mono text-[12.5px] text-slate-600">{p.sites}</td>
-                        <td className={`px-4 text-center font-mono text-[12.5px] font-bold ${p.changed ? "text-emerald-700" : "text-slate-300"}`}>{p.changed || "—"}</td>
+                        <td className={`min-w-[220px] px-4 py-2 text-[12.5px] font-semibold leading-snug ${p.name ? "text-slate-900" : "text-slate-400"}`}>{p.name || "No está en el archivo cargado"}</td>
+                        <td className="px-3 text-center"><span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${LV_ORIGIN[p.origin].className}`}>{LV_ORIGIN[p.origin].label}</span></td>
+                        <td className="px-3 text-center font-mono text-[12.5px] text-slate-600">{p.sites || "—"}</td>
+                        <td className={`px-3 text-center font-mono text-[12.5px] font-bold ${p.changed && p.origin !== "skipped" ? "text-emerald-700" : "text-slate-300"}`}>{p.origin !== "skipped" && p.changed ? p.changed : "—"}</td>
+                        <td className="px-2 text-right">{action(p)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <TablePagination page={page} pageSize={PAGE} total={shown.length} onPageChange={setPage} itemLabel="productos" />
+              <TablePagination page={page} pageSize={PAGE} total={shown.length} onPageChange={setPage} itemLabel="medicamentos" />
             </>
           )}
         </div>
       </div>
       <div className="space-y-4">
         <PreviewCard preview={preview} />
-        {products && products.list.length > 0 && (
+        <LargeVolumeNote months={months} className="hidden lg:block" />
+        {list.length > 0 && (
           <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-[12px] text-slate-600">
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
             <span>
+              {active} {active === 1 ? "medicamento cuenta" : "medicamentos cuentan"} como gran volumen.{" "}
               {f.essential.largeVolume || f.all.largeVolume
                 ? <>Con {monthsLabel(months)}, {changed} {changed === 1 ? "ítem pasa" : "ítems pasan"} de Substock a Normostock en los establecimientos del archivo.</>
-                : <>La regla está apagada. Encendida, con {monthsLabel(months)}, {changed} {changed === 1 ? "ítem pasaría" : "ítems pasarían"} de Substock a Normostock.</>}
+                : <>La regla está apagada; encendida, {changed} {changed === 1 ? "ítem pasaría" : "ítems pasarían"} de Substock a Normostock.</>}
             </span>
           </div>
         )}
-        <button type="button" onClick={() => onChange({ ...f, largeVolumeMonths: DEFAULT_AVAILABILITY_FORMULA.largeVolumeMonths, all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: true } })} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 hover:bg-slate-50">
+        <button type="button" onClick={() => onChange({ ...f, largeVolumeMonths: DEFAULT_AVAILABILITY_FORMULA.largeVolumeMonths, largeVolumeAdd: [], largeVolumeSkip: [], all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: true } })} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 hover:bg-slate-50">
           <RotateCcw className="h-4 w-4" />Restablecer ficha 28
         </button>
       </div>
+      <AddLargeVolumeDialog
+        open={adding}
+        onClose={() => setAdding(false)}
+        nameOf={nameOf}
+        onAdd={(codes) => { setLists([...f.largeVolumeAdd, ...codes], f.largeVolumeSkip.filter((c) => !codes.includes(c))); setAdding(false); }}
+      />
     </div>
   );
 };
@@ -500,9 +588,9 @@ export const AvailabilityConfigDialog: React.FC<{
 
   const dirtyFormula = JSON.stringify(formula) !== JSON.stringify(config.formula);
   // La regla de gran volumen se guarda dentro de la fórmula, pero tiene su propia pestaña.
-  const lvOf = (f: AvailabilityFormula) => JSON.stringify([f.all.largeVolume, f.essential.largeVolume, f.largeVolumeMonths]);
+  const lvOf = (f: AvailabilityFormula) => JSON.stringify([f.all.largeVolume, f.essential.largeVolume, f.largeVolumeMonths, f.largeVolumeAdd, f.largeVolumeSkip]);
   const dirtyLargeVolume = lvOf(formula) !== lvOf(config.formula);
-  const restOf = (f: AvailabilityFormula) => JSON.stringify({ ...f, largeVolumeMonths: 0, all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: false } });
+  const restOf = (f: AvailabilityFormula) => JSON.stringify({ ...f, largeVolumeMonths: 0, largeVolumeAdd: [], largeVolumeSkip: [], all: { ...f.all, largeVolume: false }, essential: { ...f.essential, largeVolume: false } });
   const dirtyFormulaRest = restOf(formula) !== restOf(config.formula);
   const dirtyFused = fused !== config.fused;
   const dirtyVitals = JSON.stringify(vitals) !== JSON.stringify(config.vitals);
