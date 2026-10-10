@@ -277,6 +277,8 @@ export interface AvailabilityExportParams {
   limits?: { subMax: number; sobreMin: number };
   /** Soluciones de gran volumen (1 L o más): Normostock desde estos meses, si la regla va en esta vista. */
   largeVolumeMonths?: number;
+  /** Códigos agregados o quitados a mano de la regla de gran volumen. */
+  largeVolumeManual?: { add: readonly string[]; skip: readonly string[] };
   /** Establecimientos que quien generó el reporte dejó fuera del análisis (no cuentan en nada). */
   outside?: Array<{ code: string; name: string; pct: number }>;
   aggregate?: "average" | "sum";
@@ -717,7 +719,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       ? [["", "Fuera del análisis", `Establecimientos que quien generó el reporte dejó fuera (no cuentan en la disponibilidad ni en las demás hojas): ${p.outside.map((o) => `${o.name} (${o.code}, ${pctText(o.pct)})`).join("; ")}. Los centros de salud mental comunitario van fuera por omisión.`]]
       : []),
     ...(p.largeVolumeMonths !== undefined
-      ? [["", "Soluciones de gran volumen", `Las de 1 L o más (se reconocen por la presentación) son Normostock desde ${n(Math.min(lim.subMax, p.largeVolumeMonths))} ${p.largeVolumeMonths === 1 ? "mes" : "meses"} de provisión: «la disponibilidad se considera con un mes de existencia disponible» (ficha 28, consideración a).`]]
+      ? [["", "Soluciones de gran volumen", `Las de 1 L o más (se reconocen por la presentación) son Normostock desde ${n(Math.min(lim.subMax, p.largeVolumeMonths))} ${p.largeVolumeMonths === 1 ? "mes" : "meses"} de provisión: «la disponibilidad se considera con un mes de existencia disponible» (ficha 28, consideración a).${p.largeVolumeManual?.add.length ? ` Agregados a mano: ${p.largeVolumeManual.add.join(", ")}.` : ""}${p.largeVolumeManual?.skip.length ? ` Quitados a mano: ${p.largeVolumeManual.skip.join(", ")}.` : ""}`]]
       : []),
   ]);
 

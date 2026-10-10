@@ -53,5 +53,12 @@ describe("configuración de disponibilidad", () => {
     expect(classifyOptionsOf(old, "all").largeVolumeMonths).toBeUndefined();
     expect(describeFormula(old, "essential")).toMatch(/soluciones de 1 L o más: Normostock desde 1 mes/);
     expect(describeFormula(old, "all")).not.toMatch(/1 L/);
+    // Las listas a mano: con sus ceros y sin repetidos.
+    const manual = normalizeFormula({ largeVolumeAdd: ["8166", "08166", 5873], largeVolumeSkip: "x" });
+    expect(manual.largeVolumeAdd).toEqual(["05873", "08166"]);
+    expect(manual.largeVolumeSkip).toEqual([]);
+    expect(old.largeVolumeAdd).toEqual([]);
+    expect(classifyOptionsOf(manual, "essential").largeVolumeAdd).toEqual(["05873", "08166"]);
+    expect(describeFormula(manual, "essential")).toMatch(/2 agregados a mano/);
   });
 });
