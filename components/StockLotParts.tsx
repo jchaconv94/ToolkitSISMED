@@ -206,7 +206,7 @@ export const LotDetailSheet: React.FC<{
 
           {/* El resto de campos, en dos columnas en escritorio. */}
           <div className="px-5 pb-5 pt-2">
-            <dl className="grid gap-x-6 md:grid-cols-2">
+            <dl className="grid grid-cols-1 gap-x-6 md:grid-cols-2">
               {fields.map(([label, value, mono]) => (
                 <div key={label} className="border-b border-slate-100 py-2.5">
                   <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</dt>

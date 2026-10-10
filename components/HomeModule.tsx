@@ -220,7 +220,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
 
   return (
     <div className="space-y-6 pb-6 pt-3 sm:pt-5 md:space-y-8 lg:px-3">
-      <div className={`grid items-center gap-4 animate-in fade-in slide-in-from-bottom-1 duration-300 ${summary ? "lg:grid-cols-[minmax(0,1fr)_500px] lg:gap-8" : ""}`}>
+      <div className={`grid grid-cols-1 items-center gap-4 animate-in fade-in slide-in-from-bottom-1 duration-300 ${summary ? "lg:grid-cols-[minmax(0,1fr)_500px] lg:gap-8" : ""}`}>
         <div className="min-w-0">
           <p className="text-[13px] font-medium text-slate-500">{limaLongDate(now)}</p>
           <h1 className="mt-1 text-[26px] font-black leading-tight tracking-tight text-slate-900 sm:text-[34px]">
@@ -254,7 +254,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
 
           <section aria-labelledby="inicio-todas">
             <h2 id="inicio-todas" className="mb-3 text-[16px] font-black text-slate-900">Todas las herramientas</h2>
-            <div className={`grid items-start gap-4 md:gap-5 ${columns.length > 1 ? "lg:grid-cols-2" : ""}`}>
+            <div className={`grid grid-cols-1 items-start gap-4 md:gap-5 ${columns.length > 1 ? "lg:grid-cols-2" : ""}`}>
               {columns.map((column, c) => (
                 <div key={c} className="space-y-4 md:space-y-5">
                   {column.map(section => {
@@ -289,7 +289,7 @@ export const HomeModule: React.FC<{ onNavigate: (module: AppModule) => void }> =
                                   <span className={`block truncate text-[13px] ${needsInternet ? "text-slate-400" : "text-slate-500"}`}>{item.description}</span>
                                 </span>
                                 {needsInternet
-                                  ? <NeedsInternetTag />
+                                  ? <NeedsInternetTag compact className="py-1 md:py-0.5" />
                                   : <ChevronRight className="h-4 w-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-teal-600" />}
                               </button>
                             );

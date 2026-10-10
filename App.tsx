@@ -381,7 +381,7 @@ const AuthenticatedApp: React.FC = () => {
                 />
 
                 {/* CONTENT AREA SWITCHER */}
-                <main className="flex-1 overflow-y-auto w-full px-3 sm:px-5 2xl:px-6 pt-2.5 sm:pt-3 pb-6">
+                <main className="flex-1 overflow-y-auto max-md:overflow-x-hidden w-full px-3 sm:px-5 2xl:px-6 pt-2.5 sm:pt-3 pb-6">
                     <div className="mx-auto max-w-[1600px] h-full">
                         <ErrorBoundary>
                             <Suspense fallback={<SuspenseFallback />}>

@@ -70,7 +70,7 @@ const Cover: React.FC<{ className: string }> = ({ className }) => (
 const Group: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div>
     <p className="mb-2 text-[11px] font-black uppercase tracking-widest text-slate-500">{title}</p>
-    <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2">{children}</div>
+    <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2">{children}</div>
   </div>
 );
 
@@ -282,7 +282,7 @@ export const UserProfile: React.FC = () => {
         </div>
       )}
 
-      <div className="grid gap-3 md:grid-cols-3 md:gap-5">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-5">
         <Section title="Datos personales">
           <Row icon={<IdCard />} label="DNI" mono>{p.dni || <Empty />}</Row>
           <Row icon={<Cake />} label="Fecha de nacimiento">{birthDate ? formatDate(birthDate) : <Empty />}</Row>
