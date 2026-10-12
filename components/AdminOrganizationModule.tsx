@@ -19,7 +19,7 @@ import { buildUngetConnectionStatus, pickOneConnectionPerUnget, type UngetConnec
 import { isLinkedToSheet, resolveFacilitySheet } from '../services/facilitySheetLink';
 import { FACILITY_TYPES, allowedFacilityTypes, facilityTypeLabel, suggestedFacilityType } from '../services/facilityCodes';
 import { findParentFacility, inheritFromParent, isPharmacyType, parentIpressCode, pharmaciesToSync } from '../services/facilityHierarchy';
-import { canCreateInOrgTab, orgTabsForLevel, showsTerritoryFilter, type OrgTab } from '../services/orgTabs';
+import { canCreateInOrgTab, orgTabsForLevel, showsTerritory, type OrgTab } from '../services/orgTabs';
 import { getUserJurisdictionScope } from '../services/jurisdictionService';
 import { listUngetSheets, type UngetSheet } from '../services/ungetSheetCatalog';
 import {
@@ -1531,6 +1531,13 @@ export const AdminOrganizationModule: React.FC = () => {
         return <SortButton label={label} dir={orgSortDir(index)} onClick={() => (orgSorts[activeTab].toggle as (k: string) => void)(key)} />;
     };
     const orgAriaSort = (index: number) => (TAB_SORT_KEYS[activeTab][index] ? ariaSort(orgSortDir(index)) : undefined);
+    // Columnas del nivel del usuario y de arriba: no se muestran, siempre dicen lo mismo
+    // (a un usuario de UNGET le sobran UNGET y OGESS). La primera columna es el nombre: siempre va.
+    const COL_TERRITORY: Record<string, 'DIRESA' | 'OGESS' | 'UNGET' | 'MICRORED'> = { DIRESA: 'DIRESA', OGESS: 'OGESS', UNGET: 'UNGET', Microred: 'MICRORED' };
+    const showCol = (tab: OrgTab, index: number) => {
+        const territory = index > 0 ? COL_TERRITORY[TAB_HEADS[tab][index]] : undefined;
+        return !territory || showsTerritory(jurisdictionLevel, territory, isSuperAdmin);
+    };
     const [orgPage, setOrgPage] = useState(1);
     const orgFilterKey = [activeTab, searchQuery, filterDiresaId, filterOgessId, filterUngetId, filterMicroredId, filterType, filterCategory, filterDepartment, filterProvince, filterDistrict].join('|');
     useEffect(() => setOrgPage(1), [orgFilterKey, diresaSort.sort, ogessSort.sort, ungetSort.sort, microredSort.sort, facilitySort.sort]);
@@ -1562,7 +1569,7 @@ export const AdminOrganizationModule: React.FC = () => {
         if (activeTab === 'UNGET') return [diresaF, ogessF, provinceF, districtF];
         if (activeTab === 'MICRORED') return [ogessF, ungetF];
         return [ogessF, ungetF, microredF, categoryF, typeF];
-    })().filter(f => !TERRITORY_FILTER[f.key] || showsTerritoryFilter(jurisdictionLevel, TERRITORY_FILTER[f.key], isSuperAdmin));
+    })().filter(f => !TERRITORY_FILTER[f.key] || showsTerritory(jurisdictionLevel, TERRITORY_FILTER[f.key], isSuperAdmin));
     // Etiquetas de los filtros aplicados (de cualquier nivel: los filtros son comunes a todos).
     const activeFilterChips = [
         { key: 'diresa', label: 'DIRESA', value: filterDiresaId && getDiresaName(filterDiresaId), clear: () => { setFilterDiresaId(''); setFilterOgessId(''); setFilterUngetId(''); setFilterMicroredId(''); } },
@@ -1588,14 +1595,18 @@ export const AdminOrganizationModule: React.FC = () => {
                     let sub2 = '';
                     let chip: React.ReactNode = null;
                     if (tab === 'DIRESA') { sub = [item.ruc && `RUC ${item.ruc}`, item.department].filter(Boolean).join(' · '); }
-                    if (tab === 'OGESS') { sub = [item.code, item.province].filter(Boolean).join(' · '); sub2 = getDiresaName(item.diresaId); }
+                    // Las mismas columnas que la tabla: lo del nivel del usuario y de arriba no se repite.
+                    if (tab === 'OGESS') { sub = [item.code, item.province].filter(Boolean).join(' · '); sub2 = showCol('OGESS', 4) ? getDiresaName(item.diresaId) : ''; }
                     if (tab === 'UNGET') {
-                        sub = getOgessName(item.ogessId);
+                        sub = showCol('UNGET', 3) ? getOgessName(item.ogessId) : [item.district, item.province].filter(Boolean).join(' · ');
                         const ui = getConnectionUi(item.id);
                         chip = <span className={`mt-1.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold ${ui.chip}`}><ui.Icon className="h-3 w-3" />{ui.label}</span>;
                     }
-                    if (tab === 'MICRORED') { sub = getUngetName(item.ungetId); }
-                    if (tab === 'IPRESS') { sub = [item.code, item.category, facilityTypeLabel(item.type)].filter(Boolean).join(' · '); sub2 = item.microredId ? getMicroredName(item.microredId) : getUngetName(item.ungetId); }
+                    if (tab === 'MICRORED') {
+                        if (showCol('MICRORED', 1)) sub = getUngetName(item.ungetId);
+                        else { const n = visibleFacilities.filter(f => f.microredId === item.id).length; sub = `${n} ${n === 1 ? 'establecimiento' : 'establecimientos'}`; }
+                    }
+                    if (tab === 'IPRESS') { sub = [item.code, item.category, facilityTypeLabel(item.type)].filter(Boolean).join(' · '); sub2 = item.microredId && showCol('IPRESS', 3) ? getMicroredName(item.microredId) : !item.microredId && showCol('IPRESS', 4) ? getUngetName(item.ungetId) : ''; }
                     return (
                         <button
                             key={item.id || item.code}
@@ -1744,7 +1755,7 @@ export const AdminOrganizationModule: React.FC = () => {
                     {canAddActiveTab && canFac.create && !isDesktop && <FloatingActionButton icon={<Plus />} label={TAB_NEW[activeTab]} onClick={openCreate} />}
 
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm max-md:border-0 max-md:bg-transparent max-md:shadow-none">
-                    <FloatingTableHead state={orgFloatingHead} padding="px-4" cells={TAB_HEADS[activeTab].map((label, index) => ({ key: label + index, index, content: orgSortHead(index), align: label === 'Acciones' ? 'right' as const : 'left' as const }))} />
+                    <FloatingTableHead state={orgFloatingHead} padding="px-4" cells={TAB_HEADS[activeTab].map((label, index) => ({ key: label + index, index, content: orgSortHead(index), align: label === 'Acciones' ? 'right' as const : 'left' as const })).filter(cell => showCol(activeTab, cell.index))} />
                     {/* Interactive Registry tables & list representations */}
                     <div className="w-full">
                         {/* Empty state conditional */}
@@ -1842,7 +1853,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                                         <th aria-sort={orgAriaSort(1)} className="p-4">{orgSortHead(1)}</th>
                                                         <th aria-sort={orgAriaSort(2)} className="p-4">{orgSortHead(2)}</th>
                                                         <th aria-sort={orgAriaSort(3)} className="p-4">{orgSortHead(3)}</th>
-                                                        <th aria-sort={orgAriaSort(4)} className="p-4">{orgSortHead(4)}</th>
+                                                        {showCol('OGESS', 4) && <th aria-sort={orgAriaSort(4)} className="p-4">{orgSortHead(4)}</th>}
                                                         <th aria-sort={orgAriaSort(5)} className="p-4 text-right pr-6">{orgSortHead(5)}</th>
                                                     </tr>
                                                 </thead>
@@ -1861,9 +1872,9 @@ export const AdminOrganizationModule: React.FC = () => {
                                                             <td className="p-4 font-mono text-xs text-slate-600 font-semibold">{o.code || '-'} / {o.ruc || '-'}</td>
                                                             <td className="p-4 text-slate-600 font-medium">{o.district || '-'}</td>
                                                             <td className="p-4 text-slate-600 font-medium">{o.province || '-'}</td>
-                                                            <td className="p-4">
+                                                            {showCol('OGESS', 4) && (<td className="p-4">
                                                                 <span className="bg-teal-50 text-teal-800 px-2 py-0.5 rounded-lg text-xs font-bold border border-teal-100">{getDiresaName(o.diresaId)}</span>
-                                                            </td>
+                                                            </td>)}
                                                             <td className="p-4 flex gap-2 justify-end pr-6">
                                                                 {canFac.edit && (<button 
                                                                     onClick={(e) => handleOpenEdit('OGESS', o, e)} 
@@ -1901,8 +1912,8 @@ export const AdminOrganizationModule: React.FC = () => {
                                                         <th aria-sort={orgAriaSort(0)} className="p-4 px-6">{orgSortHead(0)}</th>
                                                         <th aria-sort={orgAriaSort(1)} className="p-4">{orgSortHead(1)}</th>
                                                         <th aria-sort={orgAriaSort(2)} className="p-4">{orgSortHead(2)}</th>
-                                                        <th aria-sort={orgAriaSort(3)} className="p-4">{orgSortHead(3)}</th>
-                                                        <th aria-sort={orgAriaSort(4)} className="p-4">{orgSortHead(4)}</th>
+                                                        {showCol('UNGET', 3) && <th aria-sort={orgAriaSort(3)} className="p-4">{orgSortHead(3)}</th>}
+                                                        {showCol('UNGET', 4) && <th aria-sort={orgAriaSort(4)} className="p-4">{orgSortHead(4)}</th>}
                                                         <th aria-sort={orgAriaSort(5)} className="p-4">{orgSortHead(5)}</th>
                                                         <th aria-sort={orgAriaSort(6)} className="p-4 text-right pr-6">{orgSortHead(6)}</th>
                                                     </tr>
@@ -1921,10 +1932,10 @@ export const AdminOrganizationModule: React.FC = () => {
                                                             </td>
                                                             <td className="p-4 text-slate-600 font-medium">{u.district || '-'}</td>
                                                             <td className="p-4 text-slate-600 font-medium">{u.province || '-'}</td>
-                                                            <td className="p-4 text-slate-700 font-semibold">{getOgessName(u.ogessId)}</td>
-                                                            <td className="p-4">
+                                                            {showCol('UNGET', 3) && <td className="p-4 text-slate-700 font-semibold">{getOgessName(u.ogessId)}</td>}
+                                                            {showCol('UNGET', 4) && (<td className="p-4">
                                                                 <span className="bg-teal-50 text-teal-800 px-2 py-0.5 rounded-lg text-xs font-bold border border-teal-100">{getDiresaName(u.diresaId)}</span>
-                                                            </td>
+                                                            </td>)}
                                                             <td className="p-4">
                                                                 {(() => {
                                                                     const ui = getConnectionUi(u.id);
@@ -1974,8 +1985,8 @@ export const AdminOrganizationModule: React.FC = () => {
                                                 <thead>
                                                     <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider">
                                                         <th aria-sort={orgAriaSort(0)} className="p-4 px-6">{orgSortHead(0)}</th>
-                                                        <th aria-sort={orgAriaSort(1)} className="p-4">{orgSortHead(1)}</th>
-                                                        <th aria-sort={orgAriaSort(2)} className="p-4">{orgSortHead(2)}</th>
+                                                        {showCol('MICRORED', 1) && <th aria-sort={orgAriaSort(1)} className="p-4">{orgSortHead(1)}</th>}
+                                                        {showCol('MICRORED', 2) && <th aria-sort={orgAriaSort(2)} className="p-4">{orgSortHead(2)}</th>}
                                                         <th aria-sort={orgAriaSort(3)} className="p-4 text-right pr-6">{orgSortHead(3)}</th>
                                                     </tr>
                                                 </thead>
@@ -1993,10 +2004,10 @@ export const AdminOrganizationModule: React.FC = () => {
                                                                     <Network className="h-4 w-4 text-slate-400 group-hover:text-teal-600 transition" />
                                                                     <span>{m.name}</span>
                                                                 </td>
-                                                                <td className="p-4 text-slate-700 font-semibold">{getUngetName(m.ungetId)}</td>
-                                                                <td className="p-4">
+                                                                {showCol('MICRORED', 1) && <td className="p-4 text-slate-700 font-semibold">{getUngetName(m.ungetId)}</td>}
+                                                                {showCol('MICRORED', 2) && (<td className="p-4">
                                                                     <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-lg text-xs font-bold">{pUnget ? getOgessName(pUnget.ogessId) : '-'}</span>
-                                                                </td>
+                                                                </td>)}
                                                                 <td className="p-4 flex gap-2 justify-end pr-6">
                                                                     {canFac.edit && (<button 
                                                                         onClick={(e) => handleOpenEdit('MICRORED', m, e)} 
@@ -2035,9 +2046,9 @@ export const AdminOrganizationModule: React.FC = () => {
                                                         <th aria-sort={orgAriaSort(0)} className="p-4 px-6">{orgSortHead(0)}</th>
                                                         <th aria-sort={orgAriaSort(1)} className="p-4">{orgSortHead(1)}</th>
                                                         <th aria-sort={orgAriaSort(2)} className="p-4">{orgSortHead(2)}</th>
-                                                        <th aria-sort={orgAriaSort(3)} className="p-4">{orgSortHead(3)}</th>
-                                                        <th aria-sort={orgAriaSort(4)} className="p-4">{orgSortHead(4)}</th>
-                                                        <th aria-sort={orgAriaSort(5)} className="p-4">{orgSortHead(5)}</th>
+                                                        {showCol('IPRESS', 3) && <th aria-sort={orgAriaSort(3)} className="p-4">{orgSortHead(3)}</th>}
+                                                        {showCol('IPRESS', 4) && <th aria-sort={orgAriaSort(4)} className="p-4">{orgSortHead(4)}</th>}
+                                                        {showCol('IPRESS', 5) && <th aria-sort={orgAriaSort(5)} className="p-4">{orgSortHead(5)}</th>}
                                                         <th aria-sort={orgAriaSort(6)} className="p-4 text-right pr-6">{orgSortHead(6)}</th>
                                                     </tr>
                                                 </thead>
@@ -2066,9 +2077,9 @@ export const AdminOrganizationModule: React.FC = () => {
                                                                     {facilityTypeLabel(f.type) || '-'}
                                                                 </span>
                                                             </td>
-                                                            <td className="p-4 text-slate-600 font-semibold">{getMicroredName(f.microredId)}</td>
-                                                            <td className="p-4 text-slate-600 font-semibold">{getUngetName(f.ungetId)}</td>
-                                                            <td className="p-4 text-slate-500 font-medium">{getOgessName(f.ogessId)}</td>
+                                                            {showCol('IPRESS', 3) && <td className="p-4 text-slate-600 font-semibold">{getMicroredName(f.microredId)}</td>}
+                                                            {showCol('IPRESS', 4) && <td className="p-4 text-slate-600 font-semibold">{getUngetName(f.ungetId)}</td>}
+                                                            {showCol('IPRESS', 5) && <td className="p-4 text-slate-500 font-medium">{getOgessName(f.ogessId)}</td>}
                                                             <td className="p-4 flex gap-2 justify-end pr-6">
                                                                 {canFac.edit && (<button 
                                                                     onClick={(e) => handleOpenEdit('IPRESS', f, e)} 
