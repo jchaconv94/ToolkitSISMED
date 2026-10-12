@@ -853,6 +853,18 @@ export const AvailabilityModule: React.FC = () => {
   );
   const actionItems = (
     <>
+      {canSaveHistory && cut && (
+        <button type="button" onClick={() => { setActionsOpen(false); openSave(); }} disabled={!online || preparing} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-teal-700 hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent">
+          {preparing ? <Loader2 className="h-5 w-5 animate-spin" /> : <History className="h-5 w-5" />}<span className="flex-1 text-left">Guardar {monthLabel(cut)} en el historial</span>
+          {!online && <span className="text-[12px] font-bold text-slate-400">Necesita internet</span>}
+        </button>
+      )}
+      {can("AVAILABILITY", "export") && (
+        <button type="button" onClick={() => { setActionsOpen(false); handleExport(); }} disabled={exporting} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-teal-700 hover:bg-teal-50 disabled:opacity-60">
+          {exporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}{exporting ? "Generando el Excel…" : "Exportar Excel"}
+        </button>
+      )}
+      {((canSaveHistory && cut) || can("AVAILABILITY", "export")) && <div className="my-1 border-t border-slate-100" />}
       <button type="button" onClick={() => { setActionsOpen(false); setCalculated(false); }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-slate-700 hover:bg-slate-50">
         <RefreshCw className="h-5 w-5" />Cargar otro TFORMDET
       </button>
@@ -871,7 +883,7 @@ export const AvailabilityModule: React.FC = () => {
 
   return (
     <div className="pb-24 md:pb-8">
-      {/* Título del reporte: UNGET y corte a la izquierda; alcance y Exportar a la derecha; Configuración y otro TFORMDET en ⋯ */}
+      {/* Título del reporte: UNGET y corte a la izquierda; alcance y ⋯ a la derecha (guardar en el historial, exportar, otro TFORMDET, configuración). */}
       <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {backButton}
@@ -892,26 +904,9 @@ export const AvailabilityModule: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex-1 md:flex-none">{scopeSwitch(true)}</div>
-          {canSaveHistory && cut && (
-            <button
-              type="button"
-              onClick={openSave}
-              disabled={!online || preparing}
-              aria-label="Guardar en el historial"
-              title={online ? `Guardar ${monthLabel(cut)} en el historial` : "Necesita internet"}
-              className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 text-[13px] font-bold text-teal-700 transition-colors hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50 md:px-4"
-            >
-              {preparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}<span className="hidden lg:inline">Guardar en el historial</span>
-            </button>
-          )}
-          {can("AVAILABILITY", "export") && (
-            <button type="button" onClick={handleExport} disabled={exporting} aria-label="Exportar Excel" className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-teal-600 px-3 text-[13px] font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60 md:px-4">
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}<span className="hidden sm:inline">{exporting ? "Generando…" : "Exportar"}</span>
-            </button>
-          )}
           <div ref={menuRef} className="relative">
             <button type="button" onClick={() => setActionsOpen(!actionsOpen)} aria-label="Más acciones" title="Más acciones" aria-expanded={actionsOpen} className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border bg-white text-slate-600 transition-colors hover:bg-slate-50 ${actionsOpen ? "border-teal-300 ring-2 ring-teal-500/20" : "border-slate-200"}`}>
-              <MoreVertical className="h-4 w-4" />
+              {exporting || preparing ? <Loader2 className="h-4 w-4 animate-spin text-teal-600" /> : <MoreVertical className="h-4 w-4" />}
             </button>
             {isDesktop && actionsOpen && (
               <div role="menu" className="absolute right-0 top-12 z-40 w-[340px] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl animate-in fade-in zoom-in-95 duration-100">
