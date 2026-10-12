@@ -10,7 +10,8 @@ import { greetingFor, userFirstName } from "../services/sessionDisplay";
  *
  * Era un modal a pantalla completa con un botón «Comenzar Gestión»: obligaba a hacer clic
  * para empezar a trabajar y no aportaba nada que no se vea en el propio panel. Ahora es un
- * aviso en la esquina superior derecha que se va solo a los cinco segundos.
+ * aviso en la esquina inferior derecha (desde el 2026-10-12, pedido del usuario; antes arriba)
+ * que se va solo a los cinco segundos.
  *
  * La resolución de la jurisdicción se conserva igual que la tenía el modal —es lo único
  * que sí informaba: de qué UNGET, OGESS o DIRESA depende la sesión—, y se muestra en el
@@ -197,8 +198,9 @@ const WelcomeToastContent: React.FC<{ user: User }> = ({ user }) => {
   return (
     /* Pegado al borde derecho, como si asomara desde fuera de la pantalla. Sonner deja un
        margen de 24 px (16 en móvil, por debajo de 600 px), así que se desplaza justo eso
-       para quedar a ras; y solo se redondea el lado izquierdo, que es el que se ve. */
-    <div className="relative w-full translate-x-4 min-[600px]:translate-x-6 overflow-hidden rounded-l-2xl rounded-r-none border-y border-l border-slate-200 bg-white shadow-xl shadow-slate-900/10">
+       para quedar a ras; y solo se redondea el lado izquierdo, que es el que se ve. En el
+       celular sube por encima de la barra de secciones para no taparla. */
+    <div className="relative mb-20 w-full translate-x-4 min-[600px]:mb-0 min-[600px]:translate-x-6 overflow-hidden rounded-l-2xl rounded-r-none border-y border-l border-slate-200 bg-white shadow-xl shadow-slate-900/10">
       <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b from-[#5fd0be] to-[#2bb3a0]" />
       <div className="flex items-center gap-3 py-3.5 pl-5 pr-7">
         <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#0f2233]">
@@ -221,13 +223,13 @@ const WelcomeToastContent: React.FC<{ user: User }> = ({ user }) => {
 };
 
 /**
- * Lanza el aviso. Va arriba a la derecha aunque el resto de avisos de la aplicación salgan
+ * Lanza el aviso. Va abajo a la derecha aunque el resto de avisos de la aplicación salgan
  * arriba en el centro: es un saludo, no debe taparle a nadie lo que estaba mirando.
  */
 export const showWelcomeToast = (user: User): void => {
   if (!user) return;
   toast.custom(() => <WelcomeToastContent user={user} />, {
-    position: "top-right",
+    position: "bottom-right",
     duration: 5000,
   });
 };
