@@ -962,7 +962,7 @@ const PharmacyTitleMenu: React.FC<{
 
 /* ---------------------------------------------------------------- Detalle de un establecimiento */
 
-export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; onClose: () => void; onSwitch: (code: string) => void }> = ({ ctx, code, onClose, onSwitch }) => {
+export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; onSwitch: (code: string) => void }> = ({ ctx, code, onSwitch }) => {
   const { anchor, toTable } = useTableAnchor();
   // Un establecimiento (06502) o una de sus farmacias o puestos comunales (06502F02).
   const source = ctx.report.establishments.some((x) => x.code === code) ? ctx.report : ctx.pharmacy ?? ctx.report;
@@ -989,10 +989,8 @@ export const EstablishmentDetail: React.FC<{ ctx: ReportContext; code: string; o
   ];
   return (
     <div className="space-y-4">
-      <section className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5 md:pr-14">
-        <button type="button" onClick={onClose} aria-label="Cerrar" title="Cerrar" className="absolute right-3 top-3 hidden h-9 w-9 place-items-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 md:grid">
-          <X className="h-5 w-5" />
-        </button>
+      {/* Se cierra con la flecha «volver» de la cabecera de la app (vuelve al reporte), no con una X. */}
+      <section className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
