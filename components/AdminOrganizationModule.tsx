@@ -19,6 +19,8 @@ import { buildUngetConnectionStatus, pickOneConnectionPerUnget, type UngetConnec
 import { isLinkedToSheet, resolveFacilitySheet } from '../services/facilitySheetLink';
 import { FACILITY_TYPES, allowedFacilityTypes, facilityTypeLabel, suggestedFacilityType } from '../services/facilityCodes';
 import { findParentFacility, inheritFromParent, isPharmacyType, parentIpressCode, pharmaciesToSync } from '../services/facilityHierarchy';
+import { canCreateInOrgTab, orgTabsForLevel, type OrgTab } from '../services/orgTabs';
+import { getUserJurisdictionScope } from '../services/jurisdictionService';
 import { listUngetSheets, type UngetSheet } from '../services/ungetSheetCatalog';
 import {
     DEFAULT_STOCK_COLUMN_KEYS,
@@ -83,7 +85,6 @@ const CONNECTION_STATE_UI_UNKNOWN: Record<'loading' | 'error', typeof CONNECTION
 };
 
 
-type OrgTab = 'DIRESA' | 'OGESS' | 'UNGET' | 'MICRORED' | 'IPRESS';
 
 /** Cómo se llama cada nivel en pantalla. «IPRESS» se muestra como «Establecimientos». */
 const TAB_LABEL: Record<OrgTab, string> = { DIRESA: 'DIRESA', OGESS: 'OGESS', UNGET: 'UNGET', MICRORED: 'Microred', IPRESS: 'Establecimientos' };
@@ -145,15 +146,11 @@ export const AdminOrganizationModule: React.FC = () => {
     const [facilities, setFacilities] = useState<HealthFacility[]>([]);
     
     const [isLoading, setIsLoading] = useState(true);
-    const userRole = user?.role || '';
     
-    const availableTabs = useMemo(() => {
-        if (userRole === 'ADMIN') return ['DIRESA', 'OGESS', 'UNGET', 'MICRORED', 'IPRESS'];
-        if (userRole === 'DIRESA') return ['DIRESA', 'OGESS', 'UNGET', 'MICRORED', 'IPRESS'];
-        if (userRole === 'OGESS') return ['OGESS', 'UNGET', 'MICRORED', 'IPRESS'];
-        if (userRole === 'UNGET') return ['UNGET', 'MICRORED', 'IPRESS'];
-        return [];
-    }, [userRole]);
+    // Las pestañas salen del nivel territorial del rol, no de su nombre (un COORDINADOR con nivel
+    // UNGET ve UNGET, Microredes y Establecimientos de su UNGET); ver services/orgTabs.ts.
+    const jurisdictionLevel = useMemo(() => getUserJurisdictionScope(user).level, [user]);
+    const availableTabs = useMemo<OrgTab[]>(() => orgTabsForLevel(jurisdictionLevel), [jurisdictionLevel]);
 
     const [activeTab, setActiveTab] = useState<'DIRESA' | 'OGESS' | 'UNGET' | 'MICRORED' | 'IPRESS'>(
         availableTabs.length > 0 ? (availableTabs[0] as any) : 'DIRESA'
@@ -422,15 +419,7 @@ export const AdminOrganizationModule: React.FC = () => {
         return user?.personnelData?.microredId || user?.facilityData?.microredId || (user as any)?.microredId || '';
     }, [user]);
 
-    const canAddActiveTab = useMemo(() => {
-        if (isSuperAdmin) return true;
-        if (activeTab === 'DIRESA') return false;
-        if (activeTab === 'OGESS') return userRole === 'DIRESA';
-        if (activeTab === 'UNGET') return ['DIRESA', 'OGESS'].includes(userRole);
-        if (activeTab === 'MICRORED') return ['DIRESA', 'OGESS', 'UNGET'].includes(userRole);
-        if (activeTab === 'IPRESS') return ['DIRESA', 'OGESS', 'UNGET'].includes(userRole);
-        return false;
-    }, [activeTab, isSuperAdmin, userRole]);
+    const canAddActiveTab = useMemo(() => canCreateInOrgTab(jurisdictionLevel, activeTab, isSuperAdmin), [activeTab, isSuperAdmin, jurisdictionLevel]);
 
     // Filtered lists shown in tables
     const visibleDiresas = useMemo(() => {
@@ -465,6 +454,7 @@ export const AdminOrganizationModule: React.FC = () => {
 
     const visibleMicroredes = useMemo(() => {
         if (isSuperAdmin) return microredes;
+        if (jurisdictionLevel === 'MICRORED' && userMicroredId) return microredes.filter(m => m.id === userMicroredId);
         if (userUngetId) return microredes.filter(m => m.ungetId === userUngetId);
         if (userOgessId) {
             return microredes.filter(m => {
@@ -485,17 +475,20 @@ export const AdminOrganizationModule: React.FC = () => {
             });
         }
         return microredes;
-    }, [microredes, ungets, ogess, isSuperAdmin, userUngetId, userOgessId, userDiresaId]);
+    }, [microredes, ungets, ogess, isSuperAdmin, jurisdictionLevel, userMicroredId, userUngetId, userOgessId, userDiresaId]);
 
     const visibleFacilities = useMemo(() => {
         if (isSuperAdmin) return facilities;
         return facilities.filter(f => {
+            // Un rol de microred ve solo la suya; uno de establecimiento, el suyo y sus farmacias.
+            if (jurisdictionLevel === 'MICRORED' && userMicroredId && f.microredId !== userMicroredId) return false;
+            if (jurisdictionLevel === 'IPRESS' && userFacilityCode && (parentIpressCode(f.code) || f.code) !== (parentIpressCode(userFacilityCode) || userFacilityCode)) return false;
             if (userUngetId && f.ungetId !== userUngetId) return false;
             if (userOgessId && f.ogessId !== userOgessId) return false;
             if (userDiresaId && f.diresaId !== userDiresaId) return false;
             return true;
         });
-    }, [facilities, isSuperAdmin, userUngetId, userOgessId, userDiresaId]);
+    }, [facilities, isSuperAdmin, jurisdictionLevel, userMicroredId, userFacilityCode, userUngetId, userOgessId, userDiresaId]);
 
     // Computed lists applying both Advanced Filters and Search input
     const finalFilteredDiresas = useMemo(() => {
