@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, ArrowLeft, BarChart3, Building2, CalendarClock, CheckCircle2, Download, FileSpreadsheet, History, LayoutDashboard, ListChecks, Loader2, MoreVertical, PackageX, RefreshCw, Repeat2, SearchX, Settings2, TrendingUp, Upload, Warehouse, X,
+  Activity, AlertTriangle, BarChart3, Building2, CalendarClock, CheckCircle2, Download, FileSpreadsheet, History, LayoutDashboard, ListChecks, Loader2, MoreVertical, PackageX, RefreshCw, Repeat2, SearchX, Settings2, TrendingUp, Upload, Warehouse, X,
 } from "lucide-react";
 import { EMPTY_SITES, availabilitySitesApi, isOutOfAnalysis, type SitesState } from "../services/availabilitySites";
 import { AvailabilitySitesDialog, type SiteOption } from "./AvailabilitySitesDialog";
@@ -734,11 +734,9 @@ export const AvailabilityModule: React.FC = () => {
     );
   }
 
-  const backButton = (
-    <button type="button" onClick={() => setScreen("history")} aria-label="Volver al historial" title="Volver al historial" className="hidden h-11 w-11 shrink-0 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 md:grid">
-      <ArrowLeft className="h-5 w-5" />
-    </button>
-  );
+  // Sin flecha propia: la «volver» de la cabecera de la app sube un nivel (detalle → reporte →
+  // historial, con `useModuleHeaderOverride`). Tener las dos repetía lo mismo (pedido del usuario,
+  // 2026-10-12, que también pidió quitar la X del detalle del establecimiento).
 
   /* ------------------------------------------------------------ Pantalla de carga */
   if (restoring && !calculated) {
@@ -756,7 +754,6 @@ export const AvailabilityModule: React.FC = () => {
       <div className="mx-auto max-w-4xl px-4 pb-24 pt-2 md:px-0 md:pb-8">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
           <div className="flex items-center gap-3">
-            {backButton}
             <h2 className="flex-1 text-[18px] font-black text-slate-900">Reporte del mes</h2>
             {isAdmin && (
               <button type="button" onClick={() => setConfigOpen(true)} className="flex h-9 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50">
@@ -886,7 +883,6 @@ export const AvailabilityModule: React.FC = () => {
       {/* Título del reporte: UNGET y corte a la izquierda; alcance y ⋯ a la derecha (guardar en el historial, exportar, otro TFORMDET, configuración). */}
       <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          {backButton}
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <h2 className="truncate text-[18px] font-black text-slate-900 md:text-[20px]">{title}</h2>
@@ -918,7 +914,7 @@ export const AvailabilityModule: React.FC = () => {
       </div>
 
       <div ref={scroller} />
-      {openCode && <EstablishmentDetail ctx={openIsOut ? { ...ctx, report: outReport, pharmacy: outPharmacyReport, outside: undefined, outsideDetail: true } : ctx} code={openCode} onClose={closeEstablishment} onSwitch={(c) => { setProduct(null); setOpenCode(c); requestAnimationFrame(() => scrollMain(0)); }} />}
+      {openCode && <EstablishmentDetail ctx={openIsOut ? { ...ctx, report: outReport, pharmacy: outPharmacyReport, outside: undefined, outsideDetail: true } : ctx} code={openCode} onSwitch={(c) => { setProduct(null); setOpenCode(c); requestAnimationFrame(() => scrollMain(0)); }} />}
       {/* Los reportes siguen montados (ocultos) mientras el detalle está abierto: así conservan página, filtros y búsqueda. */}
       <div className={openCode ? "hidden" : undefined}>
           <nav aria-label="Reportes" className="sticky -top-2.5 z-20 -mx-3 mb-4 border-b border-slate-200 bg-slate-50 px-3 pt-0.5 sm:-top-3 sm:-mx-5 sm:px-5 2xl:-mx-6 2xl:px-6">
