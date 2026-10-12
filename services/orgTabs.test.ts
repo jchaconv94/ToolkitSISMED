@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canCreateInOrgTab, orgTabsForLevel, showsTerritoryFilter } from "./orgTabs";
+import { canCreateInOrgTab, orgTabsForLevel, showsTerritory } from "./orgTabs";
 import { getUserJurisdictionScope } from "./jurisdictionService";
 import type { User } from "../types";
 
@@ -50,21 +50,21 @@ describe("canCreateInOrgTab", () => {
   });
 });
 
-describe("showsTerritoryFilter", () => {
+describe("showsTerritory", () => {
   it("el ADMIN ve todos los filtros", () => {
-    expect(["DIRESA", "OGESS", "UNGET", "MICRORED"].every((f) => showsTerritoryFilter("GLOBAL", f as "DIRESA", true))).toBe(true);
+    expect(["DIRESA", "OGESS", "UNGET", "MICRORED"].every((f) => showsTerritory("GLOBAL", f as "DIRESA", true))).toBe(true);
   });
 
   it("los demás solo los de debajo de su nivel", () => {
-    expect(showsTerritoryFilter("GLOBAL", "DIRESA", false)).toBe(false);
-    expect(showsTerritoryFilter("GLOBAL", "OGESS", false)).toBe(true);
-    expect(showsTerritoryFilter("OGESS", "OGESS", false)).toBe(false);
-    expect(showsTerritoryFilter("OGESS", "UNGET", false)).toBe(true);
+    expect(showsTerritory("GLOBAL", "DIRESA", false)).toBe(false);
+    expect(showsTerritory("GLOBAL", "OGESS", false)).toBe(true);
+    expect(showsTerritory("OGESS", "OGESS", false)).toBe(false);
+    expect(showsTerritory("OGESS", "UNGET", false)).toBe(true);
     // Un COORDINADOR de UNGET: sin OGESS ni UNGET, con microred.
-    expect(showsTerritoryFilter("UNGET", "OGESS", false)).toBe(false);
-    expect(showsTerritoryFilter("UNGET", "UNGET", false)).toBe(false);
-    expect(showsTerritoryFilter("UNGET", "MICRORED", false)).toBe(true);
-    expect(showsTerritoryFilter("MICRORED", "MICRORED", false)).toBe(false);
-    expect(showsTerritoryFilter("IPRESS", "MICRORED", false)).toBe(false);
+    expect(showsTerritory("UNGET", "OGESS", false)).toBe(false);
+    expect(showsTerritory("UNGET", "UNGET", false)).toBe(false);
+    expect(showsTerritory("UNGET", "MICRORED", false)).toBe(true);
+    expect(showsTerritory("MICRORED", "MICRORED", false)).toBe(false);
+    expect(showsTerritory("IPRESS", "MICRORED", false)).toBe(false);
   });
 });
