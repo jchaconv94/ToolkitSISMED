@@ -28,3 +28,11 @@ export const canCreateInOrgTab = (level: UserJurisdictionScope["level"], tab: Or
   if (level === "MICRORED" || level === "IPRESS") return false;
   return ORG_TABS.indexOf(tab) > LEVEL_INDEX[level];
 };
+
+/**
+ * ¿Se muestra el filtro de este nivel territorial? Solo los que están por debajo del nivel del
+ * usuario: el suyo y los de arriba son siempre el mismo (a un usuario de UNGET le sobran
+ * «Todas las OGESS» y «Todas las UNGET»; pedido del usuario del 2026-10-12). El ADMIN, todos.
+ */
+export const showsTerritoryFilter = (level: UserJurisdictionScope["level"], filter: Exclude<OrgTab, "IPRESS">, isAdmin: boolean): boolean =>
+  isAdmin || ORG_TABS.indexOf(filter) > LEVEL_INDEX[level];
