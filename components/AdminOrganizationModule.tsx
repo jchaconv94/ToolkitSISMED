@@ -19,7 +19,7 @@ import { buildUngetConnectionStatus, pickOneConnectionPerUnget, type UngetConnec
 import { isLinkedToSheet, resolveFacilitySheet } from '../services/facilitySheetLink';
 import { FACILITY_TYPES, allowedFacilityTypes, facilityTypeLabel, suggestedFacilityType } from '../services/facilityCodes';
 import { findParentFacility, inheritFromParent, isPharmacyType, parentIpressCode, pharmaciesToSync } from '../services/facilityHierarchy';
-import { canCreateInOrgTab, orgTabsForLevel, type OrgTab } from '../services/orgTabs';
+import { canCreateInOrgTab, orgTabsForLevel, showsTerritoryFilter, type OrgTab } from '../services/orgTabs';
 import { getUserJurisdictionScope } from '../services/jurisdictionService';
 import { listUngetSheets, type UngetSheet } from '../services/ungetSheetCatalog';
 import {
@@ -1545,11 +1545,13 @@ export const AdminOrganizationModule: React.FC = () => {
 
     // Filtros de cada nivel: en escritorio van en la barra; en el celular, en el panel inferior.
     type FilterField = { key: string; label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void };
-    const panelFilters: FilterField[] = (() => {
-        const diresaF: FilterField = { key: 'diresa', label: 'DIRESA', value: filterDiresaId, options: [{ value: '', label: 'Todas las DIRESA' }, ...diresas.map(d => ({ value: d.id, label: d.name }))], onChange: (v) => { setFilterDiresaId(v); setFilterOgessId(''); setFilterUngetId(''); setFilterMicroredId(''); } };
-        const ogessF: FilterField = { key: 'ogess', label: 'OGESS', value: filterOgessId, options: [{ value: '', label: 'Todas las OGESS' }, ...ogess.filter(o => !filterDiresaId || o.diresaId === filterDiresaId).map(o => ({ value: o.id, label: o.name }))], onChange: (v) => { setFilterOgessId(v); setFilterUngetId(''); setFilterMicroredId(''); } };
-        const ungetF: FilterField = { key: 'unget', label: 'UNGET', value: filterUngetId, options: [{ value: '', label: 'Todas las UNGET' }, ...ungets.filter(u => !filterOgessId || u.ogessId === filterOgessId).map(u => ({ value: u.id, label: u.name }))], onChange: (v) => { setFilterUngetId(v); setFilterMicroredId(''); } };
-        const microredF: FilterField = { key: 'microred', label: 'Microred', value: filterMicroredId, options: [{ value: '', label: 'Todas las microredes' }, ...microredes.filter(m => !filterUngetId || m.ungetId === filterUngetId).map(m => ({ value: m.id, label: m.name }))], onChange: setFilterMicroredId };
+    // Los filtros territoriales del nivel del usuario y de arriba no se muestran: siempre son el mismo.
+    const TERRITORY_FILTER: Record<string, 'DIRESA' | 'OGESS' | 'UNGET' | 'MICRORED'> = { diresa: 'DIRESA', ogess: 'OGESS', unget: 'UNGET', microred: 'MICRORED' };
+    const panelFilters: FilterField[] = ((): FilterField[] => {
+        const diresaF: FilterField = { key: 'diresa', label: 'DIRESA', value: filterDiresaId, options: [{ value: '', label: 'Todas las DIRESA' }, ...visibleDiresas.map(d => ({ value: d.id, label: d.name }))], onChange: (v) => { setFilterDiresaId(v); setFilterOgessId(''); setFilterUngetId(''); setFilterMicroredId(''); } };
+        const ogessF: FilterField = { key: 'ogess', label: 'OGESS', value: filterOgessId, options: [{ value: '', label: 'Todas las OGESS' }, ...visibleOgess.filter(o => !filterDiresaId || o.diresaId === filterDiresaId).map(o => ({ value: o.id, label: o.name }))], onChange: (v) => { setFilterOgessId(v); setFilterUngetId(''); setFilterMicroredId(''); } };
+        const ungetF: FilterField = { key: 'unget', label: 'UNGET', value: filterUngetId, options: [{ value: '', label: 'Todas las UNGET' }, ...visibleUngets.filter(u => !filterOgessId || u.ogessId === filterOgessId).map(u => ({ value: u.id, label: u.name }))], onChange: (v) => { setFilterUngetId(v); setFilterMicroredId(''); } };
+        const microredF: FilterField = { key: 'microred', label: 'Microred', value: filterMicroredId, options: [{ value: '', label: 'Todas las microredes' }, ...visibleMicroredes.filter(m => !filterUngetId || m.ungetId === filterUngetId).map(m => ({ value: m.id, label: m.name }))], onChange: setFilterMicroredId };
         const categoryF: FilterField = { key: 'category', label: 'Categoría', value: filterCategory, options: [{ value: '', label: 'Todas las categorías' }, ...['I-1', 'I-2', 'I-3', 'I-4', 'II-1', 'II-2', 'III-1'].map(c => ({ value: c, label: c }))], onChange: setFilterCategory };
         const typeF: FilterField = { key: 'type', label: 'Tipo', value: filterType, options: [{ value: '', label: 'Todos los tipos' }, ...FACILITY_TYPES.map(t => ({ value: t.value, label: t.label }))], onChange: setFilterType };
         const departmentF: FilterField = { key: 'department', label: 'Departamento', value: filterDepartment, options: filterOptions.departments, onChange: setFilterDepartment };
@@ -1560,7 +1562,7 @@ export const AdminOrganizationModule: React.FC = () => {
         if (activeTab === 'UNGET') return [diresaF, ogessF, provinceF, districtF];
         if (activeTab === 'MICRORED') return [ogessF, ungetF];
         return [ogessF, ungetF, microredF, categoryF, typeF];
-    })();
+    })().filter(f => !TERRITORY_FILTER[f.key] || showsTerritoryFilter(jurisdictionLevel, TERRITORY_FILTER[f.key], isSuperAdmin));
     // Etiquetas de los filtros aplicados (de cualquier nivel: los filtros son comunes a todos).
     const activeFilterChips = [
         { key: 'diresa', label: 'DIRESA', value: filterDiresaId && getDiresaName(filterDiresaId), clear: () => { setFilterDiresaId(''); setFilterOgessId(''); setFilterUngetId(''); setFilterMicroredId(''); } },
@@ -1695,7 +1697,7 @@ export const AdminOrganizationModule: React.FC = () => {
                                     </button>
                                 )}
                             </>
-                        ) : (
+                        ) : panelFilters.length > 0 && (
                             <button
                                 type="button"
                                 onClick={() => setIsFilterPaneOpen(true)}
