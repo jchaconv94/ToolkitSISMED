@@ -10,6 +10,8 @@
  * regla de negocio: se puede probar sin navegador y no depende de cómo se pinte la tabla.
  */
 
+import { parseSheetNumber } from "./numberFormat";
+
 /** Lectura tolerante de una columna: la hoja las escribe con nombres que varían. */
 export const readStockField = (row: any, ...fieldPatterns: string[]): string => {
   if (!row || typeof row !== "object") return "";
@@ -36,20 +38,10 @@ export const normalizeStockText = (value?: string | null): string =>
     .trim();
 
 /**
- * Saldo como número.
- *
- * La hoja los manda como texto y no siempre con punto decimal: hay coma en algunas
- * columnas de precio y separador de miles en otras. Un `Number()` a secas devolvía `NaN` y
- * el consolidado salía en cero sin que nada avisara.
+ * Saldo o precio como número. La regla (punto o coma decimal según venga la hoja) vive en
+ * `parseSheetNumber`, compartida con Stock SISMED.
  */
-export const parseStockAmount = (value?: string | number | null): number => {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  const texto = String(value ?? "").trim();
-  if (!texto) return 0;
-  const limpio = texto.replace(/\s/g, "").replace(/\.(?=\d{3}\b)/g, "").replace(",", ".");
-  const numero = Number(limpio);
-  return Number.isFinite(numero) ? numero : 0;
-};
+export const parseStockAmount = (value?: string | number | null): number => parseSheetNumber(value);
 
 export interface StockLotDetail {
   lote: string;

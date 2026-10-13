@@ -66,12 +66,19 @@ describe("consolidateStockRows", () => {
 
   it("conserva el total de stock", () => {
     const detallado = [
-      fila({ Saldo: "1.250" }),
+      fila({ Saldo: "1250" }),
       fila({ ALMCOD: "06519F0201", Saldo: "30" }),
       fila({ ALMCOD: "06519F0301", Lote: "B", Saldo: "7" }),
     ];
     const total = (filas: any[]) => filas.reduce((s, r) => s + Number(r.Saldo), 0);
     expect(total(consolidateStockRows(detallado, almcod))).toBe(1287);
+  });
+
+  it("el precio con tres decimales no pierde el punto", () => {
+    // Libro con punto decimal: el precio detalle (90 % del de paquete) suele tener tres.
+    const [r] = consolidateStockRows([fila({ Saldo: "4", Precio_Det: "2773.125", Precio_Cab: "3081.25" })], almcod);
+    expect(r.Precio_Det).toBeCloseTo(2773.125);
+    expect(r.Precio_Cab).toBeCloseTo(3081.25);
   });
 
   it("deja el código de 5 dígitos y el nombre sin «(CONSOLIDADO)»", () => {
