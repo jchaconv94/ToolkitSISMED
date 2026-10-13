@@ -313,11 +313,23 @@ export const HBars: React.FC<{
 
 export interface RankRow { key: string; label: string; pct: number; level: DmeLevel }
 
-export const RankingChart: React.FC<{ rows: RankRow[]; levels: LevelThresholds; labels: Record<DmeLevel, string>; onSelect?: (key: string) => void }> = ({ rows, levels, labels, onSelect }) => {
+/** Gris de lo que está fuera del análisis: se ve, pero no cuenta en la disponibilidad. */
+const OUTSIDE_COLOR = "#94a3b8";
+
+/**
+ * Ranking de establecimientos sobre las franjas de nivel. Los de fuera del análisis (`outside`)
+ * van al final, en gris y tras una línea punteada: se ven, pero no tienen puesto ni cuentan en la
+ * disponibilidad (pedido del usuario, 2026-10-13).
+ */
+export const RankingChart: React.FC<{ rows: RankRow[]; outside?: RankRow[]; levels: LevelThresholds; labels: Record<DmeLevel, string>; onSelect?: (key: string) => void }> = ({ rows, outside = [], levels, labels, onSelect }) => {
   const sorted = [...rows].sort((a, b) => b.pct - a.pct);
-  const minPct = Math.max(0, Math.min(40, Math.floor((Math.min(...sorted.map((r) => r.pct), 100) - 5) / 10) * 10));
-  const slot = 34, left = 40, right = 72, top = 12, plotH = 300, bottom = 128;
-  const width = left + right + Math.max(sorted.length, 10) * slot;
+  const outSorted = [...outside].sort((a, b) => b.pct - a.pct);
+  const minPct = Math.max(0, Math.min(40, Math.floor((Math.min(...sorted.map((r) => r.pct), ...outSorted.map((r) => r.pct), 100) - 5) / 10) * 10));
+  // Con establecimientos fuera del análisis, arriba queda espacio para su título.
+  const slot = 34, left = 40, right = 72, top = outSorted.length ? 30 : 12, plotH = 300, bottom = 128;
+  // Una ranura vacía separa a los de fuera del análisis.
+  const slots = sorted.length + (outSorted.length ? outSorted.length + 1 : 0);
+  const width = left + right + Math.max(slots, 10) * slot;
   const height = top + plotH + bottom;
   const y = (v: number) => top + plotH - ((Math.max(minPct, Math.min(100, v)) - minPct) / (100 - minPct)) * plotH;
   const bands: Array<[number, number, DmeLevel]> = [[levels.optimo, 100, "OPTIMO"], [levels.alto, levels.optimo, "ALTO"], [levels.regular, levels.alto, "REGULAR"], [minPct, levels.regular, "BAJO"]];
@@ -325,6 +337,32 @@ export const RankingChart: React.FC<{ rows: RankRow[]; levels: LevelThresholds; 
   for (let v = minPct; v <= 100; v += 10) ticks.push(v);
   const [hover, setHover] = useState<string | null>(null);
   const tip = useChartTip();
+  const bar = (r: RankRow, slotIndex: number, out: boolean, rank: number) => {
+    const x = left + slotIndex * slot + 5;
+    const bw = slot - 10;
+    const rows: Array<[string, React.ReactNode]> = out
+      ? [["Disponibilidad", pct1(r.pct)], ["Nivel", labels[r.level]]]
+      : [["Disponibilidad", pct1(r.pct)], ["Nivel", labels[r.level]], ["Puesto", `${rank + 1} de ${sorted.length}`]];
+    const note = [out ? "Fuera del análisis: no cuenta en la disponibilidad" : "", onSelect ? "Clic para abrir el establecimiento" : ""].filter(Boolean).join(" · ") || undefined;
+    return (
+      <g
+        key={r.key}
+        className={onSelect ? "cursor-pointer" : ""}
+        onClick={onSelect ? () => onSelect(r.key) : undefined}
+        onMouseEnter={() => setHover(r.key)}
+        opacity={hover && hover !== r.key ? 0.45 : 1}
+        {...(() => { const b = tip.bind(<TipBox title={r.label} color={out ? OUTSIDE_COLOR : LEVEL_COLOR[r.level]} rows={rows} note={note} />); return { onMouseMove: b.onMouseMove, onMouseLeave: () => { b.onMouseLeave(); setHover(null); } }; })()}
+      >
+        <rect x={x - 4} y={top} width={bw + 8} height={plotH} fill="transparent" />
+        <rect x={x} y={y(r.pct)} width={bw} height={top + plotH - y(r.pct)} rx={3} fill={out ? OUTSIDE_COLOR : LEVEL_COLOR[r.level]} />
+        <text x={x + bw / 2} y={y(r.pct) - 6} textAnchor="middle" className={`text-[11px] font-bold ${out ? "fill-slate-400" : "fill-slate-700"}`}>{Math.round(r.pct)} %</text>
+        <text x={x + bw / 2} y={top + plotH + 10} transform={`rotate(-50 ${x + bw / 2} ${top + plotH + 10})`} textAnchor="end" className={`text-[11px] ${out ? "fill-slate-400 italic" : "fill-slate-600"}`}>
+          {r.label.length > 22 ? `${r.label.slice(0, 21)}…` : r.label}
+        </text>
+      </g>
+    );
+  };
+  const sepX = left + (sorted.length + 0.5) * slot;
   return (
     <div className="scrollbar-x overflow-x-auto">
       {tip.layer}
@@ -338,27 +376,14 @@ export const RankingChart: React.FC<{ rows: RankRow[]; levels: LevelThresholds; 
         {ticks.map((t) => (
           <text key={t} x={left - 8} y={y(t)} textAnchor="end" dominantBaseline="middle" className="fill-slate-400 text-[11px]">{t}</text>
         ))}
-        {sorted.map((r, i) => {
-          const x = left + i * slot + 5;
-          const bw = slot - 10;
-          return (
-            <g
-              key={r.key}
-              className={onSelect ? "cursor-pointer" : ""}
-              onClick={onSelect ? () => onSelect(r.key) : undefined}
-              onMouseEnter={() => setHover(r.key)}
-              opacity={hover && hover !== r.key ? 0.45 : 1}
-              {...(() => { const b = tip.bind(<TipBox title={r.label} color={LEVEL_COLOR[r.level]} rows={[["Disponibilidad", pct1(r.pct)], ["Nivel", labels[r.level]], ["Puesto", `${i + 1} de ${sorted.length}`]]} note={onSelect ? "Clic para abrir el establecimiento" : undefined} />); return { onMouseMove: b.onMouseMove, onMouseLeave: () => { b.onMouseLeave(); setHover(null); } }; })()}
-            >
-              <rect x={x - 4} y={top} width={bw + 8} height={plotH} fill="transparent" />
-              <rect x={x} y={y(r.pct)} width={bw} height={top + plotH - y(r.pct)} rx={3} fill={LEVEL_COLOR[r.level]} />
-              <text x={x + bw / 2} y={y(r.pct) - 6} textAnchor="middle" className="fill-slate-700 text-[11px] font-bold">{Math.round(r.pct)} %</text>
-              <text x={x + bw / 2} y={top + plotH + 10} transform={`rotate(-50 ${x + bw / 2} ${top + plotH + 10})`} textAnchor="end" className="fill-slate-600 text-[11px]">
-                {r.label.length > 22 ? `${r.label.slice(0, 21)}…` : r.label}
-              </text>
-            </g>
-          );
-        })}
+        {sorted.map((r, i) => bar(r, i, false, i))}
+        {outSorted.length > 0 && (
+          <g>
+            <line x1={sepX} x2={sepX} y1={top} y2={top + plotH} stroke="#64748b" strokeWidth={1.5} strokeDasharray="4 4" />
+            <text x={sepX + 6} y={top - 10} className="fill-slate-500 text-[11px] font-bold">Fuera del análisis</text>
+          </g>
+        )}
+        {outSorted.map((r, j) => bar(r, sorted.length + 1 + j, true, j))}
       </svg>
     </div>
   );

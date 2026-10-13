@@ -131,7 +131,7 @@ const PctBar: React.FC<{ pct: number; color: string; text?: string; width?: stri
 /** «Establecimiento › F02 Puesto» para una farmacia o puesto comunal; el nombre, para el establecimiento. */
 const siteLabel = (ctx: ReportContext, it: AvailabilityItem) => {
   if (it.code === it.ipressCode) return it.name;
-  const parent = ctx.report.establishments.find((x) => x.code === it.ipressCode)?.name;
+  const parent = (ctx.report.establishments.find((x) => x.code === it.ipressCode) ?? ctx.outside?.establishments.find((x) => x.code === it.ipressCode))?.name;
   return `${parent ?? it.ipressCode} › ${it.code.slice(5)} ${it.name}`;
 };
 
@@ -677,7 +677,7 @@ export const SummaryReport: React.FC<{ ctx: ReportContext; levelCounts: Record<D
       </div>
 
       <ChartCard title="Ranking de establecimientos" info={INFO.ranking}>
-        <RankingChart rows={report.establishments.map((e) => ({ key: e.code, label: e.name, pct: e.pct, level: e.level }))} levels={lv} labels={DME_LEVEL_LABEL} onSelect={ctx.openEstablishment} />
+        <RankingChart rows={report.establishments.map((e) => ({ key: e.code, label: e.name, pct: e.pct, level: e.level }))} outside={ctx.outside?.establishments.map((e) => ({ key: e.code, label: e.name, pct: e.pct, level: e.level }))} levels={lv} labels={DME_LEVEL_LABEL} onSelect={ctx.openEstablishment} />
       </ChartCard>
     </div>
   );
@@ -1362,7 +1362,8 @@ export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGa
   const siteWithMain = siteGaps.filter((r) => (r.main?.stock ?? 0) > 0).length;
   const withDesab = products.filter((p) => p.desabastecido > 0);
   const solvable = withDesab.filter((p) => p.donors > 0 || p.warehouseStock > 0);
-  const n = ctx.report.establishments.length;
+  // Los de fuera del análisis también están en esta lista (no cuentan solo en la disponibilidad).
+  const n = ctx.report.establishments.length + (ctx.outside?.establishments.length ?? 0);
   const wide = withDesab.filter((p) => p.desabastecido >= Math.max(2, n * 0.25));
   const donorsDesab = withDesab.filter((p) => p.donors > 0);
   // Los indicadores y las pastillas filtran lo mismo, y siempre sobre los productos desabastecidos.
@@ -1512,7 +1513,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
     for (const r of risk.rows) {
       if (r.bucket === "LATER") continue;
       const ipress = r.item.ipressCode;
-      const e = m.get(ipress) || { name: ctx.report.establishments.find((x) => x.code === ipress)?.name ?? r.item.name, value: 0, lots: 0 };
+      const e = m.get(ipress) || { name: (ctx.report.establishments.find((x) => x.code === ipress) ?? ctx.outside?.establishments.find((x) => x.code === ipress))?.name ?? r.item.name, value: 0, lots: 0 };
       e.value += r.value; e.lots++;
       m.set(ipress, e);
     }

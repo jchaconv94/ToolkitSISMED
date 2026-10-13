@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { StockStatus } from "../types";
 import type { ScopeRule } from "./availabilityConfig";
-import { DME_LEVEL_LABEL, cutDateOf, dmeLevelOf, ipressCodeOf, wholeMonthsBetween, type AvailabilityItem, type AvailabilityReport, type TformdetMonthSheet, type WarehouseItem } from "./availabilityReport";
+import { DME_LEVEL_LABEL, cutDateOf, dmeLevelOf, ipressCodeOf, wholeMonthsBetween, type AvailabilityItem, type AvailabilityReport, type EstablishmentSummary, type TformdetMonthSheet, type WarehouseItem } from "./availabilityReport";
 import type { DmeLevel } from "./stockStatus";
 import { formatNumber } from "./numberFormat";
 import { CHART_COLORS, brandImage, donutCard, findingCard, gaugeCard, hBarsCard, kpiCard, levelColumnsCard, miniKpiCard, rankingCard, type ChartImage, type KpiSpec } from "./availabilityCharts";
@@ -281,8 +281,12 @@ export interface AvailabilityExportParams {
   largeVolumeList?: ReadonlyArray<{ code: string; name: string }>;
   /** Medicamentos excluidos de la DME (ficha 28, criterios de exclusión), si se exporta la DME. */
   dmeExcluded?: ReadonlyArray<{ code: string; name: string }>;
-  /** Establecimientos fuera del análisis (los definen la DIRESA y cada UNGET; no cuentan en nada). */
-  outside?: Array<{ code: string; name: string; pct: number }>;
+  /**
+   * Establecimientos fuera del análisis (los definen la DIRESA y cada UNGET): no cuentan en la
+   * disponibilidad, pero se listan al final de Establecimientos y del ranking, en gris. Sus
+   * productos ya vienen en `report.items` para las demás hojas.
+   */
+  outside?: Array<Pick<EstablishmentSummary, "code" | "name" | "pct"> & Partial<EstablishmentSummary>>;
   aggregate?: "average" | "sum";
   /** Stock de los almacenes al corte (no cuenta en la disponibilidad). */
   warehouse?: WarehouseItem[] | null;
@@ -407,7 +411,8 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       { label: "Sin rotación", value: c.sinRotacion, color: "#94A3B8" }, { label: "Desabastecido", value: c.desabastecido, color: "#EF4444" },
     ] }, 500, mrH), 0, rowC);
     await place(hBarsCard({ title: "Disponibilidad por microred", items: mrsSorted.map((m) => ({ label: titleCase(m.microred), pct: m.pct, level: m.level })), levels: lv }, W - 500 - GAP, mrH), 500 + GAP, rowC);
-    await place(rankingCard({ title: "Ranking de establecimientos (%)", items: byPct.map((e) => ({ label: shortName(e.name), pct: e.pct, level: e.level })), levels: lv }, W, rankH), 0, rowD);
+    const outsideItems = (p.outside ?? []).slice().sort((a, b) => b.pct - a.pct).map((e) => ({ label: shortName(e.name), pct: e.pct, level: e.level ?? dmeLevelOf(e.pct, lv), outside: true }));
+    await place(rankingCard({ title: "Ranking de establecimientos (%)", items: [...byPct.map((e) => ({ label: shortName(e.name), pct: e.pct, level: e.level })), ...outsideItems], levels: lv }, W, rankH), 0, rowD);
   } else {
     // Sin lienzo (pruebas o navegador antiguo): el indicador principal en celdas.
     rs.getCell(imagesStart + 1, 1).value = scope === "essential" ? "Disponibilidad DME de la UNGET" : "Disponibilidad de la UNGET";
@@ -481,14 +486,22 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   const es = wb.addWorksheet("Establecimientos");
   sheetTitle(es, "Ranking de establecimientos", subtitle, 13, who);
   const ranked = report.establishments.slice().sort((a, b) => b.pct - a.pct);
+  const outsideRows = (p.outside ?? []).slice().sort((a, b) => b.pct - a.pct);
   const te = writeTable(es, TABLE_ROW_WITH_CARDS, [
     { header: "N°", width: 5, align: "center" }, { header: "Microred", width: 20 }, { header: "Código", width: 9, align: "center" }, { header: "Establecimiento", width: 32 },
     { header: "Cat.", width: 6, align: "center" }, { header: "Desabast.", width: 10, fmt: FMT.int }, { header: "Substock", width: 10, fmt: FMT.int },
     { header: "Normostock", width: 11, fmt: FMT.int }, { header: "Sobrestock", width: 11, fmt: FMT.int }, { header: "Sin rotación", width: 11, fmt: FMT.int },
     { header: "Total ítems", width: 10, fmt: FMT.int }, { header: "Disponibilidad", width: 14, fmt: FMT.pct, bar: true }, { header: "Nivel", width: 11, align: "center" },
-  ], ranked.map((e, i) => [i + 1, e.microred, e.code, e.name, e.category, e.desabastecido, e.substock, e.normostock, e.sobrestock, e.sinRotacion, e.total, e.pct / 100, DME_LEVEL_LABEL[e.level]]), { freezeCols: 4 });
+  ], [
+    ...ranked.map((e, i) => [i + 1, e.microred, e.code, e.name, e.category, e.desabastecido, e.substock, e.normostock, e.sobrestock, e.sinRotacion, e.total, e.pct / 100, DME_LEVEL_LABEL[e.level]]),
+    // Los de fuera del análisis, al final y en gris: se ven, pero no tienen puesto ni cuentan.
+    ...outsideRows.map((e) => ["—", e.microred ?? "", e.code, e.name, e.category ?? "", e.desabastecido ?? "", e.substock ?? "", e.normostock ?? "", e.sobrestock ?? "", e.sinRotacion ?? "", e.total ?? "", e.pct / 100, "Fuera del análisis"]),
+  ], { freezeCols: 4 });
   ranked.forEach((e, i) => paintLevel(es.getCell(te.head + 1 + i, 13), e.level));
   for (let i = 0; i < ranked.length; i++) restyle(es.getCell(te.head + 1 + i, 6), { font: { name: FONT, size: 10, color: { argb: "FFB91C1C" } } });
+  for (let i = 0; i < outsideRows.length; i++) {
+    for (let col = 1; col <= 13; col++) restyle(es.getCell(te.head + 1 + ranked.length + i, col), { font: { name: FONT, size: 10, italic: true, color: { argb: C.muted } } });
+  }
   dataBar(es, `L${te.head + 1}:L${te.last}`);
   await miniCards(wb, es, levels.map((l) => ({ label: DME_LEVEL_LABEL[l], value: String(perLevel(l)), hint: `establecimientos · ${levelRange[l]}`, color: CHART_COLORS.level[l] })), sheetWidthPx(es, 13));
 
@@ -721,7 +734,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       ? [["", "Medicamentos excluidos", `No entran en la DME (ficha 28, criterios de exclusión; los mismos que el tablero nacional no evalúa): ${p.dmeExcluded.map((e) => `${e.code} ${e.name}`).join("; ")}.`]]
       : []),
     ...(p.outside?.length
-      ? [["", "Fuera del análisis", `Establecimientos fuera del análisis, definidos por la DIRESA y cada UNGET (no cuentan en la disponibilidad ni en las demás hojas): ${p.outside.map((o) => `${o.name} (${o.code}, ${pctText(o.pct)})`).join("; ")}. Los centros de salud mental comunitario van fuera por omisión.`]]
+      ? [["", "Fuera del análisis", `Establecimientos fuera del análisis, definidos por la DIRESA y cada UNGET (no cuentan en la disponibilidad de la UNGET ni de su microred; sí aparecen en las demás hojas, y al final de Establecimientos y del ranking, en gris): ${p.outside.map((o) => `${o.name} (${o.code}, ${pctText(o.pct)})`).join("; ")}. Los centros de salud mental comunitario van fuera por omisión.`]]
       : []),
     ...(p.largeVolumeMonths !== undefined
       ? [["", "Soluciones de gran volumen", `Las de la lista de Configuración (soluciones e inyectables de 1 L o más del catálogo SISMED) son Normostock desde ${n(Math.min(lim.subMax, p.largeVolumeMonths))} ${p.largeVolumeMonths === 1 ? "mes" : "meses"} de provisión: «la disponibilidad se considera con un mes de existencia disponible» (ficha 28, consideración a).${p.largeVolumeList?.length ? ` En este reporte: ${p.largeVolumeList.map((e) => `${e.code} ${e.name}`).join("; ")}.` : ""}`]]

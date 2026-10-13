@@ -284,12 +284,19 @@ export const hBarsCard = async (o: { title: string; items: Array<{ label: string
 
 /* ------------------------------------------------------------------ Ranking con franjas */
 
-export const rankingCard = async (o: { title: string; items: Array<{ label: string; pct: number; level: string }>; levels: { optimo: number; alto: number; regular: number } }, w: number, h: number): Promise<ChartImage | null> => {
+/**
+ * Ranking sobre las franjas de nivel. Los ítems con `outside` (fuera del análisis) van al final,
+ * en gris y tras una línea punteada: se ven, pero no cuentan en la disponibilidad.
+ */
+export const rankingCard = async (o: { title: string; items: Array<{ label: string; pct: number; level: string; outside?: boolean }>; levels: { optimo: number; alto: number; regular: number } }, w: number, h: number): Promise<ChartImage | null> => {
   const cv = canvas(w, h);
   if (!cv) return null;
   const { c, x } = cv;
   card(x, w, h, o.title);
-  const n = o.items.length;
+  const inside = o.items.filter((i) => !i.outside);
+  const outside = o.items.filter((i) => i.outside);
+  // Una ranura vacía separa a los de fuera del análisis.
+  const n = inside.length + (outside.length ? outside.length + 1 : 0);
   const lo = Math.max(0, Math.min(40, Math.floor((Math.min(...o.items.map((i) => i.pct), o.levels.regular) - 10) / 10) * 10));
   // A la derecha, fuera del área de barras, los nombres de las franjas.
   const top = 56, bottom = n > 50 ? 80 : 118, left = 44, right = w - 64;
@@ -306,22 +313,38 @@ export const rankingCard = async (o: { title: string; items: Array<{ label: stri
   }
   for (let t = lo; t <= 100; t += 10) text(x, String(t), left - 8, py(t) + 4, { size: 10.5, color: CHART_COLORS.muted, align: "right" });
   const step = plotW / Math.max(1, n), bw = Math.max(3, Math.min(34, step - (n > 60 ? 2 : 6)));
-  o.items.forEach((it, i) => {
+  const drawBar = (it: { label: string; pct: number; level: string }, i: number, out: boolean) => {
     const cx = left + step * (i + 0.5);
     const yTop = py(Math.max(lo, it.pct));
+    const ink = out ? CHART_COLORS.muted : "#334155";
     roundRect(x, cx - bw / 2, yTop, bw, py(lo) - yTop, Math.min(3, bw / 3));
-    x.fillStyle = CHART_COLORS.level[it.level];
+    x.fillStyle = out ? "#94A3B8" : CHART_COLORS.level[it.level];
     x.fill();
-    if (n <= 60) text(x, String(Math.round(it.pct)), cx, yTop - 5, { size: n > 40 ? 8.5 : 9.5, weight: 700, color: "#334155", align: "center" });
+    if (n <= 60) text(x, String(Math.round(it.pct)), cx, yTop - 5, { size: n > 40 ? 8.5 : 9.5, weight: 700, color: ink, align: "center" });
     if (n <= 80) {
       x.save();
       x.translate(cx + 3, py(lo) + 10);
       x.rotate(-Math.PI / 3);
       font(x, n > 50 ? 9 : 10.5);
-      text(x, fit(x, it.label, (bottom - 14) / Math.sin(Math.PI / 3)), 0, 0, { size: n > 50 ? 9 : 10.5, color: "#334155", align: "right" });
+      text(x, fit(x, it.label, (bottom - 14) / Math.sin(Math.PI / 3)), 0, 0, { size: n > 50 ? 9 : 10.5, color: ink, align: "right" });
       x.restore();
     }
-  });
+  };
+  inside.forEach((it, i) => drawBar(it, i, false));
+  if (outside.length) {
+    const sx = left + step * (inside.length + 0.5);
+    x.save();
+    x.strokeStyle = CHART_COLORS.muted;
+    x.lineWidth = 1.5;
+    x.setLineDash([4, 4]);
+    x.beginPath();
+    x.moveTo(sx, py(100));
+    x.lineTo(sx, py(lo));
+    x.stroke();
+    x.restore();
+    text(x, "Fuera del análisis", sx + 6, py(100) - 6, { size: 10.5, weight: 700, color: CHART_COLORS.muted });
+    outside.forEach((it, j) => drawBar(it, inside.length + 1 + j, true));
+  }
   return finish(c, w, h);
 };
 
