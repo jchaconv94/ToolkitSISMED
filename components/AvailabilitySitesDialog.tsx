@@ -91,7 +91,7 @@ export const AvailabilitySitesDialog: React.FC<{
       busy={busy}
       size="lg"
       title="Establecimientos del análisis"
-      subtitle="Los desmarcados no cuentan en la disponibilidad ni en los demás reportes; se ven aparte."
+      subtitle="Los desmarcados no cuentan en la disponibilidad, pero se siguen viendo en los reportes y en el Excel."
       top={
         <div className="shrink-0 space-y-2.5 border-b border-slate-200 bg-white px-4 py-3 md:px-6">
           <TableSearch value={query} onChange={setQuery} placeholder="Buscar establecimiento o microred…" className="md:max-w-none" />

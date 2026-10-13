@@ -93,5 +93,25 @@ describe("Excel de disponibilidad", () => {
     expect(all).toMatch(/Soluciones de gran volumen: desde 1/);
     expect(all).toMatch(/En este reporte: 08166 SOLUCION DE LACTATO/);
   });
+
+  it("los de fuera del análisis se listan al final de Establecimientos, sin puesto", async () => {
+    const { rows } = parseAvailabilitySheet([HEADER,
+      ["R", "MR", "06503", "P.S. A", "I-1", "00091", "ACIDO ACETILSALICILICO 100 mg TAB", "TAB", 1, "M", "P", "S", 10, 10, 15]]);
+    const items = buildItems(rows, undefined, new Date(), { truncate: false, subMax: 2, sobreMin: 6 });
+    const wb = await buildAvailabilityWorkbook({
+      report: summarize(items), pharmacyItems: null, months: ["202608", "202609"], scope: "all", title: "UNGET X", formulaText: "f",
+      levels: { optimo: 90, alto: 80, regular: 70 }, source: "s",
+      outside: [{ code: "31456", name: "C.S.M.C. BELLAVISTA", pct: 73.17, microred: "MR", total: 41 }],
+    });
+    const es = wb.getWorksheet("Establecimientos")!;
+    const codes: Array<[unknown, unknown, unknown]> = [];
+    es.eachRow((row) => codes.push([row.getCell(1).value, row.getCell(3).value, row.getCell(13).value]));
+    const inside = codes.findIndex(([, code]) => code === "06503");
+    const out = codes.findIndex(([, code]) => code === "31456");
+    expect(inside).toBeGreaterThan(-1);
+    expect(out).toBeGreaterThan(inside);
+    expect(codes[out][0]).toBe("—");
+    expect(codes[out][2]).toBe("Fuera del análisis");
+  });
 });
 

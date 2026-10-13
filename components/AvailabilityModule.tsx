@@ -20,7 +20,7 @@ import { userFullName } from "../services/sessionDisplay";
 import { api } from "../services/api";
 import {
   averageConsumption, buildItems, cutDateOf, essentialRows, groupByIpress, summarize,
-  type EstablishmentInfo, type AvailabilityItem, type AvailabilityScope, type Lot, type TformdetMonthSheet, type WarehouseItem, type ParsedAvailability, type ParsedTformdet,
+  type EstablishmentInfo, type AvailabilityItem, type AvailabilityReport, type AvailabilityScope, type Lot, type TformdetMonthSheet, type WarehouseItem, type ParsedAvailability, type ParsedTformdet,
 } from "../services/availabilityReport";
 import { monthFull, monthLabel } from "../services/availabilityExport";
 import { exportAvailabilityExcel } from "../services/availabilityExportClient";
@@ -448,6 +448,12 @@ export const AvailabilityModule: React.FC = () => {
   // Los de fuera del análisis, con su propio cálculo: se ven aparte y se pueden abrir.
   const outReport = useMemo(() => summarize(outItems, summaryOptionsOf(config.formula, scope, vitalCodes)), [outItems, config.formula, scope, vitalCodes]);
   const outPharmacyReport = useMemo(() => (outPharmacyItems ? summarize(outPharmacyItems, summaryOptionsOf(config.formula, scope, vitalCodes)) : null), [outPharmacyItems, config.formula, scope, vitalCodes]);
+  // Los de fuera del análisis no cuentan en la disponibilidad (porcentajes, niveles, microredes y
+  // UNGET), pero sí aparecen en los demás reportes y en el Excel: vencimientos, sobrestock,
+  // redistribución, almacén… (pedido del usuario, 2026-10-13). Estos llevan también sus productos;
+  // sus cifras de disponibilidad siguen siendo las de `report`.
+  const opsReport = useMemo<AvailabilityReport>(() => (outReport.items.length ? { ...report, items: [...report.items, ...outReport.items] } : report), [report, outReport]);
+  const opsPharmacy = useMemo(() => (pharmacyReport && outPharmacyReport?.items.length ? { ...pharmacyReport, items: [...pharmacyReport.items, ...outPharmacyReport.items] } : pharmacyReport), [pharmacyReport, outPharmacyReport]);
   // Los cambios al plan se guardan junto al archivo; si cambian los datos o la vista, se recuperan
   // los de esa combinación (o ninguno).
   const planSignature = stored ? `${fileSignature(stored)}|${scope}` : "";
@@ -622,7 +628,7 @@ export const AvailabilityModule: React.FC = () => {
   const expiryRiskMap = () => {
     const map: Record<string, { units: number; value: number }> = {};
     const add = (key: string, units: number, value: number) => { const e = map[key] || (map[key] = { units: 0, value: 0 }); e.units += units; e.value += value; };
-    for (const r of lotRiskReport(byPharmacy(report.items), asOf).rows) {
+    for (const r of lotRiskReport(byPharmacy(opsReport.items), asOf).rows) {
       add(`${r.item.ipressCode}|${r.item.medCode}`, r.atRisk, r.value);
       if (r.item.code !== r.item.ipressCode) add(`${r.item.code}|${r.item.medCode}`, r.atRisk, r.value);
     }
@@ -645,7 +651,7 @@ export const AvailabilityModule: React.FC = () => {
     const notice = toast.loading("Generando el Excel…");
     try {
       await exportAvailabilityExcel({
-        report, otherScopePct: otherPct, pharmacyItems, months, scope, title,
+        report: opsReport, otherScopePct: otherPct, pharmacyItems: pharmacyItems && outPharmacyItems?.length ? [...pharmacyItems, ...outPharmacyItems] : pharmacyItems, months, scope, title,
         formulaText: describeFormula(config.formula, scope),
         levels: config.formula.levels,
         fusedVersion: config.fused.version,
@@ -656,9 +662,9 @@ export const AvailabilityModule: React.FC = () => {
         limits: { subMax: config.formula.subMax, sobreMin: config.formula.sobreMin },
         largeVolumeMonths: classifyOptionsOf(config.formula, scope).largeVolumeMonths,
         // Solo los de la lista que están en este reporte (la lista entera son más de 200).
-        largeVolumeList: config.formula.largeVolumeList.filter((e) => report.items.some((i) => i.largeVolume && i.medCode === e.code)),
+        largeVolumeList: config.formula.largeVolumeList.filter((e) => opsReport.items.some((i) => i.largeVolume && i.medCode === e.code)),
         dmeExcluded: scope === "essential" ? config.formula.dmeExcluded : undefined,
-        outside: outReport.establishments.map((e) => ({ code: e.code, name: e.name, pct: e.pct })),
+        outside: outReport.establishments,
         aggregate: config.formula.aggregate,
         tformdet: tformdetSheet,
         warehouse,
@@ -806,8 +812,8 @@ export const AvailabilityModule: React.FC = () => {
 
   /* ------------------------------------------------------------ Resultados */
   const ctx: ReportContext = {
-    report,
-    pharmacy: pharmacyReport,
+    report: opsReport,
+    pharmacy: opsPharmacy,
     byPharmacy,
     facilityType: (code) => registry.get(code)?.type || undefined,
     months,
