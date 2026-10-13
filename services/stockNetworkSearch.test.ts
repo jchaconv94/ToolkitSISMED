@@ -31,7 +31,8 @@ const fila = (over: Record<string, any>) => ({
 describe("parseStockAmount", () => {
   it("lee los números como los escribe la hoja", () => {
     expect(parseStockAmount("32")).toBe(32);
-    expect(parseStockAmount("1.250")).toBe(1250); // separador de miles
+    expect(parseStockAmount("1.250.000")).toBe(1250000); // separador de miles
+    expect(parseStockAmount("2773.125")).toBeCloseTo(2773.125); // punto decimal con tres cifras
     expect(parseStockAmount("0,324")).toBeCloseTo(0.324); // coma decimal
     expect(parseStockAmount(7)).toBe(7);
   });

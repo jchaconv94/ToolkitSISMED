@@ -121,11 +121,13 @@ import {
 } from "./StockExportModal";
 import {
   buildProductIndex,
+  parseStockAmount,
   productKeyOf,
   readStockField,
   suggestProducts,
   type StockProduct,
 } from "../services/stockNetworkSearch";
+import { findRepeatedSheets, sheetEstablishmentKey } from "../services/stockSheetDuplicates";
 import {
   DeficiencyCaptureModal,
   SelectedEstablishmentData,
@@ -377,9 +379,10 @@ const mergeMetadataIntoSources = (
   currentSources: SheetSource[],
   loadedSourceIds: Set<string>,
   ctx: MetadataSourceContext,
-): { merged: SheetSource[]; changedSheetNames: string[] } => {
+): { merged: SheetSource[]; changedSheetNames: string[]; replacedIds: string[] } => {
   const merged: SheetSource[] = [];
   const changedSheetNames: string[] = [];
+  const replacedIds: string[] = [];
 
   // Las pestañas que no son establecimientos (la `Sheet3` que crea Google, una copia de
   // trabajo) no llegan a ser tarjetas: ver `isFacilitySheet`.
@@ -388,7 +391,15 @@ const mergeMetadataIntoSources = (
     const existing =
       currentSources.find((s) => s.id === newId) ||
       currentSources.find((s) => (s.sheetName || s.name) === meta.name);
-    const hasSheetData = !!existing && loadedSourceIds.has(existing.id);
+    // Encontrada por el nombre con otro identificador: la pestaña se borró y se volvió a
+    // crear (otro gid). La tarjeta pasa al gid nuevo y su stock se vuelve a leer. Conservar
+    // el id viejo dejaba, al refrescarla, dos tarjetas de la misma hoja —una con el stock
+    // antiguo— y las dos salían en el Excel de la región. Quien llama descarta el stock
+    // guardado con el id viejo (`replacedIds`).
+    if (existing && existing.id !== newId && loadedSourceIds.has(existing.id)) {
+      replacedIds.push(existing.id);
+    }
+    const hasSheetData = !!existing && existing.id === newId && loadedSourceIds.has(existing.id);
 
     if (!hasSheetData) {
       merged.push(sourceFromMetadata(meta, ctx, existing ? { ...existing, id: newId } : undefined));
@@ -406,8 +417,18 @@ const mergeMetadataIntoSources = (
     }
   });
 
-  return { merged, changedSheetNames };
+  // Un id que sigue vivo (otra pestaña lo tiene ahora) conserva su stock.
+  const vigentes = new Set(merged.map((source) => source.id));
+  return { merged, changedSheetNames, replacedIds: replacedIds.filter((id) => !vigentes.has(id)) };
 };
+
+/** Sin repetir el mismo id: una tarjeta duplicada en memoria no debe exportarse dos veces. */
+const uniqueById = <T extends { id: string }>(list: T[]): T[] =>
+  Array.from(new Map(list.map((item) => [item.id, item])).values());
+
+/** Saldo o precio para el Excel: número (con punto o coma en la hoja), o vacío si no viene. */
+const excelAmount = (value: unknown): number | "" =>
+  String(value ?? "").trim() === "" ? "" : parseStockAmount(value as string | number);
 
 /** Hojas por petición al refrescar stock ya guardado; lotes pequeños fallan menos en Apps Script. */
 const CHANGED_SHEETS_BATCH_SIZE = 5;
@@ -2047,6 +2068,13 @@ const SheetSearchModuleContent: React.FC = () => {
     return await fetchGasWithResilience(cacheBusterUrl, { timeoutMs: 35000 });
   };
 
+  /** Stock guardado con el id que una pestaña recreada ya no tiene (ver `mergeMetadataIntoSources`). */
+  const dropReplacedRows = (replacedIds: string[]) => {
+    if (replacedIds.length === 0) return;
+    const viejos = new Set(replacedIds);
+    setData((prev) => prev.filter((row) => !viejos.has(row.sourceId || "")));
+  };
+
   // Reintento manual de una UNGET: solo metadata. El stock de cada IPRESS se sigue
   // pidiendo bajo demanda; "Reintentar" ya no descarga el libro completo.
   const retrySingleUrl = async (configToRetry: UngetConfig) => {
@@ -2060,7 +2088,7 @@ const SheetSearchModuleContent: React.FC = () => {
         force: true,
       });
       const loadedSourceIds = new Set(data.map((row) => row.sourceId || ""));
-      const { merged, changedSheetNames } = mergeMetadataIntoSources(
+      const { merged, changedSheetNames, replacedIds } = mergeMetadataIntoSources(
         metadataList,
         currentForRetry,
         loadedSourceIds,
@@ -2078,6 +2106,7 @@ const SheetSearchModuleContent: React.FC = () => {
         ...prev.filter((s) => s.urlIndex !== effectiveIndex),
         ...merged,
       ]);
+      dropReplacedRows(replacedIds);
       setConnectionErrors((prev) => {
         const updated = { ...prev };
         delete updated[configToRetry.url];
@@ -2275,7 +2304,7 @@ const SheetSearchModuleContent: React.FC = () => {
             const metadataList = await loadUngetMetadata(config, urlIndex, currentForUrl);
             const detectedSpreadsheetId = metadataList.find((m) => m.spreadsheetId)?.spreadsheetId;
             if (detectedSpreadsheetId) persistDetectedSpreadsheetId(config, detectedSpreadsheetId);
-            const { merged, changedSheetNames } = mergeMetadataIntoSources(
+            const { merged, changedSheetNames, replacedIds } = mergeMetadataIntoSources(
               metadataList,
               currentForUrl,
               loadedSourceIds,
@@ -2294,6 +2323,7 @@ const SheetSearchModuleContent: React.FC = () => {
               ...prev.filter((source) => source.urlIndex !== urlIndex),
               ...merged,
             ]);
+            dropReplacedRows(replacedIds);
             accumulatedSources.push(...merged);
             setConnectionErrors((prev) => {
               const updated = { ...prev };
@@ -3587,10 +3617,9 @@ const SheetSearchModuleContent: React.FC = () => {
       DESC_TIPSUM: r.DESC_TIPSUM || r.TIPO_SUMINISTRO || "",
       FFINAN: r.FFINAN || "",
       DESC_FFINAN: r.DESC_FFINAN || r.FF || "",
-      Saldo:
-        r.Saldo !== undefined ? r.Saldo : r.SALDO !== undefined ? r.SALDO : "",
-      Precio_Det: r.Precio_Det || r.PRECIO_COMPRA || "",
-      Precio_Cab: r.Precio_Cab || r.PRECIO_REF || "",
+      Saldo: excelAmount(r.Saldo !== undefined ? r.Saldo : r.SALDO),
+      Precio_Det: excelAmount(r.Precio_Det || r.PRECIO_COMPRA),
+      Precio_Cab: excelAmount(r.Precio_Cab || r.PRECIO_REF),
       "FECHA DEL EQUIPO": r.FECHA_DEL_EQUIPO || "",
       "ULTIMA ACTUALIZACION": r.Ultima_Actualizacion || "",
     }));
@@ -3630,8 +3659,8 @@ const SheetSearchModuleContent: React.FC = () => {
       CODIGO_SIG: r.CODIGO_SIG || r.SIGA || "",
       Nombre: r.Nombre || r.DESC_ITEM || "",
       Sub_Grupo: r.Sub_Grupo || "",
-      Saldo: typeof r.Saldo !== "undefined" ? r.Saldo : r.CANTIDAD || 0,
-      Precio_Cab: r.Precio_Cab || r.PRECIO_REF || "",
+      Saldo: excelAmount(typeof r.Saldo !== "undefined" ? r.Saldo : r.CANTIDAD || 0),
+      Precio_Cab: excelAmount(r.Precio_Cab || r.PRECIO_REF),
       Lote: r.Lote || r.LOTE || "",
       Fec_Vencim: r.Fec_Vencim
         ? formatDate(r.Fec_Vencim)
@@ -3692,11 +3721,37 @@ const SheetSearchModuleContent: React.FC = () => {
   };
 
   const sourcesToExport = (scope: "single" | "all") =>
-    sources.filter((s) => scope === "all" || s.urlIndex === selectedUngetIndex);
+    uniqueById(sources.filter((s) => scope === "all" || s.urlIndex === selectedUngetIndex));
+
+  /**
+   * Hojas que repiten un establecimiento de `lista`: id de la repetida → id de la que se
+   * exporta, la actualizada más recientemente (ver `services/stockSheetDuplicates.ts`).
+   */
+  const repeatedSheetsAmong = useCallback(
+    (lista: SheetSource[]) =>
+      findRepeatedSheets(
+        lista.map((s) => ({
+          id: s.id,
+          key: sheetEstablishmentKey(
+            codeForSheet(s.id),
+            s.facilityCode,
+            extractFacilityCodeFromSheetName(s.sheetName || s.name),
+          ),
+          lastUpdateTime: s.lastUpdateTime,
+          equipmentDateTime: s.equipmentDateTime,
+        })),
+      ),
+    [codeForSheet],
+  );
 
   const openExportModal = (scope: "single" | "all") => {
     setExportScope(scope);
-    setExportInitialIds(sourcesToExport(scope).filter(pasaFiltrosLaterales).map((s) => s.id));
+    // Las hojas repetidas empiezan desmarcadas: en el Excel, cada establecimiento una vez.
+    const lista = sourcesToExport(scope);
+    const repetidas = repeatedSheetsAmong(lista);
+    setExportInitialIds(
+      lista.filter((s) => pasaFiltrosLaterales(s) && !repetidas.has(s.id)).map((s) => s.id),
+    );
     setIsExportOptionsModalOpen(true);
   };
 
@@ -3713,11 +3768,16 @@ const SheetSearchModuleContent: React.FC = () => {
   /** Los establecimientos que ofrece la exportación, con lo que la lista necesita mostrar. */
   const exportEstablishments = useMemo<StockExportEstablishment[]>(() => {
     if (!isExportOptionsModalOpen) return [];
-    return sources
-      .filter((s) => exportScope === "all" || s.urlIndex === selectedUngetIndex)
+    const lista = uniqueById(
+      sources.filter((s) => exportScope === "all" || s.urlIndex === selectedUngetIndex),
+    );
+    const repetidas = repeatedSheetsAmong(lista);
+    const porId = new Map(lista.map((s) => [s.id, s]));
+    return lista
       .map((s) => {
         const estado = getUpdateStatus(s.lastUpdateTime);
         const farmacias = pharmaciesInRows(rowsForSource(s.id), readAlmCode, allFacilities);
+        const vigente = porId.get(repetidas.get(s.id) || "");
         return {
           id: s.id,
           code: codeForSheet(s.id),
@@ -3731,6 +3791,17 @@ const SheetSearchModuleContent: React.FC = () => {
           estadoLabel: estado.label,
           actualizado: estado.color === "bg-emerald-500",
           puestosComunales: Math.max(0, farmacias.length - 1),
+          repetida: vigente
+            ? {
+                vigenteId: vigente.id,
+                pestana: s.sheetName || s.name,
+                vigente: `${
+                  vigente.urlIndex !== s.urlIndex
+                    ? `la de ${formatDisplayName(scriptUrls[vigente.urlIndex]?.name || "otra UNGET")}`
+                    : `«${vigente.sheetName || vigente.name}»`
+                } (${getUpdateStatus(vigente.lastUpdateTime).label.toLowerCase()})`,
+              }
+            : undefined,
         };
       })
       .sort(
@@ -3747,6 +3818,7 @@ const SheetSearchModuleContent: React.FC = () => {
     allFacilities,
     codeForSheet,
     scriptUrls,
+    repeatedSheetsAmong,
   ]);
 
   /** Productos del ámbito de la exportación, para el buscador de productos del modal. */
@@ -3764,7 +3836,10 @@ const SheetSearchModuleContent: React.FC = () => {
     soloVencimientos,
     productos,
   }: StockExportRequest) => {
-    const elegidas = sources.filter((s) => ids.includes(s.id));
+    const pedidas = uniqueById(sources.filter((s) => ids.includes(s.id)));
+    // Cada establecimiento una sola vez: si dos hojas traen su stock, va la más reciente.
+    const repetidas = repeatedSheetsAmong(pedidas);
+    const elegidas = pedidas.filter((s) => !repetidas.has(s.id));
     const productosElegidos = new Set(productos);
 
     // Una hoja por vez: la consolidación suma las farmacias de un mismo establecimiento y
@@ -3805,14 +3880,9 @@ const SheetSearchModuleContent: React.FC = () => {
         DESC_TIPSUM: r.DESC_TIPSUM || r.TIPO_SUMINISTRO || "",
         FFINAN: r.FFINAN || "",
         DESC_FFINAN: r.DESC_FFINAN || r.FF || "",
-        Saldo:
-          r.Saldo !== undefined
-            ? r.Saldo
-            : r.SALDO !== undefined
-              ? r.SALDO
-              : "",
-        Precio_Det: r.Precio_Det || r.PRECIO_COMPRA || "",
-        Precio_Cab: r.Precio_Cab || r.PRECIO_REF || "",
+        Saldo: excelAmount(r.Saldo !== undefined ? r.Saldo : r.SALDO),
+        Precio_Det: excelAmount(r.Precio_Det || r.PRECIO_COMPRA),
+        Precio_Cab: excelAmount(r.Precio_Cab || r.PRECIO_REF),
         "FECHA DEL EQUIPO": r.FECHA_DEL_EQUIPO || "",
         "ULTIMA ACTUALIZACION": r.Ultima_Actualizacion || "",
       };
@@ -3832,6 +3902,16 @@ const SheetSearchModuleContent: React.FC = () => {
         "_",
       ),
     );
+
+    if (repetidas.size > 0) {
+      const omitidas = pedidas
+        .filter((s) => repetidas.has(s.id))
+        .map((s) => `«${s.sheetName || s.name}» (${formatDisplayName(scriptUrls[s.urlIndex]?.name || "UNGET")})`);
+      toast.warning(
+        `${omitidas.length === 1 ? "Quedó fuera una hoja repetida" : `Quedaron fuera ${omitidas.length} hojas repetidas`}: ${omitidas.join(", ")}. De cada establecimiento se exportó su hoja más reciente; la repetida se puede borrar en Google Sheets.`,
+        { duration: 15000 },
+      );
+    }
 
     setIsExportOptionsModalOpen(false);
   };

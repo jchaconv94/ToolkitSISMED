@@ -16,6 +16,7 @@ import { isLinkedToSheet, resolveFacilitySheet, rowsBelongingToFacility, type Fa
 import { parentIpressCode } from "./facilityHierarchy";
 import { STOCK_COLUMNS } from "./stockColumns";
 import { listUngetSheets } from "./ungetSheetCatalog";
+import { parseSheetNumber } from "./numberFormat";
 import { pickOneConnectionPerUnget } from "./ungetConnections";
 import type { StockAssignment } from "../types";
 
@@ -44,17 +45,8 @@ export const normalizeStockRow = (row: StockRow): StockRow => ({
   FFINAN: readStockValue(row, ["FFINAN", "ffinan"])
 });
 
-/** Número de la hoja: admite `1,5` y `1,234`. Lo que no se entiende cuenta como 0. */
-export const parseStockNumber = (value: unknown) => {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  const normalized = String(value ?? "")
-    .trim()
-    .replace(/\s/g, "")
-    .replace(/,(?=\d{1,2}$)/, ".")
-    .replace(/,/g, "");
-  const result = Number(normalized);
-  return Number.isFinite(result) ? result : 0;
-};
+/** Saldo o precio de una celda; la regla de punto y coma está en `parseSheetNumber`. */
+export const parseStockNumber = (value: unknown) => parseSheetNumber(value);
 
 /** Fecha de vencimiento como `dd/mm/aaaa` (acepta `aaaa-mm-dd` y años de dos cifras). */
 export const formatStockDate = (value: unknown) => {

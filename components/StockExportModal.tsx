@@ -15,6 +15,11 @@ export type StockExportEstablishment = {
   estadoLabel: string;
   actualizado: boolean;
   puestosComunales: number;
+  /**
+   * Otra hoja del mismo establecimiento está más al día y es la que se exporta: esta empieza
+   * desmarcada y, si se marcan las dos, se exporta solo la más reciente.
+   */
+  repetida?: { vigenteId: string; pestana: string; vigente: string };
 };
 
 export type StockExportRequest = {
@@ -127,6 +132,8 @@ export const StockExportModal: React.FC<{
   }, [establecimientos, filtro, busqueda]);
 
   const elegidosEnLista = establecimientos.filter((e) => elegidos.has(e.id));
+  // Una repetida marcada junto con su hoja vigente no suma: el Excel lleva solo la vigente.
+  const seExportan = elegidosEnLista.filter((e) => !(e.repetida && elegidos.has(e.repetida.vigenteId))).length;
   const conPuestosElegidos = elegidosEnLista.filter((e) => e.puestosComunales > 0).length;
 
   const alternar = (id: string) =>
@@ -251,6 +258,15 @@ export const StockExportModal: React.FC<{
                         </span>
                         <span className="flex-1 min-w-0">
                           <span className="block text-[13px] font-bold text-slate-800 truncate">{e.name}</span>
+                          {e.repetida && (
+                            <span
+                              className="flex items-center gap-1 text-[10.5px] font-semibold text-amber-700"
+                              title={`La pestaña «${e.repetida.pestana}» repite este establecimiento. Se exporta ${e.repetida.vigente}.`}
+                            >
+                              <AlertTriangle className="h-3 w-3 shrink-0" />
+                              <span className="truncate">Repetida · se exporta {e.repetida.vigente}</span>
+                            </span>
+                          )}
                           {(e.puestosComunales > 0 || e.ungetName) && (
                             <span className="block text-[10.5px] font-semibold truncate">
                               {e.puestosComunales > 0 && (
@@ -431,7 +447,7 @@ export const StockExportModal: React.FC<{
           <div>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Se exportarán</p>
             <p className="text-sm font-black text-slate-800">
-              {elegidosEnLista.length} de {establecimientos.length}
+              {seExportan} de {establecimientos.length}
               <span className="hidden sm:inline"> establecimientos</span>
             </p>
           </div>
