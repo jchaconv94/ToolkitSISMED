@@ -16,7 +16,7 @@
  * borran las copias viejas (se conserva la anterior, por si una pestaña abierta la usa).
  */
 
-const VERSION = "20261016163826-74f0edf218";
+const VERSION = "20261016171404-74f0edf218";
 const PRECACHE = ["apple-touch-icon.png","assets/NotoSans-Bold-D7La9DZe.ttf","assets/NotoSans-Regular-BJuaR_yQ.ttf","assets/availabilityExport.worker-cGjtUpwf.js","assets/html2canvas.esm-QH1iLAAe.js","assets/index-YeZV38RI.css","assets/index-rY2Fmnxe.js","assets/index.es-dkCtJH_1.js","assets/purify.es-C_uT9hQ1.js","assets/tformdetReader.worker-DbGLFKbR.js","favicon.svg","icon-192.png","icon-512.png","icon-maskable-512.png","index.html","manifest.webmanifest"];
 
 const APP_PREFIX = "toolkit-sismed-app-";
