@@ -101,6 +101,7 @@ import { sheetOwnerCodeOf } from "../services/facilityCodes";
 import {
   describePharmacyCode,
   pharmaciesInRows,
+  pharmacyBreakdown,
   rowMatchesPharmacy,
   showsPharmacyColumn,
 } from "../services/facilitySheetLink";
@@ -3790,7 +3791,7 @@ const SheetSearchModuleContent: React.FC = () => {
           estadoColor: estado.color,
           estadoLabel: estado.label,
           actualizado: estado.color === "bg-emerald-500",
-          puestosComunales: Math.max(0, farmacias.length - 1),
+          farmacias: pharmacyBreakdown(farmacias, allFacilities),
           repetida: vigente
             ? {
                 vigenteId: vigente.id,
