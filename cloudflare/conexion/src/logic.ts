@@ -129,6 +129,13 @@ export const BACKUP_PART_SIZE = 5 * 1024 * 1024;
  * PC que recibió el tamaño anterior justo antes de publicar el cambio.
  */
 export const BACKUP_PART_MAX_BYTES = 20 * 1024 * 1024;
+/**
+ * Partes que el Toolkit 2.3.8 o posterior sube a la vez, cada una por su conexión (de 1 a 8).
+ * Una sola conexión no pasaba de ~0,5 Mbps en el Hospital II-E Bellavista, que mide 4,1 Mbps
+ * de subida con varias (2026-10-16). Bajarlo aquí alivia la red del establecimiento sin sacar
+ * otro Toolkit; los anteriores lo ignoran y suben de una en una.
+ */
+export const BACKUP_PARALLEL = 4;
 /** Un backup que nadie descargó se borra a la hora (la regla del bucket lo haría al día). */
 export const BACKUP_TTL_MS = 60 * 60 * 1000;
 /** Tamaño máximo aceptado: el hospital pesa 70–150 MB; se deja margen. */

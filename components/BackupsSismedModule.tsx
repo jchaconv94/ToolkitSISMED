@@ -8,7 +8,7 @@ import { useBackupManager } from "../contexts/BackupManagerContext";
 import { backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import {
   ActivityItem, ActivityKind, BackupActivityRow, BackupOverviewRow, BackupRowView, SHOW_FILTER_LABEL, ShowFilter,
-  activityFromRequest, buildBackupRows, lastConnectionLabel, filterBackupRows, isActive, jobProgress, limaDay, planState, rowsOfUnget, showFilterCounts, summarizeBackups,
+  activityFromRequest, buildBackupRows, lastConnectionLabel, filterBackupRows, isActive, jobProgress, jobSpeed, limaDay, planState, rowsOfUnget, showFilterCounts, summarizeBackups,
   ungetOptions, whoLabel, BACKUPS_TAB_EVENT, takeRequestedBackupsTab,
 } from "../services/backupModule";
 import { getUserJurisdictionScope } from "../services/jurisdictionService";
@@ -69,8 +69,10 @@ const Bar: React.FC<{ pct: number; label: string }> = ({ pct, label }) => (
 const Detail: React.FC<{ row: BackupRowView }> = ({ row }) => {
   const job = row.job;
   const pct = job ? jobProgress(job).pct : null;
-  if (job?.phase === "uploading" && job.size) return <Bar pct={pct ?? 0} label={`1 de 2 · La PC sube · ${formatMegabytes(job.size)}`} />;
-  if (job?.phase === "downloading" && job.size) return <Bar pct={pct ?? 0} label={`2 de 2 · Descargando · ${formatMegabytes(job.size)}`} />;
+  const speed = job ? jobSpeed(job) : null;
+  const left = speed ? (speed.secondsLeft < 60 ? "falta < 1 min" : `faltan ~${Math.round(speed.secondsLeft / 60)} min`) : null;
+  if (job?.phase === "uploading" && job.size) return <Bar pct={pct ?? 0} label={`1 de 2 · La PC sube · ${left || formatMegabytes(job.size)}`} />;
+  if (job?.phase === "downloading" && job.size) return <Bar pct={pct ?? 0} label={`2 de 2 · Descargando · ${left || formatMegabytes(job.size)}`} />;
   if (job?.phase === "requested" || job?.phase === "saving") {
     return <span className="inline-flex items-center gap-1.5 text-[11.5px] text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" />{job.phase === "saving" ? "Comprobando la huella…" : "Esperando a la PC…"}</span>;
   }

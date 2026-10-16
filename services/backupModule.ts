@@ -45,6 +45,9 @@ export interface BackupJobView {
   savedName?: string;
   /** Nombre del establecimiento, para el nombre del archivo y el panel de descargas. */
   facility?: string;
+  /** Desde cuándo y desde cuántos bytes se mide la velocidad del paso en curso. */
+  phaseAt?: number;
+  phaseBase?: number;
   at: number;
 }
 
@@ -66,6 +69,36 @@ export const jobProgress = (job: BackupJobView): { pct: number | null; step: 1 |
   if (job.phase === "saving") return { pct: 100, step: 2 };
   return { pct: null, step: null };
 };
+
+const doneOf = (job: BackupJobView) =>
+  job.phase === "uploading" ? job.sent || 0 : job.phase === "downloading" ? job.received || 0 : 0;
+
+/**
+ * Anota desde cuándo se mide la velocidad: al empezar cada paso (subida o descarga). Si en el
+ * primer segundo llega un salto (al volver a entrar, el servicio reenvía lo que ya se subió),
+ * se vuelve a medir desde ahí para no mostrar una velocidad imposible.
+ */
+export const trackPhase = (previous: BackupJobView, next: BackupJobView, now: number): BackupJobView => {
+  const restart = next.phase !== previous.phase || next.phaseAt == null;
+  const burst = !restart && doneOf(next) !== doneOf(previous) && now - (next.phaseAt ?? now) < 1000;
+  return restart || burst ? { ...next, phaseAt: now, phaseBase: doneOf(next) } : next;
+};
+
+/** Velocidad del paso en curso y lo que le falta. Sin datos suficientes (menos de 3 s), nada. */
+export const jobSpeed = (job: BackupJobView, now: number = Date.now()): { mbps: number; secondsLeft: number } | null => {
+  if ((job.phase !== "uploading" && job.phase !== "downloading") || !job.size || job.phaseAt == null) return null;
+  const elapsed = (now - job.phaseAt) / 1000;
+  const moved = doneOf(job) - (job.phaseBase || 0);
+  if (elapsed < 3 || moved <= 0) return null;
+  const rate = moved / elapsed;
+  return { mbps: (rate * 8) / 1e6, secondsLeft: Math.max(0, (job.size - doneOf(job)) / rate) };
+};
+
+/** «2,1 Mbps · faltan ~4 min» */
+export const speedLabel = ({ mbps, secondsLeft }: { mbps: number; secondsLeft: number }) =>
+  `${mbps < 10 ? mbps.toFixed(1).replace(".", ",") : Math.round(mbps)} Mbps · ${
+    secondsLeft < 60 ? "falta menos de 1 min" : `faltan ~${Math.round(secondsLeft / 60)} min`
+  }`;
 
 /** Día calendario de Perú de una fecha (AAAA-MM-DD). */
 export const limaDay = (value: string | number | Date) =>

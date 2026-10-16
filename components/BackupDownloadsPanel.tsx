@@ -4,18 +4,20 @@ import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Copy, FolderDown, 
 import { toast } from "sonner";
 import { useBackupManager } from "../contexts/BackupManagerContext";
 import { formatMegabytes } from "../services/backupConnection";
-import { BackupJobView, isActive, jobProgress } from "../services/backupModule";
+import { BackupJobView, isActive, jobProgress, jobSpeed, speedLabel } from "../services/backupModule";
 
 /** Texto y avance de un pedido en el panel. */
 const progressOf = (job: BackupJobView): { text: string; pct: number | null } => {
   if (job.phase === "requested") return { text: job.detail || "Esperando a la PC…", pct: null };
   // Una sola barra para los dos pasos (`jobProgress`): la subida no llega sola al 100 %.
   const { pct } = jobProgress(job);
+  const speed = jobSpeed(job);
+  const tail = speed ? ` · ${speedLabel(speed)}` : "";
   if (job.phase === "uploading") {
-    return { text: `Paso 1 de 2 · La PC sube a la nube · ${formatMegabytes(job.sent || 0)} de ${formatMegabytes(job.size || 0)}`, pct };
+    return { text: `Paso 1 de 2 · La PC sube a la nube · ${formatMegabytes(job.sent || 0)} de ${formatMegabytes(job.size || 0)}${tail}`, pct };
   }
   if (job.phase === "downloading") {
-    return { text: `Paso 2 de 2 · Descargando · ${formatMegabytes(job.received || 0)} de ${formatMegabytes(job.size || 0)}`, pct };
+    return { text: `Paso 2 de 2 · Descargando · ${formatMegabytes(job.received || 0)} de ${formatMegabytes(job.size || 0)}${tail}`, pct };
   }
   if (job.phase === "saving") return { text: "Comprobando la huella y guardando…", pct };
   return { text: job.detail || "", pct: null };

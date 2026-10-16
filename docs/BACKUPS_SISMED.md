@@ -327,3 +327,20 @@ mismo envío con `io.BytesIO` (bloques de 16 KiB, cada uno con sus 15 s) llega b
   fallando aun solos y con partes de 5 MiB: necesitan la 2.3.7.
 - La publicación de la 2.3.7 se trabó porque la cuota de artefactos de GitHub estaba llena.
   Desde el PR #31 de Toolkit-OGM, guardar esa copia del instalador ya no bloquea la Release.
+
+## Varias partes a la vez y velocidad en pantalla (Toolkit 2.3.8, 2026-10-16)
+
+Con la 2.3.7, el Hospital II-E Bellavista ya no fallaba, pero subía 81,5 MB a unos 0,5 Mbps:
+30 MB en 8 minutos, unos 25 minutos en total. En esa misma PC, fast.com midió 4,1 Mbps de
+subida usando varias conexiones. Una sola conexión no aprovechaba la línea.
+
+- **Toolkit 2.3.8 (Toolkit-OGM PR #32):** sube 4 partes a la vez, cada una por su conexión.
+  Además avisa cada 2 s cuánto lleva enviado, aunque no haya terminado ninguna parte; antes la
+  barra solo se movía cada 5 MiB. Con un servidor local que frena cada conexión a ~1 MB/s,
+  8 MiB pasaron de 8,2 s a 2,1 s.
+- **Servicio:** manda `parallel` (`BACKUP_PARALLEL = 4`) en el pedido. Se puede bajar sin
+  sacar otro Toolkit si satura la red de un establecimiento. Los Toolkit anteriores lo
+  ignoran y siguen subiendo de una en una.
+- **Web:** el panel de descargas muestra la velocidad y el tiempo que falta de cada paso
+  (`jobSpeed`, `speedLabel`, `trackPhase` en `services/backupModule.ts`). La tabla muestra el
+  tiempo que falta.
