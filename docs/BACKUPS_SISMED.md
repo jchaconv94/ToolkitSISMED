@@ -320,6 +320,10 @@ mismo envío con `io.BytesIO` (bloques de 16 KiB, cada uno con sus 15 s) llega b
 - **Arreglo en el servicio, sin tocar las PC:** `BACKUP_PART_SIZE` baja a 5 MiB, el mínimo de
   R2. Basta con unos 3 Mbps de subida. Se siguen aceptando partes de hasta 20 MiB
   (`BACKUP_PART_MAX_BYTES`) por si una PC recibió el tamaño anterior.
-- **Arreglo de fondo en el Toolkit (pendiente de decisión del usuario):** en
-  `toolskit/backup_upload.py`, enviar `data=io.BytesIO(chunk)` en lugar de `data=chunk`.
-  Así una conexión lenta pero viva no corta el envío. Requiere una versión nueva del Toolkit.
+- **Arreglo de fondo en el Toolkit 2.3.7 (publicado el 2026-10-16, Toolkit-OGM PR #30):**
+  `toolskit/backup_upload.py` envía `data=io.BytesIO(chunk)` en lugar de `data=chunk`, así
+  una conexión lenta pero viva no corta el envío. La prueba `SlowLinkTests` reproduce el
+  error con el código anterior. El Hospital II-E Bellavista y el C.S. Nuevo Lima seguían
+  fallando aun solos y con partes de 5 MiB: necesitan la 2.3.7.
+- La publicación de la 2.3.7 se trabó porque la cuota de artefactos de GitHub estaba llena.
+  Desde el PR #31 de Toolkit-OGM, guardar esa copia del instalador ya no bloquea la Release.
