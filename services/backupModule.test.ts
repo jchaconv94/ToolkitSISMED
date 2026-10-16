@@ -4,7 +4,7 @@ vi.mock("./supabaseClient", () => ({ supabase: null }));
 vi.mock("./api", () => ({ getSessionToken: () => null }));
 
 import {
-  BackupOverviewRow, activityFromRequest, buildBackupRows, filterBackupRows, lastConnectionLabel, limaDay, planState, rowsOfUnget,
+  BackupOverviewRow, activityFromRequest, buildBackupRows, filterBackupRows, jobProgress, lastConnectionLabel, limaDay, planState, rowsOfUnget,
   showFilterCounts, summarizeBackups, ungetOptions, whoLabel,
 } from "./backupModule";
 import type { OnlinePc, UsageReading } from "./backupConnection";
@@ -134,5 +134,28 @@ describe("última conexión de las PC desconectadas", () => {
       A: { code: "A", equipo: "PC2", version: "2.2.4", at: 50 },
       B: { code: "B", equipo: "PC2", version: "", at: 50 },
     });
+  });
+});
+
+describe("jobProgress", () => {
+  const job = (patch: object) => ({ code: "A", phase: "requested" as const, at: 0, size: 1000, ...patch });
+
+  it("la subida es la primera mitad y la descarga la segunda: la barra nunca vuelve atrás", () => {
+    const pasos = [
+      jobProgress(job({ phase: "uploading", sent: 0 })),
+      jobProgress(job({ phase: "uploading", sent: 1000 })),
+      jobProgress(job({ phase: "downloading", received: 0 })),
+      jobProgress(job({ phase: "downloading", received: 500 })),
+      jobProgress(job({ phase: "downloading", received: 1000 })),
+      jobProgress(job({ phase: "saving" })),
+    ];
+    expect(pasos.map((p) => p.pct)).toEqual([0, 50, 50, 75, 100, 100]);
+    expect(pasos.map((p) => p.step)).toEqual([1, 1, 2, 2, 2, 2]);
+  });
+
+  it("la subida completa no llega al 100 %, y sin tamaño o esperando a la PC no hay cifra", () => {
+    expect(jobProgress(job({ phase: "uploading", sent: 999 })).pct).toBe(49);
+    expect(jobProgress(job({ phase: "uploading", sent: 10, size: undefined })).pct).toBe(0);
+    expect(jobProgress(job({ phase: "requested" }))).toEqual({ pct: null, step: null });
   });
 });

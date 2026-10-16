@@ -4,20 +4,20 @@ import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Copy, FolderDown, 
 import { toast } from "sonner";
 import { useBackupManager } from "../contexts/BackupManagerContext";
 import { formatMegabytes } from "../services/backupConnection";
-import { BackupJobView, isActive } from "../services/backupModule";
+import { BackupJobView, isActive, jobProgress } from "../services/backupModule";
 
 /** Texto y avance de un pedido en el panel. */
 const progressOf = (job: BackupJobView): { text: string; pct: number | null } => {
   if (job.phase === "requested") return { text: job.detail || "Esperando a la PC…", pct: null };
+  // Una sola barra para los dos pasos (`jobProgress`): la subida no llega sola al 100 %.
+  const { pct } = jobProgress(job);
   if (job.phase === "uploading") {
-    const pct = job.size ? Math.round(((job.sent || 0) / job.size) * 100) : 0;
-    return { text: `La PC está subiendo · ${formatMegabytes(job.sent || 0)} de ${formatMegabytes(job.size || 0)}`, pct };
+    return { text: `Paso 1 de 2 · La PC sube a la nube · ${formatMegabytes(job.sent || 0)} de ${formatMegabytes(job.size || 0)}`, pct };
   }
   if (job.phase === "downloading") {
-    const pct = job.size ? Math.round(((job.received || 0) / job.size) * 100) : 0;
-    return { text: `Descargando · ${formatMegabytes(job.received || 0)} de ${formatMegabytes(job.size || 0)}`, pct };
+    return { text: `Paso 2 de 2 · Descargando · ${formatMegabytes(job.received || 0)} de ${formatMegabytes(job.size || 0)}`, pct };
   }
-  if (job.phase === "saving") return { text: "Comprobando la huella y guardando…", pct: 100 };
+  if (job.phase === "saving") return { text: "Comprobando la huella y guardando…", pct };
   return { text: job.detail || "", pct: null };
 };
 
@@ -89,7 +89,7 @@ export const BackupDownloadsPanel: React.FC = () => {
                   <li key={job.code} className="flex items-start gap-2 px-4 py-3 text-[12.5px]">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
                     <span className="min-w-0 flex-1">
-                      <b className="block text-slate-800">{job.code}</b>
+                      <b className="block truncate text-slate-800">{job.facility || job.code}</b>
                       <span className="text-[11px] text-red-700">{text}</span>
                     </span>
                     <button type="button" aria-label="Quitar" onClick={() => manager.dismiss(job.code)} className="rounded p-1 text-slate-400 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>
@@ -99,11 +99,11 @@ export const BackupDownloadsPanel: React.FC = () => {
               return (
                 <li key={job.code} className="space-y-1.5 px-4 py-3">
                   <div className="flex items-center justify-between gap-2 text-[12.5px]">
-                    <b className="truncate text-slate-800">{job.code}{job.name ? ` · ${job.name}` : ""}</b>
+                    <b className="truncate text-slate-800">{job.facility || job.code}{job.name ? ` · ${job.name}` : ""}</b>
                     {pct != null ? <span className="font-mono text-[11px] text-slate-500">{pct}%</span> : <Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" />}
                   </div>
                   <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-                    <div className={`h-full rounded-full transition-all ${job.phase === "downloading" || job.phase === "saving" ? "bg-emerald-500" : "bg-teal-500"}`} style={{ width: `${pct ?? 4}%` }} />
+                    <div className="h-full rounded-full bg-teal-500 transition-all" style={{ width: `${pct ?? 4}%` }} />
                   </div>
                   <p className="text-[11px] text-slate-500">{text}</p>
                 </li>

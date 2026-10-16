@@ -63,7 +63,23 @@ export async function verifyBackup(data: Uint8Array, size: number, sha256: strin
 }
 
 /** Nombre con el que se guarda: el código delante, para no mezclar backups de dos establecimientos. */
-export const savedFileName = (code: string, name: string) => `${code}_${name}`;
+/**
+ * Nombre con que se guarda el backup: el establecimiento adelante del nombre real
+ * («C.S. Consuelo_06506_BKDA202610160734.zip», pedido del usuario del 2026-10-16), así se
+ * reconoce de quién es al bajar varios. Sin el nombre del establecimiento, solo el código.
+ * Se quitan las tildes y los caracteres que Windows no acepta en un nombre de archivo.
+ */
+export const savedFileName = (code: string, name: string, facility?: string) => {
+  const clean = String(facility || "")
+    // Sin tildes ni eñes: con «Juanjuí» el navegador guardaba el archivo como «download».
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/, "");
+  return clean ? `${clean}_${code}_${name}` : `${code}_${name}`;
+};
 
 // --- Carpeta elegida (File System Access API, Chrome y Edge) ----------------------------
 

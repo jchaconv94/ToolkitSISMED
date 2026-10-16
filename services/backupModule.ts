@@ -43,11 +43,29 @@ export interface BackupJobView {
   /** Dónde quedó guardado: nombre de la carpeta elegida o «Descargas». */
   savedIn?: string;
   savedName?: string;
+  /** Nombre del establecimiento, para el nombre del archivo y el panel de descargas. */
+  facility?: string;
   at: number;
 }
 
 export const ACTIVE_PHASES: JobPhase[] = ["requested", "uploading", "downloading", "saving"];
 export const isActive = (job?: BackupJobView | null) => Boolean(job && ACTIVE_PHASES.includes(job.phase));
+
+/**
+ * Avance de un pedido en una sola barra, de 0 a 100 %, que nunca retrocede.
+ *
+ * El pedido tiene dos tramos: la PC sube el backup a la nube y después el navegador lo baja.
+ * Antes cada tramo llenaba su propia barra: la subida (rápida) llegaba al 100 % y la barra
+ * volvía a cero para la descarga, y parecía que ya había terminado (2026-10-16). Ahora la
+ * subida es la primera mitad y la descarga la segunda.
+ */
+export const jobProgress = (job: BackupJobView): { pct: number | null; step: 1 | 2 | null } => {
+  const part = (value = 0) => (job.size ? Math.min(1, Math.max(0, value / job.size)) : 0);
+  if (job.phase === "uploading") return { pct: Math.floor(part(job.sent) * 50), step: 1 };
+  if (job.phase === "downloading") return { pct: 50 + Math.floor(part(job.received) * 50), step: 2 };
+  if (job.phase === "saving") return { pct: 100, step: 2 };
+  return { pct: null, step: null };
+};
 
 /** Día calendario de Perú de una fecha (AAAA-MM-DD). */
 export const limaDay = (value: string | number | Date) =>

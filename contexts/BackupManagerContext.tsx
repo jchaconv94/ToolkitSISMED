@@ -39,7 +39,10 @@ export interface BackupManager {
   folder: string | null;
   folderSupported: boolean;
   folderNeedsPermission: boolean;
-  request: (code: string) => void;
+  /** Pide el backup de un establecimiento; `facility` va adelante del nombre del archivo. */
+  request: (code: string, facility?: string) => void;
+  /** Pide varios a la vez (el botón «Descargar todos»). Se bajan de dos en dos. */
+  requestMany: (items: Array<{ code: string; facility?: string }>) => void;
   refresh: () => void;
   refreshUsage: () => void;
   dismiss: (code: string) => void;
@@ -55,6 +58,12 @@ const BackupManagerContext = createContext<BackupManager | null>(null);
 const PENDING_KEY = "backups-sismed:pendientes";
 const MAX_DOWNLOADS = 2;
 const CLOSE_AFTER_MS = 30000;
+
+/** Nombre de cada establecimiento pedido, para nombrar el archivo aunque se recargue la página. */
+const NAMES_KEY = "backups-sismed:nombres";
+const readNames = (): Record<string, string> => {
+  try { return JSON.parse(localStorage.getItem(NAMES_KEY) || "{}") || {}; } catch { return {}; }
+};
 
 const readPending = () => {
   try { return localStorage.getItem(PENDING_KEY) === "1"; } catch { return false; }
@@ -85,6 +94,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
   const closeRef = useRef<number | undefined>(undefined);
   const downloading = useRef(new Set<string>());
   const queue = useRef<Array<Extract<ServerMessage, { t: "backup_ready" }>>>([]);
+  const names = useRef<Record<string, string>>(readNames());
   // Al abrir la aplicación con pedidos sin terminar se conecta para retomarlos; el servicio
   // los reenvía al conectarse, así que pasado un momento ya no hace falta mantenerla abierta.
   const [resuming, setResuming] = useState(readPending);
@@ -102,7 +112,10 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => { if (enabled) writePending(anyActive); }, [anyActive, enabled]);
 
   const setJob = useCallback((code: string, patch: Partial<BackupJobView>) =>
-    setJobs((prev) => ({ ...prev, [code]: { ...(prev[code] || { code, phase: "requested", at: Date.now() }), ...patch, code } })), []);
+    setJobs((prev) => ({
+      ...prev,
+      [code]: { ...(prev[code] || { code, phase: "requested", at: Date.now(), facility: names.current[code] }), ...patch, code },
+    })), []);
 
   const addEvent = (text: string, tone: ActivityItem["tone"]) =>
     setEvents((prev) => [{ key: `${Date.now()}-${text}`, at: Date.now(), kind: "connection" as const, tone, text }, ...prev].slice(0, 100));
@@ -131,7 +144,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
           });
           setJob(ready.code, { phase: "saving" });
           if (!(await verifyBackup(data, ready.size, ready.sha256))) throw new Error("la huella no coincide: el archivo llegó dañado");
-          const name = savedFileName(ready.code, ready.name);
+          const name = savedFileName(ready.code, ready.name, names.current[ready.code]);
           const saved = await saveBackup(data, name);
           if (saved.needsPermission) setFolderNeedsPermission(true);
           send({ t: "backup_done", job: ready.job });
@@ -255,14 +268,19 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => window.removeEventListener("beforeunload", warn);
   }, [anyActive]);
 
-  const request = useCallback((code: string) => {
+  const requestMany = useCallback((items: Array<{ code: string; facility?: string }>) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) {
       toast.error("Sin conexión con el servicio. Espere unos segundos y vuelva a intentar.");
       return;
     }
-    setJob(code, { job: undefined, phase: "requested", failure: undefined, name: undefined, size: undefined, sent: 0, received: 0, detail: "Pidiendo…", at: Date.now() });
-    send({ t: "backup_request", code });
+    for (const { code, facility } of items) {
+      if (facility) names.current[code] = facility;
+      setJob(code, { job: undefined, phase: "requested", failure: undefined, name: undefined, size: undefined, sent: 0, received: 0, detail: "Pidiendo…", facility: names.current[code], at: Date.now() });
+      send({ t: "backup_request", code });
+    }
+    try { localStorage.setItem(NAMES_KEY, JSON.stringify(names.current)); } catch { /* sin almacenamiento: el archivo sale solo con el código */ }
   }, [send, setJob]);
+  const request = useCallback((code: string, facility?: string) => requestMany([{ code, facility }]), [requestMany]);
 
   const attach = useCallback(() => {
     setAttached((n) => n + 1);
@@ -284,6 +302,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
     folderSupported: folderPickerSupported(),
     folderNeedsPermission,
     request,
+    requestMany,
     refresh: () => send({ t: "list" }),
     refreshUsage: () => send({ t: "usage" }),
     dismiss: (code) => setJobs((prev) => {

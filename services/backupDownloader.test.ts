@@ -74,4 +74,10 @@ describe("verifyBackup y nombre", () => {
   it("el código va delante del nombre del SISMED", () => {
     expect(savedFileName("06525", "BKDA202610021300.zip")).toBe("06525_BKDA202610021300.zip");
   });
+  it("con el establecimiento, su nombre va adelante y sin caracteres que Windows rechaza", () => {
+    expect(savedFileName("06506", "BKDA202610160734.Zip", "C.S. Consuelo")).toBe("C.S. Consuelo_06506_BKDA202610160734.Zip");
+    expect(savedFileName("06502", "BKDA1.zip", 'Hospital II-E "Bellavista": F/01 ')).toBe("Hospital II-E Bellavista F 01_06502_BKDA1.zip");
+    expect(savedFileName("06502", "BKDA1.zip", "   ")).toBe("06502_BKDA1.zip");
+    expect(savedFileName("06549", "BKDA1.zip", "C.S. Juanjuí Ñuñoa")).toBe("C.S. Juanjui Nunoa_06549_BKDA1.zip");
+  });
 });
