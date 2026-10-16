@@ -15,7 +15,7 @@
  * Mensajes (JSON) por la conexión abierta:
  *   web → {t:"list"}                          → {t:"list", rows, seen} (seen: última conexión de las que no están)
  *   web → {t:"ping", id, code}                → la PC responde {t:"pong", ...} → {t:"ping_result"}
- *   web → {t:"backup_request", code}          → la PC recibe {t:"backup", job, token, partSize, uploadUrl}
+ *   web → {t:"backup_request", code}          → la PC recibe {t:"backup", job, token, partSize, parallel, uploadUrl}
  *   pc  → {t:"backup_meta"|"backup_progress"|"backup_error", job, ...} → se reenvía a esa web
  *   servicio → web {t:"backup_ready", job, downloadUrl, name, size, sha256}
  *   web → {t:"backup_done", job}              → se borra de R2
@@ -44,7 +44,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  BACKUP_MAX_BYTES, BACKUP_PART_MAX_BYTES, BACKUP_PART_SIZE, BackupJob, PcCode, PcInfo, USAGE_REFRESH_MS, UsageReading, WebInfo, backupKey,
+  BACKUP_MAX_BYTES, BACKUP_PARALLEL, BACKUP_PART_MAX_BYTES, BACKUP_PART_SIZE, BackupJob, PcCode, PcInfo, USAGE_REFRESH_MS, UsageReading, WebInfo, backupKey,
   canSee, isExpired, jobMessages, keysByCode, onlineFor, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, SeenRow,
   usageBlocks, usageFor, usageMessage,
 } from "./logic";
@@ -391,7 +391,7 @@ export class Region extends DurableObject<Env> {
     if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + CLEANUP_EVERY_MS);
     ws.send(JSON.stringify({ t: "backup_requested", job: job.id, code, quota: { limit: quota.limit, used: quota.used } }));
     try {
-      pc.send(JSON.stringify({ t: "backup", job: job.id, code, token: job.uploadToken, partSize: BACKUP_PART_SIZE, maxBytes: BACKUP_MAX_BYTES }));
+      pc.send(JSON.stringify({ t: "backup", job: job.id, code, token: job.uploadToken, partSize: BACKUP_PART_SIZE, maxBytes: BACKUP_MAX_BYTES, parallel: BACKUP_PARALLEL }));
     } catch {
       // Se fue justo ahora: se libera el cupo en vez de dejarlo ocupado una hora.
       await this.uploadFailed(job.id, "La PC se desconectó antes de recibir el pedido");

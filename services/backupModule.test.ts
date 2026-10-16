@@ -4,7 +4,7 @@ vi.mock("./supabaseClient", () => ({ supabase: null }));
 vi.mock("./api", () => ({ getSessionToken: () => null }));
 
 import {
-  BackupOverviewRow, activityFromRequest, buildBackupRows, filterBackupRows, jobProgress, lastConnectionLabel, limaDay, planState, rowsOfUnget,
+  BackupOverviewRow, activityFromRequest, buildBackupRows, filterBackupRows, jobProgress, jobSpeed, lastConnectionLabel, speedLabel, trackPhase, limaDay, planState, rowsOfUnget,
   showFilterCounts, summarizeBackups, ungetOptions, whoLabel,
 } from "./backupModule";
 import type { OnlinePc, UsageReading } from "./backupConnection";
@@ -157,5 +157,42 @@ describe("jobProgress", () => {
     expect(jobProgress(job({ phase: "uploading", sent: 999 })).pct).toBe(49);
     expect(jobProgress(job({ phase: "uploading", sent: 10, size: undefined })).pct).toBe(0);
     expect(jobProgress(job({ phase: "requested" }))).toEqual({ pct: null, step: null });
+  });
+});
+
+describe("velocidad y tiempo restante", () => {
+  const MB = 1024 * 1024;
+  const base = { code: "A", at: 0, size: 80 * MB };
+
+  it("mide desde que empieza el paso y estima lo que falta", () => {
+    let job = trackPhase({ ...base, phase: "requested" }, { ...base, phase: "uploading", sent: 0 }, 1000);
+    expect(job).toMatchObject({ phaseAt: 1000, phaseBase: 0 });
+    job = trackPhase(job, { ...job, sent: 20 * MB }, 81_000); // 20 MB en 80 s
+    const speed = jobSpeed(job, 81_000)!;
+    expect(speed.mbps).toBeCloseTo(2.1, 1);
+    expect(Math.round(speed.secondsLeft)).toBe(240);
+    expect(speedLabel(speed)).toBe("2,1 Mbps · faltan ~4 min");
+  });
+
+  it("al volver a entrar no muestra una velocidad imposible por lo ya subido", () => {
+    let job = trackPhase({ ...base, phase: "requested" }, { ...base, phase: "uploading", sent: 0 }, 1000);
+    job = trackPhase(job, { ...job, sent: 30 * MB }, 1200); // reenvío inmediato
+    expect(job).toMatchObject({ phaseAt: 1200, phaseBase: 30 * MB });
+    job = trackPhase(job, { ...job, sent: 31 * MB }, 9200);
+    expect(jobSpeed(job, 9200)!.mbps).toBeCloseTo(1.05, 1);
+  });
+
+  it("sin 3 s de medición, sin avance o en otro paso no hay cifra", () => {
+    const job = trackPhase({ ...base, phase: "requested" }, { ...base, phase: "uploading", sent: 0 }, 1000);
+    expect(jobSpeed(job, 2000)).toBeNull();
+    expect(jobSpeed(job, 10_000)).toBeNull();
+    expect(jobSpeed({ ...job, phase: "saving" }, 10_000)).toBeNull();
+    expect(speedLabel({ mbps: 12.4, secondsLeft: 30 })).toBe("12 Mbps · falta menos de 1 min");
+  });
+
+  it("al pasar de subir a descargar vuelve a medir", () => {
+    const up = trackPhase({ ...base, phase: "requested" }, { ...base, phase: "uploading", sent: 0 }, 1000);
+    const down = trackPhase(up, { ...up, phase: "downloading", received: 0 }, 50_000);
+    expect(down).toMatchObject({ phaseAt: 50_000, phaseBase: 0 });
   });
 });

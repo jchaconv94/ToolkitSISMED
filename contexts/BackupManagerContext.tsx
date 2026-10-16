@@ -14,7 +14,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { toast } from "sonner";
 import { useAuth } from "./AuthContext";
 import { OnlinePc, SeenPc, ServerMessage, UsageReading, applyPresence, applySeen, connectionUrl, parseServerMessage } from "../services/backupConnection";
-import { ActivityItem, BackupJobView, isActive } from "../services/backupModule";
+import { ActivityItem, BackupJobView, isActive, trackPhase } from "../services/backupModule";
 import {
   chooseSaveFolder, downloadWithResume, folderPickerSupported, getSaveFolder, grantSaveFolder, saveBackup, savedFileName, verifyBackup,
 } from "../services/backupDownloader";
@@ -112,10 +112,10 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => { if (enabled) writePending(anyActive); }, [anyActive, enabled]);
 
   const setJob = useCallback((code: string, patch: Partial<BackupJobView>) =>
-    setJobs((prev) => ({
-      ...prev,
-      [code]: { ...(prev[code] || { code, phase: "requested", at: Date.now(), facility: names.current[code] }), ...patch, code },
-    })), []);
+    setJobs((prev) => {
+      const previous = prev[code] || { code, phase: "requested" as const, at: Date.now(), facility: names.current[code] };
+      return { ...prev, [code]: trackPhase(previous, { ...previous, ...patch, code }, Date.now()) };
+    }), []);
 
   const addEvent = (text: string, tone: ActivityItem["tone"]) =>
     setEvents((prev) => [{ key: `${Date.now()}-${text}`, at: Date.now(), kind: "connection" as const, tone, text }, ...prev].slice(0, 100));
