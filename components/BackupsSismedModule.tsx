@@ -8,7 +8,7 @@ import { useBackupManager } from "../contexts/BackupManagerContext";
 import { backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import {
   ActivityItem, ActivityKind, BackupActivityRow, BackupOverviewRow, BackupRowView, SHOW_FILTER_LABEL, ShowFilter,
-  activityFromRequest, buildBackupRows, lastConnectionLabel, filterBackupRows, isActive, limaDay, planState, rowsOfUnget, showFilterCounts, summarizeBackups,
+  activityFromRequest, buildBackupRows, lastConnectionLabel, filterBackupRows, isActive, jobProgress, limaDay, planState, rowsOfUnget, showFilterCounts, summarizeBackups,
   ungetOptions, whoLabel, BACKUPS_TAB_EVENT, takeRequestedBackupsTab,
 } from "../services/backupModule";
 import { getUserJurisdictionScope } from "../services/jurisdictionService";
@@ -23,6 +23,8 @@ import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { BottomSheet } from "./ui/BottomSheet";
 import { CustomSelect } from "./ui/CustomSelect";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
+import { BackupDownloadAllModal, DownloadAllItem } from "./BackupDownloadAllModal";
+import { FloatingActionButton } from "./ui/FloatingActionButton";
 import { BackupConsumptionTab } from "./BackupConsumptionTab";
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -56,20 +58,19 @@ const chipFor = (row: BackupRowView): { label: string; tone: Tone } | null => {
   return null;
 };
 
-const Bar: React.FC<{ value: number; total: number; label: string; tone?: "teal" | "emerald" }> = ({ value, total, label, tone = "teal" }) => {
-  const pct = total ? Math.round((value / total) * 100) : 0;
-  return (
-    <div className="w-full max-w-[210px] space-y-1">
-      <div className="flex justify-between text-[11.5px] text-slate-500"><span className="truncate">{label}</span><b className="font-mono text-slate-700">{pct}%</b></div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full transition-all ${tone === "emerald" ? "bg-emerald-500" : "bg-teal-500"}`} style={{ width: `${pct}%` }} /></div>
-    </div>
-  );
-};
+/** Una sola barra para subida y descarga (`jobProgress`): no se llena dos veces. */
+const Bar: React.FC<{ pct: number; label: string }> = ({ pct, label }) => (
+  <div className="w-full max-w-[210px] space-y-1">
+    <div className="flex justify-between text-[11.5px] text-slate-500"><span className="truncate">{label}</span><b className="font-mono text-slate-700">{pct}%</b></div>
+    <div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-teal-500 transition-all" style={{ width: `${pct}%` }} /></div>
+  </div>
+);
 
 const Detail: React.FC<{ row: BackupRowView }> = ({ row }) => {
   const job = row.job;
-  if (job?.phase === "uploading" && job.size) return <Bar value={job.sent || 0} total={job.size} label={`La PC sube · ${formatMegabytes(job.size)}`} />;
-  if (job?.phase === "downloading" && job.size) return <Bar value={job.received || 0} total={job.size} label={`Descargando · ${formatMegabytes(job.size)}`} tone="emerald" />;
+  const pct = job ? jobProgress(job).pct : null;
+  if (job?.phase === "uploading" && job.size) return <Bar pct={pct ?? 0} label={`1 de 2 · La PC sube · ${formatMegabytes(job.size)}`} />;
+  if (job?.phase === "downloading" && job.size) return <Bar pct={pct ?? 0} label={`2 de 2 · Descargando · ${formatMegabytes(job.size)}`} />;
   if (job?.phase === "requested" || job?.phase === "saving") {
     return <span className="inline-flex items-center gap-1.5 text-[11.5px] text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" />{job.phase === "saving" ? "Comprobando la huella…" : "Esperando a la PC…"}</span>;
   }
@@ -205,6 +206,14 @@ export const BackupsSismedModule: React.FC = () => {
   };
   const plan = planState(manager.usage);
   const onlineCount = rows.filter((r) => r.online).length;
+  // «Descargar todos»: los en línea que hoy se pueden pedir, dentro de la UNGET elegida.
+  const downloadable = useMemo(() => scopedRows.filter((r) => r.canDownload), [scopedRows]);
+  const anyJobActive = Object.values(manager.jobs).some(isActive);
+  const [confirmAll, setConfirmAll] = useState(false);
+  const downloadAll = (items: DownloadAllItem[]) => {
+    setConfirmAll(false);
+    manager.requestMany(items.map((i) => ({ code: i.code, facility: i.name })));
+  };
 
   const refresh = () => {
     manager.refresh();
@@ -215,7 +224,7 @@ export const BackupsSismedModule: React.FC = () => {
     <button
       type="button"
       disabled={!row.canDownload}
-      onClick={() => manager.request(row.code)}
+      onClick={() => manager.request(row.code, row.name)}
       className={`inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-teal-600 px-3.5 text-xs font-bold text-white hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400 ${full ? "w-full" : ""}`}
     >
       {isActive(row.job) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Descargar
@@ -282,6 +291,18 @@ export const BackupsSismedModule: React.FC = () => {
                   <Activity className="h-4 w-4" />Actividad
                   {unseenActivity > 0 && <span className="rounded-full bg-teal-600 px-1.5 text-[10.5px] text-white">{unseenActivity}</span>}
                 </button>
+                {canDownload && (
+                  <button
+                    type="button"
+                    disabled={downloadable.length === 0}
+                    onClick={() => setConfirmAll(true)}
+                    title={downloadable.length === 0 ? "No hay establecimientos en línea para descargar ahora" : undefined}
+                    className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-teal-600 px-3.5 text-xs font-bold text-white hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    <Download className="h-4 w-4" />Descargar todos
+                    {downloadable.length > 0 && <span className="rounded-full bg-white/20 px-1.5 text-[10.5px]">{downloadable.length}</span>}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -419,6 +440,17 @@ export const BackupsSismedModule: React.FC = () => {
       )}
 
       {activityOpen && <ActivityDrawer items={activityItems} onClose={() => setActivityOpen(false)} />}
+
+      {tab === "backups" && canDownload && downloadable.length > 0 && !anyJobActive && (
+        <FloatingActionButton icon={<Download />} label={`Descargar todos (${downloadable.length})`} onClick={() => setConfirmAll(true)} />
+      )}
+      {confirmAll && (
+        <BackupDownloadAllModal
+          items={downloadable.map((r) => ({ code: r.code, name: r.name, ungetName: showUngetName ? r.ungetName || undefined : undefined }))}
+          onClose={() => setConfirmAll(false)}
+          onDownload={downloadAll}
+        />
+      )}
     </div>
   );
 };

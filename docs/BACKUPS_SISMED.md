@@ -292,3 +292,17 @@ devuelve además `mine`, que es lo que la web usa para «Cupo del día usado» (
 `today`, el total del establecimiento). Si dos usuarios piden a la vez el mismo
 establecimiento, la PC atiende uno y el otro recibe «Esta PC ya está enviando otro backup»;
 ese pedido fallido no cuenta.
+
+## Descargar todos y nombre del archivo (2026-10-16)
+
+- **«Descargar todos»**: pide a la vez el backup de cada establecimiento en línea que hoy
+  puede descargar (respeta el filtro de UNGET y el cupo del día de cada uno). Una ventana
+  con casillas deja quitar los que no se quieren (empiezan todos marcados). El gestor los
+  baja de dos en dos, como siempre.
+- **Nombre del archivo**: `<establecimiento>_<código>_<archivo del SISMED>`, por ejemplo
+  `C.S. Consuelo_06506_BKDA202610160734.zip`. El nombre va sin tildes ni caracteres que
+  Windows rechaza. Si se recarga la página a mitad de un pedido, el nombre se recupera
+  de `localStorage` (`backups-sismed:nombres`); sin él, el archivo lleva solo el código.
+- **Avance**: una sola barra de 0 a 100 %. La subida de la PC es la primera mitad
+  («Paso 1 de 2») y la descarga del navegador la segunda («Paso 2 de 2»). Antes cada tramo
+  llenaba su propia barra, y la subida, que es rápida, hacía creer que ya había terminado.
