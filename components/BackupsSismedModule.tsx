@@ -8,7 +8,7 @@ import { useBackupManager } from "../contexts/BackupManagerContext";
 import { backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import {
   ActivityItem, ActivityKind, BackupActivityRow, BackupOverviewRow, BackupRowView, SHOW_FILTER_LABEL, ShowFilter,
-  activityFromRequest, buildBackupRows, lastConnectionLabel, filterBackupRows, isActive, jobProgress, jobSpeed, limaDay, planState, rowsOfUnget, showFilterCounts, summarizeBackups,
+  activityFromRequest, buildBackupRows, copyLabel, lastConnectionLabel, filterBackupRows, isActive, jobProgress, jobSpeed, limaDay, planState, rowsOfUnget, showFilterCounts, summarizeBackups,
   ungetOptions, whoLabel, BACKUPS_TAB_EVENT, takeRequestedBackupsTab,
 } from "../services/backupModule";
 import { getUserJurisdictionScope } from "../services/jurisdictionService";
@@ -54,6 +54,8 @@ const chipFor = (row: BackupRowView): { label: string; tone: Tone } | null => {
     if (job.phase === "failed" && job.failure === "error") return { label: "Falló", tone: "danger" };
     if (job.phase === "failed" && job.failure === "paused") return { label: "Pausado por consumo", tone: "danger" };
   }
+  // Con copia, «Descargar» funciona aunque el cupo esté usado: el estado habla de la copia.
+  if (row.copy) return { label: "Copia lista", tone: "success" };
   if (row.quotaUsed) return { label: "Cupo del día usado", tone: "warning" };
   return null;
 };
@@ -72,9 +74,10 @@ const Detail: React.FC<{ row: BackupRowView }> = ({ row }) => {
   const speed = job ? jobSpeed(job) : null;
   const left = speed ? (speed.secondsLeft < 60 ? "falta < 1 min" : `faltan ~${Math.round(speed.secondsLeft / 60)} min`) : null;
   if (job?.phase === "uploading" && job.size) return <Bar pct={pct ?? 0} label={`1 de 2 · La PC sube · ${left || formatMegabytes(job.size)}`} />;
+  if (job?.phase === "downloading" && job.size && job.copy) return <Bar pct={pct ?? 0} label={`Copia del día · ${left || formatMegabytes(job.size)}`} />;
   if (job?.phase === "downloading" && job.size) return <Bar pct={pct ?? 0} label={`2 de 2 · Descargando · ${left || formatMegabytes(job.size)}`} />;
   if (job?.phase === "requested" || job?.phase === "saving") {
-    return <span className="inline-flex items-center gap-1.5 text-[11.5px] text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" />{job.phase === "saving" ? "Comprobando la huella…" : "Esperando a la PC…"}</span>;
+    return <span className="inline-flex items-center gap-1.5 text-[11.5px] text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" />{job.phase === "saving" ? "Comprobando la huella…" : job.copy ? "Preparando la copia…" : "Esperando a la PC…"}</span>;
   }
   if (job?.phase === "done") {
     return (
@@ -85,6 +88,14 @@ const Detail: React.FC<{ row: BackupRowView }> = ({ row }) => {
     );
   }
   if (job?.phase === "failed" && job.failure !== "quota") return <p className="line-clamp-2 max-w-[260px] text-[11.5px] text-slate-500" title={job.detail}>{job.detail}</p>;
+  if (row.copy) {
+    return (
+      <div className="text-[11.5px] text-slate-500">
+        <div className="font-semibold text-emerald-700">{copyLabel(row.copy)}</div>
+        <div>{formatMegabytes(row.copy.size)} · lista en la nube</div>
+      </div>
+    );
+  }
   if (row.quotaUsed) {
     return (
       <div className="text-[11.5px] text-slate-500">
@@ -159,8 +170,8 @@ export const BackupsSismedModule: React.FC = () => {
 
   const paused = manager.usage?.level === "paused";
   const rows = useMemo(
-    () => buildBackupRows(overview, manager.online, manager.jobs, paused, Date.now(), manager.seen),
-    [overview, manager.online, manager.jobs, paused, manager.seen],
+    () => buildBackupRows(overview, manager.online, manager.jobs, paused, Date.now(), manager.seen, manager.copies),
+    [overview, manager.online, manager.jobs, paused, manager.seen, manager.copies],
   );
   // Filtro por UNGET para quien ve más de una (DIRESA, OGESS y el administrador; la misma
   // regla de Establecimientos). Con una sola UNGET a la vista no hay nada que elegir.
@@ -214,7 +225,7 @@ export const BackupsSismedModule: React.FC = () => {
   const [confirmAll, setConfirmAll] = useState(false);
   const downloadAll = (items: DownloadAllItem[]) => {
     setConfirmAll(false);
-    manager.requestMany(items.map((i) => ({ code: i.code, facility: i.name })));
+    manager.requestMany(items.map((i) => ({ code: i.code, facility: i.name, copy: i.copy })));
   };
 
   const refresh = () => {
@@ -222,15 +233,31 @@ export const BackupsSismedModule: React.FC = () => {
     void load();
   };
 
+  // Con copia del día, «Descargar» la baja de la nube (aunque la PC esté apagada) y
+  // «Pedir uno nuevo» pide el backup de este momento a la PC, como siempre.
   const action = (row: BackupRowView, full = false) => !canDownload ? null : (
-    <button
-      type="button"
-      disabled={!row.canDownload}
-      onClick={() => manager.request(row.code, row.name)}
-      className={`inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-teal-600 px-3.5 text-xs font-bold text-white hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400 ${full ? "w-full" : ""}`}
-    >
-      {isActive(row.job) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Descargar
-    </button>
+    <span className={`inline-flex items-center justify-end gap-1.5 ${full ? "w-full" : ""}`}>
+      {row.copy && row.canRequestNew && (
+        <button
+          type="button"
+          onClick={() => manager.request(row.code, row.name)}
+          title="Pedir uno nuevo a la PC (usa el cupo del día)"
+          aria-label="Pedir uno nuevo a la PC"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-teal-700"
+        >
+          <RefreshCw className="h-4 w-4" />
+        </button>
+      )}
+      <button
+        type="button"
+        disabled={!row.canDownload}
+        onClick={() => (row.copy ? manager.requestCopy(row.code, row.name) : manager.request(row.code, row.name))}
+        title={row.copy ? `Bajar la ${copyLabel(row.copy).toLowerCase()} (no usa el cupo)` : undefined}
+        className={`inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-teal-600 px-3.5 text-xs font-bold text-white hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400 ${full ? "flex-1" : ""}`}
+      >
+        {isActive(row.job) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Descargar
+      </button>
+    </span>
   );
 
   return (
@@ -298,7 +325,7 @@ export const BackupsSismedModule: React.FC = () => {
                     type="button"
                     disabled={downloadable.length === 0}
                     onClick={() => setConfirmAll(true)}
-                    title={downloadable.length === 0 ? "No hay establecimientos en línea para descargar ahora" : undefined}
+                    title={downloadable.length === 0 ? "No hay copias del día ni establecimientos en línea para descargar ahora" : undefined}
                     className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-teal-600 px-3.5 text-xs font-bold text-white hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400"
                   >
                     <Download className="h-4 w-4" />Descargar todos
@@ -418,7 +445,7 @@ export const BackupsSismedModule: React.FC = () => {
                             ? <span className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-500" />En línea</span>
                             : <span className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-slate-400"><WifiOff className="h-3.5 w-3.5" />Desconectada</span>}
                         </div>
-                        {row.job && <Detail row={row} />}
+                        {(row.job || row.copy) && <Detail row={row} />}
                         <div className="flex items-center justify-between gap-2">
                           <span className="min-w-0 truncate text-[11.5px] text-slate-500">Último: {whenLabel(row.lastAt)}{row.lastBy ? ` · ${whoLabel(row.lastBy, manager.username)}` : ""}</span>
                           {action(row)}
@@ -448,7 +475,10 @@ export const BackupsSismedModule: React.FC = () => {
       )}
       {confirmAll && (
         <BackupDownloadAllModal
-          items={downloadable.map((r) => ({ code: r.code, name: r.name, ungetName: showUngetName ? r.ungetName || undefined : undefined }))}
+          items={downloadable.map((r) => ({
+            code: r.code, name: r.name, ungetName: showUngetName ? r.ungetName || undefined : undefined,
+            copy: Boolean(r.copy), hint: r.copy ? copyLabel(r.copy) : "Se pide a la PC",
+          }))}
           onClose={() => setConfirmAll(false)}
           onDownload={downloadAll}
         />

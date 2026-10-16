@@ -13,7 +13,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "./AuthContext";
-import { OnlinePc, SeenPc, ServerMessage, UsageReading, applyPresence, applySeen, connectionUrl, parseServerMessage } from "../services/backupConnection";
+import { BackupCopyRow, OnlinePc, SeenPc, ServerMessage, UsageReading, applyPresence, applySeen, connectionUrl, parseServerMessage } from "../services/backupConnection";
 import { ActivityItem, BackupJobView, isActive, trackPhase } from "../services/backupModule";
 import {
   chooseSaveFolder, downloadWithResume, folderPickerSupported, getSaveFolder, grantSaveFolder, saveBackup, savedFileName, verifyBackup,
@@ -31,6 +31,8 @@ export interface BackupManager {
   /** Última conexión de los establecimientos que no están en línea, por código. */
   seen: Record<string, SeenPc>;
   usage: UsageReading | null;
+  /** Copia del día de cada establecimiento que hay en la nube (Toolkit 2.3.9). */
+  copies: Record<string, BackupCopyRow>;
   jobs: Record<string, BackupJobView>;
   /** Conexiones y desconexiones de esta sesión (para el panel Actividad). */
   events: ActivityItem[];
@@ -41,8 +43,13 @@ export interface BackupManager {
   folderNeedsPermission: boolean;
   /** Pide el backup de un establecimiento; `facility` va adelante del nombre del archivo. */
   request: (code: string, facility?: string) => void;
-  /** Pide varios a la vez (el botón «Descargar todos»). Se bajan de dos en dos. */
-  requestMany: (items: Array<{ code: string; facility?: string }>) => void;
+  /** Baja la copia del día: no le pide nada a la PC ni usa el cupo. */
+  requestCopy: (code: string, facility?: string) => void;
+  /**
+   * Varios a la vez (el botón «Descargar todos»): con `copy`, la copia del día; si no, un
+   * pedido a la PC. Se bajan de dos en dos.
+   */
+  requestMany: (items: Array<{ code: string; facility?: string; copy?: boolean }>) => void;
   refresh: () => void;
   refreshUsage: () => void;
   dismiss: (code: string) => void;
@@ -82,6 +89,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
   const [online, setOnline] = useState<OnlinePc[]>([]);
   const [seen, setSeen] = useState<Record<string, SeenPc>>({});
   const [usage, setUsage] = useState<UsageReading | null>(null);
+  const [copies, setCopies] = useState<Record<string, BackupCopyRow>>({});
   const [jobs, setJobs] = useState<Record<string, BackupJobView>>({});
   const [events, setEvents] = useState<ActivityItem[]>([]);
   const [version, setVersion] = useState(0);
@@ -132,7 +140,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
       if (downloading.current.has(ready.job)) continue;
       downloading.current.add(ready.job);
       void (async () => {
-        setJob(ready.code, { job: ready.job, phase: "downloading", name: ready.name, size: ready.size, received: 0, detail: undefined });
+        setJob(ready.code, { job: ready.job, phase: "downloading", name: ready.name, size: ready.size, received: 0, detail: undefined, copy: Boolean(ready.copy) });
         try {
           let last = 0;
           const data = await downloadWithResume(ready.downloadUrl, ready.size, (received) => {
@@ -171,6 +179,16 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
         setOnline(message.rows);
         // Un servicio anterior no manda `seen`: se conserva lo que ya se sabía.
         if (message.seen) setSeen(Object.fromEntries(message.seen.map((row) => [row.code, row])));
+        // Un servicio anterior no manda copias: se conserva lo que ya se sabía.
+        if (message.copies) setCopies(Object.fromEntries(message.copies.map((row) => [row.code, row])));
+        break;
+      case "copy":
+        setCopies((prev) => {
+          const next = { ...prev };
+          if (message.copy) next[message.code] = message.copy;
+          else delete next[message.code];
+          return next;
+        });
         break;
       case "presence":
         addEvent(`${message.codes.join(", ")} ${message.online ? "se conectó" : "se desconectó"}${message.equipo ? ` (${message.equipo})` : ""}`, message.online ? "info" : "warn");
@@ -258,6 +276,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
     setUsername(null);
     setIsAdmin(false);
     setUsage(null);
+    setCopies({});
   }, [enabled]);
 
   // Mientras haya pedidos en curso, el navegador pregunta antes de cerrar la pestaña.
@@ -268,19 +287,23 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => window.removeEventListener("beforeunload", warn);
   }, [anyActive]);
 
-  const requestMany = useCallback((items: Array<{ code: string; facility?: string }>) => {
+  const requestMany = useCallback((items: Array<{ code: string; facility?: string; copy?: boolean }>) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) {
       toast.error("Sin conexión con el servicio. Espere unos segundos y vuelva a intentar.");
       return;
     }
-    for (const { code, facility } of items) {
+    for (const { code, facility, copy } of items) {
       if (facility) names.current[code] = facility;
-      setJob(code, { job: undefined, phase: "requested", failure: undefined, name: undefined, size: undefined, sent: 0, received: 0, detail: "Pidiendo…", facility: names.current[code], at: Date.now() });
-      send({ t: "backup_request", code });
+      setJob(code, {
+        job: undefined, phase: "requested", failure: undefined, name: undefined, size: undefined, sent: 0, received: 0,
+        detail: copy ? "Preparando la copia del día…" : "Pidiendo…", facility: names.current[code], copy: Boolean(copy), at: Date.now(),
+      });
+      send({ t: copy ? "copy_request" : "backup_request", code });
     }
     try { localStorage.setItem(NAMES_KEY, JSON.stringify(names.current)); } catch { /* sin almacenamiento: el archivo sale solo con el código */ }
   }, [send, setJob]);
   const request = useCallback((code: string, facility?: string) => requestMany([{ code, facility }]), [requestMany]);
+  const requestCopy = useCallback((code: string, facility?: string) => requestMany([{ code, facility, copy: true }]), [requestMany]);
 
   const attach = useCallback(() => {
     setAttached((n) => n + 1);
@@ -295,6 +318,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
     online,
     seen,
     usage,
+    copies,
     jobs,
     events,
     version,
@@ -302,6 +326,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
     folderSupported: folderPickerSupported(),
     folderNeedsPermission,
     request,
+    requestCopy,
     requestMany,
     refresh: () => send({ t: "list" }),
     refreshUsage: () => send({ t: "usage" }),

@@ -17,7 +17,8 @@ const progressOf = (job: BackupJobView): { text: string; pct: number | null } =>
     return { text: `Paso 1 de 2 · La PC sube a la nube · ${formatMegabytes(job.sent || 0)} de ${formatMegabytes(job.size || 0)}${tail}`, pct };
   }
   if (job.phase === "downloading") {
-    return { text: `Paso 2 de 2 · Descargando · ${formatMegabytes(job.received || 0)} de ${formatMegabytes(job.size || 0)}${tail}`, pct };
+    const step = job.copy ? "Copia del día" : "Paso 2 de 2";
+    return { text: `${step} · Descargando · ${formatMegabytes(job.received || 0)} de ${formatMegabytes(job.size || 0)}${tail}`, pct };
   }
   if (job.phase === "saving") return { text: "Comprobando la huella y guardando…", pct };
   return { text: job.detail || "", pct: null };

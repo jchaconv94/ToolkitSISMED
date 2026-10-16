@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, PC_SILENCE_MS, PcInfo, backupKey, buildUsage, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, jobMessages, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, usageFor, r2OperationClass, usageBlocks, usageMessage, utcDayStart, utcMonthStart } from "./logic";
+import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, BackupCopy, COPY_JOB_TTL_MS, COPY_KEEP_MS, copyIsStale, copyKey, copyOfferVerdict, copyRowsFor, nextCopyExpiry, PC_SILENCE_MS, PcInfo, backupKey, buildUsage, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, jobMessages, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, usageFor, r2OperationClass, usageBlocks, usageMessage, utcDayStart, utcMonthStart } from "./logic";
 
 const now = 1_000_000_000;
 const pc = (codes: Array<[string, string | null]>, since = now - 1000, equipo = "PC"): PcInfo => ({
@@ -176,5 +176,56 @@ describe("última conexión", () => {
     const seen = seenRowsFor(pc, pc.codes, 5_000);
     expect(seenFor({ isAdmin: false, ungetIds: ["u1"] }, seen).map((r) => r.code)).toEqual(["06519"]);
     expect(seenFor({ isAdmin: true, ungetIds: [] }, seen)).toHaveLength(2);
+  });
+});
+
+describe("copia del día", () => {
+  const sha = "a".repeat(64);
+  const meta = { name: "BKDA202610160812.zip", size: 11_000_000, sha256: sha };
+  const copy = (over: Partial<BackupCopy> = {}): BackupCopy => ({
+    code: "06502", ungetId: "u1", name: meta.name, size: meta.size, sha256: sha, modified: "2026-10-16T08:12",
+    key: "copias/06502/j1/BKDA202610160812.zip", uploadedAt: now - 3600_000, ...over,
+  });
+
+  it("vive en su propia carpeta para que la regla del bucket la trate aparte", () => {
+    expect(copyKey({ id: "j1", code: "06502" }, meta.name)).toBe("copias/06502/j1/BKDA202610160812.zip");
+    expect(backupKey({ id: "j1", code: "06502" }, meta.name)).toBe("backups/06502/j1/BKDA202610160812.zip");
+  });
+
+  it("no se vuelve a subir la misma copia, pero sí la del día siguiente", () => {
+    expect(copyOfferVerdict(copy(), meta, null, false, now)).toMatchObject({ accept: false, reason: "La nube ya tiene esta copia" });
+    expect(copyOfferVerdict(copy(), { ...meta, name: "BKDA202610170805.zip" }, null, false, now)).toEqual({ accept: true });
+    expect(copyOfferVerdict(null, meta, null, false, now)).toEqual({ accept: true });
+    // Una copia vencida igual se reemplaza, aunque sea el mismo archivo.
+    expect(copyOfferVerdict(copy({ uploadedAt: now - COPY_KEEP_MS - 1 }), meta, null, false, now)).toEqual({ accept: true });
+  });
+
+  it("no acepta dos subidas a la vez ni copias si el espacio se acerca al límite", () => {
+    expect(copyOfferVerdict(null, meta, null, true, now).accept).toBe(false);
+    const full = buildUsage({ r2Storage: 7.2 }, now);
+    expect(copyOfferVerdict(null, meta, full, false, now)).toMatchObject({ accept: false });
+    const paused = buildUsage({ doRequests: 85_000 }, now);
+    expect(copyOfferVerdict(null, meta, paused, false, now).accept).toBe(false);
+    expect(copyOfferVerdict(null, meta, buildUsage({ r2Storage: 2 }, now), false, now)).toEqual({ accept: true });
+  });
+
+  it("cada uno ve solo las copias de su jurisdicción y no las vencidas", () => {
+    const copies = [copy(), copy({ code: "06519", ungetId: "u2" }), copy({ code: "06524", uploadedAt: now - COPY_KEEP_MS - 1 })];
+    expect(copyRowsFor({ isAdmin: false, ungetIds: ["u1"] }, copies, now).map((c) => c.code)).toEqual(["06502"]);
+    expect(copyRowsFor({ isAdmin: true, ungetIds: [] }, copies, now).map((c) => c.code)).toEqual(["06502", "06519"]);
+    expect(Object.keys(copyRowsFor({ isAdmin: true, ungetIds: [] }, copies, now)[0]).sort()).toEqual(["code", "modified", "name", "size", "uploadedAt"]);
+  });
+
+  it("vence a las 48 h y la alarma despierta para la primera que vence", () => {
+    expect(copyIsStale(copy({ uploadedAt: now - COPY_KEEP_MS }), now)).toBe(false);
+    expect(copyIsStale(copy({ uploadedAt: now - COPY_KEEP_MS - 1 }), now)).toBe(true);
+    expect(nextCopyExpiry([])).toBeNull();
+    expect(nextCopyExpiry([{ uploadedAt: now }, { uploadedAt: now - 10 }])).toBe(now - 10 + COPY_KEEP_MS + 1000);
+  });
+
+  it("la subida de una copia tiene más tiempo que un pedido: nadie la espera", () => {
+    expect(isExpired({ createdAt: now - BACKUP_TTL_MS - 1 }, now)).toBe(true);
+    expect(isExpired({ createdAt: now - BACKUP_TTL_MS - 1, kind: "copy" }, now)).toBe(false);
+    expect(isExpired({ createdAt: now - COPY_JOB_TTL_MS - 1, kind: "copy" }, now)).toBe(true);
   });
 });

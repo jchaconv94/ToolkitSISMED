@@ -344,3 +344,56 @@ subida usando varias conexiones. Una sola conexión no aprovechaba la línea.
 - **Web:** el panel de descargas muestra la velocidad y el tiempo que falta de cada paso
   (`jobSpeed`, `speedLabel`, `trackPhase` en `services/backupModule.ts`). La tabla muestra el
   tiempo que falta.
+
+## Copia del día (Toolkit 2.3.9, 2026-10-16)
+
+Idea del usuario: que el backup ya esté en la nube antes de que alguien lo pida. Así la descarga
+es inmediata, sirve aunque la PC esté apagada y queda una copia fuera del establecimiento. Se
+discutió y se acordó así:
+
+- **Solo el backup de la mañana:** el primero que el SISMED genera en el día. El usuario
+  descarga los martes y viernes, o cuando hace falta.
+- **Toolkit:** cuando ese archivo termina de escribirse (90 s), lo ofrece con `copy_offer`
+  una vez por archivo y establecimiento. Si el servicio responde `copy_go`, lo sube en segundo
+  plano **por una sola conexión** (`COPY_PARALLEL = 1`), para no saturar la red del
+  establecimiento. Si llega un pedido de la web mientras sube, la copia se corta en el
+  siguiente bloque y se atiende el pedido (`BackupUploader.cancel`).
+- **Servicio:** guarda **una sola copia por establecimiento** (`copy:<código>`, archivo en
+  `copias/<código>/<pedido>/<nombre>`). Cuando llega la siguiente, la anterior se borra en el
+  acto; si el establecimiento deja de conectarse, su copia se borra a las 48 h
+  (`COPY_KEEP_MS`). No acepta copias nuevas con el almacenamiento de R2 al 70 %
+  (`COPY_STORAGE_LIMIT`) ni con el plan en pausa. Espacio aproximado: un backup por
+  establecimiento (15 establecimientos ≈ 0,3 GB; 300 de ~15 MB ≈ 4,5 GB).
+- **Web:** la fila dice «Copia de hoy 08:12 · 11 MB · lista en la nube» y el estado «Copia
+  lista». «Descargar» la baja con `copy_request`, que reutiliza el camino de siempre
+  (`backup_ready` → descarga → huella → `backup_done`), pero sin borrar el archivo, que sigue
+  para los demás. El botón ⟳ «Pedir uno nuevo» pide el backup del momento a la PC.
+  «Descargar todos» baja las copias y pide a la PC los que no tienen.
+- **Cupo:** bajar la copia **no** usa el cupo diario por usuario (decisión del usuario del
+  2026-10-16); «Pedir uno nuevo» sí. En Supabase queda como `COPY_DOWNLOADED`
+  (`supabase/SUPABASE_BACKUPS_COPIA_DIARIA.sql`) y cuenta en «Último descargado».
+- **Arreglo de paso:** los datos del backup (nombre, tamaño, huella) iban solo por la
+  conexión abierta. Con la línea ocupada, el inicio de la subida llegaba antes y el servicio
+  respondía «Falta informar el backup». Desde la 2.3.9 van también en `POST start`, y el
+  servicio los acepta ahí (`backupMeta`).
+
+**Prueba de punta a punta** con el servicio real en local, el código real de conexión del
+Toolkit y la red simulada a 1 Mbps (datos inventados): la copia sube sola (6 MB en 54 s); no se
+repite al reiniciar el Toolkit; se baja con la PC apagada y la huella coincide; queda registrada
+sin usar el cupo; sigue para los demás después de bajarla; la del día siguiente la reemplaza; y
+un pedido de la web corta la copia en curso y llega bien. Antes del arreglo, ese último caso
+fallaba con «Falta informar el backup».
+
+### Pendiente del usuario: la regla del bucket
+
+La regla `borrar-a-1-dia` borra todo el bucket al día, y la copia debe durar hasta 2 días. En
+Cloudflare → R2 → `sismed-backups` → Settings → Object lifecycle rules:
+
+1. Regla `borrar-a-1-dia`: que se aplique solo al prefijo `backups/`. Si no deja cambiar el
+   prefijo, bórrela y créela de nuevo con prefijo `backups/`, borrar a 1 día y cancelar subidas
+   incompletas a 1 día.
+2. Regla nueva `copias-a-3-dias`: prefijo `copias/`, borrar objetos a los 3 días y cancelar
+   subidas incompletas a 1 día.
+
+Mientras no se cambie, cada copia dura 1 día. Si la regla la borró antes, la web lo nota al
+pedirla («La copia ya no está en la nube; pida uno nuevo») y la olvida.

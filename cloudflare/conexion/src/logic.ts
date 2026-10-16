@@ -143,9 +143,19 @@ export const BACKUP_MAX_BYTES = 600 * 1024 * 1024;
 
 export type BackupStatus = "requested" | "uploading" | "ready" | "failed";
 
+/**
+ * «request»: alguien pidió el backup y la PC lo sube (el de siempre; sin `kind` es este).
+ * «copy»: la PC sube sola el primer backup del día y queda como copia del establecimiento.
+ * «copy_download»: alguien baja esa copia; usa el mismo archivo, que no se borra al terminar.
+ */
+export type BackupJobKind = "request" | "copy" | "copy_download";
+
 export interface BackupJob {
   id: string;
+  kind?: BackupJobKind;
   code: string;
+  /** UNGET del establecimiento (copias): para saber quién puede verla con la PC apagada. */
+  ungetId?: string | null;
   web: string;
   /** Sesión de quien lo pidió: solo esa persona actualiza el pedido en Supabase. */
   webToken: string;
@@ -175,7 +185,82 @@ export const isBackupName = (name: unknown): name is string =>
 /** Dónde vive el zip en R2 mientras está de paso. */
 export const backupKey = (job: Pick<BackupJob, "id" | "code">, name: string) => `backups/${job.code}/${job.id}/${name}`;
 
-export const isExpired = (job: Pick<BackupJob, "createdAt">, now: number) => now - job.createdAt > BACKUP_TTL_MS;
+export const isExpired = (job: Pick<BackupJob, "createdAt" | "kind">, now: number) =>
+  now - job.createdAt > (job.kind === "copy" ? COPY_JOB_TTL_MS : BACKUP_TTL_MS);
+
+// ---------------------------------------------------------------------------------------
+//  Copia del día (2026-10-16): la PC sube sola el primer backup del día
+// ---------------------------------------------------------------------------------------
+
+/** La copia sube por una sola conexión: va en segundo plano y no debe saturar la red. */
+export const COPY_PARALLEL = 1;
+/** Nadie la espera: en una línea lenta puede tardar más que un pedido. */
+export const COPY_JOB_TTL_MS = 3 * 60 * 60 * 1000;
+/**
+ * Cuánto se guarda una copia si no llega otra. Si la PC se conecta a diario, la del día
+ * siguiente la reemplaza antes. La regla del bucket para `copias/` debe dejarla al menos esto
+ * (docs/BACKUPS_SISMED.md); si borra antes, la web lo nota al pedirla y ofrece una nueva.
+ */
+export const COPY_KEEP_MS = 48 * 60 * 60 * 1000;
+/** Con el almacenamiento de R2 en este nivel ya no se aceptan copias nuevas (sí pedidos). */
+export const COPY_STORAGE_LIMIT = 0.7;
+
+export interface BackupCopy {
+  code: string;
+  ungetId: string | null;
+  name: string;
+  size: number;
+  sha256: string;
+  modified: string;
+  key: string;
+  uploadedAt: number;
+  equipo?: string;
+  /** Dirección pública del servicio, para armar el enlace de descarga. */
+  origin?: string;
+}
+
+/** La copia vive aparte de los pedidos, para que la regla del bucket pueda tratarla distinto. */
+export const copyKey = (job: Pick<BackupJob, "id" | "code">, name: string) => `copias/${job.code}/${job.id}/${name}`;
+
+export const copyIsStale = (copy: Pick<BackupCopy, "uploadedAt">, now: number) => now - copy.uploadedAt > COPY_KEEP_MS;
+
+const sameBackup = (copy: BackupCopy, meta: { name: string; size: number; sha256: string }) =>
+  copy.name === meta.name && copy.size === meta.size && copy.sha256 === meta.sha256;
+
+/** ¿Se acepta la copia que ofrece la PC? No si ya está guardada ni si el espacio se acaba. */
+export const copyOfferVerdict = (
+  existing: BackupCopy | null | undefined,
+  meta: { name: string; size: number; sha256: string },
+  reading: UsageReading | null,
+  uploading: boolean,
+  now: number,
+): { accept: true } | { accept: false; reason: string } => {
+  if (existing && sameBackup(existing, meta) && !copyIsStale(existing, now)) return { accept: false, reason: "La nube ya tiene esta copia" };
+  if (uploading) return { accept: false, reason: "Ya se está subiendo una copia de este establecimiento" };
+  const storage = reading?.items.find((item) => item.key === "r2Storage")?.ratio ?? 0;
+  if (usageBlocks(reading) || storage >= COPY_STORAGE_LIMIT) {
+    return { accept: false, reason: "La nube está cerca del límite gratuito: por ahora no se guardan copias" };
+  }
+  return { accept: true };
+};
+
+export interface CopyRow {
+  code: string;
+  name: string;
+  size: number;
+  modified: string;
+  uploadedAt: number;
+}
+
+/** Las copias que puede ver alguien (su jurisdicción), sin las vencidas. */
+export const copyRowsFor = (web: Pick<WebInfo, "isAdmin" | "ungetIds">, copies: BackupCopy[], now: number): CopyRow[] =>
+  copies
+    .filter((copy) => canSee(web, copy) && !copyIsStale(copy, now))
+    .map(({ code, name, size, modified, uploadedAt }) => ({ code, name, size, modified, uploadedAt }));
+
+/** Cuándo despertar para borrar la copia que vence primero (null si no hay). */
+export const nextCopyExpiry = (copies: Pick<BackupCopy, "uploadedAt">[]): number | null =>
+  copies.length ? Math.min(...copies.map((copy) => copy.uploadedAt + COPY_KEEP_MS)) + 1000 : null;
 
 /** Datos del backup que manda el Toolkit, validados. */
 export const parseBackupMeta = (data: any): { name: string; size: number; sha256: string; modified: string } | null => {

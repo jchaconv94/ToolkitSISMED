@@ -4,7 +4,7 @@ vi.mock("./supabaseClient", () => ({ supabase: null }));
 vi.mock("./api", () => ({ getSessionToken: () => null }));
 
 import {
-  BackupOverviewRow, activityFromRequest, buildBackupRows, filterBackupRows, jobProgress, jobSpeed, lastConnectionLabel, speedLabel, trackPhase, limaDay, planState, rowsOfUnget,
+  BackupOverviewRow, activityFromRequest, buildBackupRows, copyLabel, filterBackupRows, jobProgress, jobSpeed, lastConnectionLabel, speedLabel, trackPhase, limaDay, planState, rowsOfUnget,
   showFilterCounts, summarizeBackups, ungetOptions, whoLabel,
 } from "./backupModule";
 import type { OnlinePc, UsageReading } from "./backupConnection";
@@ -194,5 +194,44 @@ describe("velocidad y tiempo restante", () => {
     const up = trackPhase({ ...base, phase: "requested" }, { ...base, phase: "uploading", sent: 0 }, 1000);
     const down = trackPhase(up, { ...up, phase: "downloading", received: 0 }, 50_000);
     expect(down).toMatchObject({ phaseAt: 50_000, phaseBase: 0 });
+  });
+});
+
+describe("copia del día", () => {
+  const copia = { code: "06533", name: "BKDA202610020812.zip", size: 11_000_000, modified: "2026-10-02T08:12", uploadedAt: ahora - 3600_000 };
+
+  it("con copia se puede descargar aunque la PC esté apagada o el cupo esté usado", () => {
+    const filas = buildBackupRows(lista, enLinea, {}, false, ahora, {}, { "06533": copia, "06519": { ...copia, code: "06519" } });
+    const por = Object.fromEntries(filas.map((f) => [f.code, f]));
+    expect(por["06533"].online).toBe(false);
+    expect(por["06533"].canDownload).toBe(true);
+    expect(por["06533"].canRequestNew).toBe(false); // apagada: no se le puede pedir uno nuevo
+    expect(por["06519"].quotaUsed).toBe(true);
+    expect(por["06519"].canDownload).toBe(true); // la copia no usa el cupo
+    expect(por["06519"].canRequestNew).toBe(false);
+    expect(por["06525"].copy).toBeUndefined();
+    expect(por["06525"].canRequestNew).toBe(true);
+  });
+
+  it("con un pedido en curso no se ofrece bajar la copia otra vez", () => {
+    const [fila] = buildBackupRows([lista[3]], [], { "06533": { code: "06533", phase: "downloading", at: ahora } }, false, ahora, {}, { "06533": copia });
+    expect(fila.canDownload).toBe(false);
+  });
+
+  it("dice de qué día y hora es el backup", () => {
+    expect(copyLabel(copia, ahora)).toBe("Copia de hoy 08:12");
+    expect(copyLabel({ ...copia, modified: "2026-10-01T07:55" }, ahora)).toBe("Copia de ayer 07:55");
+    expect(copyLabel({ ...copia, modified: "2026-09-29T08:01" }, ahora)).toBe("Copia del 29/09 08:01");
+  });
+
+  it("la descarga de la copia llena la barra de 0 a 100 %: no hay subida", () => {
+    expect(jobProgress({ code: "A", phase: "downloading", at: 0, size: 100, received: 50, copy: true })).toEqual({ pct: 50, step: null });
+    expect(jobProgress({ code: "A", phase: "downloading", at: 0, size: 100, received: 50 })).toEqual({ pct: 75, step: 2 });
+  });
+
+  it("la actividad nombra la descarga de la copia", () => {
+    const item = activityFromRequest({ id: "1", code: "06533", name: "P.S.", username: "jordan", status: "COPY_DOWNLOADED", fileName: copia.name, size: copia.size, at: "2026-10-02T15:00:00Z" } as any, "jordan");
+    expect(item.text).toContain("copia del día");
+    expect(item.text).toContain("la descargaste tú");
   });
 });
