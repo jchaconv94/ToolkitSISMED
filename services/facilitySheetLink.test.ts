@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  describePharmacyBreakdown,
   describePharmacyCode,
   isLinkedToSheet,
+  pharmacyBreakdown,
   linkedSheetName,
   pharmaciesInRows,
   resolveFacilitySheet,
@@ -252,6 +254,41 @@ describe("pharmaciesInRows", () => {
     expect(pharmaciesInRows([{ ALMCOD: "06519F01" }, { ALMCOD: "06519F01" }], almcod, registro)).toHaveLength(1);
     expect(pharmaciesInRows([], almcod, registro)).toEqual([]);
     expect(pharmaciesInRows(null, almcod, registro)).toEqual([]);
+  });
+});
+
+describe("pharmacyBreakdown y describePharmacyBreakdown", () => {
+  const almcod = (row: { ALMCOD: string }) => row.ALMCOD;
+  const registro = [
+    { code: "06502", name: "HOSPITAL II-E", type: "IPRESS" },
+    { code: "06502F02", name: "FARMACIA EMERGENCIA", type: "FARMACIA" },
+    { code: "06502F03", name: "FARMACIA SIS", type: "FARMACIA" },
+    { code: "06519", name: "C.S. NUEVO LIMA", type: "IPRESS" },
+    { code: "06519F02", name: "P.C. LOS OLIVOS", type: "PUESTO_COMUNAL" },
+    { code: "06519F03", name: "P.C. PAJARILLO", type: "PUESTO_COMUNAL" },
+  ];
+  const desglose = (codigos: string[]) =>
+    pharmacyBreakdown(pharmaciesInRows(codigos.map((c) => ({ ALMCOD: c })), almcod, registro), registro);
+
+  it("las farmacias del hospital no se cuentan como puestos comunales", () => {
+    const d = desglose(["06502F0101", "06502F0201", "06502F0301"]);
+    expect(d).toEqual({ farmacias: 2, puestos: 0, sinTipo: 0 });
+    expect(describePharmacyBreakdown(d)).toBe("Farmacia principal + 2 farmacias");
+  });
+
+  it("los puestos comunales sí, y una F02+ sin registro va aparte", () => {
+    const d = desglose(["06519F0101", "06519F0201", "06519F0301", "06519F0401"]);
+    expect(d).toEqual({ farmacias: 0, puestos: 2, sinTipo: 1 });
+    expect(describePharmacyBreakdown(d)).toBe("Farmacia + 2 puestos comunales + 1 sin tipo");
+    expect(describePharmacyBreakdown({ farmacias: 1, puestos: 1, sinTipo: 0 })).toBe(
+      "Farmacia principal + 1 farmacia + 1 puesto comunal",
+    );
+  });
+
+  it("una hoja con una sola farmacia no dice nada", () => {
+    const d = desglose(["06519F0101"]);
+    expect(d).toEqual({ farmacias: 0, puestos: 0, sinTipo: 0 });
+    expect(describePharmacyBreakdown(d)).toBe("");
   });
 });
 

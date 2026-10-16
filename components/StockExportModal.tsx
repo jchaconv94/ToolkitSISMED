@@ -3,6 +3,7 @@ import { AlertTriangle, Building2, Check, Download, FileSpreadsheet, Layers, Pil
 import type { SheetExportMode } from "./SheetExportMenu";
 import { suggestProducts, type StockProduct } from "../services/stockNetworkSearch";
 import { CustomSelect } from "./ui/CustomSelect";
+import { describePharmacyBreakdown, type PharmacyBreakdown } from "../services/facilitySheetLink";
 
 export type StockExportEstablishment = {
   id: string;
@@ -15,7 +16,8 @@ export type StockExportEstablishment = {
   estadoColor: string;
   estadoLabel: string;
   actualizado: boolean;
-  puestosComunales: number;
+  /** Farmacias del hospital, puestos comunales y F02+ sin tipo que trae la hoja además de la F01. */
+  farmacias: PharmacyBreakdown;
   /**
    * Otra hoja del mismo establecimiento está más al día y es la que se exporta: esta empieza
    * desmarcada y, si se marcan las dos, se exporta solo la más reciente.
@@ -40,14 +42,11 @@ const FILTROS: { key: Filtro; label: string; test: (e: StockExportEstablishment)
   { key: "ALM", label: "Almacén", test: (e) => e.tipo === "ALM" },
   { key: "HOSP", label: "Hospital", test: (e) => e.tipo === "HOSP" },
   { key: "actualizados", label: "Actualizados", test: (e) => e.actualizado },
-  { key: "puestos", label: "Con puestos comunales", test: (e) => e.puestosComunales > 0 },
+  { key: "puestos", label: "Con puestos comunales", test: (e) => e.farmacias.puestos > 0 },
 ];
 
 const normalizar = (texto: string) =>
   texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-
-const detallePuestos = (n: number) =>
-  `Farmacia + ${n} puesto${n === 1 ? "" : "s"} comunal${n === 1 ? "" : "es"}`;
 
 const Interruptor: React.FC<{
   activo: boolean;
@@ -143,7 +142,15 @@ export const StockExportModal: React.FC<{
   const elegidosEnLista = establecimientos.filter((e) => elegidos.has(e.id));
   // Una repetida marcada junto con su hoja vigente no suma: el Excel lleva solo la vigente.
   const seExportan = elegidosEnLista.filter((e) => !(e.repetida && elegidos.has(e.repetida.vigenteId))).length;
-  const conPuestosElegidos = elegidosEnLista.filter((e) => e.puestosComunales > 0).length;
+  const conVariasElegidos = elegidosEnLista.filter((e) => describePharmacyBreakdown(e.farmacias)).length;
+  const conFarmaciasDeHospital = elegidosEnLista.some((e) => e.farmacias.farmacias > 0);
+  const conPuestos = elegidosEnLista.some((e) => e.farmacias.puestos > 0 || e.farmacias.sinTipo > 0);
+  const queTienen =
+    conFarmaciasDeHospital && conPuestos
+      ? "varias farmacias o puestos comunales"
+      : conFarmaciasDeHospital
+        ? "varias farmacias"
+        : "puestos comunales";
 
   const alternar = (id: string) =>
     setElegidos((prev) => {
@@ -265,6 +272,7 @@ export const StockExportModal: React.FC<{
                 ) : (
                   visibles.map((e) => {
                     const elegido = elegidos.has(e.id);
+                    const detalle = describePharmacyBreakdown(e.farmacias);
                     return (
                       <label
                         key={e.id}
@@ -294,12 +302,10 @@ export const StockExportModal: React.FC<{
                               <span className="truncate">Repetida · se exporta {e.repetida.vigente}</span>
                             </span>
                           )}
-                          {(e.puestosComunales > 0 || e.ungetName) && (
+                          {(detalle || e.ungetName) && (
                             <span className="block text-[10.5px] font-semibold truncate">
-                              {e.puestosComunales > 0 && (
-                                <span className="text-violet-600">{detallePuestos(e.puestosComunales)}</span>
-                              )}
-                              {e.puestosComunales > 0 && e.ungetName && <span className="text-slate-300"> · </span>}
+                              {detalle && <span className="text-violet-600">{detalle}</span>}
+                              {detalle && e.ungetName && <span className="text-slate-300"> · </span>}
                               {e.ungetName && <span className="text-slate-400">{e.ungetName}</span>}
                             </span>
                           )}
@@ -360,13 +366,13 @@ export const StockExportModal: React.FC<{
                 })}
               </div>
               <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-                {conPuestosElegidos > 0 ? (
+                {conVariasElegidos > 0 ? (
                   <>
-                    Hay <b>{conPuestosElegidos} establecimiento{conPuestosElegidos === 1 ? "" : "s"} con puestos comunales</b> entre
+                    Hay <b>{conVariasElegidos} establecimiento{conVariasElegidos === 1 ? "" : "s"} con {queTienen}</b> entre
                     los elegidos.
                   </>
                 ) : (
-                  "Ninguno de los elegidos tiene puestos comunales."
+                  "Ninguno de los elegidos tiene varias farmacias ni puestos comunales."
                 )}{" "}
                 En consolidado, todos salen con su código de 5 dígitos.
               </p>

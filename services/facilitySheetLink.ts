@@ -242,6 +242,46 @@ export const pharmaciesInRows = <T>(
   return lista;
 };
 
+/** Cuántas farmacias de cada tipo trae una hoja además de la principal (F01). */
+export interface PharmacyBreakdown {
+  /** Farmacias en que se divide un hospital (tipo FARMACIA del registro). */
+  farmacias: number;
+  /** Puestos comunales (tipo PUESTO_COMUNAL del registro). */
+  puestos: number;
+  /** F02+ sin tipo en el registro o sin registrar. */
+  sinTipo: number;
+}
+
+/**
+ * Separa las farmacias de una hoja por su tipo en el registro de Establecimientos. Una
+ * farmacia de hospital no es un puesto comunal: llamarlas igual confundía (2026-10-16).
+ */
+export const pharmacyBreakdown = (
+  pharmacies: PharmacyInSheet[],
+  facilities: Array<{ code?: string | null; type?: string | null }> | null | undefined,
+): PharmacyBreakdown => {
+  const resultado: PharmacyBreakdown = { farmacias: 0, puestos: 0, sinTipo: 0 };
+  for (const p of pharmacies) {
+    if (parseFacilityCode(p.code).kind !== "puesto-comunal") continue;
+    const tipo = String(findFacilityByCode(p.code, facilities)?.type || "").toUpperCase();
+    if (tipo === "FARMACIA") resultado.farmacias += 1;
+    else if (tipo === "PUESTO_COMUNAL") resultado.puestos += 1;
+    else resultado.sinTipo += 1;
+  }
+  return resultado;
+};
+
+/** «Farmacia principal + 6 farmacias», «Farmacia + 2 puestos comunales»… Vacío si no hay ninguna. */
+export const describePharmacyBreakdown = ({ farmacias, puestos, sinTipo }: PharmacyBreakdown): string => {
+  const partes = [
+    farmacias > 0 ? `${farmacias} farmacia${farmacias === 1 ? "" : "s"}` : "",
+    puestos > 0 ? `${puestos} puesto${puestos === 1 ? "" : "s"} comunal${puestos === 1 ? "" : "es"}` : "",
+    sinTipo > 0 ? `${sinTipo} sin tipo` : "",
+  ].filter(Boolean);
+  if (partes.length === 0) return "";
+  return `${farmacias > 0 ? "Farmacia principal" : "Farmacia"} + ${partes.join(" + ")}`;
+};
+
 /**
  * Si una fila pertenece a la farmacia elegida en el filtro por establecimiento.
  *
