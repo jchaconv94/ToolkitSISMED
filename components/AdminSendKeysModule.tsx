@@ -22,7 +22,7 @@ import {
   useTableSort,
 } from "./ui/kit";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
-import { TablePagination } from "./ui/TablePagination";
+import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { BottomSheet } from "./ui/BottomSheet";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
@@ -34,7 +34,7 @@ import { showsTerritory } from "../services/orgTabs";
 
 
 
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 10;
 
 const STATE_STYLE: Record<SendKeyState, { chip: string; icon: React.ElementType; bar: string; tile: string; text: string }> = {
   blocked: { chip: "border-red-200 bg-red-50 text-red-700", icon: ShieldAlert, bar: "bg-red-500", tile: "bg-red-100 text-red-700", text: "text-red-700" },
@@ -261,6 +261,7 @@ const EstablishmentsPanel: React.FC<{
   const [sismedFilter, setSismedFilter] = useState<SismedFilter>("all");
   const [unget, setUnget] = useState("all");
   const [page, setPage] = useState(1);
+  const [PAGE_SIZE, setPageSize] = usePageSize("claves-envio", DEFAULT_PAGE_SIZE);
 
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [history, setHistory] = useState<SendAttempt[]>([]);
@@ -514,7 +515,7 @@ const EstablishmentsPanel: React.FC<{
             </div>
 
             <div className="hidden md:block">
-            <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} itemLabel="establecimientos" />
+            <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="establecimientos" />
             </div>
           </>
         )}

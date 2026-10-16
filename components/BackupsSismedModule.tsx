@@ -18,14 +18,14 @@ import {
   EmptyState, KpiCard, KpiStrip, StatusChip, TableHeaderCell, TableSearch, Tone,
   useTableSort,
 } from "./ui/kit";
-import { TablePagination } from "./ui/TablePagination";
+import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { BottomSheet } from "./ui/BottomSheet";
 import { CustomSelect } from "./ui/CustomSelect";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { BackupConsumptionTab } from "./BackupConsumptionTab";
 
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 10;
 const FILTERS: ShowFilter[] = ["all", "online", "ready", "today", "offline"];
 
 const limaTime = (value: string) =>
@@ -130,6 +130,7 @@ export const BackupsSismedModule: React.FC = () => {
   const [filter, setFilter] = useState<ShowFilter>("all");
   const [unget, setUnget] = useState("all");
   const [page, setPage] = useState(1);
+  const [PAGE_SIZE, setPageSize] = usePageSize("backups", DEFAULT_PAGE_SIZE);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<BackupActivityRow[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -409,7 +410,7 @@ export const BackupsSismedModule: React.FC = () => {
                 </div>
 
                 <div className="hidden md:block">
-                  <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} itemLabel="establecimientos" />
+                  <TablePagination page={currentPage} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="establecimientos" />
                 </div>
               </>
             )}

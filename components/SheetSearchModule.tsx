@@ -139,7 +139,7 @@ import { KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, So
 import { useStickyBar } from "./ui/useStickyBar";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
 import type { StockSearchScope } from "./StockNetworkSearchModal";
-import { TablePagination } from "./ui/TablePagination";
+import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { FloatingTableHead, SortHeadButton, headAlignClass, nextSort, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type SortDir } from "./ui/FloatingTableHead";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
@@ -4305,7 +4305,7 @@ function processSheet(sheet) {
   );
 
   // Lotes de la hoja: páginas numeradas en escritorio, lista que crece al bajar en el celular.
-  const DATA_PAGE_SIZE = 50;
+  const [DATA_PAGE_SIZE, setDataPageSize] = usePageSize("consulta-stock-hoja", 50);
   const [dataPage, setDataPage] = useState(1);
 
   // Escritorio: orden por columna al tocar su título, como en la tabla de establecimientos.
@@ -6700,7 +6700,7 @@ function processSheet(sheet) {
                             </tbody>
                           </table>
                         </div>
-                        <TablePagination page={dataPage} pageSize={DATA_PAGE_SIZE} total={filteredData.length} onPageChange={setDataPage} itemLabel="lotes" />
+                        <TablePagination page={dataPage} pageSize={DATA_PAGE_SIZE} total={filteredData.length} onPageChange={setDataPage} onPageSizeChange={setDataPageSize} itemLabel="lotes" />
                       </div>
                     </>
                   )}
