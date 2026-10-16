@@ -27,6 +27,9 @@ import { BottomSheet } from "./ui/BottomSheet";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useDropdownPosition } from "../hooks/useDropdownPosition";
+import { rowsOfUnget, ungetOptions } from "../services/ungetFilter";
+import { getUserJurisdictionScope } from "../services/jurisdictionService";
+import { showsTerritory } from "../services/orgTabs";
 
 
 
@@ -248,23 +251,30 @@ const EstablishmentsPanel: React.FC<{
   alerts: SendKeyRow[];
   onIgnoreAll: () => void;
 }> = ({ rows, latest, latestSismed, busy, onGenerate, onIgnore, onPending, alerts, onIgnoreAll }) => {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const canGenerate = can("ADMIN_SEND_KEYS", "generate");
   const canIgnore = can("ADMIN_SEND_KEYS", "ignore");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<EstablishmentFilter>("all");
   const [sismedFilter, setSismedFilter] = useState<SismedFilter>("all");
+  const [unget, setUnget] = useState("all");
   const [page, setPage] = useState(1);
 
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [history, setHistory] = useState<SendAttempt[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  const summary = useMemo(() => summarizeEstablishments(rows, latest, undefined, latestSismed), [rows, latest, latestSismed]);
-  const sismedVersions = useMemo(() => sismedVersionsInUse(rows), [rows]);
+  // Filtro por UNGET para quien ve más de una (DIRESA, OGESS y el administrador; la misma
+  // regla de Establecimientos y Backups SISMED). Los KPIs y conteos siguen a la UNGET elegida.
+  const ungets = useMemo(() => ungetOptions(rows), [rows]);
+  const showUngetFilter = showsTerritory(getUserJurisdictionScope(user).level, "UNGET", user?.role === "ADMIN") && ungets.length > 1;
+  const ungetFilter = showUngetFilter && ungets.some((u) => u.key === unget) ? unget : "all";
+  const scopedRows = useMemo(() => rowsOfUnget(rows, ungetFilter), [rows, ungetFilter]);
+  const summary = useMemo(() => summarizeEstablishments(scopedRows, latest, undefined, latestSismed), [scopedRows, latest, latestSismed]);
+  const sismedVersions = useMemo(() => sismedVersionsInUse(scopedRows), [scopedRows]);
   const filteredRows = useMemo(
-    () => filterEstablishments(rows, latest, search, filter, sismedFilter, undefined, latestSismed),
-    [rows, latest, search, filter, sismedFilter, latestSismed],
+    () => filterEstablishments(scopedRows, latest, search, filter, sismedFilter, undefined, latestSismed),
+    [scopedRows, latest, search, filter, sismedFilter, latestSismed],
   );
   // Orden por cabecera: sobre las filas filtradas y antes de paginar; la lista del celular usa el mismo.
   const { sorted: filtered, sort, headSort } = useTableSort(
@@ -282,13 +292,14 @@ const EstablishmentsPanel: React.FC<{
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [search, filter, sismedFilter, sort]);
+  useEffect(() => { setPage(1); }, [search, filter, sismedFilter, ungetFilter, sort]);
   // En el celular no hay páginas: la lista crece al bajar.
-  const mobileList = useIncrementalCount(filtered.length, `${search}|${filter}|${sismedFilter}`, 20);
+  const mobileList = useIncrementalCount(filtered.length, `${search}|${filter}|${sismedFilter}|${ungetFilter}`, 20);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const searchBar = useStickyBar<HTMLDivElement>();
 
-  const showUnget = useMemo(() => new Set(rows.map((r) => r.ungetId || "")).size > 1, [rows]);
+  // Con una UNGET elegida, repetir su nombre en cada fila no dice nada.
+  const showUnget = useMemo(() => ungetFilter === "all" && new Set(rows.map((r) => r.ungetId || "")).size > 1, [rows, ungetFilter]);
   const selected = useMemo(() => rows.find((r) => r.code === selectedCode) || null, [rows, selectedCode]);
 
   const loadHistory = useCallback(async (code: string) => {
@@ -338,8 +349,14 @@ const EstablishmentsPanel: React.FC<{
         <div ref={searchBar.ref} style={searchBar.style} className={`${stickyBarClass} flex items-center gap-2 border-b border-slate-100 bg-white p-3 md:static md:px-4`}>
           <TableSearch value={search} onChange={setSearch} placeholder="Buscar establecimiento, código o PC" />
           {/* Celular: un botón abre los filtros abajo. */}
-          <MobileFilterButton onClick={() => setFiltersOpen(true)} active={filter !== "all" || sismedFilter !== "all"} />
+          <MobileFilterButton onClick={() => setFiltersOpen(true)} active={filter !== "all" || sismedFilter !== "all" || ungetFilter !== "all"} />
           <div className="ml-auto hidden gap-2 md:flex">
+            {showUngetFilter && (
+              <select value={ungetFilter} onChange={(e) => setUnget(e.target.value)} aria-label="UNGET" className={`${filterInputClass} sm:w-56`}>
+                <option value="all">UNGET: todas ({rows.length})</option>
+                {ungets.map((u) => <option key={u.key} value={u.key}>{u.name} ({u.count})</option>)}
+              </select>
+            )}
             <select value={filter} onChange={(e) => setFilter(e.target.value as EstablishmentFilter)} aria-label="Estado" className={`${filterInputClass} sm:w-60`}>
               {FILTER_ORDER.map((f) => (
                 <option key={f} value={f}>{f === "all" ? "Estado: todos" : ESTABLISHMENT_FILTER_LABEL[f]} ({summary.counts[f]})</option>
@@ -357,7 +374,17 @@ const EstablishmentsPanel: React.FC<{
         </div>
 
         <BottomSheet open={filtersOpen} title="Filtros" onClose={() => setFiltersOpen(false)}>
-          <SheetGroupTitle first>Estado</SheetGroupTitle>
+          {showUngetFilter && (
+            <>
+              <SheetGroupTitle first>UNGET</SheetGroupTitle>
+              <div className="space-y-1">
+                {[{ key: "all", name: "Todas", count: rows.length }, ...ungets].map((u) => (
+                  <SheetOption key={u.key} active={ungetFilter === u.key} label={u.name} count={u.count} onClick={() => { setUnget(u.key); setFiltersOpen(false); }} />
+                ))}
+              </div>
+            </>
+          )}
+          <SheetGroupTitle first={!showUngetFilter}>Estado</SheetGroupTitle>
           <div className="space-y-1">
             {FILTER_ORDER.map((f) => (
               <SheetOption key={f} active={filter === f} label={f === "all" ? "Todos" : ESTABLISHMENT_FILTER_LABEL[f]} count={summary.counts[f]} onClick={() => { setFilter(f); setFiltersOpen(false); }} />
