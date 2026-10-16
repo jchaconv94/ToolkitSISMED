@@ -7,6 +7,10 @@ export interface DownloadAllItem {
   name: string;
   /** Solo cuando hay varias UNGET a la vista. */
   ungetName?: string;
+  /** Hay copia del día: se baja de la nube sin pedir nada a la PC. */
+  copy?: boolean;
+  /** «Copia de hoy 08:12» o «Se pide a la PC». */
+  hint?: string;
 }
 
 const normalize = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -65,7 +69,7 @@ export const BackupDownloadAllModal: React.FC<{
             <Download className="h-6 w-6" />
           </span>
           <h3 className="mt-3 text-[16px] font-black tracking-tight text-slate-900">Descargar backups</h3>
-          <p className="mt-1 text-[12.5px] text-slate-500">Establecimientos en línea con cupo hoy.</p>
+          <p className="mt-1 text-[12.5px] text-slate-500">Copias del día y establecimientos en línea con cupo.</p>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col px-5 pb-5">
@@ -105,7 +109,13 @@ export const BackupDownloadAllModal: React.FC<{
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[13px] font-bold text-slate-800">{item.name}</span>
-                        {item.ungetName && <span className="block truncate text-[10.5px] font-semibold text-slate-400">{item.ungetName}</span>}
+                        {(item.hint || item.ungetName) && (
+                          <span className="block truncate text-[10.5px] font-semibold">
+                            {item.hint && <span className={item.copy ? "text-emerald-700" : "text-slate-400"}>{item.hint}</span>}
+                            {item.hint && item.ungetName && <span className="text-slate-300"> · </span>}
+                            {item.ungetName && <span className="text-slate-400">{item.ungetName}</span>}
+                          </span>
+                        )}
                       </span>
                     </label>
                   );

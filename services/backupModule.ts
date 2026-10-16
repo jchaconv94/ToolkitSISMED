@@ -6,7 +6,7 @@
  * Cloudflare) y el pedido en curso de esa persona, si hay.
  */
 
-import type { BackupQuota, OnlinePc, SeenPc, UsageItem, UsageReading } from "./backupConnection";
+import type { BackupCopyRow, BackupQuota, OnlinePc, SeenPc, UsageItem, UsageReading } from "./backupConnection";
 import type { Tone } from "../components/ui/kit";
 
 export interface BackupOverviewRow {
@@ -45,6 +45,8 @@ export interface BackupJobView {
   savedName?: string;
   /** Nombre del establecimiento, para el nombre del archivo y el panel de descargas. */
   facility?: string;
+  /** Es la descarga de la copia del día: no hay paso de subida. */
+  copy?: boolean;
   /** Desde cuándo y desde cuántos bytes se mide la velocidad del paso en curso. */
   phaseAt?: number;
   phaseBase?: number;
@@ -65,6 +67,8 @@ export const isActive = (job?: BackupJobView | null) => Boolean(job && ACTIVE_PH
 export const jobProgress = (job: BackupJobView): { pct: number | null; step: 1 | 2 | null } => {
   const part = (value = 0) => (job.size ? Math.min(1, Math.max(0, value / job.size)) : 0);
   if (job.phase === "uploading") return { pct: Math.floor(part(job.sent) * 50), step: 1 };
+  // La copia del día ya está en la nube: solo se descarga, de 0 a 100 %.
+  if (job.phase === "downloading" && job.copy) return { pct: Math.floor(part(job.received) * 100), step: null };
   if (job.phase === "downloading") return { pct: 50 + Math.floor(part(job.received) * 50), step: 2 };
   if (job.phase === "saving") return { pct: 100, step: 2 };
   return { pct: null, step: null };
@@ -116,6 +120,19 @@ export const lastConnectionLabel = (at: number, now: number = Date.now()): strin
   return `${date} ${limaClock(at)}`;
 };
 
+/**
+ * «Copia de hoy 08:12», «Copia de ayer 08:12» o «Copia del 14/10 08:12». La hora es la del
+ * backup (cuando lo generó el SISMED), no la de subida.
+ */
+export const copyLabel = (copy: Pick<BackupCopyRow, "modified" | "uploadedAt">, now: number = Date.now()): string => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(copy.modified || "");
+  const day = match ? `${match[1]}-${match[2]}-${match[3]}` : limaDay(copy.uploadedAt);
+  const time = match ? `${match[4]}:${match[5]}` : limaClock(copy.uploadedAt);
+  if (day === limaDay(now)) return `Copia de hoy ${time}`;
+  if (day === limaDay(now - 86400000)) return `Copia de ayer ${time}`;
+  return `Copia del ${day.slice(8, 10)}/${day.slice(5, 7)} ${time}`;
+};
+
 export interface BackupRowView extends BackupOverviewRow {
   online: boolean;
   /** En línea: la PC conectada. Desconectada: la última que se conectó, si se sabe. */
@@ -124,9 +141,14 @@ export interface BackupRowView extends BackupOverviewRow {
   /** En línea: su último ping. Desconectada: su última conexión, si el servicio la anotó. */
   lastSeen?: number;
   job?: BackupJobView;
+  /** Copia del día en la nube, si hay: se baja aunque la PC esté apagada. */
+  copy?: BackupCopyRow;
   downloadedToday: boolean;
   quotaUsed: boolean;
+  /** El botón «Descargar» sirve: baja la copia si hay, o pide uno nuevo a la PC. */
   canDownload: boolean;
+  /** Se puede pedir uno nuevo a la PC (en línea, con cupo y sin pausa por consumo). */
+  canRequestNew: boolean;
 }
 
 export const buildBackupRows = (
@@ -136,6 +158,7 @@ export const buildBackupRows = (
   paused: boolean,
   now: number = Date.now(),
   seen: Record<string, SeenPc> = {},
+  copies: Record<string, BackupCopyRow> = {},
 ): BackupRowView[] => {
   const pcs = new Map(online.map((pc) => [pc.code, pc]));
   const today = limaDay(now);
@@ -144,6 +167,8 @@ export const buildBackupRows = (
     const last = pc ? undefined : seen[row.code];
     const job = jobs[row.code];
     const quotaUsed = (row.mine ?? row.today) >= row.limit;
+    const copy = copies[row.code];
+    const canRequestNew = Boolean(pc) && !isActive(job) && !quotaUsed && !paused;
     return {
       ...row,
       online: Boolean(pc),
@@ -151,9 +176,12 @@ export const buildBackupRows = (
       version: pc?.version ?? (last?.version || undefined),
       lastSeen: pc?.lastSeen ?? last?.at,
       job,
+      copy,
       downloadedToday: Boolean(row.lastAt && limaDay(row.lastAt) === today),
       quotaUsed,
-      canDownload: Boolean(pc) && !isActive(job) && !quotaUsed && !paused,
+      // Bajar la copia no usa el cupo ni le pide nada a la PC (decisión del 2026-10-16).
+      canDownload: copy ? !isActive(job) : canRequestNew,
+      canRequestNew,
     };
   });
 };
@@ -232,7 +260,7 @@ export interface BackupActivityRow {
   code: string;
   name?: string | null;
   username: string;
-  status: "REQUESTED" | "UPLOADING" | "READY" | "DOWNLOADED" | "FAILED" | "EXPIRED";
+  status: "REQUESTED" | "UPLOADING" | "READY" | "DOWNLOADED" | "FAILED" | "EXPIRED" | "COPY_DOWNLOADED";
   fileName?: string | null;
   size?: number | null;
   reason?: string | null;
@@ -259,6 +287,8 @@ export const activityFromRequest = (row: BackupActivityRow, me?: string | null):
   const pedido = mine ? "lo pediste tú" : `lo pidió ${row.username}`;
   const base = { key: `${row.id}-${row.status}`, at: new Date(row.at).getTime() };
   switch (row.status) {
+    case "COPY_DOWNLOADED":
+      return { ...base, kind: "download", tone: "ok", text: `${row.code} · copia del día ${row.fileName || ""}${row.size ? ` (${megabytes(row.size)})` : ""} · ${mine ? "la descargaste tú" : `la descargó ${row.username}`}` };
     case "DOWNLOADED":
       return { ...base, kind: "download", tone: "ok", text: `${row.code} · ${row.fileName || "backup"}${row.size ? ` (${megabytes(row.size)})` : ""} · ${mine ? "lo descargaste tú" : `lo descargó ${row.username}`}` };
     case "FAILED":

@@ -16,6 +16,9 @@
  *   web → {t:"list"}                          → {t:"list", rows, seen} (seen: última conexión de las que no están)
  *   web → {t:"ping", id, code}                → la PC responde {t:"pong", ...} → {t:"ping_result"}
  *   web → {t:"backup_request", code}          → la PC recibe {t:"backup", job, token, partSize, parallel, uploadUrl}
+ *   web → {t:"copy_request", code}            → baja la copia del día: {t:"backup_ready", …} sin pedir nada a la PC
+ *   pc  → {t:"copy_offer", code, name, size, sha256, modified}
+ *                                              → {t:"copy_go", job, code, token, partSize, parallel} o {t:"copy_skip", code, reason}
  *   pc  → {t:"backup_meta"|"backup_progress"|"backup_error", job, ...} → se reenvía a esa web
  *   servicio → web {t:"backup_ready", job, downloadUrl, name, size, sha256}
  *   web → {t:"backup_done", job}              → se borra de R2
@@ -44,9 +47,9 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  BACKUP_MAX_BYTES, BACKUP_PARALLEL, BACKUP_PART_MAX_BYTES, BACKUP_PART_SIZE, BackupJob, PcCode, PcInfo, USAGE_REFRESH_MS, UsageReading, WebInfo, backupKey,
-  canSee, isExpired, jobMessages, keysByCode, onlineFor, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, SeenRow,
-  usageBlocks, usageFor, usageMessage,
+  BACKUP_MAX_BYTES, BACKUP_PARALLEL, BACKUP_PART_MAX_BYTES, BACKUP_PART_SIZE, BackupCopy, BackupJob, COPY_PARALLEL, PcCode, PcInfo, USAGE_REFRESH_MS,
+  UsageReading, WebInfo, backupKey, canSee, copyIsStale, copyKey, copyOfferVerdict, copyRowsFor, isExpired, jobMessages, keysByCode,
+  nextCopyExpiry, onlineFor, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, SeenRow, usageBlocks, usageFor, usageMessage,
 } from "./logic";
 import { UsageEnv, readUsage } from "./usage";
 // El reenvío de stock es el mismo código que publica Supabase (camino de respaldo B).
@@ -126,9 +129,18 @@ async function handleBackup(request: Request, env: Env, parts: string[]): Promis
   if (job.status === "ready" || job.status === "failed") return json({ error: "El pedido ya terminó" }, 409);
 
   if (action === "start" && request.method === "POST") {
-    if (!job.name || !job.size) return json({ error: "Falta informar el backup (nombre y tamaño)" }, 409);
+    if (!job.name || !job.size) {
+      // Los datos del backup llegan por la conexión abierta, que en una red congestionada (por
+      // ejemplo, mientras sube la copia del día) puede llegar después de este pedido. El
+      // Toolkit 2.3.9 los manda también aquí (2026-10-16).
+      const meta = parseBackupMeta(await request.json().catch(() => null));
+      if (!meta) return json({ error: "Falta informar el backup (nombre y tamaño)" }, 409);
+      await stub.backupMeta(job.id, meta);
+      Object.assign(job, meta);
+    }
     if (job.uploadId && job.key) return json({ ok: true, partSize: BACKUP_PART_SIZE });
-    const key = backupKey(job, job.name);
+    const name = job.name as string;
+    const key = job.kind === "copy" ? copyKey(job, name) : backupKey(job, name);
     const upload = await env.BACKUPS.createMultipartUpload(key, { httpMetadata: { contentType: "application/zip" } });
     await stub.uploadStarted(job.id, key, upload.uploadId);
     return json({ ok: true, partSize: BACKUP_PART_SIZE });
@@ -238,6 +250,8 @@ const JOB_PREFIX = "job:";
 const USAGE_KEY = "usage";
 /** Última conexión de cada establecimiento: `seen:<código>`. Una escritura por desconexión. */
 const SEEN_PREFIX = "seen:";
+/** Copia del día de cada establecimiento: `copy:<código>`. Una sola por establecimiento. */
+const COPY_PREFIX = "copy:";
 const CLEANUP_EVERY_MS = 10 * 60 * 1000;
 
 export class Region extends DurableObject<Env> {
@@ -269,7 +283,7 @@ export class Region extends DurableObject<Env> {
       this.ctx.acceptWebSocket(server, ["web", `w:${info.id}`]);
       server.serializeAttachment(info);
       server.send(JSON.stringify({ t: "hello", username: info.username, isAdmin: info.isAdmin }));
-      server.send(JSON.stringify({ t: "list", rows: this.rowsFor(info), seen: await this.seenFor(info) }));
+      server.send(JSON.stringify({ t: "list", rows: this.rowsFor(info), seen: await this.seenFor(info), copies: await this.copiesFor(info) }));
       this.ctx.waitUntil(this.resumeJobs(server, info).catch(() => undefined));
       this.ctx.waitUntil(this.usage().then((usage) => this.sendUsage(server, info, usage)).catch(() => undefined));
     }
@@ -285,7 +299,7 @@ export class Region extends DurableObject<Env> {
 
     if (info.role === "web") {
       if (data.t === "list") {
-        ws.send(JSON.stringify({ t: "list", rows: this.rowsFor(info), seen: await this.seenFor(info) }));
+        ws.send(JSON.stringify({ t: "list", rows: this.rowsFor(info), seen: await this.seenFor(info), copies: await this.copiesFor(info) }));
       } else if (data.t === "ping") {
         const code = String(data.code || "").toUpperCase();
         const pc = this.pcFor(info, code);
@@ -296,6 +310,8 @@ export class Region extends DurableObject<Env> {
         pc.send(JSON.stringify({ t: "ping", id: data.id, code, web: info.id, sentAt: Date.now() }));
       } else if (data.t === "backup_request") {
         await this.requestBackup(ws, info, String(data.code || "").toUpperCase());
+      } else if (data.t === "copy_request") {
+        await this.requestCopy(ws, info, String(data.code || "").toUpperCase());
       } else if (data.t === "backup_done" && typeof data.job === "string") {
         const job = await this.getJob(data.job);
         if (job && job.web === info.id) {
@@ -315,6 +331,11 @@ export class Region extends DurableObject<Env> {
       return;
     }
 
+    if (data.t === "copy_offer") {
+      await this.offerCopy(ws, info, data);
+      return;
+    }
+
     if (typeof data.job === "string" && data.t.startsWith("backup_")) {
       const job = await this.getJob(data.job);
       if (!job || !info.codes.some((c) => c.code === job.code)) return;
@@ -324,10 +345,7 @@ export class Region extends DurableObject<Env> {
           await this.uploadFailed(job.id, "El Toolkit informó un backup no válido");
           return;
         }
-        Object.assign(job, meta, { status: "uploading" });
-        await this.ctx.storage.put(JOB_PREFIX + job.id, job);
-        await this.report(job, "UPLOADING", { p_file_name: meta.name, p_size: meta.size });
-        this.toWeb(job, { t: "backup_meta", job: job.id, code: job.code, ...meta });
+        await this.backupMeta(job.id, meta);
       } else if (data.t === "backup_progress") {
         job.sent = Math.max(0, Math.min(Number(data.sent) || 0, job.size || 0));
         await this.ctx.storage.put(JOB_PREFIX + job.id, job);
@@ -388,7 +406,8 @@ export class Region extends DurableObject<Env> {
       createdAt: Date.now(),
     };
     await this.ctx.storage.put(JOB_PREFIX + job.id, job);
-    if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + CLEANUP_EVERY_MS);
+    // Si ya hay una alarma lejana (la de una copia), se adelanta para revisar este pedido.
+    await this.scheduleAlarm(true);
     ws.send(JSON.stringify({ t: "backup_requested", job: job.id, code, quota: { limit: quota.limit, used: quota.used } }));
     try {
       pc.send(JSON.stringify({ t: "backup", job: job.id, code, token: job.uploadToken, partSize: BACKUP_PART_SIZE, maxBytes: BACKUP_MAX_BYTES, parallel: BACKUP_PARALLEL }));
@@ -396,6 +415,19 @@ export class Region extends DurableObject<Env> {
       // Se fue justo ahora: se libera el cupo en vez de dejarlo ocupado una hora.
       await this.uploadFailed(job.id, "La PC se desconectó antes de recibir el pedido");
     }
+  }
+
+  /**
+   * Datos del backup (nombre, tamaño, huella). Llegan por la conexión abierta o con el inicio
+   * de la subida, lo que llegue primero; la segunda vez no cambia nada.
+   */
+  async backupMeta(id: string, meta: { name: string; size: number; sha256: string; modified: string }) {
+    const job = await this.getJob(id);
+    if (!job || (job.name && job.status !== "requested")) return;
+    Object.assign(job, meta, { status: "uploading" });
+    await this.ctx.storage.put(JOB_PREFIX + job.id, job);
+    await this.report(job, "UPLOADING", { p_file_name: meta.name, p_size: meta.size });
+    this.toWeb(job, { t: "backup_meta", job: job.id, code: job.code, ...meta });
   }
 
   async getJob(id: string): Promise<BackupJob | null> {
@@ -414,6 +446,10 @@ export class Region extends DurableObject<Env> {
   async uploadReady(id: string, origin: string) {
     const job = await this.getJob(id);
     if (!job) return;
+    if (job.kind === "copy") {
+      await this.storeCopy(job, origin);
+      return;
+    }
     job.status = "ready";
     job.downloadUrl = `${origin}/backup/${id}/download?token=${job.downloadToken}`;
     await this.ctx.storage.put(JOB_PREFIX + id, job);
@@ -433,6 +469,11 @@ export class Region extends DurableObject<Env> {
   }
 
   private async dropJob(job: BackupJob) {
+    // La descarga de una copia no es dueña del archivo: la copia sigue para los demás.
+    if (job.kind === "copy_download") {
+      await this.ctx.storage.delete(JOB_PREFIX + job.id);
+      return;
+    }
     try {
       if (job.key && job.status === "ready") await this.env.BACKUPS.delete(job.key);
       else if (job.key && job.uploadId) await this.env.BACKUPS.resumeMultipartUpload(job.key, job.uploadId).abort();
@@ -451,7 +492,20 @@ export class Region extends DurableObject<Env> {
       }
       else pending += 1;
     }
-    if (pending) await this.ctx.storage.setAlarm(now + CLEANUP_EVERY_MS);
+    // Copias vencidas (la PC dejó de conectarse): se borran.
+    const copies = Array.from((await this.ctx.storage.list<BackupCopy>({ prefix: COPY_PREFIX })).values());
+    for (const copy of copies.filter((c) => copyIsStale(c, now))) await this.dropCopy(copy, true);
+    await this.scheduleAlarm(pending > 0, copies.filter((c) => !copyIsStale(c, now)));
+  }
+
+  /** Despierta en 10 minutos si hay pedidos en curso, o cuando venza la primera copia. */
+  private async scheduleAlarm(pendingJobs: boolean, copies?: BackupCopy[]) {
+    const list = copies ?? Array.from((await this.ctx.storage.list<BackupCopy>({ prefix: COPY_PREFIX })).values());
+    const times = [pendingJobs ? Date.now() + CLEANUP_EVERY_MS : null, nextCopyExpiry(list)].filter((t): t is number => t != null);
+    if (!times.length) return;
+    const current = await this.ctx.storage.getAlarm();
+    const next = Math.min(...times);
+    if (!current || current > next || current < Date.now()) await this.ctx.storage.setAlarm(next);
   }
 
   /**
@@ -470,8 +524,148 @@ export class Region extends DurableObject<Env> {
     }
   }
 
+  // --- Copia del día ----------------------------------------------------------------
+
+  /** La PC ofrece su backup de la mañana. Se acepta si es nuevo y hay espacio. */
+  private async offerCopy(ws: WebSocket, pc: PcInfo, data: any) {
+    const code = String(data.code || "").toUpperCase();
+    const pcCode = pc.codes.find((c) => c.code === code);
+    if (!pcCode) return;
+    const meta = parseBackupMeta(data);
+    if (!meta) {
+      ws.send(JSON.stringify({ t: "copy_skip", code, reason: "El Toolkit informó un backup no válido" }));
+      return;
+    }
+    const now = Date.now();
+    const existing = (await this.ctx.storage.get<BackupCopy>(COPY_PREFIX + code)) || null;
+    const jobs = await this.ctx.storage.list<BackupJob>({ prefix: JOB_PREFIX });
+    const uploading = Array.from(jobs.values()).some((j) => j.kind === "copy" && j.code === code && !isExpired(j, now));
+    const verdict = copyOfferVerdict(existing, meta, await this.usage(), uploading, now);
+    if (!verdict.accept) {
+      ws.send(JSON.stringify({ t: "copy_skip", code, reason: verdict.reason }));
+      return;
+    }
+    const job: BackupJob = {
+      id: crypto.randomUUID(),
+      kind: "copy",
+      code,
+      ungetId: pcCode.ungetId,
+      web: "",
+      webToken: "",
+      username: "",
+      uploadToken: crypto.randomUUID() + crypto.randomUUID(),
+      downloadToken: "",
+      status: "requested",
+      createdAt: now,
+      ...meta,
+    };
+    await this.ctx.storage.put(JOB_PREFIX + job.id, job);
+    await this.scheduleAlarm(true);
+    ws.send(JSON.stringify({
+      t: "copy_go", job: job.id, code, token: job.uploadToken, partSize: BACKUP_PART_SIZE, parallel: COPY_PARALLEL, maxBytes: BACKUP_MAX_BYTES,
+    }));
+  }
+
+  /** La copia terminó de subir: reemplaza a la anterior, que se borra de la nube. */
+  private async storeCopy(job: BackupJob, origin: string) {
+    if (!job.key || !job.name || !job.size || !job.sha256) return;
+    const previous = await this.ctx.storage.get<BackupCopy>(COPY_PREFIX + job.code);
+    const copy: BackupCopy = {
+      code: job.code, ungetId: job.ungetId ?? null, name: job.name, size: job.size, sha256: job.sha256,
+      modified: job.modified || "", key: job.key, uploadedAt: Date.now(), equipo: this.equipoOf(job.code), origin,
+    };
+    await this.ctx.storage.put(COPY_PREFIX + job.code, copy);
+    await this.ctx.storage.delete(JOB_PREFIX + job.id);
+    if (previous && previous.key !== copy.key) {
+      try { await this.env.BACKUPS.delete(previous.key); } catch { /* la regla del bucket la borra igual */ }
+    }
+    await this.scheduleAlarm(false);
+    this.announceCopy(copy, true);
+  }
+
+  private async dropCopy(copy: BackupCopy, deleteObject: boolean) {
+    if (deleteObject) {
+      try { await this.env.BACKUPS.delete(copy.key); } catch { /* la regla del bucket la borra igual */ }
+    }
+    await this.ctx.storage.delete(COPY_PREFIX + copy.code);
+    this.announceCopy(copy, false);
+  }
+
+  /** Avisa a quienes ven ese establecimiento que hay (o ya no hay) copia. */
+  private announceCopy(copy: BackupCopy, present: boolean) {
+    const row = present ? copyRowsFor({ isAdmin: true, ungetIds: [] }, [copy], Date.now())[0] ?? null : null;
+    this.ctx.getWebSockets("web").forEach((ws) => {
+      const web = ws.deserializeAttachment() as WebInfo | null;
+      if (!web || !canSee(web, copy)) return;
+      try { ws.send(JSON.stringify({ t: "copy", code: copy.code, copy: row })); } catch { /* cerrada */ }
+    });
+  }
+
+  private async copiesFor(web: WebInfo) {
+    try {
+      const stored = await this.ctx.storage.list<BackupCopy>({ prefix: COPY_PREFIX });
+      return copyRowsFor(web, Array.from(stored.values()), Date.now());
+    } catch {
+      return [];
+    }
+  }
+
+  /** Alguien baja la copia del día: no se le pide nada a la PC ni se gasta el cupo. */
+  private async requestCopy(ws: WebSocket, web: WebInfo, code: string) {
+    const fail = (reason: string) => ws.send(JSON.stringify({ t: "backup_failed", code, reason, copy: true }));
+    const copy = await this.ctx.storage.get<BackupCopy>(COPY_PREFIX + code);
+    if (!copy || copyIsStale(copy, Date.now()) || !canSee(web, copy) || !copy.origin) {
+      fail("No hay copia de hoy de este establecimiento; pida uno nuevo.");
+      return;
+    }
+    if (!(await this.env.BACKUPS.head(copy.key))) {
+      // La borró la regla del bucket antes de tiempo: se olvida y se ofrece pedir uno nuevo.
+      await this.dropCopy(copy, false);
+      fail("La copia ya no está en la nube; pida uno nuevo.");
+      return;
+    }
+    const job: BackupJob = {
+      id: crypto.randomUUID(),
+      kind: "copy_download",
+      code,
+      ungetId: copy.ungetId,
+      web: web.id,
+      webToken: web.token,
+      username: web.username,
+      uploadToken: "",
+      downloadToken: crypto.randomUUID() + crypto.randomUUID(),
+      status: "ready",
+      createdAt: Date.now(),
+      name: copy.name,
+      size: copy.size,
+      sha256: copy.sha256,
+      modified: copy.modified,
+      key: copy.key,
+    };
+    job.downloadUrl = `${copy.origin}/backup/${job.id}/download?token=${job.downloadToken}`;
+    await this.ctx.storage.put(JOB_PREFIX + job.id, job);
+    await this.scheduleAlarm(true);
+    ws.send(JSON.stringify({
+      t: "backup_ready", job: job.id, code, name: job.name, size: job.size, sha256: job.sha256, modified: job.modified,
+      downloadUrl: job.downloadUrl, copy: true,
+    }));
+  }
+
   /** Registra el paso en Supabase con la sesión de quien pidió. Si falla, el pedido sigue. */
   private async report(job: BackupJob, status: string, extra: Record<string, unknown> = {}) {
+    // La copia la sube la PC sola: no hay pedido ni persona que registrar.
+    if (job.kind === "copy") return;
+    if (job.kind === "copy_download") {
+      if (status !== "DOWNLOADED") return;
+      try {
+        await rpc(this.env, "app_backup_copy_downloaded", {
+          p_token: job.webToken, p_job: job.id, p_code: job.code, p_file_name: job.name, p_size: job.size, p_equipo: "",
+        });
+      } catch (error) {
+        console.warn(`No se registró la descarga de la copia ${job.id}: ${String((error as Error).message || error)}`);
+      }
+      return;
+    }
     try {
       await rpc(this.env, "app_backup_request_update", { p_token: job.webToken, p_job: job.id, p_status: status, ...extra });
     } catch (error) {

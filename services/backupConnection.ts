@@ -32,6 +32,19 @@ export interface SeenPc {
   at: number;
 }
 
+/**
+ * Copia del día de un establecimiento: la PC la sube sola (Toolkit 2.3.9) y queda en la nube
+ * hasta que llega la siguiente. Se baja sin pedir nada a la PC, aunque esté apagada.
+ */
+export interface BackupCopyRow {
+  code: string;
+  name: string;
+  size: number;
+  /** Hora en que el SISMED generó el backup, tal como la anota la PC («2026-10-16T08:12»). */
+  modified: string;
+  uploadedAt: number;
+}
+
 /** Un dato del plan gratuito de Cloudflare (lo mide el servicio cada 10 minutos). */
 export interface UsageItem {
   key: string;
@@ -61,14 +74,15 @@ export interface BackupQuota {
 
 export type ServerMessage =
   | { t: "hello"; username: string; isAdmin: boolean }
-  | { t: "list"; rows: OnlinePc[]; seen?: SeenPc[] }
+  | { t: "list"; rows: OnlinePc[]; seen?: SeenPc[]; copies?: BackupCopyRow[] }
+  | { t: "copy"; code: string; copy: BackupCopyRow | null }
   | { t: "presence"; online: boolean; codes: string[]; equipo?: string; at?: number }
   | { t: "ping_result"; id: string; code: string; ok: boolean; rtt?: number; reason?: string; equipo?: string }
   | { t: "backup_requested"; job: string; code: string; quota?: BackupQuota }
   | { t: "backup_meta"; job: string; code: string; name: string; size: number; sha256: string; modified: string }
   | { t: "backup_progress"; job: string; code: string; sent: number; total: number }
-  | { t: "backup_ready"; job: string; code: string; name: string; size: number; sha256: string; modified?: string; downloadUrl: string }
-  | { t: "backup_failed"; job?: string; code: string; reason: string; quota?: BackupQuota; usage?: UsageReading }
+  | { t: "backup_ready"; job: string; code: string; name: string; size: number; sha256: string; modified?: string; downloadUrl: string; copy?: boolean }
+  | { t: "backup_failed"; job?: string; code: string; reason: string; quota?: BackupQuota; usage?: UsageReading; copy?: boolean }
   | { t: "usage"; usage: UsageReading; message: string | null };
 
 export const connectionUrl = (token: string | null = getSessionToken()): string | null =>
