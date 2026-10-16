@@ -7,6 +7,7 @@ import { formatOneDecimal } from "../services/stockStatus";
 import { formatNumber } from "../services/numberFormat";
 import { STATUS_LABEL, buildTableWorkbook, monthLabel, type TableSheet } from "../services/availabilityExport";
 import { saveAs } from "file-saver";
+import { CustomSelect } from "./ui/CustomSelect";
 import {
   TFORMDET_OUTFLOWS,
   DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
@@ -493,9 +494,11 @@ export function Pills<V extends string>({ value, options, onChange }: { value: V
   const isDesktop = useIsDesktop();
   if (isDesktop) {
     return (
-      <select value={value} onChange={(e) => onChange(e.target.value as V)} aria-label="Filtrar" className={`${filterInputClass} !w-auto min-w-[150px] shrink-0 cursor-pointer`}>
-        {options.map((o) => <option key={o.value} value={o.value}>{o.label}{o.count !== undefined ? ` (${formatNumber(o.count)})` : ""}</option>)}
-      </select>
+      <CustomSelect
+        size="md" ariaLabel="Filtrar" containerClassName="w-auto min-w-[190px] shrink-0" menuMinWidth={240}
+        value={value} onChange={(v) => onChange(v as V)}
+        options={options.map((o) => ({ value: o.value, label: o.label, count: o.count }))}
+      />
     );
   }
   return (
@@ -774,10 +777,11 @@ export const EstablishmentsReport: React.FC<{
           {switcher}
           {levelPills}
           {microreds.length > 1 && (
-            <select value={microred} onChange={(e) => onMicrored(e.target.value)} aria-label="Microred" className="h-9 rounded-full border border-slate-200 bg-white px-3 text-[12.5px] font-bold text-slate-600">
-              <option value="ALL">Todas las microredes</option>
-              {microreds.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
+            <CustomSelect
+              size="sm" ariaLabel="Microred" containerClassName="w-56 shrink-0" className="h-9" searchable searchPlaceholder="Buscar microred…" menuMinWidth={260}
+              value={microred} onChange={onMicrored}
+              options={[{ value: "ALL", label: "Todas las microredes" }, ...microreds.map((m) => ({ value: m, label: m }))]}
+            />
           )}
         </>
       }
@@ -2048,11 +2052,15 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         toolbar={(
           <div className="flex shrink-0 items-center gap-2">
             {/* Un combo en la misma línea del buscador (pedido del usuario: nada que salte a otra fila). */}
-            <select value={show} onChange={(e) => setShow(e.target.value as typeof show)} aria-label="Qué filas mostrar" className={`${filterInputClass} !w-auto min-w-[150px] cursor-pointer`}>
-              <option value="ALL">Todas ({formatNumber(views.length)})</option>
-              <option value="IN">Incluidas ({formatNumber(active.length)})</option>
-              <option value="OUT">Excluidas ({formatNumber(views.length - active.length)})</option>
-            </select>
+            <CustomSelect
+              size="md" ariaLabel="Qué filas mostrar" containerClassName="w-44 shrink-0"
+              value={show} onChange={(v) => setShow(v as typeof show)}
+              options={[
+                { value: "ALL", label: "Todas", count: views.length },
+                { value: "IN", label: "Incluidas", count: active.length },
+                { value: "OUT", label: "Excluidas", count: views.length - active.length },
+              ]}
+            />
             {edited && (
               <button type="button" onClick={() => setConfirmReset(true)} className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50" title="Deshacer mis cambios: el plan vuelve a como lo calculó el sistema">
                 <RotateCcw className="h-4 w-4" />Deshacer

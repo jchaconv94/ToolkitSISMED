@@ -19,7 +19,7 @@ import {
 } from "../services/sendKeyEstablishments";
 import {
   EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, TableHeaderCell, TableSearch, formatDate,
-  filterInputClass, useTableSort,
+  useTableSort,
 } from "./ui/kit";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { TablePagination } from "./ui/TablePagination";
@@ -28,6 +28,7 @@ import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useDropdownPosition } from "../hooks/useDropdownPosition";
 import { rowsOfUnget, ungetOptions } from "../services/ungetFilter";
+import { CustomSelect } from "./ui/CustomSelect";
 import { getUserJurisdictionScope } from "../services/jurisdictionService";
 import { showsTerritory } from "../services/orgTabs";
 
@@ -152,9 +153,10 @@ export const AdminSendKeysModule: React.FC = () => {
   };
 
   const ignore = (row: SendKeyRow) => run(() => sendKeysApi.ignore(row.code), `Aviso de ${row.name} ignorado.`);
-  const ignoreAll = () => run(
-    () => Promise.all(alerts.map((row) => sendKeysApi.ignore(row.code))),
-    alerts.length === 1 ? "Aviso ignorado." : `${alerts.length} avisos ignorados.`,
+  // Solo los avisos que se ven: con una UNGET elegida, los de esa UNGET.
+  const ignoreAll = (shown: SendKeyRow[]) => run(
+    () => Promise.all(shown.map((row) => sendKeysApi.ignore(row.code))),
+    shown.length === 1 ? "Aviso ignorado." : `${shown.length} avisos ignorados.`,
   );
 
   const confirmPending = async () => {
@@ -206,7 +208,7 @@ export const AdminSendKeysModule: React.FC = () => {
             onIgnore={(row) => void ignore(row)}
             onPending={setPending}
             alerts={alerts}
-            onIgnoreAll={() => void ignoreAll()}
+            onIgnoreAll={(shown) => void ignoreAll(shown)}
           />
         )}
 
@@ -249,7 +251,7 @@ const EstablishmentsPanel: React.FC<{
   onIgnore: (row: SendKeyRow) => void;
   onPending: (action: PendingAction) => void;
   alerts: SendKeyRow[];
-  onIgnoreAll: () => void;
+  onIgnoreAll: (shown: SendKeyRow[]) => void;
 }> = ({ rows, latest, latestSismed, busy, onGenerate, onIgnore, onPending, alerts, onIgnoreAll }) => {
   const { can, user } = useAuth();
   const canGenerate = can("ADMIN_SEND_KEYS", "generate");
@@ -270,6 +272,8 @@ const EstablishmentsPanel: React.FC<{
   const showUngetFilter = showsTerritory(getUserJurisdictionScope(user).level, "UNGET", user?.role === "ADMIN") && ungets.length > 1;
   const ungetFilter = showUngetFilter && ungets.some((u) => u.key === unget) ? unget : "all";
   const scopedRows = useMemo(() => rowsOfUnget(rows, ungetFilter), [rows, ungetFilter]);
+  // La franja de intentos bloqueados también sigue a la UNGET elegida.
+  const shownAlerts = useMemo(() => rowsOfUnget(alerts, ungetFilter), [alerts, ungetFilter]);
   const summary = useMemo(() => summarizeEstablishments(scopedRows, latest, undefined, latestSismed), [scopedRows, latest, latestSismed]);
   const sismedVersions = useMemo(() => sismedVersionsInUse(scopedRows), [scopedRows]);
   const filteredRows = useMemo(
@@ -333,15 +337,15 @@ const EstablishmentsPanel: React.FC<{
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm md:overflow-hidden">
         {/* Intentos bloqueados: solo aparece si hay alguno sin revisar. Cada uno se resuelve en su detalle. */}
-        {alerts.length > 0 && (
+        {shownAlerts.length > 0 && (
           <div className="flex items-start gap-3 border-b border-red-100 bg-red-50/70 px-4 py-2.5 text-[12.5px] text-red-800 md:items-center">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-600 md:mt-0" />
             {/* En el celular las acciones van debajo del texto, a la izquierda; en escritorio, a la derecha. */}
             <div className="flex min-w-0 flex-1 flex-col gap-1 md:flex-row md:items-center md:gap-3">
-              <span className="font-semibold">{alerts.length === 1 ? "1 intento de envío bloqueado sin revisar" : `${alerts.length} intentos de envío bloqueados sin revisar`}</span>
+              <span className="font-semibold">{shownAlerts.length === 1 ? "1 intento de envío bloqueado sin revisar" : `${shownAlerts.length} intentos de envío bloqueados sin revisar`}</span>
               <span className="flex items-center gap-4 md:ml-auto md:gap-3">
                 <button type="button" onClick={() => setFilter("alerts")} className="font-bold text-red-700 hover:underline">Ver</button>
-                {canIgnore && <button type="button" disabled={busy} onClick={onIgnoreAll} className="font-bold text-slate-500 hover:underline disabled:opacity-60">Ignorar todos</button>}
+                {canIgnore && <button type="button" disabled={busy} onClick={() => onIgnoreAll(shownAlerts)} className="font-bold text-slate-500 hover:underline disabled:opacity-60">Ignorar todos</button>}
               </span>
             </div>
           </div>
@@ -352,24 +356,27 @@ const EstablishmentsPanel: React.FC<{
           <MobileFilterButton onClick={() => setFiltersOpen(true)} active={filter !== "all" || sismedFilter !== "all" || ungetFilter !== "all"} />
           <div className="ml-auto hidden gap-2 md:flex">
             {showUngetFilter && (
-              <select value={ungetFilter} onChange={(e) => setUnget(e.target.value)} aria-label="UNGET" className={`${filterInputClass} sm:w-56`}>
-                <option value="all">UNGET: todas ({rows.length})</option>
-                {ungets.map((u) => <option key={u.key} value={u.key}>{u.name} ({u.count})</option>)}
-              </select>
+              <CustomSelect
+                size="md" prefix="UNGET" ariaLabel="UNGET" containerClassName="w-56" searchable searchPlaceholder="Buscar UNGET…"
+                value={ungetFilter} onChange={setUnget}
+                options={[{ value: "all", label: "Todas", count: rows.length }, ...ungets.map((u) => ({ value: u.key, label: u.name, count: u.count }))]}
+              />
             )}
-            <select value={filter} onChange={(e) => setFilter(e.target.value as EstablishmentFilter)} aria-label="Estado" className={`${filterInputClass} sm:w-60`}>
-              {FILTER_ORDER.map((f) => (
-                <option key={f} value={f}>{f === "all" ? "Estado: todos" : ESTABLISHMENT_FILTER_LABEL[f]} ({summary.counts[f]})</option>
-              ))}
-            </select>
-            <select value={sismedFilter} onChange={(e) => setSismedFilter(e.target.value as SismedFilter)} aria-label="Versión del SISMED" className={`${filterInputClass} sm:w-52`}>
-              <option value="all">SISMED: todas</option>
-              <option value="outdated">SISMED desactualizado</option>
-              {sismedVersions.map((v) => (
-                <option key={v} value={`v:${v}`}>SISMED v{v}{v === latestSismed ? " (vigente)" : ""}</option>
-              ))}
-              <option value="none">SISMED sin dato</option>
-            </select>
+            <CustomSelect
+              size="md" prefix="Estado" ariaLabel="Estado" containerClassName="w-60" menuMinWidth={250}
+              value={filter} onChange={(v) => setFilter(v as EstablishmentFilter)}
+              options={FILTER_ORDER.map((f) => ({ value: f, label: f === "all" ? "Todos" : ESTABLISHMENT_FILTER_LABEL[f], count: summary.counts[f] }))}
+            />
+            <CustomSelect
+              size="md" prefix="SISMED" ariaLabel="Versión del SISMED" containerClassName="w-52" menuMinWidth={230}
+              value={sismedFilter} onChange={(v) => setSismedFilter(v as SismedFilter)}
+              options={[
+                { value: "all", label: "Todas" },
+                { value: "outdated", label: "Desactualizado" },
+                ...sismedVersions.map((v) => ({ value: `v:${v}`, label: `v${v}`, hint: v === latestSismed ? "vigente" : undefined })),
+                { value: "none", label: "Sin dato" },
+              ]}
+            />
           </div>
         </div>
 
