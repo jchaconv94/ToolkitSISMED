@@ -4,8 +4,8 @@ vi.mock("./supabaseClient", () => ({ supabase: null }));
 vi.mock("./api", () => ({ getSessionToken: () => null }));
 
 import {
-  BackupOverviewRow, activityFromRequest, buildBackupRows, filterBackupRows, lastConnectionLabel, limaDay, planState, showFilterCounts,
-  summarizeBackups, whoLabel,
+  BackupOverviewRow, activityFromRequest, buildBackupRows, filterBackupRows, lastConnectionLabel, limaDay, planState, rowsOfUnget,
+  showFilterCounts, summarizeBackups, ungetOptions, whoLabel,
 } from "./backupModule";
 import type { OnlinePc, UsageReading } from "./backupConnection";
 import { applySeen } from "./backupConnection";
@@ -66,6 +66,30 @@ describe("filtro «Mostrar», resumen y búsqueda", () => {
   });
   it("KPIs: en línea, descargados hoy y sin backup en 7 días", () => {
     expect(summarizeBackups(filas, ahora)).toEqual({ total: 4, online: 3, downloadedToday: 1, stale: 2 });
+  });
+});
+
+describe("filtro por UNGET", () => {
+  const red: BackupOverviewRow[] = [
+    { code: "030S06", name: "Alm. Anexo Picota", ungetId: "u-pi", ungetName: "UNGET PICOTA", today: 0, limit: 1 },
+    { code: "030S05", name: "Almacén Bellavista", ungetId: "u-be", ungetName: "UNGET BELLAVISTA", today: 0, limit: 1 },
+    { code: "06519", name: "C.S. Bellavista", ungetId: "u-be", ungetName: "UNGET BELLAVISTA", today: 0, limit: 1 },
+    { code: "06600", name: "Sin UNGET en el registro", today: 0, limit: 1 },
+  ];
+  it("ofrece las UNGET de la lista, por nombre y con cuántos establecimientos tiene cada una", () => {
+    expect(ungetOptions(red)).toEqual([
+      { key: "u-be", name: "UNGET BELLAVISTA", count: 2 },
+      { key: "u-pi", name: "UNGET PICOTA", count: 1 },
+    ]);
+  });
+  it("deja solo los de la UNGET elegida; «all» los deja todos", () => {
+    expect(rowsOfUnget(red, "u-be").map((r) => r.code)).toEqual(["030S05", "06519"]);
+    expect(rowsOfUnget(red, "all")).toHaveLength(4);
+  });
+  it("sin id de UNGET, la reconoce por su nombre", () => {
+    const soloNombre = [{ code: "1", name: "A", ungetName: "UNGET TOCACHE", today: 0, limit: 1 }];
+    expect(ungetOptions(soloNombre)).toEqual([{ key: "UNGET TOCACHE", name: "UNGET TOCACHE", count: 1 }]);
+    expect(rowsOfUnget(soloNombre, "UNGET TOCACHE")).toHaveLength(1);
   });
 });
 

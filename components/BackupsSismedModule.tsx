@@ -8,9 +8,11 @@ import { useBackupManager } from "../contexts/BackupManagerContext";
 import { backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import {
   ActivityItem, ActivityKind, BackupActivityRow, BackupOverviewRow, BackupRowView, SHOW_FILTER_LABEL, ShowFilter,
-  activityFromRequest, buildBackupRows, lastConnectionLabel, filterBackupRows, isActive, limaDay, planState, showFilterCounts, summarizeBackups, whoLabel,
-  BACKUPS_TAB_EVENT, takeRequestedBackupsTab,
+  activityFromRequest, buildBackupRows, lastConnectionLabel, filterBackupRows, isActive, limaDay, planState, rowsOfUnget, showFilterCounts, summarizeBackups,
+  ungetOptions, whoLabel, BACKUPS_TAB_EVENT, takeRequestedBackupsTab,
 } from "../services/backupModule";
+import { getUserJurisdictionScope } from "../services/jurisdictionService";
+import { showsTerritory } from "../services/orgTabs";
 import { relativeTime } from "../services/sendKeys";
 import {
   EmptyState, KpiCard, KpiStrip, StatusChip, TableHeaderCell, TableSearch, Tone,
@@ -125,6 +127,7 @@ export const BackupsSismedModule: React.FC = () => {
   const [loadError, setLoadError] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ShowFilter>("all");
+  const [unget, setUnget] = useState("all");
   const [page, setPage] = useState(1);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<BackupActivityRow[]>([]);
@@ -154,9 +157,17 @@ export const BackupsSismedModule: React.FC = () => {
     () => buildBackupRows(overview, manager.online, manager.jobs, paused, Date.now(), manager.seen),
     [overview, manager.online, manager.jobs, paused, manager.seen],
   );
-  const summary = useMemo(() => summarizeBackups(rows), [rows]);
-  const counts = useMemo(() => showFilterCounts(rows), [rows]);
-  const filteredRows = useMemo(() => filterBackupRows(rows, search, filter), [rows, search, filter]);
+  // Filtro por UNGET para quien ve más de una (DIRESA, OGESS y el administrador; la misma
+  // regla de Establecimientos). Con una sola UNGET a la vista no hay nada que elegir.
+  const ungets = useMemo(() => ungetOptions(rows), [rows]);
+  const showUngetFilter = showsTerritory(getUserJurisdictionScope(auth.user).level, "UNGET", isAdmin) && ungets.length > 1;
+  const ungetFilter = showUngetFilter && ungets.some((u) => u.key === unget) ? unget : "all";
+  const scopedRows = useMemo(() => rowsOfUnget(rows, ungetFilter), [rows, ungetFilter]);
+  // Con todas las UNGET a la vista, cada fila dice de cuál es.
+  const showUngetName = showUngetFilter && ungetFilter === "all";
+  const summary = useMemo(() => summarizeBackups(scopedRows), [scopedRows]);
+  const counts = useMemo(() => showFilterCounts(scopedRows), [scopedRows]);
+  const filteredRows = useMemo(() => filterBackupRows(scopedRows, search, filter), [scopedRows, search, filter]);
   // Orden al tocar las cabeceras de la tabla (el mismo en el celular, aunque allí no hay cabeceras).
   const { sorted: filtered, sort, headSort } = useTableSort(filteredRows, {
     name: (r) => r.name,
@@ -169,9 +180,9 @@ export const BackupsSismedModule: React.FC = () => {
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   // En el celular no hay páginas: la lista crece al bajar.
-  const mobileList = useIncrementalCount(filtered.length, `${search}|${filter}`, 20);
+  const mobileList = useIncrementalCount(filtered.length, `${search}|${filter}|${ungetFilter}`, 20);
   const mobileRows = filtered.slice(0, mobileList.count);
-  useEffect(() => { setPage(1); }, [search, filter, sort]);
+  useEffect(() => { setPage(1); }, [search, filter, ungetFilter, sort]);
 
   const activityItems = useMemo(
     () => [...activity.map((a) => activityFromRequest(a, manager.username)), ...manager.events].sort((a, b) => b.at - a.at),
@@ -247,9 +258,15 @@ export const BackupsSismedModule: React.FC = () => {
               {/* Celular: un solo botón que abre los filtros abajo. */}
               <button type="button" onClick={() => setFiltersOpen(true)} aria-label="Filtros" className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 md:hidden">
                 <SlidersHorizontal className="h-4 w-4" />
-                {(filter !== "all" || unseenActivity > 0) && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />}
+                {(filter !== "all" || ungetFilter !== "all" || unseenActivity > 0) && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />}
               </button>
               <div className="ml-auto hidden gap-2 md:flex">
+                {showUngetFilter && (
+                  <select value={ungetFilter} onChange={(e) => setUnget(e.target.value)} aria-label="UNGET" className={`${filterInputClass} w-56`}>
+                    <option value="all">UNGET: todas ({rows.length})</option>
+                    {ungets.map((u) => <option key={u.key} value={u.key}>{u.name} ({u.count})</option>)}
+                  </select>
+                )}
                 <select value={filter} onChange={(e) => setFilter(e.target.value as ShowFilter)} aria-label="Mostrar" className={`${filterInputClass} w-56`}>
                   {FILTERS.map((f) => <option key={f} value={f}>{f === "all" ? "Mostrar: todos" : SHOW_FILTER_LABEL[f]} ({counts[f]})</option>)}
                 </select>
@@ -264,6 +281,19 @@ export const BackupsSismedModule: React.FC = () => {
             </div>
 
             <BottomSheet open={filtersOpen} title="Filtros" onClose={() => setFiltersOpen(false)}>
+              {showUngetFilter && (
+                <>
+                  <p className="mb-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400">UNGET</p>
+                  <div className="mb-4 space-y-1">
+                    {[{ key: "all", name: "Todas", count: rows.length }, ...ungets].map((u) => (
+                      <button key={u.key} type="button" onClick={() => { setUnget(u.key); setFiltersOpen(false); }} className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-[14px] font-semibold ${ungetFilter === u.key ? "bg-teal-50 text-teal-800" : "text-slate-700 hover:bg-slate-50"}`}>
+                        <span className="min-w-0 truncate">{u.name}</span>
+                        <span className={`text-[12px] font-bold ${ungetFilter === u.key ? "text-teal-700" : "text-slate-400"}`}>{u.count}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
               <p className="mb-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400">Mostrar</p>
               <div className="space-y-1">
                 {FILTERS.map((f) => (
@@ -322,6 +352,7 @@ export const BackupsSismedModule: React.FC = () => {
                             <td className="px-4 py-2">
                               <div className="font-bold text-slate-800">{row.name}</div>
                               <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
+                              {showUngetName && row.ungetName && <span className="text-[11px] text-slate-400"> · {row.ungetName}</span>}
                             </td>
                             <td className="px-4 py-2">
                               {row.equipo ? <><div className={`font-semibold ${row.online ? "text-slate-700" : "text-slate-500"}`}>{row.equipo}</div><div className="font-mono text-[11px] text-slate-400">Toolkit v{row.version || "?"}</div></> : <span className="text-slate-400">—</span>}
@@ -350,6 +381,7 @@ export const BackupsSismedModule: React.FC = () => {
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
+                            {showUngetName && row.ungetName && <span className="text-[11px] text-slate-400"> · {row.ungetName}</span>}
                             <div className="truncate font-black text-slate-800">{row.name}</div>
                             {row.equipo && <div className="truncate text-[11.5px] text-slate-400">{row.equipo} · Toolkit v{row.version || "?"}</div>}
                             {!row.online && row.lastSeen && <div className="truncate text-[11.5px] text-slate-400">Últ. conexión: {lastConnectionLabel(row.lastSeen)}</div>}
