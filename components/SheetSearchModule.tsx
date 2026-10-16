@@ -5993,7 +5993,6 @@ function processSheet(sheet) {
                 </div>
               );
               const lotes = activeSheetData.filter((row) => rowMatchesPharmacy(readAlmCode(row), dataFilterPharmacy)).length;
-              const selectClass = "h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700";
               return (
                 <>
                   <SheetGroupTitle first>Vencimiento</SheetGroupTitle>
@@ -6005,18 +6004,16 @@ function processSheet(sheet) {
                   </div>
                   <SheetGroupTitle>Mes y año de vencimiento</SheetGroupTitle>
                   <div className="grid grid-cols-2 gap-2 px-1">
-                    <select aria-label="Mes de vencimiento" value={dataFilterExpMonth} onChange={(e) => setDataFilterExpMonth(e.target.value)} className={selectClass}>
-                      <option value="all">Todos los meses</option>
-                      {["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"].map((mes, i) => (
-                        <option key={mes} value={String(i + 1)}>{mes}</option>
-                      ))}
-                    </select>
-                    <select aria-label="Año de vencimiento" value={dataFilterExpYear} onChange={(e) => setDataFilterExpYear(e.target.value)} className={selectClass}>
-                      <option value="all">Todos los años</option>
-                      {availableYears.map((year) => (
-                        <option key={year} value={String(year)}>{year}</option>
-                      ))}
-                    </select>
+                    <CustomSelect
+                      size="lg" ariaLabel="Mes de vencimiento" searchable={false}
+                      value={dataFilterExpMonth} onChange={setDataFilterExpMonth}
+                      options={[{ value: "all", label: "Todos los meses" }, ...["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"].map((mes, i) => ({ value: String(i + 1), label: mes }))]}
+                    />
+                    <CustomSelect
+                      size="lg" ariaLabel="Año de vencimiento" searchable={false}
+                      value={dataFilterExpYear} onChange={setDataFilterExpYear}
+                      options={[{ value: "all", label: "Todos los años" }, ...availableYears.map((year) => ({ value: String(year), label: String(year) }))]}
+                    />
                   </div>
                   <SheetGroupTitle>Stock</SheetGroupTitle>
                   {pills([{ value: "all", label: "Todos" }, { value: "with_stock", label: "Con stock" }, { value: "no_stock", label: "Sin stock" }], dataFilterStock, setDataFilterStock)}

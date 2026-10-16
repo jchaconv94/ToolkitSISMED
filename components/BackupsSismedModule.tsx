@@ -16,11 +16,12 @@ import { showsTerritory } from "../services/orgTabs";
 import { relativeTime } from "../services/sendKeys";
 import {
   EmptyState, KpiCard, KpiStrip, StatusChip, TableHeaderCell, TableSearch, Tone,
-  filterInputClass, useTableSort,
+  useTableSort,
 } from "./ui/kit";
 import { TablePagination } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { BottomSheet } from "./ui/BottomSheet";
+import { CustomSelect } from "./ui/CustomSelect";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { BackupConsumptionTab } from "./BackupConsumptionTab";
 
@@ -262,14 +263,17 @@ export const BackupsSismedModule: React.FC = () => {
               </button>
               <div className="ml-auto hidden gap-2 md:flex">
                 {showUngetFilter && (
-                  <select value={ungetFilter} onChange={(e) => setUnget(e.target.value)} aria-label="UNGET" className={`${filterInputClass} w-56`}>
-                    <option value="all">UNGET: todas ({rows.length})</option>
-                    {ungets.map((u) => <option key={u.key} value={u.key}>{u.name} ({u.count})</option>)}
-                  </select>
+                  <CustomSelect
+                    size="md" prefix="UNGET" ariaLabel="UNGET" containerClassName="w-56" searchable searchPlaceholder="Buscar UNGET…"
+                    value={ungetFilter} onChange={setUnget}
+                    options={[{ value: "all", label: "Todas", count: rows.length }, ...ungets.map((u) => ({ value: u.key, label: u.name, count: u.count }))]}
+                  />
                 )}
-                <select value={filter} onChange={(e) => setFilter(e.target.value as ShowFilter)} aria-label="Mostrar" className={`${filterInputClass} w-56`}>
-                  {FILTERS.map((f) => <option key={f} value={f}>{f === "all" ? "Mostrar: todos" : SHOW_FILTER_LABEL[f]} ({counts[f]})</option>)}
-                </select>
+                <CustomSelect
+                  size="md" prefix="Mostrar" ariaLabel="Mostrar" containerClassName="w-56"
+                  value={filter} onChange={(v) => setFilter(v as ShowFilter)}
+                  options={FILTERS.map((f) => ({ value: f, label: f === "all" ? "Todos" : SHOW_FILTER_LABEL[f], count: counts[f] }))}
+                />
                 <button type="button" onClick={refresh} className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">
                   <RefreshCw className={`h-4 w-4 text-teal-600 ${manager.status === "connecting" ? "animate-spin" : ""}`} />Actualizar
                 </button>
