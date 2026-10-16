@@ -23,7 +23,7 @@ Reglas acordadas:
 
 | Pieza | Para qué |
 |---|---|
-| **Toolkit de escritorio** | Mantiene una conexión abierta con Cloudflare; toma el `BKDA…zip` más reciente y lo sube en partes de 20 MiB con huella SHA-256. |
+| **Toolkit de escritorio** | Mantiene una conexión abierta con Cloudflare; toma el `BKDA…zip` más reciente y lo sube en partes de 5 MiB (antes 20 MiB) con huella SHA-256. |
 | **Supabase** | Quién entra (PC con clave vigente y vinculada; usuarios con su jurisdicción), el cupo de descargas por día y el registro de cada pedido. Solo filas chicas: no consume el límite de descargas. |
 | **Cloudflare Worker + Durable Object** (`cloudflare/conexion`, servicio `sismed-conexion`) | Las conexiones abiertas (hibernan: una conexión quieta no consume nada) y el paso del archivo hacia y desde R2, por el enlace interno de Cloudflare. |
 | **Cloudflare R2** (bucket `sismed-backups`) | Los zips, de paso. Descargas gratis e ilimitadas. |
@@ -92,7 +92,7 @@ reconecta sola; el consumo diario de Durable Objects queda por debajo del 10 % d
   web descargue.
 - **Toolkit** (`toolskit/backup_upload.py`): toma el `BKD[AH]<fecha>.zip` más reciente de
   `<carpeta SISMED>\backup` que tenga más de 90 s (uno más nuevo puede estar escribiéndose),
-  informa nombre, tamaño y SHA-256, y sube partes de 20 MiB a
+  informa nombre, tamaño y SHA-256, y sube partes de 5 MiB (el tamaño lo dicta el servicio) a
   `/backup/<pedido>/part/<n>`. Reintenta solo la parte que falla (4 intentos). Un backup a la vez.
 - **Servicio:** pasa cada parte a R2 sin guardarla en memoria; al completar comprueba el tamaño.
   Descarga en `/backup/<pedido>/download?token=…`, con soporte de `Range` para retomar.
@@ -306,3 +306,20 @@ ese pedido fallido no cuenta.
 - **Avance**: una sola barra de 0 a 100 %. La subida de la PC es la primera mitad
   («Paso 1 de 2») y la descarga del navegador la segunda («Paso 2 de 2»). Antes cada tramo
   llenaba su propia barra, y la subida, que es rápida, hacía creer que ya había terminado.
+
+## Partes de 5 MiB (2026-10-16)
+
+Con «Descargar todos», el Hospital II-E Bellavista, P.S. Barranca y C.S. Nuevo Lima fallaron
+con «La parte 1 no se pudo enviar: ('Connection aborted.', TimeoutError('The write operation
+timed out'))». Causa: el Toolkit envía cada parte con `requests` en un solo `sendall`, y
+mientras envía, `urllib3` solo espera el tiempo de **conexión** (15 s de `REQUEST_TIMEOUT`);
+los 300 s de lectura recién cuentan después. Una parte de 20 MiB exigía unos 11 Mbps de subida.
+Reproducido en local con un servidor que recibe lento: el envío de un solo bloque falla, y el
+mismo envío con `io.BytesIO` (bloques de 16 KiB, cada uno con sus 15 s) llega bien.
+
+- **Arreglo en el servicio, sin tocar las PC:** `BACKUP_PART_SIZE` baja a 5 MiB, el mínimo de
+  R2. Basta con unos 3 Mbps de subida. Se siguen aceptando partes de hasta 20 MiB
+  (`BACKUP_PART_MAX_BYTES`) por si una PC recibió el tamaño anterior.
+- **Arreglo de fondo en el Toolkit (pendiente de decisión del usuario):** en
+  `toolskit/backup_upload.py`, enviar `data=io.BytesIO(chunk)` en lugar de `data=chunk`.
+  Así una conexión lenta pero viva no corta el envío. Requiere una versión nueva del Toolkit.

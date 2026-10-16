@@ -115,8 +115,20 @@ export const seenFor = (web: Pick<WebInfo, "isAdmin" | "ungetIds">, seen: SeenRo
 //  Backups (etapa 2)
 // ---------------------------------------------------------------------------------------
 
-/** Tamaño de cada parte que sube el Toolkit. R2 exige al menos 5 MiB salvo en la última. */
-export const BACKUP_PART_SIZE = 20 * 1024 * 1024;
+/**
+ * Tamaño de cada parte que sube el Toolkit. R2 exige al menos 5 MiB salvo en la última.
+ *
+ * Era 20 MiB. El Toolkit (`requests`) manda cada parte de un solo envío y, mientras envía,
+ * solo espera el tiempo de conexión (15 s): una parte de 20 MiB exigía ~11 Mbps de subida, y
+ * en el hospital, Barranca y Nuevo Lima fallaba con «The write operation timed out»
+ * (2026-10-16). Con 5 MiB basta ~3 Mbps, sin cambiar el Toolkit de ninguna PC.
+ */
+export const BACKUP_PART_SIZE = 5 * 1024 * 1024;
+/**
+ * Lo más grande que se acepta por parte. Sigue en 20 MiB para no rechazar la subida de una
+ * PC que recibió el tamaño anterior justo antes de publicar el cambio.
+ */
+export const BACKUP_PART_MAX_BYTES = 20 * 1024 * 1024;
 /** Un backup que nadie descargó se borra a la hora (la regla del bucket lo haría al día). */
 export const BACKUP_TTL_MS = 60 * 60 * 1000;
 /** Tamaño máximo aceptado: el hospital pesa 70–150 MB; se deja margen. */

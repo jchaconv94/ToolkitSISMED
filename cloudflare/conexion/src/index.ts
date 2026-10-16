@@ -44,7 +44,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  BACKUP_MAX_BYTES, BACKUP_PART_SIZE, BackupJob, PcCode, PcInfo, USAGE_REFRESH_MS, UsageReading, WebInfo, backupKey,
+  BACKUP_MAX_BYTES, BACKUP_PART_MAX_BYTES, BACKUP_PART_SIZE, BackupJob, PcCode, PcInfo, USAGE_REFRESH_MS, UsageReading, WebInfo, backupKey,
   canSee, isExpired, jobMessages, keysByCode, onlineFor, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, SeenRow,
   usageBlocks, usageFor, usageMessage,
 } from "./logic";
@@ -141,7 +141,7 @@ async function handleBackup(request: Request, env: Env, parts: string[]): Promis
     const n = Number(partNumber);
     const length = Number(request.headers.get("Content-Length"));
     if (!Number.isInteger(n) || n < 1 || n > 1000) return json({ error: "Número de parte no válido" }, 400);
-    if (!request.body || !length || length > BACKUP_PART_SIZE) return json({ error: "Parte vacía o demasiado grande" }, 413);
+    if (!request.body || !length || length > BACKUP_PART_MAX_BYTES) return json({ error: "Parte vacía o demasiado grande" }, 413);
     // Se pasa el cuerpo tal cual a R2: el servicio no guarda la parte en memoria.
     const { readable, writable } = new FixedLengthStream(length);
     const pipe = request.body.pipeTo(writable);
