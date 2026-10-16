@@ -296,8 +296,9 @@ ese pedido fallido no cuenta.
 ## Descargar todos y nombre del archivo (2026-10-16)
 
 - **«Descargar todos»**: pide a la vez el backup de cada establecimiento en línea que hoy
-  puede descargar (respeta el filtro de UNGET y el cupo del día de cada uno). Antes de pedir,
-  una confirmación muestra la lista. El gestor los baja de dos en dos, como siempre.
+  puede descargar (respeta el filtro de UNGET y el cupo del día de cada uno). Una ventana
+  con casillas deja quitar los que no se quieren (empiezan todos marcados). El gestor los
+  baja de dos en dos, como siempre.
 - **Nombre del archivo**: `<establecimiento>_<código>_<archivo del SISMED>`, por ejemplo
   `C.S. Consuelo_06506_BKDA202610160734.zip`. El nombre va sin tildes ni caracteres que
   Windows rechaza. Si se recarga la página a mitad de un pedido, el nombre se recupera

@@ -23,7 +23,7 @@ import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { BottomSheet } from "./ui/BottomSheet";
 import { CustomSelect } from "./ui/CustomSelect";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
-import { ConfirmationDialog } from "./ui/ConfirmationDialog";
+import { BackupDownloadAllModal, DownloadAllItem } from "./BackupDownloadAllModal";
 import { FloatingActionButton } from "./ui/FloatingActionButton";
 import { BackupConsumptionTab } from "./BackupConsumptionTab";
 
@@ -210,9 +210,9 @@ export const BackupsSismedModule: React.FC = () => {
   const downloadable = useMemo(() => scopedRows.filter((r) => r.canDownload), [scopedRows]);
   const anyJobActive = Object.values(manager.jobs).some(isActive);
   const [confirmAll, setConfirmAll] = useState(false);
-  const downloadAll = () => {
+  const downloadAll = (items: DownloadAllItem[]) => {
     setConfirmAll(false);
-    manager.requestMany(downloadable.map((r) => ({ code: r.code, facility: r.name })));
+    manager.requestMany(items.map((i) => ({ code: i.code, facility: i.name })));
   };
 
   const refresh = () => {
@@ -444,25 +444,13 @@ export const BackupsSismedModule: React.FC = () => {
       {tab === "backups" && canDownload && downloadable.length > 0 && !anyJobActive && (
         <FloatingActionButton icon={<Download />} label={`Descargar todos (${downloadable.length})`} onClick={() => setConfirmAll(true)} />
       )}
-      <ConfirmationDialog
-        isOpen={confirmAll}
-        tone="warning"
-        icon={<Download className="h-5 w-5" />}
-        title={`¿Descargar ${downloadable.length === 1 ? "el backup en línea" : `los ${downloadable.length} backups en línea`}?`}
-        description="Se pide el backup de cada establecimiento en línea que todavía puede descargar hoy, y cada uno usa su cupo del día. Se bajan de dos en dos y cada archivo lleva el nombre del establecimiento adelante."
-        confirmLabel="Descargar todos"
-        onConfirm={downloadAll}
-        onCancel={() => setConfirmAll(false)}
-      >
-        <ul className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-[12.5px]">
-          {downloadable.map((r) => (
-            <li key={r.code} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate font-semibold text-slate-700">{r.name}</span>
-              <span className="shrink-0 font-mono text-[11px] text-slate-400">{r.code}</span>
-            </li>
-          ))}
-        </ul>
-      </ConfirmationDialog>
+      {confirmAll && (
+        <BackupDownloadAllModal
+          items={downloadable.map((r) => ({ code: r.code, name: r.name, ungetName: showUngetName ? r.ungetName || undefined : undefined }))}
+          onClose={() => setConfirmAll(false)}
+          onDownload={downloadAll}
+        />
+      )}
     </div>
   );
 };
