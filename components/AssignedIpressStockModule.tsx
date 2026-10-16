@@ -43,7 +43,7 @@ import { BottomSheet } from "./ui/BottomSheet";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { ExpiryDate, LotDetailSheet, LotMobileItem } from "./StockLotParts";
-import { TablePagination } from "./ui/TablePagination";
+import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { noticeSettingsApi } from "../services/noticeSettings";
 import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, type NoticeThresholds, noticeWhen } from "../services/notifications";
 import {
@@ -104,7 +104,7 @@ export const AssignedIpressStockModule: React.FC = () => {
   /** Ventana de «por vencer» y días sin actualizar: los mismos parámetros que usa la campana. */
   const [thresholds, setThresholds] = useState<NoticeThresholds>(DEFAULT_NOTICE_THRESHOLDS);
   const expiryDays = thresholds.expiryDays;
-  const pageSize = 50;
+  const [pageSize, setPageSize] = usePageSize("stock-sismed", 50);
 
   useEffect(() => {
     let vigente = true;
@@ -522,7 +522,7 @@ export const AssignedIpressStockModule: React.FC = () => {
             )}
 
             <div className="hidden sm:block">
-              <TablePagination page={page} pageSize={pageSize} total={filteredRows.length} onPageChange={setPage} itemLabel="lotes" />
+              <TablePagination page={page} pageSize={pageSize} total={filteredRows.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="lotes" />
             </div>
           </section>
         </>

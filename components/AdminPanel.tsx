@@ -21,7 +21,7 @@ import { isPharmacyType } from '../services/facilityHierarchy';
 import { KpiCard, KpiStrip, StatusChip, FormField, inputClass, SortButton, ariaSort, tableSearchBoxClass, useTableSort } from './ui/kit';
 import { ResponsiveDialog, DialogSection, DialogRow, dialogPrimaryButton, dialogSecondaryButton } from './ui/ResponsiveDialog';
 import { ConfirmationDialog } from './ui/ConfirmationDialog';
-import { TablePagination } from './ui/TablePagination';
+import { TablePagination, usePageSize } from './ui/TablePagination';
 import { FloatingActionButton } from './ui/FloatingActionButton';
 import { BottomSheet } from './ui/BottomSheet';
 import { LoadMoreSentinel, useIncrementalCount } from './ui/IncrementalList';
@@ -418,7 +418,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
   }, [usersMatchingFilters, filterStatus]);
 
   // --- LISTA DE USUARIOS: tabla paginada en escritorio, tarjetas que cargan al bajar en el celular ---
-  const USERS_PAGE_SIZE = 10;
+  const [USERS_PAGE_SIZE, setUsersPageSize] = usePageSize("usuarios", 10);
   const isDesktop = useIsDesktop();
   const usersFilterKey = [searchTerm, filterProfession, filterRole, filterStatus, filterDiresa, filterOgess, filterUnget, filterLaborRegime, filterMicrored].join('|');
   const [usersPage, setUsersPage] = useState(1);
@@ -1851,7 +1851,7 @@ export const AdminPanel: React.FC<{ currentView?: string }> = ({ currentView }) 
                                             </tbody>
                                         </table>
                                     </div>
-                                    <TablePagination page={usersPage} pageSize={USERS_PAGE_SIZE} total={filteredUsers.length} onPageChange={setUsersPage} itemLabel="usuarios" />
+                                    <TablePagination page={usersPage} pageSize={USERS_PAGE_SIZE} total={filteredUsers.length} onPageChange={setUsersPage} onPageSizeChange={setUsersPageSize} itemLabel="usuarios" />
                                 </div>
                             )}
 

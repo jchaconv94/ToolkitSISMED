@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Building2, Check, ChevronRight, FileClock, History, Monitor, Square, Wifi, WifiOff } from "lucide-react";
 import { KpiCard, KpiStrip, StatusChip, type Tone } from "./ui/kit";
-import { TablePagination } from "./ui/TablePagination";
+import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { FloatingTableHead, SortHeadButton, headAlignClass, nextSort, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead } from "./ui/FloatingTableHead";
 import { checkDatesMatch, getCardUpdateStatus, type EstablishmentCardData } from "./EstablishmentCard";
 
@@ -139,7 +139,7 @@ const byUrgency = (a: EstablishmentCardData, b: EstablishmentCardData) =>
   b.expiringThisMonthCount - a.expiringThisMonthCount ||
   a.name.localeCompare(b.name);
 
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 10;
 
 const COLUMNS: Array<{ k: SortKey; label: string; align: "left" | "right" | "center" }> = [
   { k: "name", label: "Establecimiento", align: "left" },
@@ -164,6 +164,7 @@ export const EstablishmentTable: React.FC<{
 }> = ({ rows, followGivenOrder = false, givenOrderLabel, onOpen, onShowHistory, isCaptureMode = false, selectedIds, onToggleSelect }) => {
   const [sort, setSort] = useState<Sort>(null);
   const [page, setPage] = useState(1);
+  const [PAGE_SIZE, setPageSize] = usePageSize("establecimientos-analisis", DEFAULT_PAGE_SIZE);
 
   // Si se elige un orden en Filtros, manda ese; el de los encabezados se olvida.
   useEffect(() => {
@@ -338,7 +339,7 @@ export const EstablishmentTable: React.FC<{
           </button>
         )}
       </div>
-      <TablePagination page={page} pageSize={PAGE_SIZE} total={sorted.length} onPageChange={setPage} itemLabel="establecimientos" />
+      <TablePagination page={page} pageSize={PAGE_SIZE} total={sorted.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="establecimientos" />
     </div>
   );
 };

@@ -18,7 +18,7 @@ import {
   type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type PlanRow, type PlanSource, type ProductGap, type SiteGapRow, type WarehouseRow,
 } from "../services/availabilityInsights";
 import { EmptyState, KpiCard, KpiStrip, SortButton, TableSearch, ariaSort, filterInputClass, useTableSort, type Tone } from "./ui/kit";
-import { TablePagination } from "./ui/TablePagination";
+import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import { BottomSheet } from "./ui/BottomSheet";
@@ -85,7 +85,7 @@ export type PlanEdits = Record<string, PlanEdit>;
 
 export type ReportTab = "summary" | "establishments" | "gaps" | "expiry" | "consumption" | "abc" | "overstock" | "redistribution" | "warehouse";
 
-const PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 25;
 export const MONTH_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"];
 export const monthShort = (key: string) => `${MONTH_SHORT[Number(key.slice(4, 6)) - 1] ?? key.slice(4, 6)}${key.slice(2, 4)}`;
 
@@ -320,6 +320,8 @@ export function ReportTable<T>({ title, info, lead, rows, columns, rowKey, card,
   const firstDir = useMemo(() => Object.fromEntries(columns.filter((c) => c.firstDir).map((c) => [c.key, c.firstDir!])), [columns]);
   const { sorted, headSort } = useTableSort(filtered, getters, { firstDir });
   const [page, setPage] = useState(1);
+  // Una elección por tipo de tabla (productos, establecimientos, lotes…), la que dice su pie.
+  const [PAGE_SIZE, setPageSize] = usePageSize(`disponibilidad:${itemLabel}`, DEFAULT_PAGE_SIZE);
   // La página vuelve a 1 solo si cambian de verdad las filas (búsqueda, filtro u orden), no
   // cuando la pantalla se vuelve a dibujar al abrir un detalle.
   const signature = `${q}|${sorted.length}|${sorted.length ? rowKey(sorted[0]) : ""}|${sorted.length ? rowKey(sorted[sorted.length - 1]) : ""}`;
@@ -447,7 +449,7 @@ export function ReportTable<T>({ title, info, lead, rows, columns, rowKey, card,
               </tbody>
             </table>
           </div>
-          <TablePagination page={page} pageSize={PAGE_SIZE} total={sorted.length} onPageChange={setPage} itemLabel={itemLabel} />
+          <TablePagination page={page} pageSize={PAGE_SIZE} total={sorted.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel={itemLabel} />
         </>
       ) : (
         <div className="space-y-2.5 p-3">

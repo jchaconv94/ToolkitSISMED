@@ -4,7 +4,7 @@ import { useBackupManager } from "../contexts/BackupManagerContext";
 import { UsageItem, backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import { limaDay } from "../services/backupModule";
 import { StatusChip, TableHeaderCell, Tone, useTableSort } from "./ui/kit";
-import { TablePagination } from "./ui/TablePagination";
+import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { formatNumber } from "../services/numberFormat";
 
@@ -117,7 +117,7 @@ const DailyChart: React.FC<{ daily: Array<{ date: string; requests: number }>; l
 
 type MonthRow = Awaited<ReturnType<typeof backupModuleApi.monthByUnget>>[number];
 
-const MONTH_PAGE = 10;
+const DEFAULT_MONTH_PAGE = 10;
 
 const lastLabel = (lastAt: string | null) =>
   lastAt ? (limaDay(lastAt) === limaDay(Date.now()) ? "Hoy" : new Date(lastAt).toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit" })) : "Nunca";
@@ -129,6 +129,7 @@ export const BackupConsumptionTab: React.FC = () => {
   const [month, setMonth] = useState<MonthRow[] | null>(null);
   const [monthError, setMonthError] = useState("");
   const [monthPage, setMonthPage] = useState(1);
+  const [MONTH_PAGE, setMonthPageSize] = usePageSize("backups-consumo", DEFAULT_MONTH_PAGE);
   const monthRows = month || [];
   // Orden por cabecera, antes de paginar; la lista del celular usa el mismo.
   const { sorted: sortedMonth, sort: monthSort, headSort } = useTableSort(monthRows, {
@@ -248,7 +249,7 @@ export const BackupConsumptionTab: React.FC = () => {
                   ))}
                 </tbody>
               </table>
-              <TablePagination page={monthPage} pageSize={MONTH_PAGE} total={month.length} onPageChange={setMonthPage} itemLabel="UNGET" />
+              <TablePagination page={monthPage} pageSize={MONTH_PAGE} total={month.length} onPageChange={setMonthPage} onPageSizeChange={setMonthPageSize} itemLabel="UNGET" />
             </div>
             {/* Celular: una tarjeta por UNGET. */}
             <ul className="divide-y divide-slate-100 border-t border-slate-100 md:hidden">

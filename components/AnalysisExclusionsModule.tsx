@@ -26,7 +26,7 @@ import { HealthFacility, RequirementExclusionItem } from "../types";
 import { requirementExclusionService } from "../services/requirementExclusionService";
 import { filterFacilitiesByJurisdiction, getUserJurisdictionScope } from "../services/jurisdictionService";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
-import { TablePagination } from "./ui/TablePagination";
+import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { BottomSheet } from "./ui/BottomSheet";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
@@ -226,7 +226,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
   }, [exclusions]);
 
   // Escritorio: páginas numeradas. Celular: la lista crece al bajar.
-  const PAGE_SIZE = 10;
+  const [PAGE_SIZE, setPageSize] = usePageSize("exclusiones", 10);
   const [page, setPage] = useState(1);
   useEffect(() => { setPage(1); }, [searchTerm, selectedFacilityCode, sort]);
   const pageRows = sortedExclusions.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -770,7 +770,7 @@ export const AnalysisExclusionsModule: React.FC = () => {
               )}
             </tbody>
           </table>
-          <TablePagination page={page} pageSize={PAGE_SIZE} total={filteredExclusions.length} onPageChange={setPage} itemLabel="medicamentos" />
+          <TablePagination page={page} pageSize={PAGE_SIZE} total={filteredExclusions.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="medicamentos" />
         </div>
 
         {/* Celular: tarjetas; la lista crece al bajar. */}

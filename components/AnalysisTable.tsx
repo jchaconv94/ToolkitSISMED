@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { utils, writeFile } from 'xlsx';
 import { ConsumptionModal } from './ConsumptionModal';
-import { TablePagination } from './ui/TablePagination';
+import { TablePagination, usePageSize } from './ui/TablePagination';
 import { FloatingTableHead, useFloatingTableHead } from './ui/FloatingTableHead';
 import { SortButton, SortDir, ariaSort, tableSearchBoxClass, useTableSort } from './ui/kit';
 import { analysisFilterValue, formatOneDecimal, truncateOneDecimal } from '../services/stockStatus';
@@ -288,7 +288,9 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
   // Acciones que el rol puede usar (Configuración de Roles).
   const canEditRequirement = can('DASHBOARD', 'editRequirement');
   const canExportExcel = can('DASHBOARD', 'exportExcel');
-  const itemsPerPage = isFullScreen ? 15 : 10; // Show more items in full screen
+  // Filas por página que eligió el usuario; en pantalla completa, 15 si dejó las 10 de omisión.
+  const [pageSizeChoice, setPageSize] = usePageSize("matriz-requerimiento", 10);
+  const itemsPerPage = isFullScreen && pageSizeChoice === 10 ? 15 : pageSizeChoice;
   const mainFilterRef = useRef<HTMLDivElement>(null); // Ref for main header filter
   const mainFilterDropdownRef = useRef<HTMLDivElement>(null); // Ref for main header filter dropdown
 
@@ -1125,7 +1127,7 @@ export const AnalysisTable: React.FC<AnalysisTableProps> = React.memo(({
 
       {/* Paginación numerada, la misma del resto del sistema (antes «1 / 3»). */}
       <div className={`shrink-0 ${isFullScreen ? 'bg-white' : 'bg-gray-50'}`}>
-        <TablePagination page={currentPage} pageSize={itemsPerPage} total={filteredItems.length} onPageChange={handlePageChange} itemLabel="ítems" />
+        <TablePagination page={currentPage} pageSize={itemsPerPage} total={filteredItems.length} onPageChange={handlePageChange} onPageSizeChange={setPageSize} itemLabel="ítems" />
       </div>
     </div>
     

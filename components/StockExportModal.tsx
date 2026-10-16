@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { AlertTriangle, Building2, Check, Download, FileSpreadsheet, Layers, Pill, Search, X } from "lucide-react";
 import type { SheetExportMode } from "./SheetExportMenu";
 import { suggestProducts, type StockProduct } from "../services/stockNetworkSearch";
+import { CustomSelect } from "./ui/CustomSelect";
 
 export type StockExportEstablishment = {
   id: string;
@@ -96,6 +97,13 @@ export const StockExportModal: React.FC<{
 }> = ({ titulo, establecimientos, productos, seleccionInicial, soloVencimientosInicial = false, onClose, onExport }) => {
   const [elegidos, setElegidos] = useState<Set<string>>(() => new Set(seleccionInicial));
   const [filtro, setFiltro] = useState<Filtro>("todos");
+  // En la exportación regional: elegir una UNGET deja en la lista solo sus establecimientos.
+  const [unget, setUnget] = useState("todas");
+  const ungets = useMemo(() => {
+    const conteo = new Map<string, number>();
+    for (const e of establecimientos) if (e.ungetName) conteo.set(e.ungetName, (conteo.get(e.ungetName) || 0) + 1);
+    return [...conteo].sort((a, b) => a[0].localeCompare(b[0], "es")).map(([nombre, total]) => ({ value: nombre, label: nombre, count: total }));
+  }, [establecimientos]);
   const [busqueda, setBusqueda] = useState("");
   const [modo, setModo] = useState<SheetExportMode>("consolidado");
   const [soloVencimientos, setSoloVencimientos] = useState(soloVencimientosInicial);
@@ -124,12 +132,13 @@ export const StockExportModal: React.FC<{
     return establecimientos.filter(
       (e) =>
         prueba(e) &&
+        (unget === "todas" || e.ungetName === unget) &&
         (!termino ||
           normalizar(e.name).includes(termino) ||
           normalizar(e.code).includes(termino) ||
           normalizar(e.ungetName || "").includes(termino)),
     );
-  }, [establecimientos, filtro, busqueda]);
+  }, [establecimientos, filtro, busqueda, unget]);
 
   const elegidosEnLista = establecimientos.filter((e) => elegidos.has(e.id));
   // Una repetida marcada junto con su hoja vigente no suma: el Excel lleva solo la vigente.
@@ -187,6 +196,24 @@ export const StockExportModal: React.FC<{
                 {elegidosEnLista.length} de {establecimientos.length} elegidos
               </span>
             </div>
+            {ungets.length > 1 && (
+              <CustomSelect
+                size="md" prefix="UNGET" ariaLabel="UNGET" searchable searchPlaceholder="Buscar UNGET…" containerClassName="mb-2.5 w-full sm:w-72"
+                value={unget}
+                onChange={(v) => {
+                  // Elegir una UNGET deja marcados solo sus establecimientos (sin las hojas
+                  // repetidas); «Todas» vuelve a lo marcado al abrir.
+                  setUnget(v);
+                  const inicial = new Set(seleccionInicial);
+                  setElegidos(new Set(
+                    v === "todas"
+                      ? seleccionInicial
+                      : establecimientos.filter((e) => e.ungetName === v && (inicial.has(e.id) || !e.repetida)).map((e) => e.id),
+                  ));
+                }}
+                options={[{ value: "todas", label: "Todas", count: establecimientos.length }, ...ungets]}
+              />
+            )}
             <div className="flex flex-wrap gap-1.5 mb-3">
               {filtrosDisponibles.map((f) => (
                 <button

@@ -1,5 +1,32 @@
-import React from "react";
+import React, { useCallback, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { CustomSelect } from "./CustomSelect";
+
+/** Opciones de «Filas por página»: 10, 20, 50 y 100, más la de omisión de la tabla si es otra. */
+export const pageSizeOptionsFor = (initial: number): number[] =>
+  [...new Set([10, 20, 50, 100, initial])].sort((a, b) => a - b);
+
+/**
+ * Filas por página de una tabla, recordadas en este equipo por tabla (`key`), para que quien
+ * eligió ver 100 no tenga que volver a elegirlo al regresar (pedido del usuario del
+ * 2026-10-16: «seleccionar mostrar por 20, por 50, por 100»).
+ */
+export const usePageSize = (key: string, initial: number): [number, (size: number) => void] => {
+  const storageKey = `tabla-filas:${key}`;
+  const [size, setSize] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(storageKey));
+      return pageSizeOptionsFor(initial).includes(saved) ? saved : initial;
+    } catch {
+      return initial;
+    }
+  });
+  const change = useCallback((next: number) => {
+    setSize(next);
+    try { localStorage.setItem(storageKey, String(next)); } catch { /* sin almacenamiento: vale para esta visita */ }
+  }, [storageKey]);
+  return [size, change];
+};
 
 /** Páginas visibles alrededor de la actual: 1 … 4 5 6 … 12. */
 const visiblePages = (page: number, totalPages: number): Array<number | "…"> => {
@@ -19,6 +46,9 @@ const visiblePages = (page: number, totalPages: number): Array<number | "…"> =
  * escritorio se pagina con este componente. En el celular las listas no se paginan, se
  * cargan al bajar (`IncrementalList.tsx`); los módulos que aún no se adaptaron muestran
  * aquí anterior / «Página 1 de 3» / siguiente.
+ *
+ * Con `onPageSizeChange` muestra «Filas por página» (10, 20, 50, 100; ver `usePageSize`). Al
+ * cambiarlo se queda en la página que contiene la primera fila que se estaba viendo.
  */
 export const TablePagination: React.FC<{
   page: number;
@@ -26,7 +56,9 @@ export const TablePagination: React.FC<{
   total: number;
   onPageChange: (page: number) => void;
   itemLabel?: string;
-}> = ({ page, pageSize, total, onPageChange, itemLabel = "registros" }) => {
+  onPageSizeChange?: (size: number) => void;
+  pageSizeOptions?: number[];
+}> = ({ page, pageSize, total, onPageChange, itemLabel = "registros", onPageSizeChange, pageSizeOptions }) => {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   if (total === 0) return null;
   const from = (page - 1) * pageSize + 1;
@@ -41,8 +73,25 @@ export const TablePagination: React.FC<{
       <span className="sm:hidden">
         Página <b className="text-slate-700">{page}</b> de <b className="text-slate-700">{totalPages}</b> · {total} {itemLabel}
       </span>
-      <span className="hidden sm:inline">
-        Mostrando <b className="text-slate-700">{from}–{to}</b> de <b className="text-slate-700">{total}</b> {itemLabel}
+      <span className="hidden items-center gap-3 sm:flex">
+        <span>
+          Mostrando <b className="text-slate-700">{from}–{to}</b> de <b className="text-slate-700">{total}</b> {itemLabel}
+        </span>
+        {onPageSizeChange && (
+          <span className="flex items-center gap-1.5 border-l border-slate-200 pl-3">
+            Filas por página
+            <CustomSelect
+              size="sm" ariaLabel="Filas por página" searchable={false} containerClassName="w-[72px]" className="h-8" menuMinWidth={88}
+              value={String(pageSize)}
+              onChange={(v) => {
+                const next = Number(v);
+                onPageSizeChange(next);
+                onPageChange(Math.floor((from - 1) / next) + 1);
+              }}
+              options={(pageSizeOptions || pageSizeOptionsFor(pageSize)).map((n) => ({ value: String(n), label: String(n) }))}
+            />
+          </span>
+        )}
       </span>
       <div className="hidden items-center gap-1 sm:flex">
         <button type="button" className={arrow} disabled={page <= 1} onClick={() => onPageChange(page - 1)} aria-label="Página anterior">

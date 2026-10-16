@@ -10,7 +10,7 @@ import { useIsDesktop } from './ui/useIsDesktop';
 import { stickyBarClass, useStickyBar } from './ui/useStickyBar';
 import { BottomSheet } from './ui/BottomSheet';
 import { FloatingActionButton } from './ui/FloatingActionButton';
-import { TablePagination } from './ui/TablePagination';
+import { TablePagination, usePageSize } from './ui/TablePagination';
 import { LoadMoreSentinel, useIncrementalCount } from './ui/IncrementalList';
 import { FloatingTableHead, useFloatingTableHead } from './ui/FloatingTableHead';
 import { ConfirmationDialog } from './ui/ConfirmationDialog';
@@ -107,7 +107,7 @@ const TAB_SORT_KEYS: Record<OrgTab, (string | null)[]> = {
     MICRORED: ['name', 'unget', 'ogess', null],
     IPRESS: ['name', 'category', 'type', 'microred', 'unget', 'ogess', null],
 };
-const ORG_PAGE_SIZE = 10;
+const DEFAULT_ORG_PAGE_SIZE = 10;
 
 export const AdminOrganizationModule: React.FC = () => {
     const { user, hasPermission, can } = useAuth();
@@ -1539,6 +1539,7 @@ export const AdminOrganizationModule: React.FC = () => {
         return !territory || showsTerritory(jurisdictionLevel, territory, isSuperAdmin);
     };
     const [orgPage, setOrgPage] = useState(1);
+    const [ORG_PAGE_SIZE, setOrgPageSize] = usePageSize("establecimientos-admin", DEFAULT_ORG_PAGE_SIZE);
     const orgFilterKey = [activeTab, searchQuery, filterDiresaId, filterOgessId, filterUngetId, filterMicroredId, filterType, filterCategory, filterDepartment, filterProvince, filterDistrict].join('|');
     useEffect(() => setOrgPage(1), [orgFilterKey, diresaSort.sort, ogessSort.sort, ungetSort.sort, microredSort.sort, facilitySort.sort]);
     const currentTotal = countCurrentItems(activeTab);
@@ -2108,7 +2109,7 @@ export const AdminOrganizationModule: React.FC = () => {
                             </>
                         )}
                     </div>
-                    {isDesktop && <TablePagination page={orgPage} pageSize={ORG_PAGE_SIZE} total={currentTotal} onPageChange={setOrgPage} itemLabel="registros" />}
+                    {isDesktop && <TablePagination page={orgPage} pageSize={ORG_PAGE_SIZE} total={currentTotal} onPageChange={setOrgPage} onPageSizeChange={setOrgPageSize} itemLabel="registros" />}
                 </div>
                 </>
             )}
