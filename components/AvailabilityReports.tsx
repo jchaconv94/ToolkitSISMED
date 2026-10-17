@@ -2042,7 +2042,13 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   // los filtros ayudan a ver lo desmarcado, pero tienen que decir claramente qué muestran).
   const [show, setShow] = useState<"ALL" | "IN" | "OUT">("ALL");
   const [confirmReset, setConfirmReset] = useState(false);
-  const rows = views.filter((v) => (show === "ALL" || (show === "OUT" ? v.excluded : !v.excluded)) && (filter === "ALL" || (!v.excluded && (filter === "SHORT" ? v.short > 0 : has(v, filter === "DONOR" ? "donor" : filter === "WAREHOUSE" ? "warehouse" : "internal")))));
+  // Un establecimiento elegido en uno de los dos gráficos: la tabla deja solo lo que entrega o lo que recibe.
+  const [pick, setPick] = useState<{ kind: "donor" | "receiver"; code: string; name: string } | null>(null);
+  const picked = (v: PlanView) => !pick || (pick.kind === "receiver"
+    ? !v.site && v.to.code === pick.code && !v.excluded && v.covered > 0
+    : v.sources.some((x) => x.qty > 0 && plan.pools[x.pool]?.kind === "donor" && plan.pools[x.pool]?.item.code === pick.code));
+  const togglePick = (kind: "donor" | "receiver", code: string, name: string) => { setPick(pick?.kind === kind && pick.code === code ? null : { kind, code, name }); toTable(); };
+  const rows = views.filter((v) => picked(v) && (show === "ALL" || (show === "OUT" ? v.excluded : !v.excluded)) && (filter === "ALL" || (!v.excluded && (filter === "SHORT" ? v.short > 0 : has(v, filter === "DONOR" ? "donor" : filter === "WAREHOUSE" ? "warehouse" : "internal")))));
 
   const byDonor = useMemo(() => {
     const m = new Map<string, { name: string; n: number }>();
@@ -2115,10 +2121,10 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
       </KpiStrip>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ChartCard title="Establecimientos con más excedente para transferir" info={<><P>Establecimientos en sobrestock que más productos transfieren en el plan. El número es la cantidad de productos que entregan.</P><P>Excedente: lo que tienen por encima de {ctx.sobreMin} meses de consumo.</P></>}>
-          <HBars labelWidth="w-36 md:w-56" rows={byDonor.map(([code, e]) => ({ key: code, label: e.name, value: e.n, color: "#3b82f6", text: `${e.n}` }))} onSelect={ctx.openEstablishment} />
+          <HBars labelWidth="w-36 md:w-56" rows={byDonor.map(([code, e]) => ({ key: code, label: e.name, value: e.n, color: "#3b82f6", text: `${e.n}` }))} selected={pick?.kind === "donor" ? pick.code : null} onSelect={(k) => togglePick("donor", k, byDonor.find(([c]) => c === k)?.[1].name ?? k)} />
         </ChartCard>
         <ChartCard title="Establecimientos con más productos por recibir" info={<P>Establecimientos desabastecidos o en substock que más productos reciben en el plan, de otros establecimientos o del almacén. El número es la cantidad de productos.</P>}>
-          <HBars labelWidth="w-36 md:w-56" rows={byReceiver.map(([code, e]) => ({ key: code, label: e.name, value: e.n, color: "#0d9488", text: `${e.n}` }))} onSelect={ctx.openEstablishment} />
+          <HBars labelWidth="w-36 md:w-56" rows={byReceiver.map(([code, e]) => ({ key: code, label: e.name, value: e.n, color: "#0d9488", text: `${e.n}` }))} selected={pick?.kind === "receiver" ? pick.code : null} onSelect={(k) => togglePick("receiver", k, byReceiver.find(([c]) => c === k)?.[1].name ?? k)} />
         </ChartCard>
       </div>
       {overPools.length > 0 && (
@@ -2128,7 +2134,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
       )}
       <ReportTable
         anchorRef={anchor}
-        title="Plan de redistribución"
+        title={pick ? `Plan de redistribución · ${pick.kind === "donor" ? "entrega" : "recibe"} ${pick.name}` : "Plan de redistribución"}
         info={INFO.redistribution(ctx.subMax, ctx.sobreMin)}
         rows={rows}
         columns={columns}
@@ -2140,6 +2146,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
         minWidth={1100}
         toolbar={(
           <div className="flex shrink-0 items-center gap-2">
+            {pick && <button type="button" onClick={() => setPick(null)} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50"><X className="h-3.5 w-3.5" /> Quitar filtro</button>}
             {/* Un combo en la misma línea del buscador (pedido del usuario: nada que salte a otra fila). */}
             <CustomSelect
               size="md" ariaLabel="Qué filas mostrar" containerClassName="w-44 shrink-0"
