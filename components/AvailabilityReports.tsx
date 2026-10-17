@@ -1849,9 +1849,24 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   ];
   const bandOf = (m: number) => BANDS.find((b) => b.test(m))?.key ?? "MORE";
   const bands = BANDS.map((b) => {
-    const rs = data.rows.filter((x) => bandOf(x.item.months) === b.key);
+    // Cada gráfico sigue al filtro del otro, así sus cifras coinciden con la tabla.
+    const rs = data.rows.filter((x) => bandOf(x.item.months) === b.key && (!est || x.item.code === est));
     return { ...b, value: rs.reduce((a, x) => a + x.value, 0), count: rs.length };
   });
+  const estRows = useMemo(() => {
+    const m = new Map<string, { code: string; name: string; microred: string; value: number; items: number }>();
+    for (const r of data.rows) {
+      if (band && bandOf(r.item.months) !== band) continue;
+      const e = m.get(r.item.code) || { code: r.item.code, name: r.item.name, microred: r.item.microred, value: 0, items: 0 };
+      e.value += r.value; e.items++;
+      m.set(r.item.code, e);
+    }
+    const all = [...m.values()].sort((x, y) => y.value - x.value);
+    const top = all.slice(0, 10);
+    // El elegido sigue a la vista aunque con el tramo quede fuera de los 10 primeros.
+    const chosen = est ? all.find((e) => e.code === est) : undefined;
+    return chosen && !top.includes(chosen) ? [...top, chosen] : top;
+  }, [data, band, est]);
   const tableRows = data.rows.filter((x) => (!est || x.item.code === est) && (!band || bandOf(x.item.months) === band));
   const estName = est ? data.establishments.find((e) => e.code === est)?.name ?? est : "";
   const bandName = band ? BANDS.find((b) => b.key === band)?.label ?? "" : "";
@@ -1901,7 +1916,7 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
           ) : <EmptyState title="Sin sobrestock" description="Ningún producto pasa el límite." />}
         </ChartCard>
         <ChartCard title="Dinero inmovilizado por establecimiento" className="lg:col-span-7">
-          <HBars labelWidth="w-36 md:w-52" rows={data.establishments.slice(0, 10).map((e) => ({ key: e.code, label: e.name, sub: `${e.items} productos · ${e.microred}`, value: e.value, color: "#3b82f6", text: money(e.value) }))} selected={est} onSelect={(k) => { setEst(est === k ? null : k); toTable(); }} />
+          <HBars labelWidth="w-36 md:w-52" rows={estRows.map((e) => ({ key: e.code, label: e.name, sub: `${e.items} productos · ${e.microred}`, value: e.value, color: "#3b82f6", text: money(e.value) }))} selected={est} onSelect={(k) => { setEst(est === k ? null : k); toTable(); }} />
         </ChartCard>
       </div>
       <ReportTable
