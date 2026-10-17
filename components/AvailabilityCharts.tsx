@@ -309,6 +309,63 @@ export const HBars: React.FC<{
   );
 };
 
+/* ---------------------------------------------------------------- Columnas que llenan la tarjeta */
+
+export interface ColumnRow extends HBarRow { short?: string }
+
+/**
+ * Columnas verticales para pocas categorías en orden (los plazos de vencimiento): ocupan todo el
+ * alto de su tarjeta, así no queda espacio en blanco junto a un gráfico más alto (2026-10-17).
+ * La tarjeta lleva `flex flex-col`. `short` es la cifra corta para el celular.
+ */
+export const VColumns: React.FC<{
+  rows: ColumnRow[];
+  onSelect?: (key: string) => void;
+  selected?: string | null;
+}> = ({ rows, onSelect, selected }) => {
+  const top = Math.max(1, ...rows.map((r) => r.value));
+  const total = rows.reduce((a, r) => a + r.value, 0) || 1;
+  const [hover, setHover] = useState<string | null>(null);
+  const tip = useChartTip();
+  const focus = hover ?? selected ?? null;
+  // Alto de la barra dentro del área, dejando arriba lugar para la cifra.
+  const barHeight = (v: number) => `calc((100% - 24px) * ${v / top})`;
+  return (
+    <div className="grid min-h-[260px] flex-1 gap-2 md:gap-3" style={{ gridTemplateColumns: `repeat(${rows.length}, minmax(0, 1fr))` }}>
+      {tip.layer}
+      {rows.map((r) => {
+        const b = tip.bind(<TipBox title={r.label} color={r.color} rows={[["Valor", r.text ?? r.value], ["Del total", pct1((r.value / total) * 100)]]} note={[r.sub, onSelect ? "Clic para ver la lista" : ""].filter(Boolean).join(" · ") || undefined} />);
+        return (
+          <button
+            key={r.key}
+            type="button"
+            disabled={!onSelect}
+            onClick={onSelect ? () => onSelect(r.key) : undefined}
+            onMouseEnter={() => setHover(r.key)}
+            onMouseMove={b.onMouseMove}
+            onMouseLeave={() => { b.onMouseLeave(); setHover(null); }}
+            className={`group flex h-full min-w-0 flex-col rounded-lg text-center transition-opacity ${onSelect ? "cursor-pointer" : "cursor-default"} ${focus && focus !== r.key ? "opacity-40" : ""}`}
+          >
+            <span className="relative w-full flex-1 border-b border-slate-200">
+              <span className="absolute inset-x-0 whitespace-nowrap text-[11px] font-bold tabular-nums text-slate-900 md:text-[12.5px]" style={{ bottom: `calc(${barHeight(r.value)} + 4px)` }}>
+                <span className="md:hidden">{r.short ?? r.text ?? r.value}</span>
+                <span className="hidden md:inline">{r.text ?? r.value}</span>
+              </span>
+              <span
+                className="absolute bottom-0 left-1/2 w-full max-w-[64px] -translate-x-1/2 rounded-t-[4px] transition-[filter] group-hover:brightness-110"
+                style={{ height: r.value > 0 ? `max(2px, ${barHeight(r.value)})` : "0px", background: r.color }}
+              />
+            </span>
+            {/* Dos líneas siempre: si una etiqueta se parte, las bases siguen a la misma altura. */}
+            <span className="mt-2 block min-h-[2.5em] text-[11px] font-bold leading-tight text-slate-700 md:text-[12.5px]">{r.label}</span>
+            {r.sub && <span className="mt-0.5 block text-[10.5px] text-slate-400 md:text-[11px]">{r.sub}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
 /* ---------------------------------------------------------------- Ranking con franjas de nivel */
 
 export interface RankRow { key: string; label: string; pct: number; level: DmeLevel }

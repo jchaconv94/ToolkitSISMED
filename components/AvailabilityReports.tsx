@@ -25,7 +25,7 @@ import { BottomSheet } from "./ui/BottomSheet";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type HeadAlign } from "./ui/FloatingTableHead";
 import {
-  ChartCard, Donut, Gauge, HBars, InfoTip, LEVEL_COLOR, LEVEL_SOFT, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar, TipBox, useChartTip,
+  ChartCard, Donut, Gauge, HBars, InfoTip, LEVEL_COLOR, LEVEL_SOFT, LevelColumns, MonthlyBars, RankingChart, STATUS_COLOR, Sparkline, StackBar, TipBox, VColumns, useChartTip,
 } from "./AvailabilityCharts";
 
 /**
@@ -1547,10 +1547,10 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         <KpiCard watermark tone="warning" label="Total en riesgo" value={money(risk.value)} hint={`${formatNumber(risk.units)} unidades · ${formatNumber(risk.rows.length)} lotes`} onClick={() => { setBucket("ALL"); toTable(); }} active={bucket === "ALL"} />
       </KpiStrip>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <ChartCard title="Valor en riesgo según cuándo vence" info={INFO.expiry} className="lg:col-span-5">
-          <HBars
-            labelWidth="w-28"
-            rows={EXPIRY_BUCKETS.map((b) => ({ key: b, label: EXPIRY_BUCKET_LABEL[b], sub: `${risk.byBucket[b].lots} lotes`, value: risk.byBucket[b].value, color: bucketColor[b], text: money(risk.byBucket[b].value) }))}
+        <ChartCard title="Valor en riesgo según cuándo vence" info={INFO.expiry} className="flex flex-col lg:col-span-5">
+          <VColumns
+            rows={EXPIRY_BUCKETS.map((b) => ({ key: b, label: EXPIRY_BUCKET_LABEL[b], sub: `${formatNumber(risk.byBucket[b].lots)} lotes`, value: risk.byBucket[b].value, color: bucketColor[b], text: money(risk.byBucket[b].value), short: moneyShort(risk.byBucket[b].value) }))}
+            selected={(EXPIRY_BUCKETS as readonly string[]).includes(bucket) ? bucket : null}
             onSelect={(k) => { setBucket(k as (typeof EXPIRY_BUCKETS)[number]); toTable(); }}
           />
         </ChartCard>
