@@ -1476,6 +1476,8 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
   const total = gap.items[0]?.consumption.map((_, i) => gap.items.reduce((a, it) => a + (it.consumption[i] || 0), 0)) ?? [];
   // CPA de la red: el promedio de los totales mensuales (meses con consumo), comparable con las barras.
   const cpa = averageConsumption(total);
+  // El producto en el almacén, con sus lotes (pedido del usuario: ver lote y vencimiento).
+  const stores = ctx.warehouse.filter((w) => w.medCode === gap.medCode);
   return (
     <div className="fixed inset-0 z-[100000] flex justify-end bg-slate-900/40" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <aside role="dialog" aria-label={gap.description} className="flex h-full w-full flex-col bg-white shadow-2xl animate-in slide-in-from-right duration-200 md:w-[620px]">
@@ -1496,11 +1498,47 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
             </div>
             <MonthlyBars values={total} labels={ctx.months.map(monthShort)} cpa={cpa} lineLabel="CPA de la red" height={170} />
           </div>
+          {stores.length > 0 && (
+            <div>
+              <h4 className="mb-2 text-[11.5px] font-black uppercase tracking-wider text-slate-500">En el almacén</h4>
+              {stores.map((w) => (
+                <div key={w.code} className="mb-3 overflow-hidden rounded-xl border border-slate-200 last:mb-0">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 bg-slate-50 px-3 py-2 text-[12.5px] text-slate-600">
+                    <span className="font-bold text-slate-800">{w.name || w.code}</span>
+                    <span>Stock <b className="font-mono text-slate-900">{formatNumber(w.stock)}</b></span>
+                    <span>Precio <b className="font-mono text-slate-900">{w.price ? `S/ ${formatNumber(w.price, 2)}` : "—"}</b></span>
+                    <span>Valor <b className="font-mono text-slate-900">{money(w.stock * (w.price || 0))}</b></span>
+                  </div>
+                  {w.lots.length ? (
+                    <table className="w-full text-[12.5px]">
+                      <thead><tr className="text-[10.5px] font-black uppercase tracking-wider text-slate-400">
+                        <th className="px-3 py-1.5 text-left">Lote</th><th className="px-3 py-1.5 text-center">Vence</th><th className="px-3 py-1.5 text-center">Meses para vencer</th><th className="px-3 py-1.5 text-center">Saldo</th><th className="px-3 py-1.5 text-center">Valor</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {w.lots.map((l, i) => {
+                          const m = l.expiry ? (l.expiry.getTime() - ctx.asOf.getTime()) / (30.44 * 86400000) : null;
+                          return (
+                            <tr key={`${l.lot}-${i}`}>
+                              <td className="px-3 py-1.5 font-mono">{l.lot || "—"}</td>
+                              <td className={`px-3 py-1.5 text-center ${m !== null && m < 6 ? "font-bold text-red-700" : ""}`}>{dateText(l.expiry)}</td>
+                              <td className="px-3 py-1.5 text-center font-mono">{m === null ? "—" : m <= 0 ? "vencido" : dec(m)}</td>
+                              <td className="px-3 py-1.5 text-center font-mono">{formatNumber(l.balance)}</td>
+                              <td className="px-3 py-1.5 text-center font-mono">{money(l.balance * (w.price || 0))}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : <p className="px-3 py-2 text-[12px] text-slate-400">Sin lotes en el archivo.</p>}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
             {rows.map((o) => (
               <button key={o.code} type="button" onClick={() => ctx.openProduct(o, rows)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[12.5px] hover:bg-slate-50">
                 <span className="min-w-0 flex-1"><span className="block truncate font-semibold text-slate-800">{o.name}</span><span className="block text-[11.5px] text-slate-400">{o.microred}</span></span>
-                <span className="text-right font-mono text-slate-600"><span className="font-sans text-slate-400">Stock</span> {formatNumber(o.stock)}<br /><span className="text-[11px] text-slate-400">{dec(o.months)} meses</span></span>
+                <span className="text-right font-mono text-slate-600"><span className="font-sans text-slate-400">Stock</span> {formatNumber(o.stock)}<br /><span className="text-[11px] text-slate-400">{dec(o.months)} meses{o.stock > 0 && o.nearestExpiry ? ` · vence ${dateText(o.nearestExpiry)}` : ""}</span></span>
                 <StatusPill status={o.status} />
               </button>
             ))}
