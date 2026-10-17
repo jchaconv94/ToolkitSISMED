@@ -1517,18 +1517,36 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const { anchor, toTable } = useTableAnchor();
   const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(ctx.report.items), ctx.asOf), [ctx.byPharmacy, ctx.report.items, ctx.asOf]);
   const [bucket, setBucket] = useState<"URGENT" | "ALL" | "NOUSE" | "STILL" | (typeof EXPIRY_BUCKETS)[number]>("URGENT");
+  // Establecimiento elegido en el gráfico de la derecha: filtra la tabla y las columnas.
+  const [est, setEst] = useState<string | null>(null);
+  const inBucket = (r: LotRiskRow) => bucket === "ALL" || (bucket === "URGENT" ? r.bucket !== "LATER" : bucket === "NOUSE" ? r.item.cpa <= 0 : bucket === "STILL" ? isStill(r.item) : r.bucket === bucket);
+  // Cada gráfico sigue al filtro del otro, así sus cifras coinciden con la tabla (como en Sobrestock).
   const byEst = useMemo(() => {
     const m = new Map<string, { name: string; value: number; lots: number }>();
     for (const r of risk.rows) {
-      if (r.bucket === "LATER") continue;
+      if (!inBucket(r)) continue;
       const ipress = r.item.ipressCode;
       const e = m.get(ipress) || { name: (ctx.report.establishments.find((x) => x.code === ipress) ?? ctx.outside?.establishments.find((x) => x.code === ipress))?.name ?? r.item.name, value: 0, lots: 0 };
       e.value += r.value; e.lots++;
       m.set(ipress, e);
     }
-    return [...m.entries()].sort((a, b) => b[1].value - a[1].value).slice(0, 10);
-  }, [risk]);
-  const rows = risk.rows.filter((r) => bucket === "ALL" || (bucket === "URGENT" ? r.bucket !== "LATER" : bucket === "NOUSE" ? r.item.cpa <= 0 : bucket === "STILL" ? isStill(r.item) : r.bucket === bucket));
+    const all = [...m.entries()].sort((a, b) => b[1].value - a[1].value);
+    const top = all.slice(0, 10);
+    const chosen = est ? all.find(([code]) => code === est) : undefined;
+    return chosen && !top.includes(chosen) ? [...top, chosen] : top;
+  }, [risk, bucket, est]);
+  const estBuckets = useMemo(() => {
+    const out = Object.fromEntries(EXPIRY_BUCKETS.map((b) => [b, { value: 0, lots: 0 }])) as Record<string, { value: number; lots: number }>;
+    for (const r of risk.rows) {
+      if (est && r.item.ipressCode !== est) continue;
+      const o = out[r.bucket];
+      if (o) { o.value += r.value; o.lots++; }
+    }
+    return out;
+  }, [risk, est]);
+  const rows = risk.rows.filter((r) => inBucket(r) && (!est || r.item.ipressCode === est));
+  const estName = est ? byEst.find(([code]) => code === est)?.[1].name ?? est : "";
+  const bucketTitle: Record<string, string> = { URGENT: "próximos 12 meses", ALL: "todos los lotes", NOUSE: "productos sin consumo", STILL: "sin ningún movimiento", ...EXPIRY_BUCKET_LABEL };
   const bucketColor: Record<string, string> = { EXPIRED: "#7f1d1d", M3: "#dc2626", M6: "#f97316", M12: "#f59e0b", LATER: "#94a3b8" };
   const whereOf = (it: AvailabilityItem) => siteLabel(ctx, it);
   const columns: Column<LotRiskRow>[] = [
@@ -1552,18 +1570,20 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <ChartCard title="Valor en riesgo según cuándo vence" info={INFO.expiry} className="flex flex-col lg:col-span-5">
           <VColumns
-            rows={EXPIRY_BUCKETS.map((b) => ({ key: b, label: EXPIRY_BUCKET_LABEL[b], sub: `${formatNumber(risk.byBucket[b].lots)} lotes`, value: risk.byBucket[b].value, color: bucketColor[b], text: money(risk.byBucket[b].value), short: moneyShort(risk.byBucket[b].value) }))}
+            rows={EXPIRY_BUCKETS.map((b) => ({ key: b, label: EXPIRY_BUCKET_LABEL[b], sub: `${formatNumber(estBuckets[b].lots)} lotes`, value: estBuckets[b].value, color: bucketColor[b], text: money(estBuckets[b].value), short: moneyShort(estBuckets[b].value) }))}
             selected={(EXPIRY_BUCKETS as readonly string[]).includes(bucket) ? bucket : null}
-            onSelect={(k) => { setBucket(k as (typeof EXPIRY_BUCKETS)[number]); toTable(); }}
+            onSelect={(k) => { setBucket(bucket === k ? "URGENT" : (k as (typeof EXPIRY_BUCKETS)[number])); toTable(); }}
           />
         </ChartCard>
-        <ChartCard title="Establecimientos con más valor en riesgo (12 meses)" className="lg:col-span-7">
-          <HBars labelWidth="w-36 md:w-52" rows={byEst.map(([code, e]) => ({ key: code, label: e.name, sub: `${e.lots} lotes`, value: e.value, color: "#dc2626", text: money(e.value) }))} onSelect={ctx.openEstablishment} />
+        <ChartCard title={`Establecimientos con más valor en riesgo (${bucketTitle[bucket]})`} className="lg:col-span-7">
+          {byEst.length ? (
+            <HBars labelWidth="w-36 md:w-52" rows={byEst.map(([code, e]) => ({ key: code, label: e.name, sub: `${e.lots} lotes`, value: e.value, color: "#dc2626", text: money(e.value) }))} selected={est} onSelect={(k) => { setEst(est === k ? null : k); toTable(); }} />
+          ) : <EmptyState title="Sin lotes en riesgo" description="Ningún lote en este plazo." />}
         </ChartCard>
       </div>
       <ReportTable
         anchorRef={anchor}
-        title="Lotes en riesgo"
+        title={est ? `Lotes en riesgo · ${estName}` : "Lotes en riesgo"}
         info={INFO.expiry}
         rows={rows}
         columns={columns}
@@ -1579,7 +1599,7 @@ export const ExpiryReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         placeholder="Buscar producto, lote o establecimiento…"
         onRowClick={(r, rows) => ctx.openProduct(r.item, rows.map((x) => x.item))}
         minWidth={1050}
-        toolbar={<Pills value={bucket} onChange={setBucket} options={[{ value: "URGENT", label: "Próximos 12 meses" }, ...EXPIRY_BUCKETS.map((b) => ({ value: b, label: EXPIRY_BUCKET_LABEL[b], count: risk.byBucket[b].lots })), { value: "NOUSE", label: "Sin consumo" }, ...(ctx.hasOutflows ? [{ value: "STILL" as const, label: "Sin ningún movimiento", count: risk.stillLots }] : []), { value: "ALL", label: "Todos" }]} />}
+        toolbar={<><Pills value={bucket} onChange={setBucket} options={[{ value: "URGENT", label: "Próximos 12 meses" }, ...EXPIRY_BUCKETS.map((b) => ({ value: b, label: EXPIRY_BUCKET_LABEL[b], count: risk.byBucket[b].lots })), { value: "NOUSE", label: "Sin consumo" }, ...(ctx.hasOutflows ? [{ value: "STILL" as const, label: "Sin ningún movimiento", count: risk.stillLots }] : []), { value: "ALL", label: "Todos" }]} />{est && <button type="button" onClick={() => setEst(null)} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50"><X className="h-3.5 w-3.5" /> Quitar filtro</button>}</>}
         card={(r) => (
           <>
             <ProductCell code={r.item.medCode} description={r.item.description} sub={whereOf(r.item)} />
