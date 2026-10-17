@@ -1707,9 +1707,17 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
 
 /* ---------------------------------------------------------------- ABC × XYZ */
 
-export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
+export const AbcReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap, list?: ProductGap[]) => void }> = ({ ctx, onProduct }) => {
   const { anchor, toTable } = useTableAnchor();
   const data = useMemo(() => abcXyzReport(ctx.report.items), [ctx.report.items]);
+  // Al tocar una fila se abre el producto en toda la red, el mismo panel de «¿Dónde falta?».
+  const gaps = useMemo(() => new Map(productGapReport(ctx.report.items, ctx.warehouse).map((g) => [g.medCode, g])), [ctx.report.items, ctx.warehouse]);
+  const openRow = (r: AbcProduct, list: AbcProduct[]) => {
+    const g = gaps.get(r.medCode);
+    if (g) onProduct(g, list.map((x) => gaps.get(x.medCode)).filter((x): x is ProductGap => !!x));
+  };
+  // Un producto con algo de valor no es «0,0 %».
+  const shareText = (v: number) => (v > 0 && v < 0.0005 ? "< 0,1 %" : pctText(v * 100));
   const [cell, setCell] = useState<string | null>(null);
   const tip = useChartTip();
   const rows = data.products.filter((p) => !cell || `${p.abc}${p.xyz}` === cell);
@@ -1742,7 +1750,7 @@ export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
     { key: "trend", label: "Consumo de la red", render: (r) => <Sparkline values={r.consumption} width={140} /> },
     { key: "units", label: "Unidades", align: "right", sort: (r) => r.units, firstDir: "desc", render: (r) => <span className="font-mono">{formatNumber(r.units)}</span> },
     { key: "value", label: "Valor consumido", align: "right", sort: (r) => r.value, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-slate-900">{money(r.value)}</span> },
-    { key: "share", label: "% del valor", align: "right", sort: (r) => r.share, firstDir: "desc", render: (r) => <span className="font-mono">{pctText(r.share * 100)}</span> },
+    { key: "share", label: "% del valor", align: "right", sort: (r) => r.share, firstDir: "desc", render: (r) => <span className="font-mono">{shareText(r.share)}</span> },
     { key: "cumulative", label: "Acumulado", align: "right", sort: (r) => r.cumulative, render: (r) => <span className="font-mono text-slate-500">{pctText(r.cumulative * 100)}</span> },
     { key: "establishments", label: "Establec.", align: "right", sort: (r) => r.establishments, firstDir: "desc", render: (r) => <span className="font-mono">{r.establishments}</span> },
   ];
@@ -1812,11 +1820,12 @@ export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         itemLabel="productos"
         searchOf={(r) => `${r.medCode} ${r.description}`}
         placeholder="Buscar producto o código…"
+        onRowClick={openRow}
         minWidth={1050}
         card={(r) => (
           <>
             <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><ProductCell code={r.medCode} description={r.description} /></div><span className="rounded-md bg-teal-50 px-2 py-0.5 font-mono text-[12px] font-black text-teal-800">{r.abc}{r.xyz}</span></div>
-            <p className="mt-1.5 text-[12px] text-slate-600">{money(r.value)} · {pctText(r.share * 100)} del valor · consumo {formatNumber(r.units)}</p>
+            <p className="mt-1.5 text-[12px] text-slate-600">{money(r.value)} · {shareText(r.share)} del valor · consumo {formatNumber(r.units)}</p>
           </>
         )}
       />
