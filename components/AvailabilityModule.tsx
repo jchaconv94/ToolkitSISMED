@@ -953,7 +953,7 @@ export const AvailabilityModule: React.FC = () => {
           {tab === "gaps" && <GapsReport ctx={ctx} onProduct={(g, list) => setGap(g, list ?? [g])} />}
           {tab === "expiry" && <ExpiryReport ctx={ctx} />}
           {tab === "consumption" && <ConsumptionReport ctx={ctx} />}
-          {tab === "abc" && <AbcReport ctx={ctx} />}
+          {tab === "abc" && <AbcReport ctx={ctx} onProduct={(g, list) => setGap(g, list ?? [g])} />}
           {tab === "overstock" && <OverstockReport ctx={ctx} />}
           {tab === "redistribution" && <RedistributionReport ctx={ctx} />}
           {tab === "warehouse" && <WarehouseReport ctx={ctx} />}
