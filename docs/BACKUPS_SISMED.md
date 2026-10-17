@@ -384,7 +384,7 @@ sin usar el cupo; sigue para los demás después de bajarla; la del día siguien
 un pedido de la web corta la copia en curso y llega bien. Antes del arreglo, ese último caso
 fallaba con «Falta informar el backup».
 
-### Pendiente del usuario: la regla del bucket
+### La regla del bucket (aplicada por el usuario el 2026-10-16, junto con el SQL)
 
 La regla `borrar-a-1-dia` borra todo el bucket al día, y la copia debe durar hasta 2 días. En
 Cloudflare → R2 → `sismed-backups` → Settings → Object lifecycle rules:
