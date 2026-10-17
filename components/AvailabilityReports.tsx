@@ -2302,8 +2302,14 @@ const PlanDrawer: React.FC<{
 
 /* ---------------------------------------------------------------- Almacén */
 
-export const WarehouseReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
+export const WarehouseReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap, list?: ProductGap[]) => void }> = ({ ctx, onProduct }) => {
   const { anchor, toTable } = useTableAnchor();
+  // Tocar un producto (gráfico o tabla) abre el producto en toda la red: quién lo necesita y cuánto tiene cada uno.
+  const gaps = useMemo(() => new Map(productGapReport(ctx.report.items, ctx.warehouse).map((g) => [g.medCode, g])), [ctx.report.items, ctx.warehouse]);
+  const openProduct = (medCode: string, list: string[]) => {
+    const g = gaps.get(medCode);
+    if (g) onProduct(g, list.map((c) => gaps.get(c)).filter((x): x is ProductGap => !!x));
+  };
   const data = useMemo(() => warehouseReport(ctx.warehouse, ctx.report.items, ctx.subMax), [ctx.warehouse, ctx.report.items, ctx.subMax]);
   const [filter, setFilter] = useState<"NEED" | "ALL" | "NODEMAND" | "EXPIRY">("NEED");
   const soon = (r: WarehouseRow) => !!r.nearestExpiry && r.nearestExpiry.getTime() - ctx.asOf.getTime() < 183 * 86400000;
@@ -2334,6 +2340,7 @@ export const WarehouseReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         <HBars
           labelWidth="w-44 md:w-80"
           rows={top.map((r) => ({ key: r.item.medCode, label: r.item.description, sub: `almacén ${formatNumber(r.item.stock)} · cubre ${Math.round(r.coverage)} %`, value: r.inNeed, color: r.coverage >= 100 ? "#10b981" : "#f59e0b", text: `${r.inNeed}` }))}
+          onSelect={(k) => openProduct(k, top.map((r) => r.item.medCode))}
         />
       </ChartCard>
       <ReportTable
@@ -2352,6 +2359,7 @@ export const WarehouseReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         itemLabel="productos"
         searchOf={(r) => `${r.item.medCode} ${r.item.description}`}
         placeholder="Buscar producto o código…"
+        onRowClick={(r, list) => openProduct(r.item.medCode, list.map((x) => x.item.medCode))}
         minWidth={1050}
         card={(r) => (
           <>

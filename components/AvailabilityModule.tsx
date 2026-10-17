@@ -956,7 +956,7 @@ export const AvailabilityModule: React.FC = () => {
           {tab === "abc" && <AbcReport ctx={ctx} onProduct={(g, list) => setGap(g, list ?? [g])} />}
           {tab === "overstock" && <OverstockReport ctx={ctx} />}
           {tab === "redistribution" && <RedistributionReport ctx={ctx} />}
-          {tab === "warehouse" && <WarehouseReport ctx={ctx} />}
+          {tab === "warehouse" && <WarehouseReport ctx={ctx} onProduct={(g, list) => setGap(g, list ?? [g])} />}
       </div>
 
       <ProductGapDrawer ctx={ctx} gap={product ? null : gap} onClose={closeGap} nav={gapState ? drawerNav(gapState.gap, gapState.list, (g) => setGap(g)) : undefined} />
