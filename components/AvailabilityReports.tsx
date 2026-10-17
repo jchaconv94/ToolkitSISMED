@@ -1192,7 +1192,7 @@ const OutflowsSection: React.FC<{ ctx: ReportContext; item: AvailabilityItem }> 
       {heading}
       {noUse && (
         <p className="mb-2 rounded-xl bg-teal-50 px-3 py-2.5 text-[13px] font-semibold text-teal-800">
-          Sin consumo, pero salió por otra vía: {formatNumber(total)} u en los {ctx.months.length} meses.
+          Sin consumo, pero tuvo otras salidas: {formatNumber(total)} en los {ctx.months.length} meses.
         </p>
       )}
       <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -1382,7 +1382,7 @@ export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGa
     { key: "site", label: "Puesto comunal", sort: (r) => r.item.name, render: (r) => <span className="block max-w-[260px]"><span className="block truncate font-semibold text-slate-800">{r.item.name}</span><span className="block truncate text-[11.5px] text-slate-400">{siteLabel(ctx, r.establishment)} › {r.item.code.slice(5)}</span></span> },
     { key: "stock", label: "Stock", sort: (r) => r.item.stock, render: (r) => <span className="font-mono font-bold text-red-600">{formatNumber(r.item.stock)}</span> },
     { key: "cpa", label: "CPA", sort: (r) => r.item.cpa, firstDir: "desc", render: (r) => <span className="font-mono">{dec(r.item.cpa)}</span> },
-    { key: "main", label: "Su F01 tiene", sort: (r) => r.main?.stock ?? 0, firstDir: "desc", render: (r) => (r.main?.stock ? <span className="whitespace-nowrap"><span className="block font-mono font-bold text-blue-700">{formatNumber(r.main.stock)} u</span><span className="block text-[11px] text-slate-400">{dec(r.main.months)} meses</span></span> : <span className="text-slate-300">0</span>) },
+    { key: "main", label: "Stock de su F01", sort: (r) => r.main?.stock ?? 0, firstDir: "desc", render: (r) => (r.main?.stock ? <span className="whitespace-nowrap"><span className="block font-mono font-bold text-blue-700">{formatNumber(r.main.stock)}</span><span className="block text-[11px] text-slate-400">{dec(r.main.months)} meses</span></span> : <span className="text-slate-300">0</span>) },
     { key: "status", label: "Establecimiento", sort: (r) => STATUS_ORDER.indexOf(r.establishment.status), render: (r) => <StatusPill status={r.establishment.status} /> },
   ];
   const pills = <Pills value={filter} onChange={setFilter} options={[{ value: "DESAB", label: "Desabastecidos", count: withDesab.length }, { value: "WIDE", label: "Faltan en muchos", count: wide.length }, { value: "DONOR", label: "A otro le sobra", count: donorsDesab.length }, { value: "COVER", label: "Se pueden cubrir", count: solvable.length }, ...(ctx.pharmacy ? [{ value: "SITE" as const, label: "Faltan en un puesto", count: siteGaps.length }] : []), { value: "ALL", label: "Todos", count: products.length }]} />;
@@ -1433,7 +1433,7 @@ export const GapsReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGa
             <>
               <ProductCell code={r.item.medCode} description={r.item.description} />
               <p className="mt-1.5 text-[12px] text-slate-500"><b className="text-slate-700">{r.item.name}</b> · stock <b className="text-red-600">{formatNumber(r.item.stock)}</b> · CPA {dec(r.item.cpa)}</p>
-              <p className="text-[12px] text-slate-500">Su F01 tiene <b className="text-blue-700">{formatNumber(r.main?.stock ?? 0)} u</b> · establecimiento en {STATUS_LABEL[r.establishment.status].toLowerCase()}</p>
+              <p className="text-[12px] text-slate-500">Stock de su F01: <b className="text-blue-700">{formatNumber(r.main?.stock ?? 0)}</b> · establecimiento en {STATUS_LABEL[r.establishment.status].toLowerCase()}</p>
             </>
           )}
         />
@@ -1499,7 +1499,7 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
             {rows.map((o) => (
               <button key={o.code} type="button" onClick={() => ctx.openProduct(o, rows)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[12.5px] hover:bg-slate-50">
                 <span className="min-w-0 flex-1"><span className="block truncate font-semibold text-slate-800">{o.name}</span><span className="block text-[11.5px] text-slate-400">{o.microred}</span></span>
-                <span className="text-right font-mono text-slate-600">{formatNumber(o.stock)} u<br /><span className="text-[11px] text-slate-400">{dec(o.months)} meses</span></span>
+                <span className="text-right font-mono text-slate-600"><span className="font-sans text-slate-400">Stock</span> {formatNumber(o.stock)}<br /><span className="text-[11px] text-slate-400">{dec(o.months)} meses</span></span>
                 <StatusPill status={o.status} />
               </button>
             ))}
@@ -1816,7 +1816,7 @@ export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         card={(r) => (
           <>
             <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><ProductCell code={r.medCode} description={r.description} /></div><span className="rounded-md bg-teal-50 px-2 py-0.5 font-mono text-[12px] font-black text-teal-800">{r.abc}{r.xyz}</span></div>
-            <p className="mt-1.5 text-[12px] text-slate-600">{money(r.value)} · {pctText(r.share * 100)} del valor · {formatNumber(r.units)} u</p>
+            <p className="mt-1.5 text-[12px] text-slate-600">{money(r.value)} · {pctText(r.share * 100)} del valor · consumo {formatNumber(r.units)}</p>
           </>
         )}
       />
@@ -2004,7 +2004,7 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
   // Una fila, un dato por celda (NN/g, Carbon, PatternFly): el detalle y la edición, en el panel.
   const columns: Column<PlanView>[] = [
     { key: "description", label: "Producto", sort: (r) => r.to.description, render: (r) => <span className={r.excluded ? "opacity-45" : ""}><ProductCell code={r.to.medCode} description={r.to.description} /></span> },
-    { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className={`block max-w-[240px] ${r.excluded ? "opacity-45" : ""}`}><span className="block truncate font-semibold text-slate-800">{r.site ? whereOf(r.to) : r.to.name}</span><span className="block text-[11.5px] text-slate-500">{formatNumber(r.to.stock)} u · CPA {dec(r.to.cpa)}</span></span> },
+    { key: "to", label: "Recibe", sort: (r) => r.to.name, render: (r) => <span className={`block max-w-[240px] ${r.excluded ? "opacity-45" : ""}`}><span className="block truncate font-semibold text-slate-800">{r.site ? whereOf(r.to) : r.to.name}</span><span className="block text-[11.5px] text-slate-500">Stock {formatNumber(r.to.stock)} · CPA {dec(r.to.cpa)}</span></span> },
     { key: "status", label: "Situación", sort: (r) => STATUS_ORDER.indexOf(r.to.status), render: (r) => <StatusPill status={r.to.status} /> },
     { key: "need", label: "Necesita", sort: (r) => r.need, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-slate-900">{formatNumber(r.need)}</span> },
     { key: "others", label: "De otros", sort: (r) => units(r, "donor") + units(r, "internal"), firstDir: "desc", render: (r) => { const n = units(r, "donor") + units(r, "internal"); return <span className={`font-mono ${n ? "font-bold text-blue-700" : "text-slate-300"}`}>{formatNumber(n)}</span>; } },
@@ -2046,10 +2046,10 @@ export const RedistributionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) 
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-3 xl:grid-cols-5">
         <KpiCard watermark tone="info" icon={<Repeat2 />} label="Necesidades" value={formatNumber(active.length)} hint={`${formatNumber(active.length - shortRows.length)} cubiertas${views.length > active.length ? ` · ${formatNumber(views.length - active.length)} sin distribuir` : ` · ${formatNumber(active.filter((v) => v.to.status === StockStatus.DESABASTECIDO).length)} desabastecidas`}`} onClick={() => { setFilter("ALL"); toTable(); }} active={filter === "ALL"} />
-        <KpiCard watermark tone="success" icon={<Building2 />} label="De otros establecimientos" value={`${formatNumber(donorUnits)} u`} hint={`en ${formatNumber(active.filter((v) => has(v, "donor")).length)} necesidades · su excedente`} onClick={() => { setFilter("DONOR"); toTable(); }} active={filter === "DONOR"} />
-        <KpiCard watermark tone="warning" icon={<Warehouse />} label="Del almacén" value={`${formatNumber(whUnits)} u`} hint={`completa ${formatNumber(active.filter((v) => has(v, "warehouse")).length)} necesidades`} onClick={() => { setFilter("WAREHOUSE"); toTable(); }} active={filter === "WAREHOUSE"} />
-        <KpiCard watermark tone="info" icon={<Store />} label="Internas F01 → puesto" value={`${formatNumber(internalUnits)} u`} hint={`${formatNumber(active.filter((v) => has(v, "internal")).length)} puestos`} onClick={() => { setFilter("INTERNAL"); toTable(); }} active={filter === "INTERNAL"} />
-        <KpiCard watermark tone="danger" icon={<PackageX />} label="Sin cubrir" value={formatNumber(shortRows.length)} hint={`faltan ${formatNumber(shortRows.reduce((a, v) => a + v.short, 0))} u`} onClick={() => { setFilter("SHORT"); toTable(); }} active={filter === "SHORT"} />
+        <KpiCard watermark tone="success" icon={<Building2 />} label="De otros establecimientos" value={formatNumber(donorUnits)} hint={`en ${formatNumber(active.filter((v) => has(v, "donor")).length)} necesidades · su excedente`} onClick={() => { setFilter("DONOR"); toTable(); }} active={filter === "DONOR"} />
+        <KpiCard watermark tone="warning" icon={<Warehouse />} label="Del almacén" value={formatNumber(whUnits)} hint={`completa ${formatNumber(active.filter((v) => has(v, "warehouse")).length)} necesidades`} onClick={() => { setFilter("WAREHOUSE"); toTable(); }} active={filter === "WAREHOUSE"} />
+        <KpiCard watermark tone="info" icon={<Store />} label="Internas F01 → puesto" value={formatNumber(internalUnits)} hint={`${formatNumber(active.filter((v) => has(v, "internal")).length)} puestos`} onClick={() => { setFilter("INTERNAL"); toTable(); }} active={filter === "INTERNAL"} />
+        <KpiCard watermark tone="danger" icon={<PackageX />} label="Sin cubrir" value={formatNumber(shortRows.length)} hint={`faltan ${formatNumber(shortRows.reduce((a, v) => a + v.short, 0))} por cubrir`} onClick={() => { setFilter("SHORT"); toTable(); }} active={filter === "SHORT"} />
       </KpiStrip>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ChartCard title="Establecimientos con más excedente para transferir" info={<><P>Establecimientos en sobrestock que más productos transfieren en el plan. El número es la cantidad de productos que entregan.</P><P>Excedente: lo que tienen por encima de {ctx.sobreMin} meses de consumo.</P></>}>

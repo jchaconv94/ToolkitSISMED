@@ -542,7 +542,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
     ...(hasWarehouse ? [{ header: "Stock en almacén", width: 12, fmt: FMT.int }] : []),
   ], attention.map((i) => [
     i.microred, i.name, i.medCode, i.description, i.stock, i.cpa, monthsValue(i.months), STATUS_LABEL[i.status], dateText(i.nearestExpiry), i.monthsToExpiry,
-    i.status === StockStatus.DESABASTECIDO ? "Sin stock y con consumo" : i.status === StockStatus.SUBSTOCK ? "Menos de 2 meses de stock" : `Vencen ${formatNumber(riskOf(i)?.units ?? 0)} u sin usarse`,
+    i.status === StockStatus.DESABASTECIDO ? "Sin stock y con consumo" : i.status === StockStatus.SUBSTOCK ? "Menos de 2 meses de stock" : `Vencen sin usarse: ${formatNumber(riskOf(i)?.units ?? 0)}`,
     i.status === StockStatus.DESABASTECIDO || i.status === StockStatus.SUBSTOCK ? Math.max(0, Math.ceil(i.cpa * 2 - i.stock)) : null,
     ...(hasWarehouse ? [warehouseStockOf(i) || null] : []),
   ]), { freezeCols: 4 });
@@ -612,14 +612,14 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       { header: "Stock", width: 10, fmt: FMT.int }, { header: "CPA", width: 9, fmt: FMT.dec1 }, { header: "Meses de provisión", width: 10, fmt: FMT.dec1 },
       { header: "Situación", width: 13, align: "center" }, { header: "Valor del stock (S/)", width: 12, fmt: FMT.money }, { header: "Vence primero", width: 12, align: "center" },
       { header: "Lotes", width: 7, fmt: FMT.int }, { header: "Detalle de lotes (lote · vence · saldo)", width: 48 }, { header: "Meses para vencer", width: 10, fmt: FMT.int },
-      { header: "Riesgo de vencimiento", width: 12, align: "center" }, { header: "Fusiona", width: 18 },
+      { header: "Vencen sin usarse", width: 12, fmt: FMT.int }, { header: "Fusiona", width: 18 },
     ];
     const cols = [...fixed, ...monthCols, ...tail];
     sheetTitle(ws, title, subtitle, cols.length, who);
     const t = writeTable(ws, 5, cols, items.map((i) => [
       i.red, i.microred, i.code, i.name, i.category, i.medCode, i.description, i.form, i.price, i.medtip, i.medpet, i.medest,
       ...i.consumption, i.stock, i.cpa, monthsValue(i.months), STATUS_LABEL[i.status], i.stock * (i.price || 0), dateText(i.nearestExpiry),
-      i.lots.length, i.lots.map((l) => `${l.lot} · ${dateText(l.expiry)} · ${l.balance}`).join("  |  "), i.monthsToExpiry, riskOf(i) ? `${formatNumber(riskOf(i)!.units)} u` : "",
+      i.lots.length, i.lots.map((l) => `${l.lot} · ${dateText(l.expiry)} · ${l.balance}`).join("  |  "), i.monthsToExpiry, riskOf(i)?.units ?? "",
       (i.fusedFrom?.length ?? 0) > 1 ? i.fusedFrom!.join(", ") : "",
     ]), { freezeCols: 7 });
     const statusCol = fixed.length + monthCols.length + 4;
@@ -781,8 +781,8 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   meSection("6. Columnas de apoyo");
   meTable(["", "Columna", "Qué significa"], [1, 1, 2], [
     ["", "Cubrir 2 meses (unid.)", "Hoja «Atención»: unidades que le faltan al establecimiento para tener 2 meses de stock (CPA × 2 − stock)."],
-    ["", "Riesgo de vencimiento", p.expiryRisk
-      ? "Cada lote por separado: se usan del que vence primero al último al ritmo del CPA; lo que no alcanza a usarse antes de su fecha queda en riesgo (unidades en la columna). Los puestos comunales se evalúan con sus propios lotes y CPA; las farmacias del hospital, sumadas. La F01 que abastece a sus puestos suma a su CPA lo que les entrega (otras salidas)."
+    ["", "Vencen sin usarse", p.expiryRisk
+      ? "Cada lote por separado: se usan del que vence primero al último al ritmo del CPA; lo que no alcanza a usarse antes de su fecha queda en riesgo; la columna dice cuántas unidades. Los puestos comunales se evalúan con sus propios lotes y CPA; las farmacias del hospital, sumadas. La F01 que abastece a sus puestos suma a su CPA lo que les entrega (otras salidas)."
       : "El producto vencería antes de consumirse: sus meses de provisión superan los meses que faltan para el vencimiento más próximo."],
     ["", "Meses para vencer", `Se cuentan desde el cierre del mes de corte (${dateText(cutDateOf(cut))}), que es la fecha del stock del TFORMDET, y no desde el día en que se generó el archivo.`],
     ["", "Valor del stock (S/)", "Stock × precio del producto."],
