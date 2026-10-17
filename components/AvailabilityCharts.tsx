@@ -266,7 +266,9 @@ export const HBars: React.FC<{
   marks?: number[];
   onSelect?: (key: string) => void;
   labelWidth?: string;
-}> = ({ rows, max, marks = [], onSelect, labelWidth = "w-28 md:w-40" }) => {
+  /** Con `selected` el gráfico filtra: la fila elegida resalta y las demás se atenúan. */
+  selected?: string | null;
+}> = ({ rows, max, marks = [], onSelect, labelWidth = "w-28 md:w-40", selected }) => {
   const top = max ?? Math.max(1, ...rows.map((r) => r.value));
   const tip = useChartTip();
   return (
@@ -278,8 +280,8 @@ export const HBars: React.FC<{
           type="button"
           disabled={!onSelect}
           onClick={onSelect ? () => onSelect(r.key) : undefined}
-          {...tip.bind(<TipBox title={r.label} color={r.color} rows={[["Valor", r.text ?? r.value]]} note={[r.sub, onSelect ? "Clic para abrir" : ""].filter(Boolean).join(" · ") || undefined} />)}
-          className={`group flex w-full items-center gap-3 rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-slate-50 ${onSelect ? "cursor-pointer" : "cursor-default"}`}
+          {...tip.bind(<TipBox title={r.label} color={r.color} rows={[["Valor", r.text ?? r.value]]} note={[r.sub, onSelect ? (selected !== undefined ? "Clic para filtrar la tabla" : "Clic para abrir") : ""].filter(Boolean).join(" · ") || undefined} />)}
+          className={`group flex w-full items-center gap-3 rounded-lg px-1 py-0.5 text-left transition-[background-color,opacity] hover:bg-slate-50 ${onSelect ? "cursor-pointer" : "cursor-default"} ${selected && selected !== r.key ? "opacity-40" : ""}`}
         >
           <span className={`${labelWidth} shrink-0`}>
             <span className="block truncate text-[13px] font-semibold text-slate-700" title={r.label}>{r.label}</span>

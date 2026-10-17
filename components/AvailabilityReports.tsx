@@ -1836,7 +1836,25 @@ export const AbcReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap
 /* ---------------------------------------------------------------- Sobrestock inmovilizado */
 
 export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
+  const { anchor, toTable } = useTableAnchor();
   const data = useMemo(() => overstockReport(ctx.report.items, ctx.sobreMin), [ctx.report.items, ctx.sobreMin]);
+  // Filtros de la tabla desde los gráficos: un establecimiento y un tramo de meses de stock.
+  const [est, setEst] = useState<string | null>(null);
+  const [band, setBand] = useState<string | null>(null);
+  const BANDS = [
+    { key: "M12", label: "6 a 12 meses", test: (m: number) => m <= 12, color: "#93c5fd" },
+    { key: "M24", label: "12 a 24 meses", test: (m: number) => m > 12 && m <= 24, color: "#60a5fa" },
+    { key: "M36", label: "24 a 36 meses", test: (m: number) => m > 24 && m <= 36, color: "#3b82f6" },
+    { key: "MORE", label: "Más de 36 meses", test: (m: number) => m > 36, color: "#1d4ed8" },
+  ];
+  const bandOf = (m: number) => BANDS.find((b) => b.test(m))?.key ?? "MORE";
+  const bands = BANDS.map((b) => {
+    const rs = data.rows.filter((x) => bandOf(x.item.months) === b.key);
+    return { ...b, value: rs.reduce((a, x) => a + x.value, 0), count: rs.length };
+  });
+  const tableRows = data.rows.filter((x) => (!est || x.item.code === est) && (!band || bandOf(x.item.months) === band));
+  const estName = est ? data.establishments.find((e) => e.code === est)?.name ?? est : "";
+  const bandName = band ? BANDS.find((b) => b.key === band)?.label ?? "" : "";
   // Lo mismo que propone el plan de redistribución: el excedente que va a otros establecimientos.
   const movableNeeds = useMemo(() => {
     const plan = redistributionPlan({ items: ctx.report.items, pharmacyItems: ctx.pharmacy?.items ?? [], warehouse: ctx.warehouse, subMax: ctx.subMax, sobreMin: ctx.sobreMin, isSeparate: separateOf(ctx) });
@@ -1850,7 +1868,6 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const movable = movableNeeds.value;
   const risk = useMemo(() => lotRiskReport(ctx.byPharmacy(ctx.report.items), ctx.asOf), [ctx.byPharmacy, ctx.report.items, ctx.asOf]);
   const overlap = useMemo(() => overstockAtRisk(data.rows, risk.rows), [data, risk]);
-  const example = data.rows.find((r) => r.item.cpa >= 5 && r.value > 50) || data.rows[0];
   const columns: Column<OverstockRow>[] = [
     { key: "description", label: "Producto", sort: (r) => r.item.description, render: (r) => <ProductCell code={r.item.medCode} description={r.item.description} sub={r.item.name} /> },
     { key: "stock", label: "Stock", align: "right", sort: (r) => r.item.stock, firstDir: "desc", render: (r) => <span className="font-mono">{formatNumber(r.item.stock)}</span> },
@@ -1874,35 +1891,24 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         <KpiCard watermark tone="neutral" icon={<Building2 />} label="Establecimientos con excedente" value={formatNumber(data.establishments.length)} hint={data.establishments[0] ? `el mayor: ${data.establishments[0].name}` : ""} />
       </KpiStrip>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <ChartCard title="Cómo se calcula" info={INFO.overstock(ctx.sobreMin)} className="lg:col-span-5">
-          {example ? (
-            <div>
-              <p className="text-[13px] font-semibold text-slate-800">{example.item.description}</p>
-              <p className="text-[12px] text-slate-500">{example.item.name} · CPA {dec(example.item.cpa)} al mes</p>
-              <div className="mt-4 flex h-12 overflow-hidden rounded-xl text-[12px] font-bold text-white">
-                <span className="flex items-center justify-center bg-emerald-500 px-2" style={{ width: `${(example.needed / example.item.stock) * 100}%` }}>{formatNumber(example.needed)}</span>
-                <span className="flex items-center justify-center bg-blue-500 px-2" style={{ width: `${(example.excess / example.item.stock) * 100}%` }}>{formatNumber(example.excess)}</span>
-              </div>
-              <div className="mt-2 flex justify-between text-[11.5px] text-slate-500">
-                <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-500" />Lo que usa en {ctx.sobreMin} meses</span>
-                <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-blue-500" />Excedente</span>
-              </div>
-              <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-xl bg-slate-50 p-2"><p className="text-[10.5px] font-black uppercase text-slate-400">Stock</p><p className="font-mono text-[16px] font-black">{formatNumber(example.item.stock)}</p></div>
-                <div className="rounded-xl bg-slate-50 p-2"><p className="text-[10.5px] font-black uppercase text-slate-400">Excedente</p><p className="font-mono text-[16px] font-black text-blue-700">{formatNumber(example.excess)}</p></div>
-                <div className="rounded-xl bg-slate-50 p-2"><p className="text-[10.5px] font-black uppercase text-slate-400">× precio</p><p className="font-mono text-[16px] font-black">{money(example.value)}</p></div>
-              </div>
-            </div>
+        <ChartCard title="Dinero inmovilizado según meses de stock" info={INFO.overstock(ctx.sobreMin)} className="flex flex-col lg:col-span-5">
+          {data.rows.length ? (
+            <VColumns
+              rows={bands.map((b) => ({ key: b.key, label: b.label, sub: `${formatNumber(b.count)} productos`, value: b.value, color: b.color, text: money(b.value), short: moneyShort(b.value) }))}
+              selected={band}
+              onSelect={(k) => { setBand(band === k ? null : k); toTable(); }}
+            />
           ) : <EmptyState title="Sin sobrestock" description="Ningún producto pasa el límite." />}
         </ChartCard>
         <ChartCard title="Dinero inmovilizado por establecimiento" className="lg:col-span-7">
-          <HBars labelWidth="w-36 md:w-52" rows={data.establishments.slice(0, 10).map((e) => ({ key: e.code, label: e.name, sub: `${e.items} productos · ${e.microred}`, value: e.value, color: "#3b82f6", text: money(e.value) }))} onSelect={ctx.openEstablishment} />
+          <HBars labelWidth="w-36 md:w-52" rows={data.establishments.slice(0, 10).map((e) => ({ key: e.code, label: e.name, sub: `${e.items} productos · ${e.microred}`, value: e.value, color: "#3b82f6", text: money(e.value) }))} selected={est} onSelect={(k) => { setEst(est === k ? null : k); toTable(); }} />
         </ChartCard>
       </div>
       <ReportTable
-        title="Productos con excedente"
+        anchorRef={anchor}
+        title={["Productos con excedente", estName, bandName].filter(Boolean).join(" · ")}
         info={INFO.overstock(ctx.sobreMin)}
-        rows={data.rows}
+        rows={tableRows}
         columns={columns}
         excel={{ name: "Sobrestock", title: "Productos con excedente (sobrestock inmovilizado)", subtitle: ctx.reportTitle, columns: [
           ...xSite(ctx, (r: OverstockRow) => r.item), ...xProduct((r: OverstockRow) => r.item), { header: "Stock", width: 10, fmt: "int", value: (r) => r.item.stock },
@@ -1914,6 +1920,7 @@ export const OverstockReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name}`}
         placeholder="Buscar producto o establecimiento…"
         onRowClick={(r, rows) => ctx.openProduct(r.item, rows.map((x) => x.item))}
+        toolbar={est || band ? <button type="button" onClick={() => { setEst(null); setBand(null); }} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50"><X className="h-3.5 w-3.5" /> Quitar filtro</button> : undefined}
         minWidth={1050}
         card={(r) => (
           <>
