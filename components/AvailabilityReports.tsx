@@ -562,9 +562,11 @@ const INFO = {
   ),
   abc: (
     <>
-      <P>Ordena los productos por el valor consumido en el periodo (unidades × precio), sumando todos los establecimientos.</P>
-      <P><b>A:</b> los que juntan el 80 % del valor. <b>B:</b> el 15 % siguiente. <b>C:</b> el 5 % restante.</P>
-      <P>Cruzado con la variabilidad (X, Y, Z): los <b>A-X</b> se programan con precisión; los <b>A-Z</b> son caros e impredecibles y conviene vigilarlos de cerca.</P>
+      <P>Cada producto se ubica según dos preguntas, y cada recuadro dice cuántos productos caen ahí y qué hacer con ellos.</P>
+      <P><b>¿Cuánto dinero mueve? (filas A, B, C).</b> Se suma lo consumido en el periodo por todos los establecimientos, a su precio, y se ordenan de mayor a menor. <b>A:</b> los pocos productos que juntan el 80 % del valor. <b>B:</b> el 15 % siguiente. <b>C:</b> los muchos que juntan el 5 % restante.</P>
+      <P><b>¿Qué tan parejo se consume? (columnas X, Y, Z).</b> <b>X:</b> casi lo mismo cada mes; el CPA acierta. <b>Y:</b> sube y baja. <b>Z:</b> meses sin uso y meses con mucho; el CPA falla.</P>
+      <P>Al tocar un recuadro, la tabla muestra sus productos.</P>
+      <Ex>Un producto caro que se usa casi igual cada mes es <b>AX</b>: se programa con el CPA. Uno caro que unos meses no se usa y otros mucho es <b>AZ</b>: conviene revisarlo cada mes. Uno barato e irregular es <b>CZ</b>: se pide solo cuando se usa.</Ex>
     </>
   ),
   overstock: (sobreMin: number) => (
@@ -1709,17 +1711,31 @@ export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
   const { anchor, toTable } = useTableAnchor();
   const data = useMemo(() => abcXyzReport(ctx.report.items), [ctx.report.items]);
   const [cell, setCell] = useState<string | null>(null);
+  const tip = useChartTip();
   const rows = data.products.filter((p) => !cell || `${p.abc}${p.xyz}` === cell);
-  const heat = (n: number) => {
-    const max = Math.max(1, ...Object.values(data.matrix));
-    const t = n / max;
-    return `rgba(13, 148, 136, ${0.08 + t * 0.82})`;
-  };
+  // Valor consumido de cada recuadro, para el recuadro al pasar el mouse.
+  const cellValue = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const p of data.products) m[`${p.abc}${p.xyz}`] = (m[`${p.abc}${p.xyz}`] || 0) + p.value;
+    return m;
+  }, [data]);
+  // Las filas se tiñen por el gasto (A más fuerte): el ojo va a lo que más dinero mueve, no a donde hay más productos.
+  const ABC_ROW = {
+    A: { name: "Mayor gasto", cell: "border-teal-200 bg-teal-100 hover:bg-teal-200/70" },
+    B: { name: "Gasto medio", cell: "border-teal-100 bg-teal-50 hover:bg-teal-100/70" },
+    C: { name: "Menor gasto", cell: "border-slate-200 bg-slate-50 hover:bg-slate-100" },
+  } as const;
+  const XYZ_COL = {
+    X: { sub: "casi igual cada mes", shape: [5, 5.4, 4.8, 5.2, 5, 5.3, 4.9, 5.1] },
+    Y: { sub: "sube y baja", shape: [3, 6, 2.5, 5.5, 3.5, 6, 3, 5] },
+    Z: { sub: "meses sin uso y picos", shape: [0, 0, 8, 0, 1, 0, 7, 0] },
+  } as const;
   const advice: Record<string, string> = {
-    AX: "Programar con precisión", AY: "Revisar cada mes", AZ: "Vigilar de cerca",
-    BX: "Programación regular", BY: "Revisión periódica", BZ: "Stock de seguridad",
+    AX: "Programar con el CPA", AY: "Revisar cada mes", AZ: "Vigilar de cerca",
+    BX: "Programar con el CPA", BY: "Revisión periódica", BZ: "Tener stock de seguridad",
     CX: "Pedido simple", CY: "Pedido simple", CZ: "Pedir solo si se usa",
   };
+  const cellName = (k: string) => `${ABC_ROW[k[0] as "A" | "B" | "C"].name.toLowerCase()}, consumo ${XYZ_LABEL[k[1] as "X" | "Y" | "Z"].toLowerCase()}`;
   const columns: Column<AbcProduct>[] = [
     { key: "description", label: "Producto", sort: (r) => r.description, render: (r) => <ProductCell code={r.medCode} description={r.description} /> },
     { key: "class", label: "Clase", sort: (r) => `${r.abc}${r.xyz}`, render: (r) => <span className="rounded-md bg-teal-50 px-2 py-0.5 font-mono text-[12px] font-black text-teal-800">{r.abc}{r.xyz}</span> },
@@ -1740,41 +1756,50 @@ export const AbcReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => {
         <KpiCard watermark tone="neutral" label="Clase C" value={formatNumber(data.counts.C.products)} hint={`productos · ${pctText(share("C"))} del valor`} />
       </KpiStrip>
       <ChartCard title="Matriz ABC × XYZ" info={INFO.abc}>
-        <div className="scrollbar-x overflow-x-auto">
-          <div className="grid min-w-[640px] grid-cols-[120px_repeat(3,1fr)] gap-2">
-            <span />
-            {(["X", "Y", "Z"] as const).map((x) => (
-              <span key={x} className="text-center text-[12px] font-black text-slate-600">{x} · {XYZ_LABEL[x]}</span>
-            ))}
-            {(["A", "B", "C"] as const).map((a) => (
-              <React.Fragment key={a}>
-                <span className="flex flex-col justify-center text-[12px] font-black text-slate-600">Clase {a}<span className="font-semibold text-slate-400">{pctText(share(a))} del valor</span></span>
-                {(["X", "Y", "Z"] as const).map((x) => {
-                  const k = `${a}${x}`;
-                  const n = data.matrix[k] || 0;
-                  const dark = n / Math.max(1, ...Object.values(data.matrix)) > 0.5;
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => { setCell(cell === k ? null : k); toTable(); }}
-                      className={`rounded-xl px-4 py-4 text-left transition-transform hover:scale-[1.02] ${cell === k ? "ring-2 ring-slate-900" : ""}`}
-                      style={{ background: heat(n) }}
-                    >
-                      <span className={`block font-mono text-[12px] font-black ${dark ? "text-white/80" : "text-teal-900/70"}`}>{k}</span>
-                      <span className={`block text-[26px] font-black leading-tight ${dark ? "text-white" : "text-slate-900"}`}>{formatNumber(n)}</span>
-                      <span className={`block text-[11.5px] font-semibold ${dark ? "text-white/85" : "text-slate-600"}`}>{advice[k]}</span>
-                    </button>
-                  );
-                })}
-              </React.Fragment>
-            ))}
-          </div>
+        {tip.layer}
+        {/* Sin desplazamiento: la matriz entra en el ancho, también en el celular (pedido del usuario, 2026-10-17). */}
+        <div className="grid grid-cols-[64px_repeat(3,minmax(0,1fr))] gap-1.5 md:grid-cols-[150px_repeat(3,minmax(0,1fr))] md:gap-2">
+          <span />
+          {(["X", "Y", "Z"] as const).map((x) => (
+            <span key={x} className="flex flex-col items-center pb-1 text-center">
+              <Sparkline values={[...XYZ_COL[x].shape]} width={56} height={20} />
+              <span className="mt-1 text-[11px] font-black text-slate-700 md:text-[12.5px]">{x} · {XYZ_LABEL[x]}</span>
+              <span className="text-[10px] leading-tight text-slate-400 md:text-[11.5px]">{XYZ_COL[x].sub}</span>
+            </span>
+          ))}
+          {(["A", "B", "C"] as const).map((a) => (
+            <React.Fragment key={a}>
+              <span className="flex flex-col justify-center leading-tight">
+                <span className="text-[11.5px] font-black text-slate-700 md:text-[13px]">Clase {a}</span>
+                <span className="text-[10.5px] font-semibold text-slate-500 md:text-[12px]">{ABC_ROW[a].name}</span>
+                <span className="text-[10px] text-slate-400 md:text-[11.5px]">{pctText(share(a))} del valor</span>
+              </span>
+              {(["X", "Y", "Z"] as const).map((x) => {
+                const k = `${a}${x}`;
+                const n = data.matrix[k] || 0;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => { setCell(cell === k ? null : k); toTable(); }}
+                    {...tip.bind(<TipBox title={`${k} · ${cellName(k)}`} rows={[["Productos", formatNumber(n)], ["Valor consumido", money(cellValue[k] || 0)], ["Del valor total", pctText(data.total ? ((cellValue[k] || 0) / data.total) * 100 : 0)]]} note="Clic para ver la lista" />)}
+                    className={`min-w-0 rounded-xl border p-2 text-left transition-colors md:px-4 md:py-3.5 ${ABC_ROW[a].cell} ${cell === k ? "ring-2 ring-teal-600" : ""}`}
+                  >
+                    <span className="block font-mono text-[10.5px] font-black text-teal-900/60 md:text-[12px]">{k}</span>
+                    <span className="block text-[20px] font-black leading-tight text-slate-900 md:text-[26px]">
+                      {formatNumber(n)}<span className="ml-1.5 hidden text-[12px] font-semibold text-slate-500 md:inline">productos</span>
+                    </span>
+                    <span className="block text-[10.5px] font-semibold leading-tight text-slate-600 md:text-[12px]">{advice[k]}</span>
+                  </button>
+                );
+              })}
+            </React.Fragment>
+          ))}
         </div>
       </ChartCard>
       <ReportTable
         anchorRef={anchor}
-        title={cell ? `Productos ${cell}` : "Productos por valor consumido"}
+        title={cell ? `Productos ${cell} · ${cellName(cell)}` : "Productos por valor consumido"}
         info={INFO.abc}
         rows={rows}
         columns={columns}
