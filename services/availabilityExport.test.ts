@@ -64,12 +64,12 @@ describe("Excel de disponibilidad", () => {
     });
     const ws = wb.getWorksheet("Productos por establecimiento")!;
     const header = (ws.getRow(5).values as unknown[]).map(String);
-    const col = header.indexOf("Riesgo de vencimiento");
+    const col = header.indexOf("Vencen sin usarse");
     expect(ws.getCell(6, col).value).toBe("");
-    expect(ws.getCell(7, col).value).toBe("12 u");
+    expect(ws.getCell(7, col).value).toBe(12);
     const at = wb.getWorksheet("Atención")!;
     const head = (at.getRow(10).values as unknown[]).map(String);
-    expect(at.getCell(11, head.indexOf("Motivo")).value).toBe("Vencen 12 u sin usarse");
+    expect(at.getCell(11, head.indexOf("Motivo")).value).toBe("Vencen sin usarse: 12");
   });
 
   it("la metodología dice qué establecimientos quedaron fuera y explica la regla de 1 litro", async () => {
