@@ -587,7 +587,12 @@ export const MonthlyBars: React.FC<{
   fullFormat?: (v: number) => string;
   /** Ancho de cada mes en el dibujo (más ancho si las etiquetas son largas). */
   slot?: number;
-}> = ({ values, labels, cpa, highlight = null, height = 200, color = "#0d9488", lineLabel = "CPA", format = (v) => formatNumber(Math.round(v)), fullFormat, slot = 48 }) => {
+  /** Nombre de la cifra en el recuadro del mouse (por omisión «Valor»). */
+  valueLabel?: string;
+  /** Tocar un mes lo elige (para filtrar una tabla); `selected` atenúa los demás. */
+  onSelect?: (index: number) => void;
+  selected?: number | null;
+}> = ({ values, labels, cpa, highlight = null, height = 200, color = "#0d9488", lineLabel = "CPA", format = (v) => formatNumber(Math.round(v)), fullFormat, slot = 48, valueLabel = "Valor", onSelect, selected = null }) => {
   const n = values.length;
   const full = fullFormat ?? format;
   const left = 52, right = 12, top = 30, bottom = 26;
@@ -635,7 +640,10 @@ export const MonthlyBars: React.FC<{
           <g
             key={i}
             onMouseEnter={() => setHover(i)}
-            {...tip.bind(<TipBox title={labels[i]} color={hl ? "#dc2626" : color} rows={[["Valor", full(v)], ...(cpa ? [[lineLabel, cpa >= 100 ? full(cpa) : cpa.toFixed(1).replace(".", ",")] as [string, string], ["Frente a la línea", cpa > 0 ? `${v >= cpa ? "+" : ""}${Math.round(((v - cpa) / cpa) * 100)} %` : "—"] as [string, string]] : [])]} note={hl ? "Mes de mayor consumo" : undefined} />)}
+            onClick={onSelect ? () => onSelect(i) : undefined}
+            className={onSelect ? "cursor-pointer" : undefined}
+            opacity={selected !== null && selected !== i ? 0.35 : 1}
+            {...tip.bind(<TipBox title={labels[i]} color={hl ? "#dc2626" : color} rows={[[valueLabel, full(v)], ...(cpa ? [[lineLabel, cpa >= 100 ? full(cpa) : cpa.toFixed(1).replace(".", ",")] as [string, string], ["Frente a la línea", cpa > 0 ? `${v >= cpa ? "+" : ""}${Math.round(((v - cpa) / cpa) * 100)} %` : "—"] as [string, string]] : [])]} note={hl ? "Mes de mayor consumo" : onSelect ? "Clic para ver la lista" : undefined} />)}
           >
             <rect x={left + i * slot + 2} y={top} width={slot - 4} height={plotH} rx={6} fill={hover === i ? "#f1f5f9" : "transparent"} />
             <rect x={x} y={y(v)} width={bw} height={Math.max(0, top + plotH - y(v))} rx={3} fill={hl ? "#dc2626" : color} opacity={hover === i ? 1 : highlight?.length && !hl ? 0.8 : 1} />

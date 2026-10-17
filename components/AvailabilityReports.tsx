@@ -551,6 +551,7 @@ const INFO = {
   peaks: (
     <>
       <P>Un <b>pico</b> es un mes cuyo consumo es 3 veces o más el promedio de los <b>otros meses con consumo</b> (con 20 unidades o más y al menos 3 meses con consumo). Los meses en cero no cuentan, y si el consumo más alto se repite en varios meses no es un pico: es lo habitual.</P>
+      <P>El gráfico cuenta, mes a mes, cuántos productos tuvieron su pico en ese mes. Al tocar un mes, la tabla muestra esos productos.</P>
       <P>Puede ser un brote, una campaña, una salida grande o un error de registro. Un pico sube el CPA y puede hacer pedir de más.</P>
     </>
   ),
@@ -1601,7 +1602,9 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
   const data = useMemo(() => consumptionReport(ctx.report.items), [ctx.report.items]);
   const [xyz, setXyz] = useState<"ALL" | "X" | "Y" | "Z">("ALL");
   const totalXyz = data.xyz.X + data.xyz.Y + data.xyz.Z;
-  const rows = data.peaks;
+  // Tocar un mes del gráfico deja en la tabla solo los picos de ese mes.
+  const [peakMonth, setPeakMonth] = useState<number | null>(null);
+  const rows = peakMonth === null ? data.peaks : data.peaks.filter((p) => p.peakIndex === peakMonth);
   const classRows = useMemo(() => data.classified.filter((c) => c.xyz === xyz), [data, xyz]);
   const classColumns: Column<ClassifiedItem>[] = [
     { key: "description", label: "Producto", sort: (r) => r.item.description, render: (r) => <ProductCell code={r.item.medCode} description={r.item.description} sub={r.item.name} /> },
@@ -1631,8 +1634,15 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
         <KpiCard watermark tone="danger" label="Consumo irregular (Z)" value={formatNumber(data.xyz.Z)} hint={`${pctText(totalXyz ? (data.xyz.Z / totalXyz) * 100 : 0)} de los ítems con consumo`} onClick={() => { setXyz("Z"); toTable(); }} active={xyz === "Z"} />
       </KpiStrip>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <ChartCard title="Picos por mes" info={INFO.peaks} className="lg:col-span-7">
-          <MonthlyBars values={data.peaksByMonth} labels={ctx.months.map(monthShort)} color="#dc2626" />
+        <ChartCard title="Productos con pico de consumo, por mes" info={INFO.peaks} className="lg:col-span-7">
+          <MonthlyBars
+            values={data.peaksByMonth}
+            labels={ctx.months.map(monthShort)}
+            color="#dc2626"
+            valueLabel="Productos con pico"
+            selected={peakMonth}
+            onSelect={(i) => { setPeakMonth(peakMonth === i ? null : i); setXyz("ALL"); toTable(); }}
+          />
         </ChartCard>
         <ChartCard title="Qué tan parejo es el consumo" info={INFO.xyz} className="lg:col-span-5">
           <Donut
@@ -1678,7 +1688,7 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
       ) : (
         <ReportTable
         anchorRef={anchor}
-        title="Picos de consumo"
+        title={peakMonth === null ? "Picos de consumo" : `Picos de consumo · ${monthLabel(ctx.months[peakMonth])}`}
         info={INFO.peaks}
         rows={rows}
         columns={columns}
@@ -1692,6 +1702,7 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
         searchOf={(r) => `${r.item.medCode} ${r.item.description} ${r.item.name}`}
         placeholder="Buscar producto o establecimiento…"
         onRowClick={(r, rows) => ctx.openProduct(r.item, rows.map((x) => x.item))}
+        toolbar={peakMonth !== null ? <button type="button" onClick={() => setPeakMonth(null)} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50"><X className="h-3.5 w-3.5" /> Quitar filtro</button> : undefined}
         minWidth={1050}
         card={(r) => (
           <>
