@@ -8,6 +8,7 @@
 
 import type { BackupCopyRow, BackupQuota, OnlinePc, SeenPc, UsageItem, UsageReading } from "./backupConnection";
 import type { Tone } from "../components/ui/kit";
+import { compareVersions } from "./toolkitDevices";
 
 export interface BackupOverviewRow {
   code: string;
@@ -185,6 +186,21 @@ export const buildBackupRows = (
     };
   });
 };
+
+/** Desde esta versión la PC sube sola cada backup nuevo del SISMED: la copia ya es el más reciente. */
+export const AUTO_COPY_VERSION = "2.3.10";
+
+/** Toolkit conocido y anterior a la 2.3.10: la fila lo dice en ámbar con «actualizar». */
+export const isOldToolkit = (version?: string): boolean =>
+  Boolean(version) && compareVersions(version, AUTO_COPY_VERSION) < 0;
+
+/**
+ * «Pedir a la PC» solo tiene sentido con copia en la nube y un Toolkit que sube únicamente el
+ * backup de la mañana (2.3.9). Con la 2.3.10 la copia ya es el último backup y el botón sobra
+ * (decisión del usuario del 2026-10-18); sin copia, «Descargar» ya se lo pide a la PC.
+ */
+export const asksPcForNewer = (row: Pick<BackupRowView, "copy" | "version">): boolean =>
+  Boolean(row.copy) && compareVersions(row.version, AUTO_COPY_VERSION) < 0;
 
 export type ShowFilter = "all" | "online" | "ready" | "today" | "offline";
 

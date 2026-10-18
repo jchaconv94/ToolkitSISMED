@@ -8,7 +8,7 @@ import { useBackupManager } from "../contexts/BackupManagerContext";
 import { backupModuleApi, formatMegabytes } from "../services/backupConnection";
 import {
   ActivityItem, ActivityKind, BackupActivityRow, BackupOverviewRow, BackupRowView, SHOW_FILTER_LABEL, ShowFilter,
-  activityFromRequest, buildBackupRows, copyLabel, lastConnectionLabel, filterBackupRows, isActive, jobProgress, jobSpeed, limaDay, planState, rowsOfUnget, showFilterCounts, summarizeBackups,
+  activityFromRequest, asksPcForNewer, buildBackupRows, isOldToolkit, copyLabel, lastConnectionLabel, filterBackupRows, isActive, jobProgress, jobSpeed, limaDay, planState, rowsOfUnget, showFilterCounts, summarizeBackups,
   ungetOptions, whoLabel, BACKUPS_TAB_EVENT, takeRequestedBackupsTab,
 } from "../services/backupModule";
 import { getUserJurisdictionScope } from "../services/jurisdictionService";
@@ -234,28 +234,30 @@ export const BackupsSismedModule: React.FC = () => {
   };
 
   const newBackupBlocker = (row: BackupRowView) =>
-    !row.online ? "La PC debe estar encendida para pedir uno más reciente"
+    !row.online ? "La PC debe estar encendida para pedirle el backup"
       : isActive(row.job) ? "Ya hay una descarga en curso"
       : row.quotaUsed ? "Ya se usó el backup del día de este establecimiento"
       : paused ? "Las descargas nuevas están pausadas por el consumo del plan"
       : "No se puede pedir ahora";
 
-  // Con copia en la nube (el último backup que generó el SISMED), «Descargar» la baja aunque
-  // la PC esté apagada. «Pedir uno nuevo» le pide a la PC el de este momento: si es el mismo
-  // que ya está en la nube, el servicio baja la copia sin volver a subirlo ni usar el cupo.
+  // Con copia en la nube, «Descargar» la baja aunque la PC esté apagada; sin copia, se la pide
+  // a la PC. Desde el Toolkit 2.3.10 la PC sube sola cada backup nuevo, así que la copia ya es el
+  // más reciente: «Pedir a la PC» queda solo para las PC con un Toolkit anterior, que suben
+  // únicamente el de la mañana (`asksPcForNewer`). Si la PC tiene el mismo que ya está en la
+  // nube, el servicio baja la copia sin volver a subirlo ni usar el cupo.
   const action = (row: BackupRowView, full = false) => !canDownload ? null : (
     <span className={`inline-flex items-center justify-end gap-1.5 ${full ? "w-full" : ""}`}>
-      {/* Siempre a la vista cuando hay copia (antes se escondía y no se sabía que existía); si no se puede, dice por qué. */}
-      {row.copy && (
+      {/* Con un Toolkit anterior siempre a la vista; si no se puede, dice por qué. */}
+      {asksPcForNewer(row) && (
         <button
           type="button"
           disabled={!row.canRequestNew}
           onClick={() => manager.request(row.code, row.name)}
-          title={row.canRequestNew ? "Pedir a la PC el backup de este momento (usa el cupo solo si es más nuevo que el de la nube)" : newBackupBlocker(row)}
-          aria-label="Pedir el backup más reciente a la PC"
+          title={row.canRequestNew ? "Este Toolkit solo sube el backup de la mañana: pedir a la PC el de este momento (usa el cupo solo si es más nuevo que el de la nube)" : newBackupBlocker(row)}
+          aria-label="Pedir el backup a la PC"
           className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-teal-200 bg-white px-2.5 text-xs font-bold text-teal-700 hover:bg-teal-50 disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-white"
         >
-          <RefreshCw className="h-4 w-4" /><span className="hidden xl:inline">Más reciente</span>
+          <RefreshCw className="h-4 w-4" /><span className="sm:hidden xl:inline">Pedir a la PC</span>
         </button>
       )}
       <button
@@ -420,7 +422,7 @@ export const BackupsSismedModule: React.FC = () => {
                               {showUngetName && row.ungetName && <span className="text-[11px] text-slate-400"> · {row.ungetName}</span>}
                             </td>
                             <td className="px-4 py-2">
-                              {row.equipo ? <><div className={`font-semibold ${row.online ? "text-slate-700" : "text-slate-500"}`}>{row.equipo}</div><div className="font-mono text-[11px] text-slate-400">Toolkit v{row.version || "?"}</div></> : <span className="text-slate-400">—</span>}
+                              {row.equipo ? <><div className={`font-semibold ${row.online ? "text-slate-700" : "text-slate-500"}`}>{row.equipo}</div><div className={`font-mono text-[11px] ${isOldToolkit(row.version) ? "text-amber-700" : "text-slate-400"}`}>Toolkit v{row.version || "?"}{isOldToolkit(row.version) ? " · actualizar" : ""}</div></> : <span className="text-slate-400">—</span>}
                             </td>
                             <td className="px-4 py-2"><Signal row={row} /></td>
                             <td className="px-4 py-2">{chip ? <StatusChip label={chip.label} tone={chip.tone} /> : <span className="text-slate-300">—</span>}</td>
@@ -448,7 +450,7 @@ export const BackupsSismedModule: React.FC = () => {
                             <span className="font-mono text-[11px] text-teal-700">{row.code}</span>
                             {showUngetName && row.ungetName && <span className="text-[11px] text-slate-400"> · {row.ungetName}</span>}
                             <div className="truncate font-black text-slate-800">{row.name}</div>
-                            {row.equipo && <div className="truncate text-[11.5px] text-slate-400">{row.equipo} · Toolkit v{row.version || "?"}</div>}
+                            {row.equipo && <div className={`truncate text-[11.5px] ${isOldToolkit(row.version) ? "text-amber-700" : "text-slate-400"}`}>{row.equipo} · Toolkit v{row.version || "?"}{isOldToolkit(row.version) ? " · actualizar" : ""}</div>}
                             {!row.online && row.lastSeen && <div className="truncate text-[11.5px] text-slate-400">Últ. conexión: {lastConnectionLabel(row.lastSeen)}</div>}
                           </div>
                           {chip ? <StatusChip label={chip.label} tone={chip.tone} /> : row.online
