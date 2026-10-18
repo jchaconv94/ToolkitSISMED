@@ -200,11 +200,12 @@ describe("copia del día", () => {
     expect(copyOfferVerdict(copy({ uploadedAt: now - COPY_KEEP_MS - 1 }), meta, null, false, now)).toEqual({ accept: true });
   });
 
-  it("cada backup nuevo del día reemplaza al anterior, pero uno más viejo no", () => {
+  it("cada backup nuevo reemplaza al anterior, aunque la fecha de la PC diga otra cosa", () => {
     const afternoon = { ...meta, name: "BKDA202610161300.zip", sha256: "b".repeat(64), modified: "2026-10-16T13:00" };
     expect(copyOfferVerdict(copy(), afternoon, null, false, now)).toEqual({ accept: true });
-    const older = { ...meta, name: "BKDA202610150730.zip", sha256: "c".repeat(64), modified: "2026-10-15T07:30" };
-    expect(copyOfferVerdict(copy(), older, null, false, now)).toMatchObject({ accept: false, reason: "La nube ya tiene un backup más reciente" });
+    // Fin de mes: la PC estuvo en el 25 y la regresaron al 17. El backup real del 17 no es «más viejo».
+    const afterDateReset = { ...meta, name: "BKDA202610170730.zip", sha256: "c".repeat(64), modified: "2026-10-17T07:30" };
+    expect(copyOfferVerdict(copy({ name: "BKDA202610250800.zip", modified: "2026-10-25T08:00" }), afterDateReset, null, false, now)).toEqual({ accept: true });
   });
 
   it("un pedido con el mismo backup de la nube se atiende con la copia, sin subirlo otra vez", () => {
@@ -212,15 +213,18 @@ describe("copia del día", () => {
     expect(copyCovers(copy(), { ...meta, name: "BKDA202610161300.zip", sha256: "b".repeat(64), modified: "2026-10-16T13:00" }, now)).toBe(false);
     expect(copyCovers(null, meta, now)).toBe(false);
     expect(copyCovers(copy({ uploadedAt: now - COPY_KEEP_MS - 1 }), meta, now)).toBe(false);
-    // Sin fecha no se puede decir cuál es más nuevo: solo cuenta si es el mismo archivo.
-    expect(copyCovers(copy({ modified: "" }), { ...meta, name: "BKDA202610150730.zip", sha256: "c".repeat(64), modified: "2026-10-15T07:30" }, now)).toBe(false);
+    // Una copia con fecha de PC más alta no cubre a un backup distinto: la fecha la pudieron cambiar.
+    expect(copyCovers(copy({ modified: "2026-10-25T08:00" }), { ...meta, name: "BKDA202610170730.zip", sha256: "c".repeat(64), modified: "2026-10-17T07:30" }, now)).toBe(false);
   });
 
-  it("una subida más vieja que termina después no reemplaza a la copia", () => {
-    expect(copyIsNewer(copy({ modified: "2026-10-16T13:30" }), { modified: "2026-10-16T08:12" }, now)).toBe(true);
-    expect(copyIsNewer(copy(), { modified: "2026-10-16T13:30" }, now)).toBe(false);
-    expect(copyIsNewer(copy({ modified: "2026-10-16T13:30", uploadedAt: now - COPY_KEEP_MS - 1 }), { modified: "2026-10-16T08:12" }, now)).toBe(false);
-    expect(copyIsNewer(copy(), { modified: "" }, now)).toBe(false);
+  it("una subida pedida antes que termina después no reemplaza a la copia (reloj del servicio)", () => {
+    expect(copyIsNewer(copy({ startedAt: now - 1000 }), { createdAt: now - 5000 }, now)).toBe(true);
+    expect(copyIsNewer(copy({ startedAt: now - 5000 }), { createdAt: now - 1000 }, now)).toBe(false);
+    expect(copyIsNewer(copy({ startedAt: now - 1000, uploadedAt: now - COPY_KEEP_MS - 1 }), { createdAt: now - 5000 }, now)).toBe(false);
+    // Una copia guardada antes de este cambio no trae `startedAt`: la nueva la reemplaza.
+    expect(copyIsNewer(copy(), { createdAt: now - 5000 }, now)).toBe(false);
+    // La fecha de la PC ya no cuenta.
+    expect(copyIsNewer(copy({ modified: "2026-10-25T08:00", startedAt: now - 5000 }), { createdAt: now - 1000 }, now)).toBe(false);
   });
 
   it("al volver a entrar, el pedido atendido con la copia se sigue mostrando como copia", () => {

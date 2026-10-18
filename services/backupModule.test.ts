@@ -218,10 +218,13 @@ describe("copia del día", () => {
     expect(fila.canDownload).toBe(false);
   });
 
-  it("dice de qué día y hora es el backup", () => {
-    expect(copyLabel(copia, ahora)).toBe("Copia de hoy 08:12");
-    expect(copyLabel({ ...copia, modified: "2026-10-01T07:55" }, ahora)).toBe("Copia de ayer 07:55");
-    expect(copyLabel({ ...copia, modified: "2026-09-29T08:01" }, ahora)).toBe("Copia del 29/09 08:01");
+  it("dice de qué día y hora es la copia, con la hora en que llegó a la nube", () => {
+    expect(copyLabel(copia, ahora)).toBe("Copia de hoy 09:00");
+    expect(copyLabel({ ...copia, uploadedAt: ahora - 26 * 3600_000 }, ahora)).toBe("Copia de ayer 08:00");
+    expect(copyLabel({ ...copia, uploadedAt: Date.parse("2026-09-29T13:01:00Z") }, ahora)).toBe("Copia del 29/09 08:01");
+    // La PC con la fecha adelantada al 25 (cierre de mes): no sale «Copia del 25/10».
+    const adelantada = { ...copia, modified: "2026-10-25T08:12" };
+    expect(copyLabel(adelantada, ahora)).toBe("Copia de hoy 09:00");
   });
 
   it("la descarga de la copia llena la barra de 0 a 100 %: no hay subida", () => {

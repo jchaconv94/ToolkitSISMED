@@ -406,14 +406,13 @@ Propuesta del usuario. Con la copia del día solo subía el backup de la mañana
 SISMED genera otro, y si alguien pedía «el más reciente» con ⟳ la PC volvía a subir, entero, el
 mismo archivo que ya estaba en la nube cuando el SISMED todavía no había hecho otro. Ahora:
 
-- **Toolkit 2.3.10:** cada 5 minutos mira el backup más reciente de `<SISMED>\backup` que ya
-  terminó de escribirse (`find_latest_backup`, 90 s) y lo ofrece con `copy_offer` si no lo
-  ofreció antes. Ya no existe `find_morning_backup`. Lo que subió por un pedido de la web no lo
-  vuelve a ofrecer.
+- **Toolkit 2.3.10:** cada 5 minutos mira el **último backup que apareció** en
+  `<SISMED>\backup` (`BackupWatcher`) y lo ofrece con `copy_offer` si no lo subió antes. Ya no
+  existe `find_morning_backup`. Lo que subió por un pedido de la web no lo vuelve a ofrecer.
 - **Servicio, solo el más reciente:** el backup nuevo se guarda como copia y **recién cuando
   terminó de subir completo** (tamaño comprobado al cerrar la subida) se borra el anterior, así
-  nunca queda sin ninguno (`saveCopy`). Si la PC ofrece uno más viejo que el de la nube, responde
-  «La nube ya tiene un backup más reciente» (`copyCovers`, compara `modified`).
+  nunca queda sin ninguno (`saveCopy`). Solo rechaza el mismo archivo que ya tiene («La nube ya
+  tiene esta copia», `copyCovers`); no compara fechas de la PC (ver abajo).
 - **Servicio, «Pedir uno nuevo» sin subir lo mismo dos veces:** cuando la PC informa el backup
   del pedido (`backup_meta` o el inicio de la subida) y es el mismo que ya está en la nube, el
   servicio no lo deja subir: el pedido pasa a bajar la copia (`reuseCopy`, `reused`), se cierra
@@ -429,6 +428,35 @@ mismo archivo que ya estaba en la nube cuando el SISMED todavía no había hecho
   backup es más nuevo que el de la nube.
 - **Consumo:** sube un backup más por establecimiento y día (el de las 13:00). En R2 sigue
   habiendo uno por establecimiento, porque el anterior se borra.
+
+### Cuando cambian la fecha de la PC (fin de mes)
+
+A fin de mes algunos adelantan la fecha de la PC (del 17 al 25, por ejemplo) y luego la
+regresan. El SISMED pone en el backup la fecha de la PC, así que el «del 25» quedaría como el más
+nuevo durante una semana: comparando fechas, el backup real del 17 a las 13:00 no habría subido
+y en la nube se habría quedado el viejo. Por eso **nada decide con la fecha de la PC**:
+
+- **Toolkit:** el más nuevo es el **último que apareció en la carpeta**, no el de fecha más alta.
+  `BackupWatcher` guarda en `%LOCALAPPDATA%\ToolkitOGM\backups_conocidos.json` el orden en que
+  vio cada archivo (sobrevive a reinicios). La primera vez en una carpeta toma el de fecha más
+  alta y da los demás por vistos.
+- **Completo, sin mirar el reloj:** un backup se ofrece cuando el zip abre y se lee entero
+  (`testzip`); mientras el SISMED lo escribe, no. Uno roto se salta cuando su tamaño deja de
+  cambiar 15 minutos (reloj del equipo encendido, que no cambia con la fecha).
+- **Copiados de otro lado:** un backup traído de otra PC o de una memoria aparece nuevo en la
+  carpeta pero es viejo. En Windows se reconoce porque su fecha de creación (cuando llegó) pasa
+  en más de un día a la de modificación (la que traía); ese no se sube.
+- **Servicio:** acepta siempre el backup que ofrece la PC (solo rechaza el mismo archivo) y, si
+  un pedido sube después de que llegó una copia, compara **cuándo empezó cada subida con el reloj
+  del servicio** (`startedAt` de la copia contra `createdAt` del pedido, `copyIsNewer`), no las
+  fechas de los archivos.
+- **Web:** «Copia de hoy 09:00» es la hora en que **llegó a la nube** (`uploadedAt`), no la fecha
+  que trae el archivo.
+
+Probado de punta a punta (servicio en local, código real del Toolkit): sube el «del 25»; al
+regresar la fecha, el real del 17 a las 13:00 lo reemplaza y lo que se baja es ese (huella
+comprobada); uno a medio escribir no sube hasta terminar; un reinicio no vuelve a subir nada; un
+pedido con el mismo backup baja la copia.
 
 **Prueba de punta a punta** con el servicio real en local (R2 simulado, Supabase simulado) y el
 código real de conexión del Toolkit: sube solo el de las 07:00; ⟳ con el mismo backup baja la

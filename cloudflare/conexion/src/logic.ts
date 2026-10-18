@@ -228,6 +228,11 @@ export interface BackupCopy {
   modified: string;
   key: string;
   uploadedAt: number;
+  /**
+   * Cuándo se pidió la subida que la dejó (reloj del servicio). Ordena dos subidas que terminan
+   * en desorden; la fecha de la PC no sirve para eso, porque a fin de mes la cambian.
+   */
+  startedAt?: number;
   equipo?: string;
   /** Dirección pública del servicio, para armar el enlace de descarga. */
   origin?: string;
@@ -244,16 +249,23 @@ const sameBackup = (copy: BackupCopy, meta: BackupMeta) =>
   copy.name === meta.name && copy.size === meta.size && copy.sha256 === meta.sha256;
 
 /**
- * ¿La copia de la nube ya sirve en lugar de este backup? Sí si es el mismo archivo, o uno
- * más reciente (`modified` va como «AAAA-MM-DDTHH:MM», se compara como texto).
+ * ¿La copia de la nube ya sirve en lugar de este backup? Solo si es el mismo archivo.
+ *
+ * Antes también si la copia tenía una fecha más nueva, pero esa fecha es la del reloj de la PC:
+ * a fin de mes la adelantan para cerrar en el SISMED y luego la regresan, y un backup «del 25»
+ * hacía rechazar como más viejos todos los backups reales de los días siguientes (2026-10-18).
+ * Desde el Toolkit 2.3.10 la PC ofrece el último backup que apareció en la carpeta: confiamos
+ * en ese orden, no en la fecha.
  */
 export const copyCovers = (copy: BackupCopy | null | undefined, meta: BackupMeta, now: number): boolean =>
-  Boolean(copy) && !copyIsStale(copy!, now) &&
-  (sameBackup(copy!, meta) || Boolean(copy!.modified && meta.modified && copy!.modified > meta.modified));
+  Boolean(copy) && !copyIsStale(copy!, now) && sameBackup(copy!, meta);
 
-/** ¿La copia vigente es más reciente que este backup? (para no reemplazarla por uno más viejo) */
-export const copyIsNewer = (copy: BackupCopy, meta: { modified?: string }, now: number): boolean =>
-  !copyIsStale(copy, now) && Boolean(copy.modified && meta.modified && copy.modified > meta.modified);
+/**
+ * ¿La copia vigente salió de una subida pedida después que esta? Entonces esta no la reemplaza
+ * (dos subidas que terminan en desorden). Se mira cuándo se pidió cada una, con el reloj del servicio.
+ */
+export const copyIsNewer = (copy: BackupCopy, job: { createdAt?: number }, now: number): boolean =>
+  !copyIsStale(copy, now) && copy.startedAt != null && job.createdAt != null && copy.startedAt > job.createdAt;
 
 /** ¿Se acepta la copia que ofrece la PC? No si la nube ya la tiene (o una más nueva) ni si el espacio se acaba. */
 export const copyOfferVerdict = (
@@ -263,9 +275,7 @@ export const copyOfferVerdict = (
   uploading: boolean,
   now: number,
 ): { accept: true } | { accept: false; reason: string } => {
-  if (copyCovers(existing, meta, now)) {
-    return { accept: false, reason: sameBackup(existing!, meta) ? "La nube ya tiene esta copia" : "La nube ya tiene un backup más reciente" };
-  }
+  if (copyCovers(existing, meta, now)) return { accept: false, reason: "La nube ya tiene esta copia" };
   if (uploading) return { accept: false, reason: "Ya se está subiendo una copia de este establecimiento" };
   const storage = reading?.items.find((item) => item.key === "r2Storage")?.ratio ?? 0;
   const otherPaused = reading?.items.some((item) => item.key !== "r2Storage" && (item.ratio ?? 0) >= USAGE_PAUSE) ?? false;
