@@ -121,13 +121,13 @@ export const lastConnectionLabel = (at: number, now: number = Date.now()): strin
 };
 
 /**
- * «Copia de hoy 08:12», «Copia de ayer 08:12» o «Copia del 14/10 08:12». La hora es la del
- * backup (cuando lo generó el SISMED), no la de subida.
+ * «Copia de hoy 08:12», «Copia de ayer 08:12» o «Copia del 14/10 08:12». La hora es la de subida
+ * a la nube, con el reloj del servicio: la fecha de la PC no sirve, porque a fin de mes la
+ * adelantan para cerrar en el SISMED (antes salía «Copia del 25/10» siendo 17; 2026-10-18).
  */
-export const copyLabel = (copy: Pick<BackupCopyRow, "modified" | "uploadedAt">, now: number = Date.now()): string => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(copy.modified || "");
-  const day = match ? `${match[1]}-${match[2]}-${match[3]}` : limaDay(copy.uploadedAt);
-  const time = match ? `${match[4]}:${match[5]}` : limaClock(copy.uploadedAt);
+export const copyLabel = (copy: Pick<BackupCopyRow, "uploadedAt">, now: number = Date.now()): string => {
+  const day = limaDay(copy.uploadedAt);
+  const time = limaClock(copy.uploadedAt);
   if (day === limaDay(now)) return `Copia de hoy ${time}`;
   if (day === limaDay(now - 86400000)) return `Copia de ayer ${time}`;
   return `Copia del ${day.slice(8, 10)}/${day.slice(5, 7)} ${time}`;

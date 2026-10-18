@@ -444,7 +444,7 @@ export class Region extends DurableObject<Env> {
   }
 
   /**
-   * El pedido trae el mismo backup que ya está en la nube (o uno más viejo): en vez de subirlo
+   * El pedido trae el mismo backup que ya está en la nube: en vez de subirlo
    * otra vez, se baja la copia (2026-10-18). Como bajar la copia, no gasta el cupo: el pedido
    * se cierra como no descargado y la descarga se registra aparte, con otro id.
    */
@@ -631,7 +631,7 @@ export class Region extends DurableObject<Env> {
     const ungetId = job.ungetId ?? previous?.ungetId ?? this.ungetOf(job.code);
     const copy: BackupCopy = {
       code: job.code, ungetId, name: job.name, size: job.size, sha256: job.sha256,
-      modified: job.modified || "", key: job.key, uploadedAt: Date.now(), equipo: this.equipoOf(job.code), origin,
+      modified: job.modified || "", key: job.key, uploadedAt: Date.now(), startedAt: job.createdAt, equipo: this.equipoOf(job.code), origin,
     };
     await this.ctx.storage.put(COPY_PREFIX + job.code, copy);
     if (previous && previous.key !== copy.key) {
