@@ -296,7 +296,7 @@ export const BackupManagerProvider: React.FC<{ children: React.ReactNode }> = ({
       if (facility) names.current[code] = facility;
       setJob(code, {
         job: undefined, phase: "requested", failure: undefined, name: undefined, size: undefined, sent: 0, received: 0,
-        detail: copy ? "Preparando la copia del día…" : "Pidiendo…", facility: names.current[code], copy: Boolean(copy), at: Date.now(),
+        detail: copy ? "Preparando la copia de la nube…" : "Pidiendo…", facility: names.current[code], copy: Boolean(copy), at: Date.now(),
       });
       send({ t: copy ? "copy_request" : "backup_request", code });
     }

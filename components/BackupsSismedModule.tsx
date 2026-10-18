@@ -74,7 +74,7 @@ const Detail: React.FC<{ row: BackupRowView }> = ({ row }) => {
   const speed = job ? jobSpeed(job) : null;
   const left = speed ? (speed.secondsLeft < 60 ? "falta < 1 min" : `faltan ~${Math.round(speed.secondsLeft / 60)} min`) : null;
   if (job?.phase === "uploading" && job.size) return <Bar pct={pct ?? 0} label={`1 de 2 · La PC sube · ${left || formatMegabytes(job.size)}`} />;
-  if (job?.phase === "downloading" && job.size && job.copy) return <Bar pct={pct ?? 0} label={`Copia del día · ${left || formatMegabytes(job.size)}`} />;
+  if (job?.phase === "downloading" && job.size && job.copy) return <Bar pct={pct ?? 0} label={`Desde la nube · ${left || formatMegabytes(job.size)}`} />;
   if (job?.phase === "downloading" && job.size) return <Bar pct={pct ?? 0} label={`2 de 2 · Descargando · ${left || formatMegabytes(job.size)}`} />;
   if (job?.phase === "requested" || job?.phase === "saving") {
     return <span className="inline-flex items-center gap-1.5 text-[11.5px] text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" />{job.phase === "saving" ? "Comprobando la huella…" : job.copy ? "Preparando la copia…" : "Esperando a la PC…"}</span>;
@@ -240,8 +240,9 @@ export const BackupsSismedModule: React.FC = () => {
       : paused ? "Las descargas nuevas están pausadas por el consumo del plan"
       : "No se puede pedir ahora";
 
-  // Con copia del día, «Descargar» la baja de la nube (aunque la PC esté apagada) y
-  // «Pedir uno nuevo» pide el backup de este momento a la PC, como siempre.
+  // Con copia en la nube (el último backup que generó el SISMED), «Descargar» la baja aunque
+  // la PC esté apagada. «Pedir uno nuevo» le pide a la PC el de este momento: si es el mismo
+  // que ya está en la nube, el servicio baja la copia sin volver a subirlo ni usar el cupo.
   const action = (row: BackupRowView, full = false) => !canDownload ? null : (
     <span className={`inline-flex items-center justify-end gap-1.5 ${full ? "w-full" : ""}`}>
       {/* Siempre a la vista cuando hay copia (antes se escondía y no se sabía que existía); si no se puede, dice por qué. */}
@@ -250,7 +251,7 @@ export const BackupsSismedModule: React.FC = () => {
           type="button"
           disabled={!row.canRequestNew}
           onClick={() => manager.request(row.code, row.name)}
-          title={row.canRequestNew ? "Pedir a la PC el backup de este momento (usa el cupo del día)" : newBackupBlocker(row)}
+          title={row.canRequestNew ? "Pedir a la PC el backup de este momento (usa el cupo solo si es más nuevo que el de la nube)" : newBackupBlocker(row)}
           aria-label="Pedir el backup más reciente a la PC"
           className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-teal-200 bg-white px-2.5 text-xs font-bold text-teal-700 hover:bg-teal-50 disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-white"
         >

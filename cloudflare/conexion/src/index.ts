@@ -16,7 +16,7 @@
  *   web → {t:"list"}                          → {t:"list", rows, seen} (seen: última conexión de las que no están)
  *   web → {t:"ping", id, code}                → la PC responde {t:"pong", ...} → {t:"ping_result"}
  *   web → {t:"backup_request", code}          → la PC recibe {t:"backup", job, token, partSize, parallel, uploadUrl}
- *   web → {t:"copy_request", code}            → baja la copia del día: {t:"backup_ready", …} sin pedir nada a la PC
+ *   web → {t:"copy_request", code}            → baja la copia de la nube: {t:"backup_ready", …} sin pedir nada a la PC
  *   pc  → {t:"copy_offer", code, name, size, sha256, modified}
  *                                              → {t:"copy_go", job, code, token, partSize, parallel} o {t:"copy_skip", code, reason}
  *   pc  → {t:"backup_meta"|"backup_progress"|"backup_error", job, ...} → se reenvía a esa web
@@ -32,7 +32,9 @@
  *   POST /backup/<job>/complete        (X-Job-Token)   {parts:[{partNumber, etag}]}
  *   POST /backup/<job>/abort           (X-Job-Token)
  *   GET  /backup/<job>/download?token=…                 descarga (admite Range)
- * Un backup no descargado se borra a la hora; la regla del bucket lo borra al día.
+ * Todo backup que termina de subir (pedido o copia) queda como la copia del establecimiento
+ * y reemplaza a la anterior: en la nube queda solo el más reciente (2026-10-18). Si un pedido
+ * trae el mismo backup que ya está en la nube, no se sube otra vez: se baja la copia.
  *
  * Envío de stock por camino de respaldo (no usa la conexión abierta ni el Durable Object):
  *   POST /stock   el Toolkit manda aquí el stock cuando la red bloquea script.google.com, y
@@ -48,7 +50,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   BACKUP_MAX_BYTES, BACKUP_PARALLEL, BACKUP_PART_MAX_BYTES, BACKUP_PART_SIZE, BackupCopy, BackupJob, COPY_PARALLEL, PcCode, PcInfo, USAGE_REFRESH_MS,
-  UsageReading, WebInfo, backupKey, canSee, copyIsStale, copyKey, copyOfferVerdict, copyRowsFor, isExpired, jobMessages, keysByCode,
+  UsageReading, WebInfo, canSee, copyCovers, copyIsNewer, copyIsStale, copyKey, copyOfferVerdict, copyRowsFor, isExpired, jobMessages, keysByCode,
   nextCopyExpiry, onlineFor, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, SeenRow, usageBlocks, usageFor, usageMessage,
 } from "./logic";
 import { UsageEnv, readUsage } from "./usage";
@@ -126,6 +128,9 @@ async function handleBackup(request: Request, env: Env, parts: string[]): Promis
   }
 
   if (!sameToken(request.headers.get("X-Job-Token"), job.uploadToken)) return json({ error: "Permiso no válido" }, 403);
+  // La PC iba a subir el mismo backup que ya está en la nube: no hace falta (2026-10-18). El
+  // Toolkit 2.3.10 lo entiende al iniciar y no sube nada; uno anterior falla en la primera parte.
+  if (job.reused) return action === "start" ? json({ ok: true, reused: true }) : json({ error: "La nube ya tiene este backup" }, 409);
   if (job.status === "ready" || job.status === "failed") return json({ error: "El pedido ya terminó" }, 409);
 
   if (action === "start" && request.method === "POST") {
@@ -135,12 +140,13 @@ async function handleBackup(request: Request, env: Env, parts: string[]): Promis
       // Toolkit 2.3.9 los manda también aquí (2026-10-16).
       const meta = parseBackupMeta(await request.json().catch(() => null));
       if (!meta) return json({ error: "Falta informar el backup (nombre y tamaño)" }, 409);
-      await stub.backupMeta(job.id, meta);
+      if (await stub.backupMeta(job.id, meta)) return json({ ok: true, reused: true });
       Object.assign(job, meta);
     }
     if (job.uploadId && job.key) return json({ ok: true, partSize: BACKUP_PART_SIZE });
     const name = job.name as string;
-    const key = job.kind === "copy" ? copyKey(job, name) : backupKey(job, name);
+    // También el pedido va a `copias/`: al terminar queda como la copia del establecimiento.
+    const key = copyKey(job, name);
     const upload = await env.BACKUPS.createMultipartUpload(key, { httpMetadata: { contentType: "application/zip" } });
     await stub.uploadStarted(job.id, key, upload.uploadId);
     return json({ ok: true, partSize: BACKUP_PART_SIZE });
@@ -247,6 +253,8 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 const JOB_PREFIX = "job:";
+/** Motivo con que se cierra un pedido atendido con la copia de la nube (la web lo reconoce). */
+const REUSED_REASON = "Ya estaba en la nube: se bajó la copia";
 const USAGE_KEY = "usage";
 /** Última conexión de cada establecimiento: `seen:<código>`. Una escritura por desconexión. */
 const SEEN_PREFIX = "seen:";
@@ -397,6 +405,7 @@ export class Region extends DurableObject<Env> {
     const job: BackupJob = {
       id,
       code,
+      ungetId: this.ungetOf(code),
       web: web.id,
       webToken: web.token,
       username: web.username,
@@ -421,13 +430,43 @@ export class Region extends DurableObject<Env> {
    * Datos del backup (nombre, tamaño, huella). Llegan por la conexión abierta o con el inicio
    * de la subida, lo que llegue primero; la segunda vez no cambia nada.
    */
-  async backupMeta(id: string, meta: { name: string; size: number; sha256: string; modified: string }) {
+  async backupMeta(id: string, meta: { name: string; size: number; sha256: string; modified: string }): Promise<boolean> {
     const job = await this.getJob(id);
-    if (!job || (job.name && job.status !== "requested")) return;
+    if (!job) return false;
+    if (job.reused) return true;
+    if (job.name && job.status !== "requested") return false;
+    if ((!job.kind || job.kind === "request") && (await this.reuseCopy(job, meta))) return true;
     Object.assign(job, meta, { status: "uploading" });
     await this.ctx.storage.put(JOB_PREFIX + job.id, job);
     await this.report(job, "UPLOADING", { p_file_name: meta.name, p_size: meta.size });
     this.toWeb(job, { t: "backup_meta", job: job.id, code: job.code, ...meta });
+    return false;
+  }
+
+  /**
+   * El pedido trae el mismo backup que ya está en la nube (o uno más viejo): en vez de subirlo
+   * otra vez, se baja la copia (2026-10-18). Como bajar la copia, no gasta el cupo: el pedido
+   * se cierra como no descargado y la descarga se registra aparte, con otro id.
+   */
+  private async reuseCopy(job: BackupJob, meta: { name: string; size: number; sha256: string; modified: string }): Promise<boolean> {
+    const copy = await this.ctx.storage.get<BackupCopy>(COPY_PREFIX + job.code);
+    if (!copy || !copy.origin || !copyCovers(copy, meta, Date.now())) return false;
+    if (!(await this.env.BACKUPS.head(copy.key))) {
+      await this.dropCopy(copy, false);
+      return false;
+    }
+    await this.report(job, "FAILED", { p_reason: REUSED_REASON, p_file_name: copy.name, p_size: copy.size });
+    Object.assign(job, {
+      kind: "copy_download", reused: true, reportId: crypto.randomUUID(), status: "ready", ungetId: copy.ungetId,
+      name: copy.name, size: copy.size, sha256: copy.sha256, modified: copy.modified, key: copy.key,
+      downloadUrl: `${copy.origin}/backup/${job.id}/download?token=${job.downloadToken}`,
+    } satisfies Partial<BackupJob>);
+    await this.ctx.storage.put(JOB_PREFIX + job.id, job);
+    this.toWeb(job, {
+      t: "backup_ready", job: job.id, code: job.code, name: job.name, size: job.size, sha256: job.sha256, modified: job.modified,
+      downloadUrl: job.downloadUrl, copy: true,
+    });
+    return true;
   }
 
   async getJob(id: string): Promise<BackupJob | null> {
@@ -450,6 +489,8 @@ export class Region extends DurableObject<Env> {
       await this.storeCopy(job, origin);
       return;
     }
+    // El backup pedido es el más reciente: queda también como copia, para los demás.
+    job.promoted = await this.saveCopy(job, origin);
     job.status = "ready";
     job.downloadUrl = `${origin}/backup/${id}/download?token=${job.downloadToken}`;
     await this.ctx.storage.put(JOB_PREFIX + id, job);
@@ -462,7 +503,8 @@ export class Region extends DurableObject<Env> {
 
   async uploadFailed(id: string, reason: string) {
     const job = await this.getJob(id);
-    if (!job) return;
+    // Un Toolkit anterior a 2.3.10 no entiende que no debía subir y avisa un error: se ignora.
+    if (!job || job.reused) return;
     this.toWeb(job, { t: "backup_failed", job: id, code: job.code, reason });
     await this.report(job, "FAILED", { p_reason: reason });
     await this.dropJob(job);
@@ -470,7 +512,7 @@ export class Region extends DurableObject<Env> {
 
   private async dropJob(job: BackupJob) {
     // La descarga de una copia no es dueña del archivo: la copia sigue para los demás.
-    if (job.kind === "copy_download") {
+    if (job.kind === "copy_download" || job.promoted) {
       await this.ctx.storage.delete(JOB_PREFIX + job.id);
       return;
     }
@@ -524,9 +566,9 @@ export class Region extends DurableObject<Env> {
     }
   }
 
-  // --- Copia del día ----------------------------------------------------------------
+  // --- Copia en la nube --------------------------------------------------------------
 
-  /** La PC ofrece su backup de la mañana. Se acepta si es nuevo y hay espacio. */
+  /** La PC ofrece cada backup nuevo que genera el SISMED. Se acepta si es nuevo y hay espacio. */
   private async offerCopy(ws: WebSocket, pc: PcInfo, data: any) {
     const code = String(data.code || "").toUpperCase();
     const pcCode = pc.codes.find((c) => c.code === code);
@@ -566,21 +608,38 @@ export class Region extends DurableObject<Env> {
     }));
   }
 
-  /** La copia terminó de subir: reemplaza a la anterior, que se borra de la nube. */
+  /** La copia terminó de subir: reemplaza a la anterior. */
   private async storeCopy(job: BackupJob, origin: string) {
-    if (!job.key || !job.name || !job.size || !job.sha256) return;
+    await this.saveCopy(job, origin);
+    await this.ctx.storage.delete(JOB_PREFIX + job.id);
+  }
+
+  /**
+   * Un backup terminó de subir completo (la subida ya comprobó el tamaño): pasa a ser la copia
+   * del establecimiento y recién entonces se borra la anterior, así nunca queda sin ninguna.
+   */
+  private async saveCopy(job: BackupJob, origin: string): Promise<boolean> {
+    if (!job.key || !job.name || !job.size || !job.sha256) return false;
     const previous = await this.ctx.storage.get<BackupCopy>(COPY_PREFIX + job.code);
+    // Dos subidas que terminan en desorden: la nube no vuelve a un backup más viejo.
+    if (previous && previous.key !== job.key && copyIsNewer(previous, job, Date.now())) {
+      if (job.kind === "copy") {
+        try { await this.env.BACKUPS.delete(job.key); } catch { /* la regla del bucket la borra igual */ }
+      }
+      return false;
+    }
+    const ungetId = job.ungetId ?? previous?.ungetId ?? this.ungetOf(job.code);
     const copy: BackupCopy = {
-      code: job.code, ungetId: job.ungetId ?? null, name: job.name, size: job.size, sha256: job.sha256,
+      code: job.code, ungetId, name: job.name, size: job.size, sha256: job.sha256,
       modified: job.modified || "", key: job.key, uploadedAt: Date.now(), equipo: this.equipoOf(job.code), origin,
     };
     await this.ctx.storage.put(COPY_PREFIX + job.code, copy);
-    await this.ctx.storage.delete(JOB_PREFIX + job.id);
     if (previous && previous.key !== copy.key) {
       try { await this.env.BACKUPS.delete(previous.key); } catch { /* la regla del bucket la borra igual */ }
     }
     await this.scheduleAlarm(false);
     this.announceCopy(copy, true);
+    return true;
   }
 
   private async dropCopy(copy: BackupCopy, deleteObject: boolean) {
@@ -615,7 +674,7 @@ export class Region extends DurableObject<Env> {
     const fail = (reason: string) => ws.send(JSON.stringify({ t: "backup_failed", code, reason, copy: true }));
     const copy = await this.ctx.storage.get<BackupCopy>(COPY_PREFIX + code);
     if (!copy || copyIsStale(copy, Date.now()) || !canSee(web, copy) || !copy.origin) {
-      fail("No hay copia de hoy de este establecimiento; pida uno nuevo.");
+      fail("No hay un backup de este establecimiento en la nube; pida uno nuevo.");
       return;
     }
     if (!(await this.env.BACKUPS.head(copy.key))) {
@@ -659,7 +718,7 @@ export class Region extends DurableObject<Env> {
       if (status !== "DOWNLOADED") return;
       try {
         await rpc(this.env, "app_backup_copy_downloaded", {
-          p_token: job.webToken, p_job: job.id, p_code: job.code, p_file_name: job.name, p_size: job.size, p_equipo: "",
+          p_token: job.webToken, p_job: job.reportId ?? job.id, p_code: job.code, p_file_name: job.name, p_size: job.size, p_equipo: "",
         });
       } catch (error) {
         console.warn(`No se registró la descarga de la copia ${job.id}: ${String((error as Error).message || error)}`);
@@ -699,6 +758,12 @@ export class Region extends DurableObject<Env> {
   }
 
   // --- Conexiones ------------------------------------------------------------------
+
+  /** UNGET del establecimiento según la PC conectada (un pedido no la guarda). */
+  private ungetOf(code: string): string | null {
+    const ws = this.ctx.getWebSockets(`pc:${code}`)[0];
+    return (ws?.deserializeAttachment() as PcInfo | null)?.codes.find((c) => c.code === code)?.ungetId ?? null;
+  }
 
   private equipoOf(code: string) {
     const ws = this.ctx.getWebSockets(`pc:${code}`)[0];

@@ -145,8 +145,10 @@ export type BackupStatus = "requested" | "uploading" | "ready" | "failed";
 
 /**
  * «request»: alguien pidió el backup y la PC lo sube (el de siempre; sin `kind` es este).
- * «copy»: la PC sube sola el primer backup del día y queda como copia del establecimiento.
+ *   Al terminar de subir pasa a ser la copia del establecimiento (`promoted`).
+ * «copy»: la PC sube sola cada backup nuevo del SISMED y queda como copia del establecimiento.
  * «copy_download»: alguien baja esa copia; usa el mismo archivo, que no se borra al terminar.
+ *   Si era un pedido y la PC informó el mismo backup que ya estaba en la nube, queda `reused`.
  */
 export type BackupJobKind = "request" | "copy" | "copy_download";
 
@@ -176,6 +178,12 @@ export interface BackupJob {
   key?: string;
   uploadId?: string;
   reason?: string;
+  /** Pedido que la PC iba a subir con el mismo backup de la nube: se baja la copia. */
+  reused?: boolean;
+  /** Pedido ya subido que quedó como copia: su archivo es de la copia y no se borra al bajarlo. */
+  promoted?: boolean;
+  /** Con qué id se registra en Supabase la descarga de la copia (el del pedido ya se cerró). */
+  reportId?: string;
 }
 
 /** Nombre del zip como lo genera el SISMED: BKDA<AAAAMMDD><HHMM>.zip (o BKDH…). */
@@ -189,7 +197,8 @@ export const isExpired = (job: Pick<BackupJob, "createdAt" | "kind">, now: numbe
   now - job.createdAt > (job.kind === "copy" ? COPY_JOB_TTL_MS : BACKUP_TTL_MS);
 
 // ---------------------------------------------------------------------------------------
-//  Copia del día (2026-10-16): la PC sube sola el primer backup del día
+//  Copia en la nube (2026-10-16; desde el 2026-10-18, cada backup nuevo): la PC sube sola
+//  cada backup que genera el SISMED y en la nube queda solo el más reciente
 // ---------------------------------------------------------------------------------------
 
 /** La copia sube por una sola conexión: va en segundo plano y no debe saturar la red. */
@@ -224,18 +233,34 @@ export const copyKey = (job: Pick<BackupJob, "id" | "code">, name: string) => `c
 
 export const copyIsStale = (copy: Pick<BackupCopy, "uploadedAt">, now: number) => now - copy.uploadedAt > COPY_KEEP_MS;
 
-const sameBackup = (copy: BackupCopy, meta: { name: string; size: number; sha256: string }) =>
+type BackupMeta = { name: string; size: number; sha256: string; modified?: string };
+
+const sameBackup = (copy: BackupCopy, meta: BackupMeta) =>
   copy.name === meta.name && copy.size === meta.size && copy.sha256 === meta.sha256;
 
-/** ¿Se acepta la copia que ofrece la PC? No si ya está guardada ni si el espacio se acaba. */
+/**
+ * ¿La copia de la nube ya sirve en lugar de este backup? Sí si es el mismo archivo, o uno
+ * más reciente (`modified` va como «AAAA-MM-DDTHH:MM», se compara como texto).
+ */
+export const copyCovers = (copy: BackupCopy | null | undefined, meta: BackupMeta, now: number): boolean =>
+  Boolean(copy) && !copyIsStale(copy!, now) &&
+  (sameBackup(copy!, meta) || Boolean(copy!.modified && meta.modified && copy!.modified > meta.modified));
+
+/** ¿La copia vigente es más reciente que este backup? (para no reemplazarla por uno más viejo) */
+export const copyIsNewer = (copy: BackupCopy, meta: { modified?: string }, now: number): boolean =>
+  !copyIsStale(copy, now) && Boolean(copy.modified && meta.modified && copy.modified > meta.modified);
+
+/** ¿Se acepta la copia que ofrece la PC? No si la nube ya la tiene (o una más nueva) ni si el espacio se acaba. */
 export const copyOfferVerdict = (
   existing: BackupCopy | null | undefined,
-  meta: { name: string; size: number; sha256: string },
+  meta: BackupMeta,
   reading: UsageReading | null,
   uploading: boolean,
   now: number,
 ): { accept: true } | { accept: false; reason: string } => {
-  if (existing && sameBackup(existing, meta) && !copyIsStale(existing, now)) return { accept: false, reason: "La nube ya tiene esta copia" };
+  if (copyCovers(existing, meta, now)) {
+    return { accept: false, reason: sameBackup(existing!, meta) ? "La nube ya tiene esta copia" : "La nube ya tiene un backup más reciente" };
+  }
   if (uploading) return { accept: false, reason: "Ya se está subiendo una copia de este establecimiento" };
   const storage = reading?.items.find((item) => item.key === "r2Storage")?.ratio ?? 0;
   if (usageBlocks(reading) || storage >= COPY_STORAGE_LIMIT) {
@@ -419,7 +444,7 @@ export const usageFor = (reading: UsageReading, isAdmin: boolean): UsageReading 
   };
 
 /** Mensajes que hay que volver a mandar a la web para que muestre un pedido en curso. */
-export const jobMessages = (job: Pick<BackupJob, "id" | "code" | "status" | "name" | "size" | "sha256" | "modified" | "sent" | "downloadUrl">): unknown[] => {
+export const jobMessages = (job: Pick<BackupJob, "id" | "code" | "kind" | "status" | "name" | "size" | "sha256" | "modified" | "sent" | "downloadUrl">): unknown[] => {
   const base = { job: job.id, code: job.code };
   const messages: unknown[] = [{ t: "backup_requested", ...base }];
   if (job.name && job.size) {
@@ -427,7 +452,8 @@ export const jobMessages = (job: Pick<BackupJob, "id" | "code" | "status" | "nam
     if (job.status === "uploading" && job.sent) messages.push({ t: "backup_progress", ...base, sent: job.sent, total: job.size });
   }
   if (job.status === "ready" && job.downloadUrl) {
-    messages.push({ t: "backup_ready", ...base, name: job.name, size: job.size, sha256: job.sha256, modified: job.modified, downloadUrl: job.downloadUrl });
+    messages.push({ t: "backup_ready", ...base, name: job.name, size: job.size, sha256: job.sha256, modified: job.modified, downloadUrl: job.downloadUrl,
+      ...(job.kind === "copy_download" ? { copy: true } : {}) });
   }
   return messages;
 };
