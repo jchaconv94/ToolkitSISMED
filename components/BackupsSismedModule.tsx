@@ -233,19 +233,28 @@ export const BackupsSismedModule: React.FC = () => {
     void load();
   };
 
+  const newBackupBlocker = (row: BackupRowView) =>
+    !row.online ? "La PC debe estar encendida para pedir uno más reciente"
+      : isActive(row.job) ? "Ya hay una descarga en curso"
+      : row.quotaUsed ? "Ya se usó el backup del día de este establecimiento"
+      : paused ? "Las descargas nuevas están pausadas por el consumo del plan"
+      : "No se puede pedir ahora";
+
   // Con copia del día, «Descargar» la baja de la nube (aunque la PC esté apagada) y
   // «Pedir uno nuevo» pide el backup de este momento a la PC, como siempre.
   const action = (row: BackupRowView, full = false) => !canDownload ? null : (
     <span className={`inline-flex items-center justify-end gap-1.5 ${full ? "w-full" : ""}`}>
-      {row.copy && row.canRequestNew && (
+      {/* Siempre a la vista cuando hay copia (antes se escondía y no se sabía que existía); si no se puede, dice por qué. */}
+      {row.copy && (
         <button
           type="button"
+          disabled={!row.canRequestNew}
           onClick={() => manager.request(row.code, row.name)}
-          title="Pedir uno nuevo a la PC (usa el cupo del día)"
-          aria-label="Pedir uno nuevo a la PC"
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-teal-700"
+          title={row.canRequestNew ? "Pedir a la PC el backup de este momento (usa el cupo del día)" : newBackupBlocker(row)}
+          aria-label="Pedir el backup más reciente a la PC"
+          className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-teal-200 bg-white px-2.5 text-xs font-bold text-teal-700 hover:bg-teal-50 disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-white"
         >
-          <RefreshCw className="h-4 w-4" />
+          <RefreshCw className="h-4 w-4" /><span className="hidden xl:inline">Más reciente</span>
         </button>
       )}
       <button
