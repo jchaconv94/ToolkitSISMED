@@ -1241,7 +1241,7 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
   const stat = (label: string, value: React.ReactNode) => (
     <div className="rounded-xl bg-slate-50 px-3 py-2.5">
       <p className="text-[10.5px] font-black uppercase tracking-wider text-slate-400">{label}</p>
-      <p className="mt-0.5 font-mono text-[17px] font-black text-slate-900">{value}</p>
+      <p className="mt-0.5 tabular-nums text-[17px] font-black text-slate-900">{value}</p>
     </div>
   );
   return (
@@ -1294,15 +1294,15 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
                         <tr key={i} className={r ? "bg-red-50/50" : ""}>
                           {bySite && (
                             <td className="max-w-[150px] px-3 py-2" title={`${site} · ${siteName(site)} · se evalúa con el CPA de ${unit.name} (${dec(unit.cpa)}${unit.dispensedCpa !== undefined ? `, con lo que entrega a sus puestos; solo dispensado ${dec(unit.dispensedCpa)}` : ""})`}>
-                              <span className="block font-mono text-[11px] font-bold text-slate-500">{site.length > 5 ? site.slice(5) : site}</span>
+                              <span className="block tabular-nums text-[11px] font-bold text-slate-500">{site.length > 5 ? site.slice(5) : site}</span>
                               <span className="block truncate text-[11.5px] text-slate-600">{siteName(site)}</span>
                             </td>
                           )}
-                          <td className="px-3 py-2 text-center font-mono">{l.lot || "—"}</td>
+                          <td className="px-3 py-2 text-center tabular-nums">{l.lot || "—"}</td>
                           <td className="px-3 py-2 text-center">{dateText(l.expiry)}</td>
-                          <td className="px-3 py-2 text-center font-mono">{formatNumber(l.balance)}</td>
-                          <td className="px-3 py-2 text-center font-mono">{formatNumber(r ? r.usable : l.balance)}</td>
-                          <td className="px-3 py-2 text-center font-mono font-bold text-red-700">{r ? formatNumber(r.atRisk) : "—"}</td>
+                          <td className="px-3 py-2 text-center tabular-nums">{formatNumber(l.balance)}</td>
+                          <td className="px-3 py-2 text-center tabular-nums">{formatNumber(r ? r.usable : l.balance)}</td>
+                          <td className="px-3 py-2 text-center tabular-nums font-bold text-red-700">{r ? formatNumber(r.atRisk) : "—"}</td>
                         </tr>
                       );
                     })}
@@ -1329,8 +1329,8 @@ export const ProductDrawer: React.FC<{ ctx: ReportContext; item: AvailabilityIte
                           <span className="block truncate font-semibold text-slate-700">{o.name}</span>
                           <span className="block truncate text-[11.5px] text-slate-400">{o.microred}</span>
                         </td>
-                        <td className="px-3 py-2 text-center font-mono">{formatNumber(o.stock)}</td>
-                        <td className="px-3 py-2 text-center font-mono" title={Number.isFinite(o.months) ? undefined : "Sin consumo: no se puede calcular"}>{Number.isFinite(o.months) ? dec(o.months) : "—"}</td>
+                        <td className="px-3 py-2 text-center tabular-nums">{formatNumber(o.stock)}</td>
+                        <td className="px-3 py-2 text-center tabular-nums" title={Number.isFinite(o.months) ? undefined : "Sin consumo: no se puede calcular"}>{Number.isFinite(o.months) ? dec(o.months) : "—"}</td>
                         <td className="px-3 py-2 text-center"><StatusPill status={o.status} /></td>
                       </tr>
                     ))}
@@ -1505,9 +1505,9 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
                 <div key={w.code} className="mb-3 overflow-hidden rounded-xl border border-slate-200 last:mb-0">
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 bg-slate-50 px-3 py-2 text-[12.5px] text-slate-600">
                     <span className="font-bold text-slate-800">{w.name || w.code}</span>
-                    <span>Stock <b className="font-mono text-slate-900">{formatNumber(w.stock)}</b></span>
-                    <span>Precio <b className="font-mono text-slate-900">{w.price ? `S/ ${formatNumber(w.price, 2)}` : "—"}</b></span>
-                    <span>Valor <b className="font-mono text-slate-900">{money(w.stock * (w.price || 0))}</b></span>
+                    <span>Stock <b className="tabular-nums text-slate-900">{formatNumber(w.stock)}</b></span>
+                    <span>Precio <b className="tabular-nums text-slate-900">{w.price ? `S/ ${w.price.toFixed(2).replace(".", ",")}` : "—"}</b></span>
+                    <span>Valor <b className="tabular-nums text-slate-900">{money(w.stock * (w.price || 0))}</b></span>
                   </div>
                   {w.lots.length ? (
                     <table className="w-full text-[12.5px]">
@@ -1519,11 +1519,11 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
                           const m = l.expiry ? (l.expiry.getTime() - ctx.asOf.getTime()) / (30.44 * 86400000) : null;
                           return (
                             <tr key={`${l.lot}-${i}`}>
-                              <td className="px-3 py-1.5 font-mono">{l.lot || "—"}</td>
+                              <td className="px-3 py-1.5 tabular-nums">{l.lot || "—"}</td>
                               <td className={`px-3 py-1.5 text-center ${m !== null && m < 6 ? "font-bold text-red-700" : ""}`}>{dateText(l.expiry)}</td>
-                              <td className="px-3 py-1.5 text-center font-mono">{m === null ? "—" : m <= 0 ? "vencido" : dec(m)}</td>
-                              <td className="px-3 py-1.5 text-center font-mono">{formatNumber(l.balance)}</td>
-                              <td className="px-3 py-1.5 text-center font-mono">{money(l.balance * (w.price || 0))}</td>
+                              <td className="px-3 py-1.5 text-center tabular-nums">{m === null ? "—" : m <= 0 ? "vencido" : dec(m)}</td>
+                              <td className="px-3 py-1.5 text-center tabular-nums">{formatNumber(l.balance)}</td>
+                              <td className="px-3 py-1.5 text-center tabular-nums">{money(l.balance * (w.price || 0))}</td>
                             </tr>
                           );
                         })}
@@ -1538,7 +1538,7 @@ export const ProductGapDrawer: React.FC<{ ctx: ReportContext; gap: ProductGap | 
             {rows.map((o) => (
               <button key={o.code} type="button" onClick={() => ctx.openProduct(o, rows)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[12.5px] hover:bg-slate-50">
                 <span className="min-w-0 flex-1"><span className="block truncate font-semibold text-slate-800">{o.name}</span><span className="block text-[11.5px] text-slate-400">{o.microred}</span></span>
-                <span className="text-right font-mono text-slate-600"><span className="font-sans text-slate-400">Stock</span> {formatNumber(o.stock)}<br /><span className="text-[11px] text-slate-400">{dec(o.months)} meses{o.stock > 0 && o.nearestExpiry ? ` · vence ${dateText(o.nearestExpiry)}` : ""}</span></span>
+                <span className="text-right tabular-nums text-slate-600"><span className="font-sans text-slate-400">Stock</span> {formatNumber(o.stock)}<br /><span className="text-[11px] text-slate-400">{dec(o.months)} meses{o.stock > 0 && o.nearestExpiry ? ` · vence ${dateText(o.nearestExpiry)}` : ""}</span></span>
                 <StatusPill status={o.status} />
               </button>
             ))}
