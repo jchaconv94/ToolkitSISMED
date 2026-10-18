@@ -4,7 +4,7 @@ vi.mock("./supabaseClient", () => ({ supabase: null }));
 vi.mock("./api", () => ({ getSessionToken: () => null }));
 
 import {
-  BackupOverviewRow, activityFromRequest, buildBackupRows, copyLabel, filterBackupRows, jobProgress, jobSpeed, lastConnectionLabel, speedLabel, trackPhase, limaDay, planState, rowsOfUnget,
+  BackupOverviewRow, activityFromRequest, asksPcForNewer, buildBackupRows, isOldToolkit, copyLabel, filterBackupRows, jobProgress, jobSpeed, lastConnectionLabel, speedLabel, trackPhase, limaDay, planState, rowsOfUnget,
   showFilterCounts, summarizeBackups, ungetOptions, whoLabel,
 } from "./backupModule";
 import type { OnlinePc, UsageReading } from "./backupConnection";
@@ -225,6 +225,17 @@ describe("copia del día", () => {
     // La PC con la fecha adelantada al 25 (cierre de mes): no sale «Copia del 25/10».
     const adelantada = { ...copia, modified: "2026-10-25T08:12" };
     expect(copyLabel(adelantada, ahora)).toBe("Copia de hoy 09:00");
+  });
+
+  it("«Pedir a la PC» solo aparece con copia y un Toolkit que sube únicamente el de la mañana", () => {
+    expect(asksPcForNewer({ copy: copia, version: "2.3.9" })).toBe(true);
+    expect(asksPcForNewer({ copy: copia, version: "2.3.10" })).toBe(false); // sube sola cada backup
+    expect(asksPcForNewer({ copy: copia, version: "2.4.0" })).toBe(false);
+    expect(asksPcForNewer({ copy: copia, version: undefined })).toBe(true); // sin versión: se ofrece
+    expect(asksPcForNewer({ copy: undefined, version: "2.3.9" })).toBe(false); // sin copia, «Descargar» ya se lo pide
+    expect(isOldToolkit("2.3.9")).toBe(true);
+    expect(isOldToolkit("2.3.10")).toBe(false);
+    expect(isOldToolkit(undefined)).toBe(false); // sin versión no se pide actualizar
   });
 
   it("la descarga de la copia llena la barra de 0 a 100 %: no hay subida", () => {

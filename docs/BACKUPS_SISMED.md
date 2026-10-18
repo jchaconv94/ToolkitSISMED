@@ -369,7 +369,8 @@ discutió y se acordó así:
 - **Web:** la fila dice «Copia de hoy 08:12 · 11 MB · lista en la nube» y el estado «Copia
   lista». «Descargar» la baja con `copy_request`, que reutiliza el camino de siempre
   (`backup_ready` → descarga → huella → `backup_done`), pero sin borrar el archivo, que sigue
-  para los demás. El botón ⟳ «Pedir uno nuevo» pide el backup del momento a la PC.
+  para los demás. El botón ⟳ pide el backup del momento a la PC (desde el 2026-10-18 solo en
+  PC con Toolkit anterior a 2.3.10; ver «Siempre el último backup en la nube»).
   «Descargar todos» baja las copias y pide a la PC los que no tienen.
 - **Cupo:** bajar la copia **no** usa el cupo diario por usuario (decisión del usuario del
   2026-10-16); «Pedir uno nuevo» sí. En Supabase queda como `COPY_DOWNLOADED`
@@ -424,8 +425,14 @@ mismo archivo que ya estaba en la nube cuando el SISMED todavía no había hecho
 - **Un pedido con un backup más nuevo** sube como siempre (4 partes a la vez) y, al terminar,
   queda también como la copia del establecimiento (`promoted`): ya va a `copias/` y su archivo
   no se borra al bajarlo. Antes se borraba y la PC lo habría vuelto a subir como copia.
-- **Web:** la barra de la descarga dice «Desde la nube» y ⟳ dice que usa el cupo solo si el
-  backup es más nuevo que el de la nube.
+- **Web:** la barra de la descarga dice «Desde la nube». **Un solo botón, «Descargar»**
+  (decisión del usuario del 2026-10-18): con la 2.3.10 la copia ya es el último backup, así que
+  baja la copia, y sin copia se lo pide a la PC. El antiguo ⟳ «Más reciente» ahora es «Pedir a la
+  PC» y solo aparece con copia y un Toolkit anterior a 2.3.10, que sube únicamente el de la
+  mañana; toda PC con Toolkit anterior a 2.3.10 sale con su versión en ámbar y «actualizar» (`asksPcForNewer`, `isOldToolkit`, `AUTO_COPY_VERSION`).
+  Cuando todas las PC tengan la 2.3.10, el botón ya no aparece. Entre que el SISMED genera un
+  backup y llega a la nube pasan unos minutos; quien descargue en ese momento baja el anterior,
+  y la hora de la copia en la fila lo dice.
 - **Consumo:** sube un backup más por establecimiento y día (el de las 13:00). En R2 sigue
   habiendo uno por establecimiento, porque el anterior se borra.
 
