@@ -231,11 +231,14 @@ describe("copia del día", () => {
 
   it("no acepta dos subidas a la vez ni copias si el espacio se acerca al límite", () => {
     expect(copyOfferVerdict(null, meta, null, true, now).accept).toBe(false);
-    const full = buildUsage({ r2Storage: 7.2 }, now);
+    const full = buildUsage({ r2Storage: 8.6 }, now);
     expect(copyOfferVerdict(null, meta, full, false, now)).toMatchObject({ accept: false });
     const paused = buildUsage({ doRequests: 85_000 }, now);
     expect(copyOfferVerdict(null, meta, paused, false, now).accept).toBe(false);
     expect(copyOfferVerdict(null, meta, buildUsage({ r2Storage: 2 }, now), false, now)).toEqual({ accept: true });
+    // Hasta 85 % del almacenamiento siguen entrando copias, aunque los pedidos ya estén en pausa (80 %).
+    expect(copyOfferVerdict(null, meta, buildUsage({ r2Storage: 8.2 }, now), false, now)).toEqual({ accept: true });
+    expect(copyOfferVerdict(null, meta, buildUsage({ r2Storage: 8.5 }, now), false, now).accept).toBe(false);
   });
 
   it("cada uno ve solo las copias de su jurisdicción y no las vencidas", () => {

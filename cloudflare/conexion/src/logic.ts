@@ -211,8 +211,13 @@ export const COPY_JOB_TTL_MS = 3 * 60 * 60 * 1000;
  * (docs/BACKUPS_SISMED.md); si borra antes, la web lo nota al pedirla y ofrece una nueva.
  */
 export const COPY_KEEP_MS = 48 * 60 * 60 * 1000;
-/** Con el almacenamiento de R2 en este nivel ya no se aceptan copias nuevas (sí pedidos). */
-export const COPY_STORAGE_LIMIT = 0.7;
+/**
+ * Con el almacenamiento de R2 en este nivel ya no se aceptan copias nuevas. Era 70 %; el
+ * 2026-10-18 el usuario lo subió a 85 % para que entre toda la región (en R2 queda una sola
+ * copia por establecimiento). Para las copias el almacenamiento solo cuenta contra este tope,
+ * no contra la pausa general del 80 %; los demás límites del plan sí las pausan.
+ */
+export const COPY_STORAGE_LIMIT = 0.85;
 
 export interface BackupCopy {
   code: string;
@@ -263,7 +268,8 @@ export const copyOfferVerdict = (
   }
   if (uploading) return { accept: false, reason: "Ya se está subiendo una copia de este establecimiento" };
   const storage = reading?.items.find((item) => item.key === "r2Storage")?.ratio ?? 0;
-  if (usageBlocks(reading) || storage >= COPY_STORAGE_LIMIT) {
+  const otherPaused = reading?.items.some((item) => item.key !== "r2Storage" && (item.ratio ?? 0) >= USAGE_PAUSE) ?? false;
+  if (otherPaused || storage >= COPY_STORAGE_LIMIT) {
     return { accept: false, reason: "La nube está cerca del límite gratuito: por ahora no se guardan copias" };
   }
   return { accept: true };

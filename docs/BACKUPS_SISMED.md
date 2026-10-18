@@ -363,7 +363,7 @@ discutió y se acordó así:
 - **Servicio:** guarda **una sola copia por establecimiento** (`copy:<código>`, archivo en
   `copias/<código>/<pedido>/<nombre>`). Cuando llega la siguiente, la anterior se borra en el
   acto; si el establecimiento deja de conectarse, su copia se borra a las 48 h
-  (`COPY_KEEP_MS`). No acepta copias nuevas con el almacenamiento de R2 al 70 %
+  (`COPY_KEEP_MS`). No acepta copias nuevas con el almacenamiento de R2 al 70 % (85 % desde el 2026-10-18)
   (`COPY_STORAGE_LIMIT`) ni con el plan en pausa. Espacio aproximado: un backup por
   establecimiento (15 establecimientos ≈ 0,3 GB; 300 de ~15 MB ≈ 4,5 GB).
 - **Web:** la fila dice «Copia de hoy 08:12 · 11 MB · lista en la nube» y el estado «Copia
@@ -436,3 +436,11 @@ copia sin subir nada, con la huella correcta, sin gastar el cupo y registrada ap
 13:00 sube solo y en R2 queda solo ese; un pedido con uno de las 13:30 sube, queda como copia y
 la PC no lo vuelve a subir; otro usuario lo baja de la nube. Con el Toolkit 2.3.9, ⟳ con el mismo
 backup también baja la copia (la PC solo anota un aviso en su consola).
+
+**Tope de las copias al 85 % (2026-10-18, decisión del usuario).** Con toda la región conectada
+el almacenamiento se acercaría al 70 %, que era el tope de las copias. Ahora es 85 %
+(`COPY_STORAGE_LIMIT`): con un solo backup por establecimiento en R2, entran todos. Para las
+copias el almacenamiento solo cuenta contra ese tope, no contra la pausa general del 80 %; si
+otro límite del plan llega al 80 %, las copias también se pausan. Los pedidos siguen igual
+(aviso al 70 %, pausa al 80 % de cualquier límite). Si la PC no tiene internet cuando el SISMED
+genera un backup, en la nube sigue el anterior hasta que vuelva la conexión.
