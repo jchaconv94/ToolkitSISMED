@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, BackupCopy, COPY_JOB_TTL_MS, COPY_KEEP_MS, copyIsStale, copyKey, copyOfferVerdict, copyRowsFor, nextCopyExpiry, PC_SILENCE_MS, PcInfo, backupKey, buildUsage, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, jobMessages, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, usageFor, r2OperationClass, usageBlocks, usageMessage, utcDayStart, utcMonthStart } from "./logic";
+import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, BackupCopy, COPY_JOB_TTL_MS, COPY_KEEP_MS, copyCovers, copyIsStale, copyKey, copyOfferVerdict, copyRowsFor, nextCopyExpiry, PC_SILENCE_MS, PcInfo, backupKey, buildUsage, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, jobMessages, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, usageFor, r2OperationClass, usageBlocks, usageMessage, utcDayStart, utcMonthStart } from "./logic";
 
 const now = 1_000_000_000;
 const pc = (codes: Array<[string, string | null]>, since = now - 1000, equipo = "PC"): PcInfo => ({
@@ -198,6 +198,28 @@ describe("copia del día", () => {
     expect(copyOfferVerdict(null, meta, null, false, now)).toEqual({ accept: true });
     // Una copia vencida igual se reemplaza, aunque sea el mismo archivo.
     expect(copyOfferVerdict(copy({ uploadedAt: now - COPY_KEEP_MS - 1 }), meta, null, false, now)).toEqual({ accept: true });
+  });
+
+  it("cada backup nuevo del día reemplaza al anterior, pero uno más viejo no", () => {
+    const afternoon = { ...meta, name: "BKDA202610161300.zip", sha256: "b".repeat(64), modified: "2026-10-16T13:00" };
+    expect(copyOfferVerdict(copy(), afternoon, null, false, now)).toEqual({ accept: true });
+    const older = { ...meta, name: "BKDA202610150730.zip", sha256: "c".repeat(64), modified: "2026-10-15T07:30" };
+    expect(copyOfferVerdict(copy(), older, null, false, now)).toMatchObject({ accept: false, reason: "La nube ya tiene un backup más reciente" });
+  });
+
+  it("un pedido con el mismo backup de la nube se atiende con la copia, sin subirlo otra vez", () => {
+    expect(copyCovers(copy(), { ...meta, modified: "2026-10-16T08:12" }, now)).toBe(true);
+    expect(copyCovers(copy(), { ...meta, name: "BKDA202610161300.zip", sha256: "b".repeat(64), modified: "2026-10-16T13:00" }, now)).toBe(false);
+    expect(copyCovers(null, meta, now)).toBe(false);
+    expect(copyCovers(copy({ uploadedAt: now - COPY_KEEP_MS - 1 }), meta, now)).toBe(false);
+    // Sin fecha no se puede decir cuál es más nuevo: solo cuenta si es el mismo archivo.
+    expect(copyCovers(copy({ modified: "" }), { ...meta, name: "BKDA202610150730.zip", sha256: "c".repeat(64), modified: "2026-10-15T07:30" }, now)).toBe(false);
+  });
+
+  it("al volver a entrar, el pedido atendido con la copia se sigue mostrando como copia", () => {
+    const job = { id: "j1", code: "06502", kind: "copy_download" as const, status: "ready" as const, name: meta.name, size: meta.size, sha256: sha, downloadUrl: "https://x/d" };
+    expect(jobMessages(job).at(-1)).toMatchObject({ t: "backup_ready", copy: true });
+    expect(jobMessages({ ...job, kind: undefined }).at(-1)).not.toHaveProperty("copy");
   });
 
   it("no acepta dos subidas a la vez ni copias si el espacio se acerca al límite", () => {

@@ -11,7 +11,9 @@ contraseña), sin que nadie en el establecimiento haga nada.
 
 Reglas acordadas:
 
-- **Solo a pedido.** Sin descargas automáticas: lo que nadie descarga no debe quedar ocupando espacio.
+- ~~**Solo a pedido.**~~ Cambió el 2026-10-16 (copia del día) y el 2026-10-18: cada backup nuevo
+  del SISMED sube solo y en la nube queda **solo el más reciente** de cada establecimiento
+  (ver «Siempre el último backup en la nube» al final).
 - **Solo PC conectadas en ese momento**, y solo las de su jurisdicción.
 - **Inmediato:** el aviso llega a la PC en 1–2 s (conexión abierta), no cada 2 ni 10 minutos.
 - **Un backup por establecimiento al día**, para todos los usuarios. No cuenta si falló.
@@ -397,3 +399,40 @@ Cloudflare → R2 → `sismed-backups` → Settings → Object lifecycle rules:
 
 Mientras no se cambie, cada copia dura 1 día. Si la regla la borró antes, la web lo nota al
 pedirla («La copia ya no está en la nube; pida uno nuevo») y la olvida.
+
+## Siempre el último backup en la nube (Toolkit 2.3.10, 2026-10-18)
+
+Propuesta del usuario. Con la copia del día solo subía el backup de la mañana; a las 13:00 el
+SISMED genera otro, y si alguien pedía «el más reciente» con ⟳ la PC volvía a subir, entero, el
+mismo archivo que ya estaba en la nube cuando el SISMED todavía no había hecho otro. Ahora:
+
+- **Toolkit 2.3.10:** cada 5 minutos mira el backup más reciente de `<SISMED>\backup` que ya
+  terminó de escribirse (`find_latest_backup`, 90 s) y lo ofrece con `copy_offer` si no lo
+  ofreció antes. Ya no existe `find_morning_backup`. Lo que subió por un pedido de la web no lo
+  vuelve a ofrecer.
+- **Servicio, solo el más reciente:** el backup nuevo se guarda como copia y **recién cuando
+  terminó de subir completo** (tamaño comprobado al cerrar la subida) se borra el anterior, así
+  nunca queda sin ninguno (`saveCopy`). Si la PC ofrece uno más viejo que el de la nube, responde
+  «La nube ya tiene un backup más reciente» (`copyCovers`, compara `modified`).
+- **Servicio, «Pedir uno nuevo» sin subir lo mismo dos veces:** cuando la PC informa el backup
+  del pedido (`backup_meta` o el inicio de la subida) y es el mismo que ya está en la nube, el
+  servicio no lo deja subir: el pedido pasa a bajar la copia (`reuseCopy`, `reused`), se cierra
+  en Supabase como `FAILED` con el motivo «Ya estaba en la nube: se bajó la copia» (no cuenta en
+  el cupo; la web lo muestra como descarga, no como falla) y la descarga se registra como
+  `COPY_DOWNLOADED` con otro id (`reportId`). Sin SQL nuevo. El Toolkit 2.3.10 lo entiende al
+  iniciar (`reused`) y no sube nada; uno anterior intenta la primera parte, recibe «La nube ya
+  tiene este backup» y el servicio ignora su error.
+- **Un pedido con un backup más nuevo** sube como siempre (4 partes a la vez) y, al terminar,
+  queda también como la copia del establecimiento (`promoted`): ya va a `copias/` y su archivo
+  no se borra al bajarlo. Antes se borraba y la PC lo habría vuelto a subir como copia.
+- **Web:** la barra de la descarga dice «Desde la nube» y ⟳ dice que usa el cupo solo si el
+  backup es más nuevo que el de la nube.
+- **Consumo:** sube un backup más por establecimiento y día (el de las 13:00). En R2 sigue
+  habiendo uno por establecimiento, porque el anterior se borra.
+
+**Prueba de punta a punta** con el servicio real en local (R2 simulado, Supabase simulado) y el
+código real de conexión del Toolkit: sube solo el de las 07:00; ⟳ con el mismo backup baja la
+copia sin subir nada, con la huella correcta, sin gastar el cupo y registrada aparte; el de las
+13:00 sube solo y en R2 queda solo ese; un pedido con uno de las 13:30 sube, queda como copia y
+la PC no lo vuelve a subir; otro usuario lo baja de la nube. Con el Toolkit 2.3.9, ⟳ con el mismo
+backup también baja la copia (la PC solo anota un aviso en su consola).

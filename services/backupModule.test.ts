@@ -231,7 +231,15 @@ describe("copia del día", () => {
 
   it("la actividad nombra la descarga de la copia", () => {
     const item = activityFromRequest({ id: "1", code: "06533", name: "P.S.", username: "jordan", status: "COPY_DOWNLOADED", fileName: copia.name, size: copia.size, at: "2026-10-02T15:00:00Z" } as any, "jordan");
-    expect(item.text).toContain("copia del día");
+    expect(item.text).toContain("copia de la nube");
     expect(item.text).toContain("la descargaste tú");
+  });
+
+  it("un pedido atendido con la copia de la nube no se muestra como falla", () => {
+    const base = { id: "2", code: "06533", name: "P.S.", username: "jordan", status: "FAILED", at: "2026-10-02T15:00:00Z" } as const;
+    const reused = activityFromRequest({ ...base, reason: "Ya estaba en la nube: se bajó la copia" }, "jordan");
+    expect(reused).toMatchObject({ kind: "download", tone: "info" });
+    expect(reused.text).toContain("ya estaba en la nube");
+    expect(activityFromRequest({ ...base, reason: "La PC se desconectó" }, "jordan").tone).toBe("warn");
   });
 });

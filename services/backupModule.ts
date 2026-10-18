@@ -281,6 +281,9 @@ export interface ActivityItem {
 const megabytes = (bytes?: number | null) =>
   bytes ? `${(bytes / 1048576).toLocaleString("es-PE", { maximumFractionDigits: 1 })} MB` : "";
 
+/** Motivo con que el servicio cierra un pedido atendido con la copia de la nube (`cloudflare/conexion`). */
+export const REUSED_REASON = "Ya estaba en la nube";
+
 /** Un pedido del registro, como línea de la actividad. */
 export const activityFromRequest = (row: BackupActivityRow, me?: string | null): ActivityItem => {
   const mine = row.username === me;
@@ -288,10 +291,12 @@ export const activityFromRequest = (row: BackupActivityRow, me?: string | null):
   const base = { key: `${row.id}-${row.status}`, at: new Date(row.at).getTime() };
   switch (row.status) {
     case "COPY_DOWNLOADED":
-      return { ...base, kind: "download", tone: "ok", text: `${row.code} · copia del día ${row.fileName || ""}${row.size ? ` (${megabytes(row.size)})` : ""} · ${mine ? "la descargaste tú" : `la descargó ${row.username}`}` };
+      return { ...base, kind: "download", tone: "ok", text: `${row.code} · copia de la nube ${row.fileName || ""}${row.size ? ` (${megabytes(row.size)})` : ""} · ${mine ? "la descargaste tú" : `la descargó ${row.username}`}` };
     case "DOWNLOADED":
       return { ...base, kind: "download", tone: "ok", text: `${row.code} · ${row.fileName || "backup"}${row.size ? ` (${megabytes(row.size)})` : ""} · ${mine ? "lo descargaste tú" : `lo descargó ${row.username}`}` };
     case "FAILED":
+      // El servicio lo atendió con la copia de la nube, sin volver a subirlo (2026-10-18).
+      if (row.reason?.startsWith(REUSED_REASON)) return { ...base, kind: "download", tone: "info", text: `${row.code} · ya estaba en la nube: se bajó la copia · ${pedido}` };
       return { ...base, kind: "warning", tone: "warn", text: `${row.code} · falló: ${row.reason || "sin detalle"} · ${pedido}` };
     case "EXPIRED":
       return { ...base, kind: "warning", tone: "warn", text: `${row.code} · venció sin descargarse · ${pedido}` };
