@@ -282,7 +282,9 @@ export const StatusChip: React.FC<{
   label: string;
   tone?: Tone;
 }> = ({ label, tone = "neutral" }) => (
-  <span className={`w-fit rounded-full border px-2.5 py-1 text-xs font-black ${toneChip[tone]}`}>
+  // En una línea siempre: en una columna angosta («Copia lista» en Backups) el texto se partía y
+  // el borde redondeado quedaba cortado en dos pedazos.
+  <span className={`inline-flex w-fit shrink-0 items-center whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-black ${toneChip[tone]}`}>
     {label}
   </span>
 );
