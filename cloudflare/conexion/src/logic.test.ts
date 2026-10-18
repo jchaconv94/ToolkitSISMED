@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, BackupCopy, COPY_JOB_TTL_MS, COPY_KEEP_MS, copyCovers, copyIsStale, copyKey, copyOfferVerdict, copyRowsFor, nextCopyExpiry, PC_SILENCE_MS, PcInfo, backupKey, buildUsage, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, jobMessages, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, usageFor, r2OperationClass, usageBlocks, usageMessage, utcDayStart, utcMonthStart } from "./logic";
+import { BACKUP_MAX_BYTES, BACKUP_TTL_MS, BackupCopy, COPY_JOB_TTL_MS, COPY_KEEP_MS, copyCovers, copyIsNewer, copyIsStale, copyKey, copyOfferVerdict, copyRowsFor, nextCopyExpiry, PC_SILENCE_MS, PcInfo, backupKey, buildUsage, canSee, isAlive, isBackupName, isExpired, keysByCode, onlineFor, jobMessages, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, usageFor, r2OperationClass, usageBlocks, usageMessage, utcDayStart, utcMonthStart } from "./logic";
 
 const now = 1_000_000_000;
 const pc = (codes: Array<[string, string | null]>, since = now - 1000, equipo = "PC"): PcInfo => ({
@@ -214,6 +214,13 @@ describe("copia del día", () => {
     expect(copyCovers(copy({ uploadedAt: now - COPY_KEEP_MS - 1 }), meta, now)).toBe(false);
     // Sin fecha no se puede decir cuál es más nuevo: solo cuenta si es el mismo archivo.
     expect(copyCovers(copy({ modified: "" }), { ...meta, name: "BKDA202610150730.zip", sha256: "c".repeat(64), modified: "2026-10-15T07:30" }, now)).toBe(false);
+  });
+
+  it("una subida más vieja que termina después no reemplaza a la copia", () => {
+    expect(copyIsNewer(copy({ modified: "2026-10-16T13:30" }), { modified: "2026-10-16T08:12" }, now)).toBe(true);
+    expect(copyIsNewer(copy(), { modified: "2026-10-16T13:30" }, now)).toBe(false);
+    expect(copyIsNewer(copy({ modified: "2026-10-16T13:30", uploadedAt: now - COPY_KEEP_MS - 1 }), { modified: "2026-10-16T08:12" }, now)).toBe(false);
+    expect(copyIsNewer(copy(), { modified: "" }, now)).toBe(false);
   });
 
   it("al volver a entrar, el pedido atendido con la copia se sigue mostrando como copia", () => {

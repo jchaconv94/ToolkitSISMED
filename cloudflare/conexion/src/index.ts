@@ -50,7 +50,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   BACKUP_MAX_BYTES, BACKUP_PARALLEL, BACKUP_PART_MAX_BYTES, BACKUP_PART_SIZE, BackupCopy, BackupJob, COPY_PARALLEL, PcCode, PcInfo, USAGE_REFRESH_MS,
-  UsageReading, WebInfo, canSee, copyCovers, copyIsStale, copyKey, copyOfferVerdict, copyRowsFor, isExpired, jobMessages, keysByCode,
+  UsageReading, WebInfo, canSee, copyCovers, copyIsNewer, copyIsStale, copyKey, copyOfferVerdict, copyRowsFor, isExpired, jobMessages, keysByCode,
   nextCopyExpiry, onlineFor, parseBackupMeta, quotaMessage, seenFor, seenRowsFor, SeenRow, usageBlocks, usageFor, usageMessage,
 } from "./logic";
 import { UsageEnv, readUsage } from "./usage";
@@ -621,6 +621,13 @@ export class Region extends DurableObject<Env> {
   private async saveCopy(job: BackupJob, origin: string): Promise<boolean> {
     if (!job.key || !job.name || !job.size || !job.sha256) return false;
     const previous = await this.ctx.storage.get<BackupCopy>(COPY_PREFIX + job.code);
+    // Dos subidas que terminan en desorden: la nube no vuelve a un backup más viejo.
+    if (previous && previous.key !== job.key && copyIsNewer(previous, job, Date.now())) {
+      if (job.kind === "copy") {
+        try { await this.env.BACKUPS.delete(job.key); } catch { /* la regla del bucket la borra igual */ }
+      }
+      return false;
+    }
     const ungetId = job.ungetId ?? previous?.ungetId ?? this.ungetOf(job.code);
     const copy: BackupCopy = {
       code: job.code, ungetId, name: job.name, size: job.size, sha256: job.sha256,

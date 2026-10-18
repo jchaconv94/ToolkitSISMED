@@ -246,6 +246,10 @@ export const copyCovers = (copy: BackupCopy | null | undefined, meta: BackupMeta
   Boolean(copy) && !copyIsStale(copy!, now) &&
   (sameBackup(copy!, meta) || Boolean(copy!.modified && meta.modified && copy!.modified > meta.modified));
 
+/** ¿La copia vigente es más reciente que este backup? (para no reemplazarla por uno más viejo) */
+export const copyIsNewer = (copy: BackupCopy, meta: { modified?: string }, now: number): boolean =>
+  !copyIsStale(copy, now) && Boolean(copy.modified && meta.modified && copy.modified > meta.modified);
+
 /** ¿Se acepta la copia que ofrece la PC? No si la nube ya la tiene (o una más nueva) ni si el espacio se acaba. */
 export const copyOfferVerdict = (
   existing: BackupCopy | null | undefined,
