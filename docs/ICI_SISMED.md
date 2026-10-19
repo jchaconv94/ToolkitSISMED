@@ -121,9 +121,11 @@ Desde junio de 2026 la F01 abastece a F02–F08 con **Guía de Devolución, conc
 
 ---
 
-## 6. Diseño del ICI (en revisión con el usuario)
+## 6. Diseño del ICI (aprobado el 2026-10-19)
 
-Prototipo aprobado en lo general el 2026-10-19 («hiciste un buen trabajo»), con ajustes pendientes:
+Prototipo aprobado el 2026-10-19 («ya, está excelente»). En el Toolkit de escritorio es una **herramienta nueva, «Generar ICI»**, aparte de «Consulta TFORMDET» (que se queda como está): toma los datos del TFORMDET y arma el ICI.
+
+Hojas del libro, en este orden: **ICI**, **Vencimientos**, **Alertas de farmacia**, **Lotes sin movimiento**, **Guías de ingreso** y **Correcciones de lote**.
 
 - **Hoja ICI**, para imprimir **horizontal** en A4, a una hoja de ancho, con el encabezado de columnas repetido en cada página.
   - Banda de título con el mes, y debajo el periodo.
@@ -131,7 +133,7 @@ Prototipo aprobado en lo general el 2026-10-19 («hiciste un buen trabajo»), co
   - Tabla por lote con encabezados girados agrupados (Producto, Saldo, Entradas, Consumos, Otras salidas, Saldo final). Nombres a la izquierda, cifras centradas, «–» en lugar de 0, cifras distintas de cero resaltadas por grupo (azul ingresos, verde consumos, ámbar devoluciones, rojo vencidos), fecha de vencimiento en rojo si ya venció con stock y en ámbar si vence en 6 meses.
   - Fila «N° de recetas» bajo las columnas de consumo; bajo Devolución, Vencidos, Merma y Otras salidas, el número de lotes con esa salida (como hacía la macro).
   - Totales, y al final **declaración jurada** con dos firmas, responsable de farmacia y jefe del establecimiento, cada una con nombre y DNI (sin colegiatura ni sello: decisión del usuario del 2026-10-19), y la **fecha en que se generó el informe**, automática y sin lugar.
-- **Hoja Reporte de vencimientos:** resumen y cuatro listas (salieron por vencimiento en el mes, vencidos que aún tienen stock, vencen en 1–3 meses, vencen entre 3 y 6 meses), con lote, fecha, meses al vencimiento desde el cierre del mes, stock, consumo del mes, precio y valor.
+- **Hoja Vencimientos:** resumen y cuatro listas (salieron por vencimiento en el mes, vencidos que aún tienen stock, vencen en 1–3 meses, vencen entre 3 y 6 meses), con lote, fecha, meses al vencimiento desde el cierre del mes, stock, consumo del mes, precio y valor.
 - **Hojas Guías de ingreso y Correcciones de lote.**
 - Pedidos del usuario (2026-10-19), ya aplicados en el prototipo:
   - cifras **sin separador de miles** (con coma parecía decimal) y **precios completos** (hasta 6 decimales; nunca «###»);
@@ -139,18 +141,18 @@ Prototipo aprobado en lo general el 2026-10-19 («hiciste un buen trabajo»), co
   - **la misma letra en todas las descripciones**: un nombre largo pasa a una segunda línea (antes se achicaba cada uno a un tamaño distinto);
   - sin notas en la fila de recetas;
   - **sin columna de ajuste de inventario que entra** (`ING_REGULA`, concepto 21): en toda la región estuvo siempre en cero y «regularización» la entienden como una guía de un mes anterior ingresada en este. Solo aparece, como «Ajuste de inventario (+)», si algún lote del mes lo tiene, para que el stock cuadre. La salida conserva el nombre del SISMED, «Regula.».
-- **Hoja «Resumen gerencial»** (elegida el 2026-10-19):
+- **Hoja «Alertas de farmacia»** (nombre elegido por el usuario el 2026-10-19; antes «Resumen gerencial»):
   - productos **desabastecidos**: consumo en el mes y stock final cero, sumando todos sus lotes;
   - los **10 productos de mayor consumo en soles**, con su porcentaje del consumo del mes;
-  - **lotes sin movimiento**: stock sin ninguna entrada ni salida en el mes, con su valor.
+  - **lotes sin movimiento**: stock sin ninguna entrada ni salida en el mes; se muestran **los 30 de mayor valor** y la lista completa va en la hoja **«Lotes sin movimiento»** (con filtro).
   - Agosto 2026, hospital consolidado: 24 desabastecidos; los 10 primeros suman el 46,4 % del consumo; 398 lotes sin movimiento por S/ 387 974,03.
 - **Descartados por el usuario:** el control FEFO desde los datos (el SISMED ya descarga el lote que vence primero; el problema real es que físicamente entregan otro lote, y eso no queda en el sistema), el resumen por financiamiento y tipo de suministro, y los meses de stock por producto.
 ---
 
 ## 7. Plan
 
-1. Ajustar el diseño hasta aprobarlo (prototipo con datos reales).
-2. Toolkit de escritorio: ICI por farmacia y consolidado con un clic, leyendo TFORMDET, TFORMATO y TMOVIM; y el TFORMDET exportado con las columnas y hojas nuevas. Requiere una versión nueva (el usuario aprueba la publicación).
+1. ~~Ajustar el diseño hasta aprobarlo~~ (aprobado el 2026-10-19).
+2. Toolkit de escritorio, herramienta **«Generar ICI»**: ICI por farmacia y consolidado con un clic, leyendo TFORMDET, TFORMATO y TMOVIM; y el TFORMDET exportado con las columnas y hojas nuevas. Requiere una versión nueva (el usuario aprueba la publicación).
 3. Toolkit web: el mismo ICI desde el archivo, sin internet.
 4. Formato para puestos comunales.
 5. IME (plan aparte).
