@@ -134,7 +134,10 @@ Hojas del libro, en este orden: **ICI**, **Vencimientos**, **Alertas de farmacia
   - Fila «N° de recetas» bajo las columnas de consumo; bajo Devolución, Vencidos, Merma y Otras salidas, el número de lotes con esa salida (como hacía la macro).
   - Totales, y al final **declaración jurada** con dos firmas, responsable de farmacia y jefe del establecimiento, cada una con nombre y DNI (sin colegiatura ni sello: decisión del usuario del 2026-10-19), y la **fecha en que se generó el informe**, automática y sin lugar.
 - **Hoja Vencimientos:** resumen y cuatro listas (salieron por vencimiento en el mes, vencidos que aún tienen stock, vencen en 1–3 meses, vencen entre 3 y 6 meses), con lote, fecha, meses al vencimiento desde el cierre del mes, stock, consumo del mes, precio y valor.
-- **Hojas Guías de ingreso y Correcciones de lote.**
+- **Hoja Guías de ingreso** (ajustada por el usuario el 2026-10-19): fecha, N° de guía, procedencia, concepto (solo el nombre, «Distribución», sin el número), **referencia** (lo que escriben a mano en la guía del almacén, `TMOVIM.MOVREFE`), ítems y valor; sin «documento». Un resumen por referencia y las guías **separadas en SISMED, Intervención y Transferencias** (por el texto de la referencia, sin importar tildes ni mayúsculas; lo demás va a «Otras referencias»), cada grupo con su subtotal. En el consolidado, también la farmacia que la recibió.
+- **Hoja Correcciones de lote:** las guías con que un producto salió y volvió a entrar en la misma farmacia para cambiarle el lote o el código. Fecha, N° de guía, farmacia, salida o entrada, concepto, referencia, código, descripción, lote, **vencimiento** y cantidad.
+- **Firmas** centradas en el ancho de la hoja (la derecha es el espejo de la izquierda) y la **fecha en letras** («19 de octubre de 2026»), a la izquierda, bajo la declaración jurada.
+- **Excel y PDF** (pedido del usuario del 2026-10-19): cada ICI sale también en un PDF con **todas las hojas**, para imprimir sin olvidar ninguna; el Excel es para presentarlo de forma virtual. El PDF lo arma Microsoft Excel (o WPS) de la PC, con la configuración de impresión de cada hoja; sin ellos, LibreOffice; si no hay ninguno, sale solo el Excel y la consola lo avisa. El consolidado de agosto del hospital da 47 páginas (26 del ICI y 12 de la lista completa de lotes sin movimiento).
 - Pedidos del usuario (2026-10-19), ya aplicados en el prototipo:
   - cifras **sin separador de miles** (con coma parecía decimal) y **precios completos** (hasta 6 decimales; nunca «###»);
   - impresión **horizontal** con el encabezado de columnas en cada página;
@@ -152,7 +155,7 @@ Hojas del libro, en este orden: **ICI**, **Vencimientos**, **Alertas de farmacia
 ## 7. Plan
 
 1. ~~Ajustar el diseño hasta aprobarlo~~ (aprobado el 2026-10-19).
-2. Toolkit de escritorio, herramienta **«Generar ICI»**: ICI por farmacia y consolidado con un clic, leyendo TFORMDET, TFORMATO y TMOVIM; y el TFORMDET exportado con las columnas y hojas nuevas. Requiere una versión nueva (el usuario aprueba la publicación).
+2. ~~Toolkit de escritorio, herramienta **«Generar ICI»**~~: publicada en el **Toolkit 2.3.11** (2026-10-19, Toolkit-OGM PR #36): ICI por farmacia y consolidado con un clic, en Excel y PDF, leyendo TFORMDET, TFORMATO y TMOVIM (`toolskit/ici_data.py`, `ici_excel.py`, `ici_pdf.py`, `tools/generar_ici_tool.py`, pruebas en `tests/test_ici.py`). Comprobado con el TFORMDET real de agosto del hospital (mismas cifras que el prototipo); **falta probarlo con el SISMED completo del hospital** (TMOVIM: descuento exacto entre farmacias, concepto 35, guías por referencia). Pendiente de este punto: el TFORMDET exportado con las columnas y hojas nuevas.
 3. Toolkit web: el mismo ICI desde el archivo, sin internet.
 4. Formato para puestos comunales.
 5. IME (plan aparte).
