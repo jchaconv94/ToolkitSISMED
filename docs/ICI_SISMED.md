@@ -130,10 +130,11 @@ Prototipo aprobado en lo general el 2026-10-19 («hiciste un buen trabajo»), co
   - Tres recuadros: datos del establecimiento; resumen valorizado del mes (saldo anterior, ingresos, reingresos, consumo total, stock final, venta, SIS, intervención, devoluciones, vencidos); control del mes (lotes con stock, por vencer en 6 meses, vencidos con stock, productos sin precio, guías de ingreso).
   - Tabla por lote con encabezados girados agrupados (Producto, Saldo, Entradas, Consumos, Otras salidas, Saldo final). Nombres a la izquierda, cifras centradas, «–» en lugar de 0, cifras distintas de cero resaltadas por grupo (azul ingresos, verde consumos, ámbar devoluciones, rojo vencidos), fecha de vencimiento en rojo si ya venció con stock y en ámbar si vence en 6 meses.
   - Fila «N° de recetas» bajo las columnas de consumo; bajo Devolución, Vencidos, Merma y Otras salidas, el número de lotes con esa salida (como hacía la macro).
-  - Totales, y al final **declaración jurada** con firmas del responsable de farmacia (nombre, DNI, colegiatura) y del jefe del establecimiento, sello, lugar y fecha.
+  - Totales, y al final **declaración jurada** con dos firmas, responsable de farmacia y jefe del establecimiento, cada una con nombre y DNI (sin colegiatura ni sello: decisión del usuario del 2026-10-19), y la **fecha en que se generó el informe**, automática y sin lugar.
 - **Hoja Reporte de vencimientos:** resumen y cuatro listas (salieron por vencimiento en el mes, vencidos que aún tienen stock, vencen en 1–3 meses, vencen entre 3 y 6 meses), con lote, fecha, meses al vencimiento desde el cierre del mes, stock, consumo del mes, precio y valor.
 - **Hojas Guías de ingreso y Correcciones de lote.**
-- Pedidos del usuario: cifras **sin separador de miles** (con coma parecía decimal); sin notas explicativas en la fila de recetas; explicar la columna de ingreso por regularización.
+- Pedidos del usuario (2026-10-19), ya aplicados en el prototipo: cifras **sin separador de miles** (con coma parecía decimal); sin notas en la fila de recetas; impresión **horizontal** con el encabezado de columnas en cada página; la columna de ajuste se llama «Ingreso por regularización» (concepto 21, entrada) y su par «Salida por regularización».
+- Datos adicionales propuestos para una hoja «Resumen gerencial» (esperan la elección del usuario): desabastecidos (consumo en el mes y stock final cero), lotes sin movimiento con su valor, control FEFO (se despachó un lote que vence después mientras otro que vence antes seguía con stock), los 10 productos de mayor consumo en soles, resumen por financiamiento y tipo de suministro, y meses de stock solo si hay varios meses.
 
 ---
 
