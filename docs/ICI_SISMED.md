@@ -133,9 +133,18 @@ Prototipo aprobado en lo general el 2026-10-19 («hiciste un buen trabajo»), co
   - Totales, y al final **declaración jurada** con dos firmas, responsable de farmacia y jefe del establecimiento, cada una con nombre y DNI (sin colegiatura ni sello: decisión del usuario del 2026-10-19), y la **fecha en que se generó el informe**, automática y sin lugar.
 - **Hoja Reporte de vencimientos:** resumen y cuatro listas (salieron por vencimiento en el mes, vencidos que aún tienen stock, vencen en 1–3 meses, vencen entre 3 y 6 meses), con lote, fecha, meses al vencimiento desde el cierre del mes, stock, consumo del mes, precio y valor.
 - **Hojas Guías de ingreso y Correcciones de lote.**
-- Pedidos del usuario (2026-10-19), ya aplicados en el prototipo: cifras **sin separador de miles** (con coma parecía decimal); sin notas en la fila de recetas; impresión **horizontal** con el encabezado de columnas en cada página; la columna de ajuste se llama «Ingreso por regularización» (concepto 21, entrada) y su par «Salida por regularización».
-- Datos adicionales propuestos para una hoja «Resumen gerencial» (esperan la elección del usuario): desabastecidos (consumo en el mes y stock final cero), lotes sin movimiento con su valor, control FEFO (se despachó un lote que vence después mientras otro que vence antes seguía con stock), los 10 productos de mayor consumo en soles, resumen por financiamiento y tipo de suministro, y meses de stock solo si hay varios meses.
-
+- Pedidos del usuario (2026-10-19), ya aplicados en el prototipo:
+  - cifras **sin separador de miles** (con coma parecía decimal) y **precios completos** (hasta 6 decimales; nunca «###»);
+  - impresión **horizontal** con el encabezado de columnas en cada página;
+  - **la misma letra en todas las descripciones**: un nombre largo pasa a una segunda línea (antes se achicaba cada uno a un tamaño distinto);
+  - sin notas en la fila de recetas;
+  - **sin columna de ajuste de inventario que entra** (`ING_REGULA`, concepto 21): en toda la región estuvo siempre en cero y «regularización» la entienden como una guía de un mes anterior ingresada en este. Solo aparece, como «Ajuste de inventario (+)», si algún lote del mes lo tiene, para que el stock cuadre. La salida conserva el nombre del SISMED, «Regula.».
+- **Hoja «Resumen gerencial»** (elegida el 2026-10-19):
+  - productos **desabastecidos**: consumo en el mes y stock final cero, sumando todos sus lotes;
+  - los **10 productos de mayor consumo en soles**, con su porcentaje del consumo del mes;
+  - **lotes sin movimiento**: stock sin ninguna entrada ni salida en el mes, con su valor.
+  - Agosto 2026, hospital consolidado: 24 desabastecidos; los 10 primeros suman el 46,4 % del consumo; 398 lotes sin movimiento por S/ 387 974,03.
+- **Descartados por el usuario:** el control FEFO desde los datos (el SISMED ya descarga el lote que vence primero; el problema real es que físicamente entregan otro lote, y eso no queda en el sistema), el resumen por financiamiento y tipo de suministro, y los meses de stock por producto.
 ---
 
 ## 7. Plan
