@@ -428,9 +428,11 @@ mismo archivo que ya estaba en la nube cuando el SISMED todavía no había hecho
 - **Web:** la barra de la descarga dice «Desde la nube». **Un solo botón, «Descargar»**
   (decisión del usuario del 2026-10-18): con la 2.3.10 la copia ya es el último backup, así que
   baja la copia, y sin copia se lo pide a la PC. El antiguo ⟳ «Más reciente» ahora es «Pedir a la
-  PC» y solo aparece con copia y un Toolkit anterior a 2.3.10, que sube únicamente el de la
-  mañana; toda PC con Toolkit anterior a 2.3.10 sale con su versión en ámbar y «actualizar» (`asksPcForNewer`, `isOldToolkit`, `AUTO_COPY_VERSION`).
-  Cuando todas las PC tengan la 2.3.10, el botón ya no aparece. Entre que el SISMED genera un
+  PC» y solo aparece con copia y un Toolkit que no sube solo cada backup nuevo: la 2.3.9 (solo el
+  de la mañana) y de la 2.3.10 a la 2.4.3 (ninguno, ver «Backups con contraseña» abajo); toda PC
+  con Toolkit anterior a `UPDATE_HINT_VERSION` sale con su versión en ámbar y «actualizar»
+  (`asksPcForNewer`, `isOldToolkit`, `AUTO_COPY_VERSION`). Cuando todas las PC tengan la 2.4.4, el
+  botón ya no aparece. Entre que el SISMED genera un
   backup y llega a la nube pasan unos minutos; quien descargue en ese momento baja el anterior,
   y la hora de la copia en la fila lo dice.
 - **Consumo:** sube un backup más por establecimiento y día (el de las 13:00). En R2 sigue
@@ -447,9 +449,29 @@ y en la nube se habría quedado el viejo. Por eso **nada decide con la fecha de 
   `BackupWatcher` guarda en `%LOCALAPPDATA%\ToolkitOGM\backups_conocidos.json` el orden en que
   vio cada archivo (sobrevive a reinicios). La primera vez en una carpeta toma el de fecha más
   alta y da los demás por vistos.
-- **Completo, sin mirar el reloj:** un backup se ofrece cuando el zip abre y se lee entero
-  (`testzip`); mientras el SISMED lo escribe, no. Uno roto se salta cuando su tamaño deja de
-  cambiar 15 minutos (reloj del equipo encendido, que no cambia con la fecha).
+- **Completo, sin mirar el reloj:** un backup se ofrece cuando el zip está completo (`_zip_ok`:
+  índice al final y cada archivo de adentro en su lugar y dentro del tamaño real; los que no
+  tienen contraseña se leen enteros); mientras el SISMED lo escribe, no. Uno roto se salta cuando
+  su tamaño deja de cambiar 15 minutos (reloj del equipo encendido, que no cambia con la fecha).
+
+### Backups con contraseña (Toolkit 2.4.4, 2026-10-21)
+
+Caso del hospital (Toolkit 2.3.14): en la web quedó la copia del 19/10 y no cambió hasta el 21.
+**Causa:** de la 2.3.10 a la 2.4.3 el Toolkit comprobaba el backup con `zipfile.testzip`, que lee
+cada archivo de adentro; el backup del SISMED tiene contraseña, `testzip` no puede leerlo y lo daba
+por dañado: a los 15 minutos se saltaba y **ninguna copia subía sola**. Solo subía lo que se pedía
+desde la web (ese camino toma el más reciente por fecha y no lo comprobaba), y luego «Descargar»
+entregaba siempre esa copia vieja, sin forma de pedir otra.
+
+- **Toolkit 2.4.4:** `_zip_ok` comprueba la estructura sin la contraseña (no hace falta conocerla).
+  Pruebas con zips cifrados con ZipCrypto de verdad, cortados en varios puntos y con una cabecera
+  dañada, y una simulación de varios días (`tests/test_backup_password.py` de Toolkit-OGM). Con
+  un backup de 300 MB tarda milésimas de segundo. Lo marcado como dañado vive solo en memoria:
+  al abrir la versión nueva, el último backup se ofrece sin limpiar nada en la PC.
+- **Web (mientras haya PC con la 2.3.10 a la 2.4.3):** esas filas muestran «Pedir a la PC» junto a
+  «Descargar» (`AUTO_COPY_VERSION = "2.4.4"`); la 2.3.14, al pedírselo, toma el más reciente por
+  fecha. El ámbar «actualizar» sigue desde la 2.3.10 (`UPDATE_HINT_VERSION`) hasta que se publique
+  la 2.4.4: al publicarla, subirlo a la 2.4.4.
 - **Copiados de otro lado:** un backup traído de otra PC o de una memoria aparece nuevo en la
   carpeta pero es viejo. En Windows se reconoce porque su fecha de creación (cuando llegó) pasa
   en más de un día a la de modificación (la que traía); ese no se sube.

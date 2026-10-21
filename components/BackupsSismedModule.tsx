@@ -241,10 +241,10 @@ export const BackupsSismedModule: React.FC = () => {
       : "No se puede pedir ahora";
 
   // Con copia en la nube, «Descargar» la baja aunque la PC esté apagada; sin copia, se la pide
-  // a la PC. Desde el Toolkit 2.3.10 la PC sube sola cada backup nuevo, así que la copia ya es el
-  // más reciente: «Pedir a la PC» queda solo para las PC con un Toolkit anterior, que suben
-  // únicamente el de la mañana (`asksPcForNewer`). Si la PC tiene el mismo que ya está en la
-  // nube, el servicio baja la copia sin volver a subirlo ni usar el cupo.
+  // a la PC. Desde el Toolkit 2.4.4 la PC sube sola cada backup nuevo, así que la copia ya es el
+  // más reciente: «Pedir a la PC» queda solo para las PC con un Toolkit anterior, que no suben
+  // solos cada backup nuevo (`asksPcForNewer`). Si la PC tiene el mismo que ya está en la nube,
+  // el servicio baja la copia sin volver a subirlo ni usar el cupo.
   const action = (row: BackupRowView, full = false) => !canDownload ? null : (
     <span className={`inline-flex items-center justify-end gap-1.5 ${full ? "w-full" : ""}`}>
       {/* Con un Toolkit anterior siempre a la vista; si no se puede, dice por qué. */}
@@ -253,7 +253,7 @@ export const BackupsSismedModule: React.FC = () => {
           type="button"
           disabled={!row.canRequestNew}
           onClick={() => manager.request(row.code, row.name)}
-          title={row.canRequestNew ? "Este Toolkit solo sube el backup de la mañana: pedir a la PC el de este momento (usa el cupo solo si es más nuevo que el de la nube)" : newBackupBlocker(row)}
+          title={row.canRequestNew ? "Este Toolkit no sube solo cada backup nuevo: pedir a la PC el de este momento (usa el cupo solo si es más nuevo que el de la nube)" : newBackupBlocker(row)}
           aria-label="Pedir el backup a la PC"
           className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-teal-200 bg-white px-2.5 text-xs font-bold text-teal-700 hover:bg-teal-50 disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-white"
         >

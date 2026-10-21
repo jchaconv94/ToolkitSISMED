@@ -187,17 +187,31 @@ export const buildBackupRows = (
   });
 };
 
-/** Desde esta versión la PC sube sola cada backup nuevo del SISMED: la copia ya es el más reciente. */
-export const AUTO_COPY_VERSION = "2.3.10";
-
-/** Toolkit conocido y anterior a la 2.3.10: la fila lo dice en ámbar con «actualizar». */
-export const isOldToolkit = (version?: string): boolean =>
-  Boolean(version) && compareVersions(version, AUTO_COPY_VERSION) < 0;
+/**
+ * Desde esta versión la PC sube sola cada backup nuevo del SISMED: la copia ya es el más reciente.
+ *
+ * La 2.3.10 ya intentaba subir cada uno, pero antes de ofrecerlo comprobaba el zip con un método
+ * que no puede leer un zip con contraseña, y el del SISMED la tiene: lo daba por dañado y no subía
+ * ninguno. La copia solo cambiaba cuando la web se lo pedía a la PC, y luego «Descargar» entregaba
+ * esa copia vieja (caso del hospital: la del 19/10 hasta el 21/10). Corregido en el Toolkit 2.4.4.
+ */
+export const AUTO_COPY_VERSION = "2.4.4";
 
 /**
- * «Pedir a la PC» solo tiene sentido con copia en la nube y un Toolkit que sube únicamente el
- * backup de la mañana (2.3.9). Con la 2.3.10 la copia ya es el último backup y el botón sobra
- * (decisión del usuario del 2026-10-18); sin copia, «Descargar» ya se lo pide a la PC.
+ * Por debajo de esta versión la fila dice «actualizar» en ámbar. Sigue en la 2.3.10 hasta que se
+ * publique la 2.4.4: antes no hay a qué actualizar. Al publicarla, igualarla a `AUTO_COPY_VERSION`.
+ */
+export const UPDATE_HINT_VERSION = "2.3.10";
+
+/** Toolkit conocido y anterior a `UPDATE_HINT_VERSION`: la fila lo dice en ámbar con «actualizar». */
+export const isOldToolkit = (version?: string): boolean =>
+  Boolean(version) && compareVersions(version, UPDATE_HINT_VERSION) < 0;
+
+/**
+ * «Pedir a la PC» solo tiene sentido con copia en la nube y un Toolkit que no sube solo cada backup
+ * nuevo: la 2.3.9 sube únicamente el de la mañana y de la 2.3.10 a la 2.4.3 no sube ninguno (ver
+ * `AUTO_COPY_VERSION`). Con un Toolkit que sí los sube la copia ya es el último backup y el botón
+ * sobra (decisión del usuario del 2026-10-18); sin copia, «Descargar» ya se lo pide a la PC.
  */
 export const asksPcForNewer = (row: Pick<BackupRowView, "copy" | "version">): boolean =>
   Boolean(row.copy) && compareVersions(row.version, AUTO_COPY_VERSION) < 0;
