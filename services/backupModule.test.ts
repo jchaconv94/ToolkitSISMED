@@ -227,14 +227,18 @@ describe("copia del día", () => {
     expect(copyLabel(adelantada, ahora)).toBe("Copia de hoy 09:00");
   });
 
-  it("«Pedir a la PC» solo aparece con copia y un Toolkit que sube únicamente el de la mañana", () => {
-    expect(asksPcForNewer({ copy: copia, version: "2.3.9" })).toBe(true);
-    expect(asksPcForNewer({ copy: copia, version: "2.3.10" })).toBe(false); // sube sola cada backup
-    expect(asksPcForNewer({ copy: copia, version: "2.4.0" })).toBe(false);
+  it("«Pedir a la PC» solo aparece con copia y un Toolkit que no sube solo cada backup nuevo", () => {
+    expect(asksPcForNewer({ copy: copia, version: "2.3.9" })).toBe(true); // solo el de la mañana
+    // De la 2.3.10 a la 2.4.3 no sube ninguno: el backup con contraseña no pasaba la comprobación.
+    expect(asksPcForNewer({ copy: copia, version: "2.3.10" })).toBe(true);
+    expect(asksPcForNewer({ copy: copia, version: "2.3.14" })).toBe(true); // el hospital, octubre 2026
+    expect(asksPcForNewer({ copy: copia, version: "2.4.3" })).toBe(true);
+    expect(asksPcForNewer({ copy: copia, version: "2.4.4" })).toBe(false); // sube sola cada backup
+    expect(asksPcForNewer({ copy: copia, version: "2.5.0" })).toBe(false);
     expect(asksPcForNewer({ copy: copia, version: undefined })).toBe(true); // sin versión: se ofrece
     expect(asksPcForNewer({ copy: undefined, version: "2.3.9" })).toBe(false); // sin copia, «Descargar» ya se lo pide
     expect(isOldToolkit("2.3.9")).toBe(true);
-    expect(isOldToolkit("2.3.10")).toBe(false);
+    expect(isOldToolkit("2.3.10")).toBe(false); // hasta publicar la 2.4.4 no hay a qué actualizar
     expect(isOldToolkit(undefined)).toBe(false); // sin versión no se pide actualizar
   });
 
