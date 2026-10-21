@@ -430,7 +430,7 @@ mismo archivo que ya estaba en la nube cuando el SISMED todavía no había hecho
   baja la copia, y sin copia se lo pide a la PC. El antiguo ⟳ «Más reciente» ahora es «Pedir a la
   PC» y solo aparece con copia y un Toolkit que no sube solo cada backup nuevo: la 2.3.9 (solo el
   de la mañana) y de la 2.3.10 a la 2.4.3 (ninguno, ver «Backups con contraseña» abajo); toda PC
-  con Toolkit anterior a `UPDATE_HINT_VERSION` sale con su versión en ámbar y «actualizar»
+  con Toolkit anterior a la 2.4.4 sale con su versión en ámbar y «actualizar»
   (`asksPcForNewer`, `isOldToolkit`, `AUTO_COPY_VERSION`). Cuando todas las PC tengan la 2.4.4, el
   botón ya no aparece. Entre que el SISMED genera un
   backup y llega a la nube pasan unos minutos; quien descargue en ese momento baja el anterior,
@@ -470,8 +470,8 @@ entregaba siempre esa copia vieja, sin forma de pedir otra.
   al abrir la versión nueva, el último backup se ofrece sin limpiar nada en la PC.
 - **Web (mientras haya PC con la 2.3.10 a la 2.4.3):** esas filas muestran «Pedir a la PC» junto a
   «Descargar» (`AUTO_COPY_VERSION = "2.4.4"`); la 2.3.14, al pedírselo, toma el más reciente por
-  fecha. El ámbar «actualizar» sigue desde la 2.3.10 (`UPDATE_HINT_VERSION`) hasta que se publique
-  la 2.4.4: al publicarla, subirlo a la 2.4.4.
+  fecha. Desde que se publicó la 2.4.4 (2026-10-21), esas filas dicen también «actualizar» en
+  ámbar (`isOldToolkit`, con la misma versión).
 - **Copiados de otro lado:** un backup traído de otra PC o de una memoria aparece nuevo en la
   carpeta pero es viejo. En Windows se reconoce porque su fecha de creación (cuando llegó) pasa
   en más de un día a la de modificación (la que traía); ese no se sube.

@@ -238,7 +238,9 @@ describe("copia del día", () => {
     expect(asksPcForNewer({ copy: copia, version: undefined })).toBe(true); // sin versión: se ofrece
     expect(asksPcForNewer({ copy: undefined, version: "2.3.9" })).toBe(false); // sin copia, «Descargar» ya se lo pide
     expect(isOldToolkit("2.3.9")).toBe(true);
-    expect(isOldToolkit("2.3.10")).toBe(false); // hasta publicar la 2.4.4 no hay a qué actualizar
+    expect(isOldToolkit("2.3.14")).toBe(true); // no sube sola la copia: hay que pasar a la 2.4.4
+    expect(isOldToolkit("2.4.3")).toBe(true);
+    expect(isOldToolkit("2.4.4")).toBe(false);
     expect(isOldToolkit(undefined)).toBe(false); // sin versión no se pide actualizar
   });
 

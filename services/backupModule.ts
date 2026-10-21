@@ -197,15 +197,9 @@ export const buildBackupRows = (
  */
 export const AUTO_COPY_VERSION = "2.4.4";
 
-/**
- * Por debajo de esta versión la fila dice «actualizar» en ámbar. Sigue en la 2.3.10 hasta que se
- * publique la 2.4.4: antes no hay a qué actualizar. Al publicarla, igualarla a `AUTO_COPY_VERSION`.
- */
-export const UPDATE_HINT_VERSION = "2.3.10";
-
-/** Toolkit conocido y anterior a `UPDATE_HINT_VERSION`: la fila lo dice en ámbar con «actualizar». */
+/** Toolkit conocido y anterior a `AUTO_COPY_VERSION`: la fila lo dice en ámbar con «actualizar». */
 export const isOldToolkit = (version?: string): boolean =>
-  Boolean(version) && compareVersions(version, UPDATE_HINT_VERSION) < 0;
+  Boolean(version) && compareVersions(version, AUTO_COPY_VERSION) < 0;
 
 /**
  * «Pedir a la PC» solo tiene sentido con copia en la nube y un Toolkit que no sube solo cada backup
