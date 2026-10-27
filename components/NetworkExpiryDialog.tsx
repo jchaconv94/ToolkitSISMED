@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CalendarClock, ChevronDown, ChevronRight, Clock, Download } from "lucide-react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CalendarClock, ChevronLeft, ChevronRight, Clock, Download, Package, Wallet } from "lucide-react";
 import { saveAs } from "file-saver";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
 import { EmptyState, KpiCard, StatusChip, TableHeaderCell, TableSearch, useTableSort } from "./ui/kit";
@@ -7,14 +7,25 @@ import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import { formatNumber } from "../services/numberFormat";
-import { describeExpiryDays, filterNetworkExpiry, type ExpiryFilter, type ExpiryLot, type ExpirySite, type NetworkExpiry } from "../services/networkExpiry";
+import {
+  describeExpiryDays,
+  filterNetworkExpiry,
+  groupExpiryByProduct,
+  type ExpiryFilter,
+  type ExpiryProduct,
+  type ExpiryProductLot,
+  type NetworkExpiry,
+} from "../services/networkExpiry";
 import { buildNetworkExpiryWorkbook, networkExpiryFileName } from "../services/networkExpiryExport";
 
 /**
- * Vencimientos de la red (Consulta Stock, pedido del usuario del 2026-10-27): arriba los
- * totales de vencidos y por vencer, y debajo cada establecimiento con sus cifras; al tocarlo se
- * despliegan sus lotes. Filtro, buscador y Excel de lo que se ve. Las cifras son las de la tabla
- * de establecimientos (misma regla, `services/networkExpiry.ts`).
+ * Vencimientos de la red (Consulta Stock, pedido del usuario del 2026-10-27).
+ *
+ * Una fila por producto con sus totales en la red; al tocarlo, **la misma ventana** pasa a su
+ * detalle: cada lote y en qué establecimiento está, con «← Volver» y ‹ › (o las flechas del
+ * teclado) para pasar al producto anterior o siguiente. Nada de filas que se despliegan hacia
+ * abajo ni de ventana sobre ventana (decisión del usuario; Nielsen Norman Group desaconseja
+ * apilar ventanas). Las cifras son las de la tabla de establecimientos (`services/networkExpiry.ts`).
  */
 
 /** Soles siempre con dos decimales: «S/ 2 141,25», «S/ 532,50». */
@@ -24,8 +35,11 @@ const money = (value: number) => {
 };
 const day = (date: Date) => date.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" });
 const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`;
-const daysTone = (lot: ExpiryLot) => (lot.status === "expired" ? "text-rose-600" : lot.days <= 30 ? "text-amber-600" : "text-slate-500");
-const pharmacyLabel = (lot: ExpiryLot) => lot.pharmacyName || lot.pharmacy;
+const daysTone = (status: "expired" | "expiring", days: number) => (status === "expired" ? "text-rose-600" : days <= 30 ? "text-amber-600" : "text-slate-500");
+/** La farmacia o el puesto del lote; nada si es la del propio establecimiento (su código). */
+const pharmacyLabel = (lot: ExpiryProductLot) => lot.pharmacyName || (lot.pharmacy && lot.pharmacy !== lot.siteCode ? lot.pharmacy : "");
+
+const EMPTY: NetworkExpiry = { sites: [], expiredLots: 0, expiringLots: 0, expiredValue: 0, expiringValue: 0, expiredSites: 0, expiringSites: 0, sitesWithoutData: 0 };
 
 const FILTERS: { value: ExpiryFilter; label: string }[] = [
   { value: "all", label: "Todos" },
@@ -33,76 +47,117 @@ const FILTERS: { value: ExpiryFilter; label: string }[] = [
   { value: "expiring", label: "Por vencer" },
 ];
 
-const SiteCounts: React.FC<{ site: ExpirySite }> = ({ site }) => (
-  <div className="flex flex-wrap items-center gap-1.5">
-    {site.expiredLots > 0 && <StatusChip tone="danger" label={plural(site.expiredLots, "vencido", "vencidos")} />}
-    {site.expiringLots > 0 && <StatusChip tone="warning" label={plural(site.expiringLots, "por vencer", "por vencer")} />}
+const CodeChip: React.FC<{ code: string }> = ({ code }) =>
+  code ? <span className="inline-block rounded bg-slate-100 px-1.5 font-mono text-[11px] text-slate-600">{code}</span> : null;
+
+const CountChip: React.FC<{ value: number; tone: "danger" | "warning" }> = ({ value, tone }) =>
+  value > 0 ? <StatusChip tone={tone} label={formatNumber(value)} /> : <span className="text-slate-300">0</span>;
+
+const ExpiryCell: React.FC<{ date: Date; days: number; status: "expired" | "expiring" }> = ({ date, days, status }) => (
+  <div className="whitespace-nowrap">
+    <p className="text-[13px] font-semibold text-slate-800">{day(date)}</p>
+    <p className={`text-[11px] font-semibold ${daysTone(status, days)}`}>{describeExpiryDays(days)}</p>
   </div>
 );
 
-const ProductCell: React.FC<{ lot: ExpiryLot }> = ({ lot }) => (
-  <div className="min-w-0">
-    <p className="text-[13px] font-semibold text-slate-800">{lot.productName || "Sin nombre"}</p>
-    {lot.productCode && <span className="mt-0.5 inline-block rounded bg-slate-100 px-1.5 font-mono text-[11px] text-slate-600">{lot.productCode}</span>}
-  </div>
-);
+/** Detalle de un producto: sus lotes en toda la red y en qué establecimiento está cada uno. */
+const ProductDetail: React.FC<{ product: ExpiryProduct; isDesktop: boolean }> = ({ product, isDesktop }) => {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = usePageSize("vencimientos-producto", 10);
+  const { sorted, headSort } = useTableSort(
+    product.lots,
+    {
+      site: (lot) => lot.siteName,
+      pharmacy: (lot) => pharmacyLabel(lot),
+      lot: (lot) => lot.lot,
+      expiry: (lot) => lot.expiry.getTime(),
+      balance: (lot) => lot.balance,
+      value: (lot) => lot.value,
+    },
+    { firstDir: { balance: "desc", value: "desc" } },
+  );
+  const mobile = useIncrementalCount(sorted.length, product.key, 20);
+  useEffect(() => setPage(1), [product.key]);
+  // Farmacia solo si algún lote está en una farmacia o puesto distinto de su establecimiento.
+  const showPharmacy = product.lots.some((lot) => pharmacyLabel(lot));
+  const rows = isDesktop ? sorted.slice((page - 1) * pageSize, page * pageSize) : sorted.slice(0, mobile.count);
 
-/** Lotes de un establecimiento, desplegados bajo su fila (escritorio). */
-const LotsTable: React.FC<{ site: ExpirySite }> = ({ site }) => {
-  const showPharmacy = site.pharmacies > 1;
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <table className="w-full text-left text-sm">
-        <thead className="bg-slate-50">
-          <tr>
-            <TableHeaderCell>Producto</TableHeaderCell>
-            {showPharmacy && <TableHeaderCell align="center">Farmacia</TableHeaderCell>}
-            <TableHeaderCell align="center">Lote</TableHeaderCell>
-            <TableHeaderCell align="center">Vence</TableHeaderCell>
-            <TableHeaderCell align="center">Situación</TableHeaderCell>
-            <TableHeaderCell align="center">Saldo</TableHeaderCell>
-            <TableHeaderCell align="center">Valor</TableHeaderCell>
-          </tr>
-        </thead>
-        <tbody>
-          {site.lots.map((lot, index) => (
-            <tr key={`${lot.productCode}-${lot.lot}-${lot.pharmacy}-${index}`} className="border-t border-slate-100">
-              <td className="px-4 py-2.5"><ProductCell lot={lot} /></td>
-              {showPharmacy && <td className="px-4 py-2.5 text-center text-xs text-slate-600">{pharmacyLabel(lot) || "—"}</td>}
-              <td className="px-4 py-2.5 text-center font-mono text-xs text-slate-700">{lot.lot || "—"}</td>
-              <td className="px-4 py-2.5 text-center">
-                <p className="text-[13px] font-semibold text-slate-800">{day(lot.expiry)}</p>
-                <p className={`text-[11px] font-semibold ${daysTone(lot)}`}>{describeExpiryDays(lot.days)}</p>
-              </td>
-              <td className="px-4 py-2.5 text-center"><StatusChip tone={lot.status === "expired" ? "danger" : "warning"} label={lot.status === "expired" ? "Vencido" : "Por vencer"} /></td>
-              <td className="px-4 py-2.5 text-center text-[13px] font-semibold text-slate-800">{formatNumber(lot.balance, 3)}</td>
-              <td className="px-4 py-2.5 text-center text-[13px] text-slate-700">{lot.value > 0 ? money(lot.value) : "—"}</td>
-            </tr>
+    <div className="space-y-4">
+      {/* En el celular la cabecera corta el nombre: aquí va completo. */}
+      <div className="md:hidden">
+        <p className="text-[15px] font-black leading-snug text-slate-900">{product.name || "Producto sin nombre"}</p>
+        <CodeChip code={product.code} />
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <KpiCard watermark tone="danger" icon={<AlertTriangle />} label="Vencidos" value={plural(product.expiredLots, "lote", "lotes")} hint={money(product.expiredValue)} />
+        <KpiCard watermark tone="warning" icon={<Clock />} label="Por vencer" value={plural(product.expiringLots, "lote", "lotes")} hint={money(product.expiringValue)} />
+        <KpiCard watermark tone="info" icon={<Package />} label="Stock" value={formatNumber(product.balance, 3)} hint={`en ${plural(product.sites, "establecimiento", "establecimientos")}`} />
+        <KpiCard watermark tone="neutral" icon={<Wallet />} label="Valor" value={money(product.expiredValue + product.expiringValue)} hint="vencido y por vencer" />
+      </div>
+
+      {isDesktop ? (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <TableHeaderCell sort={headSort("site")}>Establecimiento</TableHeaderCell>
+                {showPharmacy && <TableHeaderCell align="center" sort={headSort("pharmacy")}>Farmacia</TableHeaderCell>}
+                <TableHeaderCell align="center" sort={headSort("lot")}>Lote</TableHeaderCell>
+                <TableHeaderCell align="center" sort={headSort("expiry")}>Vence</TableHeaderCell>
+                <TableHeaderCell align="center">Situación</TableHeaderCell>
+                <TableHeaderCell align="center" sort={headSort("balance")}>Saldo</TableHeaderCell>
+                <TableHeaderCell align="center" sort={headSort("value")}>Valor</TableHeaderCell>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((lot, index) => (
+                <tr key={`${lot.siteId}-${lot.lot}-${lot.pharmacy}-${index}`} className="h-14 border-t border-slate-100">
+                  <td className="px-4 py-2">
+                    <p className="text-[13.5px] font-bold text-slate-900">{lot.siteName}</p>
+                    {lot.siteCode && <p className="font-mono text-[11px] text-slate-500">{lot.siteCode}</p>}
+                  </td>
+                  {showPharmacy && <td className="px-4 py-2 text-center text-xs text-slate-600">{pharmacyLabel(lot) || "—"}</td>}
+                  <td className="px-4 py-2 text-center font-mono text-xs text-slate-700">{lot.lot || "—"}</td>
+                  <td className="px-4 py-2 text-center"><ExpiryCell date={lot.expiry} days={lot.days} status={lot.status} /></td>
+                  <td className="px-4 py-2 text-center">
+                    <StatusChip tone={lot.status === "expired" ? "danger" : "warning"} label={lot.status === "expired" ? "Vencido" : "Por vencer"} />
+                  </td>
+                  <td className="px-4 py-2 text-center text-[13px] font-semibold text-slate-800">{formatNumber(lot.balance, 3)}</td>
+                  <td className="whitespace-nowrap px-4 py-2 text-center text-[13px] text-slate-700">{lot.value > 0 ? money(lot.value) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <TablePagination page={page} pageSize={pageSize} total={sorted.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="lotes" />
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((lot, index) => (
+            <div key={`${lot.siteId}-${lot.lot}-${lot.pharmacy}-${index}`} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[14px] font-bold text-slate-900">{lot.siteName}</p>
+                  {lot.siteCode && <p className="font-mono text-[11px] text-slate-500">{lot.siteCode}</p>}
+                </div>
+                <StatusChip tone={lot.status === "expired" ? "danger" : "warning"} label={lot.status === "expired" ? "Vencido" : "Por vencer"} />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                <span className="text-slate-500">Lote <b className="font-mono text-slate-700">{lot.lot || "—"}</b></span>
+                <span className="text-right text-slate-500">Vence <b className="text-slate-700">{day(lot.expiry)}</b></span>
+                <span className="text-slate-500">Stock <b className="text-slate-700">{formatNumber(lot.balance, 3)}</b></span>
+                <span className={`text-right font-semibold ${daysTone(lot.status, lot.days)}`}>{describeExpiryDays(lot.days)}</span>
+                {showPharmacy && pharmacyLabel(lot) && <span className="col-span-2 text-slate-500">Farmacia <b className="text-slate-700">{pharmacyLabel(lot)}</b></span>}
+                {lot.value > 0 && <span className="col-span-2 text-slate-500">Valor <b className="text-slate-700">{money(lot.value)}</b></span>}
+              </div>
+            </div>
           ))}
-        </tbody>
-      </table>
+          <LoadMoreSentinel hasMore={mobile.hasMore} onLoadMore={mobile.loadMore} shown={mobile.count} total={sorted.length} itemLabel="lotes" />
+        </div>
+      )}
     </div>
   );
 };
-
-/** Lotes de un establecimiento en el celular. */
-const LotsList: React.FC<{ site: ExpirySite }> = ({ site }) => (
-  <div className="space-y-2 border-t border-slate-100 bg-slate-50 p-3">
-    {site.lots.map((lot, index) => (
-      <div key={`${lot.productCode}-${lot.lot}-${lot.pharmacy}-${index}`} className="rounded-xl border border-slate-200 bg-white p-3">
-        <ProductCell lot={lot} />
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-          <span className="text-slate-500">Lote <b className="font-mono text-slate-700">{lot.lot || "—"}</b></span>
-          <span className="text-right text-slate-500">Vence <b className="text-slate-700">{day(lot.expiry)}</b></span>
-          <span className="text-slate-500">Stock <b className="text-slate-700">{formatNumber(lot.balance, 3)}</b></span>
-          <span className={`text-right font-semibold ${daysTone(lot)}`}>{describeExpiryDays(lot.days)}</span>
-          {site.pharmacies > 1 && pharmacyLabel(lot) && <span className="col-span-2 text-slate-500">Farmacia <b className="text-slate-700">{pharmacyLabel(lot)}</b></span>}
-          {lot.value > 0 && <span className="col-span-2 text-slate-500">Valor <b className="text-slate-700">{money(lot.value)}</b></span>}
-        </div>
-      </div>
-    ))}
-  </div>
-);
 
 export const NetworkExpiryDialog: React.FC<{
   open: boolean;
@@ -116,43 +171,41 @@ export const NetworkExpiryDialog: React.FC<{
   const isDesktop = useIsDesktop();
   const [filter, setFilter] = useState<ExpiryFilter>("all");
   const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  // Mientras se busca, todo viene desplegado; aquí se guardan los que el usuario cerró.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [detailKey, setDetailKey] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePageSize("vencimientos-red", 10);
   const [exporting, setExporting] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const listScroll = useRef(0);
 
   useEffect(() => {
     if (open) return;
     setFilter("all");
     setQuery("");
-    setExpanded(new Set());
-    setCollapsed(new Set());
+    setDetailKey(null);
   }, [open]);
-  useEffect(() => setCollapsed(new Set()), [query]);
 
-  const empty: NetworkExpiry = { sites: [], expiredLots: 0, expiringLots: 0, expiredValue: 0, expiringValue: 0, expiredSites: 0, expiringSites: 0, sitesWithoutData: 0 };
-  const source = data ?? empty;
+  const source = data ?? EMPTY;
   // Los indicadores siguen a la búsqueda pero no al filtro: así uno no deja al otro en cero.
   const searched = useMemo(() => filterNetworkExpiry(source, "all", query), [source, query]);
+  const searchedProducts = useMemo(() => groupExpiryByProduct(searched), [searched]);
   const visible = useMemo(() => filterNetworkExpiry(source, filter, query), [source, filter, query]);
-  const ordered = useMemo(
-    () =>
-      [...visible.sites].sort(
-        (a, b) => b.expiredLots - a.expiredLots || b.expiringLots - a.expiringLots || b.expiredValue + b.expiringValue - (a.expiredValue + a.expiringValue),
-      ),
-    [visible],
-  );
+  const products = useMemo(() => groupExpiryByProduct(visible), [visible]);
+  // El detalle muestra todos los lotes del producto en la red, sin el filtro ni la búsqueda.
+  const allProducts = useMemo(() => new Map(groupExpiryByProduct(source).map((product) => [product.key, product])), [source]);
+
   const { sorted, headSort } = useTableSort(
-    ordered,
+    products,
     {
-      name: (site) => site.name,
-      expired: (site) => site.expiredLots,
-      expiring: (site) => site.expiringLots,
-      value: (site) => site.expiredValue + site.expiringValue,
+      name: (product) => product.name,
+      sites: (product) => product.sites,
+      expired: (product) => product.expiredLots,
+      expiring: (product) => product.expiringLots,
+      balance: (product) => product.balance,
+      value: (product) => product.expiredValue + product.expiringValue,
+      first: (product) => product.first.expiry.getTime(),
     },
-    { firstDir: { expired: "desc", expiring: "desc", value: "desc" } },
+    { firstDir: { sites: "desc", expired: "desc", expiring: "desc", balance: "desc", value: "desc" } },
   );
 
   const signature = `${filter}|${query}|${sorted.length}`;
@@ -160,24 +213,40 @@ export const NetworkExpiryDialog: React.FC<{
   const mobile = useIncrementalCount(sorted.length, signature, 20);
   const rows = isDesktop ? sorted.slice((page - 1) * pageSize, page * pageSize) : sorted.slice(0, mobile.count);
 
-  const searching = query.trim().length > 0;
-  const isOpen = (id: string) => (searching ? !collapsed.has(id) : expanded.has(id));
-  const toggle = (id: string) => {
-    const flip = (set: Set<string>) => {
-      const next = new Set(set);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    };
-    if (searching) setCollapsed(flip);
-    else setExpanded(flip);
+  const detail = detailKey ? allProducts.get(detailKey) ?? null : null;
+  const position = detail ? sorted.findIndex((product) => product.key === detail.key) : -1;
+  const scroller = () => contentRef.current?.parentElement ?? null;
+
+  const openDetail = (key: string) => {
+    listScroll.current = scroller()?.scrollTop ?? 0;
+    setDetailKey(key);
   };
+  const goTo = (offset: number) => {
+    const next = sorted[position + offset];
+    if (next) setDetailKey(next.key);
+  };
+  // Al abrir un detalle se empieza arriba; al volver, la lista queda donde estaba.
+  useLayoutEffect(() => {
+    const element = scroller();
+    if (element) element.scrollTop = detailKey ? 0 : listScroll.current;
+  }, [detailKey]);
+  useEffect(() => {
+    if (!detail) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (event.key === "ArrowLeft") goTo(-1);
+      if (event.key === "ArrowRight") goTo(1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   const exportExcel = async () => {
     setExporting(true);
     try {
       const now = new Date();
-      const workbook = buildNetworkExpiryWorkbook({ ...visible, sites: sorted }, { scope, windowDays, generatedAt: now });
+      const workbook = buildNetworkExpiryWorkbook(visible, { scope, windowDays, generatedAt: now });
       const buffer = await workbook.xlsx.writeBuffer();
       saveAs(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), networkExpiryFileName(scope, now));
     } finally {
@@ -185,15 +254,40 @@ export const NetworkExpiryDialog: React.FC<{
     }
   };
 
-  const siteTotal = (site: ExpirySite) => site.expiredValue + site.expiringValue;
+  const productTotal = (product: ExpiryProduct) => product.expiredValue + product.expiringValue;
+  const expiredProducts = searchedProducts.filter((product) => product.expiredLots > 0).length;
+  const expiringProducts = searchedProducts.filter((product) => product.expiringLots > 0).length;
+  const searching = query.trim().length > 0;
+  const arrow = "grid h-9 w-9 place-items-center rounded-full text-slate-600 transition-colors hover:bg-slate-100 disabled:text-slate-300 disabled:hover:bg-transparent";
 
   return (
     <ResponsiveDialog
       open={open}
       onClose={onClose}
       size="xl"
-      title="Vencimientos"
-      subtitle={`${scope} · lotes con saldo vencidos o que vencen en los próximos ${windowDays} días`}
+      title={detail ? detail.name || "Producto sin nombre" : "Vencimientos"}
+      subtitle={
+        detail
+          ? `${detail.code ? `Código ${detail.code} · ` : ""}${scope} · todos sus lotes vencidos o por vencer`
+          : `${scope} · lotes con saldo vencidos o que vencen en los próximos ${windowDays} días`
+      }
+      onBack={detail ? () => setDetailKey(null) : undefined}
+      backLabel="Volver a los productos"
+      headerAside={
+        detail && position >= 0 ? (
+          <>
+            <button type="button" onClick={() => goTo(-1)} disabled={position <= 0} aria-label="Producto anterior" className={arrow}>
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <span className="hidden whitespace-nowrap text-xs font-semibold text-slate-500 sm:inline">
+              {formatNumber(position + 1)} de {formatNumber(sorted.length)}
+            </span>
+            <button type="button" onClick={() => goTo(1)} disabled={position >= sorted.length - 1} aria-label="Producto siguiente" className={arrow}>
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </>
+        ) : undefined
+      }
       footer={
         <>
           <button type="button" onClick={onClose} className={dialogSecondaryButton}>Cerrar</button>
@@ -206,136 +300,144 @@ export const NetworkExpiryDialog: React.FC<{
         </>
       }
     >
-      <div className="space-y-4">
-        {/* Dos indicadores: en cuadrícula también en el celular (en una tira deslizable dejaban un hueco). */}
-        <div className="grid grid-cols-2 gap-3">
-          <KpiCard
-            watermark
-            tone="danger"
-            icon={<AlertTriangle />}
-            label="Vencidos"
-            value={plural(searched.expiredLots, "lote", "lotes")}
-            hint={`${money(searched.expiredValue)} · ${plural(searched.expiredSites, "establecimiento", "establecimientos")}`}
-            onClick={() => setFilter((current) => (current === "expired" ? "all" : "expired"))}
-            active={filter === "expired"}
-          />
-          <KpiCard
-            watermark
-            tone="warning"
-            icon={<Clock />}
-            label="Por vencer"
-            value={plural(searched.expiringLots, "lote", "lotes")}
-            hint={`${money(searched.expiringValue)} · ${plural(searched.expiringSites, "establecimiento", "establecimientos")}`}
-            onClick={() => setFilter((current) => (current === "expiring" ? "all" : "expiring"))}
-            active={filter === "expiring"}
-          />
-        </div>
-
-        <div className="flex flex-col gap-2 md:flex-row md:items-center">
-          <div className="flex h-10 shrink-0 items-center gap-0.5 rounded-xl border border-slate-200 bg-white p-1 shadow-sm" role="group" aria-label="Situación">
-            {FILTERS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setFilter(option.value)}
-                aria-pressed={filter === option.value}
-                className={`flex h-full flex-1 items-center justify-center rounded-lg px-3 text-xs font-bold transition-colors md:flex-none ${
-                  filter === option.value ? "bg-teal-600 text-white" : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <TableSearch value={query} onChange={setQuery} placeholder="Buscar establecimiento, producto o lote" />
-        </div>
-
-        {source.sitesWithoutData > 0 && (
-          <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-            {plural(source.sitesWithoutData, "establecimiento todavía no tiene", "establecimientos todavía no tienen")} su stock cargado y no
-            {source.sitesWithoutData === 1 ? " entra" : " entran"} en este resumen. Sincroniza para incluirlos.
-          </p>
-        )}
-
-        {sorted.length === 0 ? (
-          <div className="rounded-2xl border border-slate-200 bg-white">
-            <EmptyState
-              icon={<CalendarClock className="h-6 w-6" />}
-              title={searching ? `Sin resultados para «${query.trim()}»` : "Sin lotes vencidos ni por vencer"}
-              description={
-                searching
-                  ? "Prueba con otro nombre, código o lote."
-                  : `Ningún establecimiento a la vista tiene lotes con saldo vencidos o que venzan en los próximos ${windowDays} días.`
-              }
-            />
-          </div>
-        ) : isDesktop ? (
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  <TableHeaderCell sort={headSort("name")}>Establecimiento</TableHeaderCell>
-                  <TableHeaderCell align="center" sort={headSort("expired")}>Vencidos</TableHeaderCell>
-                  <TableHeaderCell align="center" sort={headSort("expiring")}>Por vencer</TableHeaderCell>
-                  <TableHeaderCell align="center" sort={headSort("value")}>Valor</TableHeaderCell>
-                  <th className="w-10" aria-label="Desplegar" />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((site) => {
-                  const opened = isOpen(site.id);
-                  return (
-                    <React.Fragment key={site.id}>
-                      <tr onClick={() => toggle(site.id)} aria-expanded={opened} className="h-14 cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50">
-                        <td className="px-4 py-2">
-                          <p className="text-[14px] font-bold text-slate-900">{site.name}</p>
-                          {site.code && <p className="font-mono text-[11px] text-slate-500">{site.code}</p>}
-                        </td>
-                        <td className="px-4 py-2 text-center">
-                          {site.expiredLots > 0 ? <StatusChip tone="danger" label={formatNumber(site.expiredLots)} /> : <span className="text-slate-300">0</span>}
-                        </td>
-                        <td className="px-4 py-2 text-center">
-                          {site.expiringLots > 0 ? <StatusChip tone="warning" label={formatNumber(site.expiringLots)} /> : <span className="text-slate-300">0</span>}
-                        </td>
-                        <td className="px-4 py-2 text-center text-[13px] font-semibold text-slate-800">{siteTotal(site) > 0 ? money(siteTotal(site)) : "—"}</td>
-                        <td className="px-2 py-2 text-slate-400">{opened ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
-                      </tr>
-                      {opened && (
-                        <tr>
-                          <td colSpan={5} className="bg-slate-50/70 px-4 pb-4 pt-1">
-                            <LotsTable site={site} />
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-            <TablePagination page={page} pageSize={pageSize} total={sorted.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="establecimientos" />
-          </div>
+      <div ref={contentRef}>
+        {detail ? (
+          <ProductDetail product={detail} isDesktop={isDesktop} />
         ) : (
-          <div className="space-y-2">
-            {rows.map((site) => {
-              const opened = isOpen(site.id);
-              return (
-                <div key={site.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                  <button type="button" onClick={() => toggle(site.id)} aria-expanded={opened} className="flex w-full items-start gap-3 px-4 py-3 text-left">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] font-bold text-slate-900">{site.name}</p>
-                      {site.code && <p className="font-mono text-[11px] text-slate-500">{site.code}</p>}
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <SiteCounts site={site} />
-                        {siteTotal(site) > 0 && <span className="text-xs font-semibold text-slate-600">{money(siteTotal(site))}</span>}
-                      </div>
-                    </div>
-                    {opened ? <ChevronDown className="mt-1 h-5 w-5 shrink-0 text-slate-400" /> : <ChevronRight className="mt-1 h-5 w-5 shrink-0 text-slate-400" />}
+          <div className="space-y-4">
+            {/* Dos indicadores: en cuadrícula también en el celular (en una tira deslizable dejaban un hueco). */}
+            <div className="grid grid-cols-2 gap-3">
+              <KpiCard
+                watermark
+                tone="danger"
+                icon={<AlertTriangle />}
+                label="Vencidos"
+                value={plural(searched.expiredLots, "lote", "lotes")}
+                hint={`${money(searched.expiredValue)} · ${plural(expiredProducts, "producto", "productos")} en ${plural(searched.expiredSites, "establecimiento", "establecimientos")}`}
+                onClick={() => setFilter((current) => (current === "expired" ? "all" : "expired"))}
+                active={filter === "expired"}
+              />
+              <KpiCard
+                watermark
+                tone="warning"
+                icon={<Clock />}
+                label="Por vencer"
+                value={plural(searched.expiringLots, "lote", "lotes")}
+                hint={`${money(searched.expiringValue)} · ${plural(expiringProducts, "producto", "productos")} en ${plural(searched.expiringSites, "establecimiento", "establecimientos")}`}
+                onClick={() => setFilter((current) => (current === "expiring" ? "all" : "expiring"))}
+                active={filter === "expiring"}
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 md:flex-row md:items-center">
+              <div className="flex h-10 shrink-0 items-center gap-0.5 rounded-xl border border-slate-200 bg-white p-1 shadow-sm" role="group" aria-label="Situación">
+                {FILTERS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setFilter(option.value)}
+                    aria-pressed={filter === option.value}
+                    className={`flex h-full flex-1 items-center justify-center rounded-lg px-3 text-xs font-bold transition-colors md:flex-none ${
+                      filter === option.value ? "bg-teal-600 text-white" : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                    }`}
+                  >
+                    {option.label}
                   </button>
-                  {opened && <LotsList site={site} />}
-                </div>
-              );
-            })}
-            <LoadMoreSentinel hasMore={mobile.hasMore} onLoadMore={mobile.loadMore} shown={mobile.count} total={sorted.length} itemLabel="establecimientos" />
+                ))}
+              </div>
+              <TableSearch value={query} onChange={setQuery} placeholder="Buscar producto, código, lote o establecimiento" />
+            </div>
+
+            {source.sitesWithoutData > 0 && (
+              <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                {plural(source.sitesWithoutData, "establecimiento todavía no tiene", "establecimientos todavía no tienen")} su stock cargado y no
+                {source.sitesWithoutData === 1 ? " entra" : " entran"} en este resumen. Sincroniza para incluirlos.
+              </p>
+            )}
+
+            {sorted.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white">
+                <EmptyState
+                  icon={<CalendarClock className="h-6 w-6" />}
+                  title={searching ? `Sin resultados para «${query.trim()}»` : "Sin lotes vencidos ni por vencer"}
+                  description={
+                    searching
+                      ? "Prueba con otro nombre, código, lote o establecimiento."
+                      : `Ningún establecimiento a la vista tiene lotes con saldo vencidos o que venzan en los próximos ${windowDays} días.`
+                  }
+                />
+              </div>
+            ) : isDesktop ? (
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <TableHeaderCell sort={headSort("name")}>Producto</TableHeaderCell>
+                      <TableHeaderCell align="center" sort={headSort("sites")}>Establecimientos</TableHeaderCell>
+                      <TableHeaderCell align="center" sort={headSort("expired")}>Vencidos</TableHeaderCell>
+                      <TableHeaderCell align="center" sort={headSort("expiring")}>Por vencer</TableHeaderCell>
+                      <TableHeaderCell align="center" sort={headSort("balance")}>Stock</TableHeaderCell>
+                      <TableHeaderCell align="center" sort={headSort("value")}>Valor</TableHeaderCell>
+                      <TableHeaderCell align="center" sort={headSort("first")}>Vence primero</TableHeaderCell>
+                      <th className="w-10" aria-label="Ver detalle" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((product) => (
+                      <tr
+                        key={product.key}
+                        tabIndex={0}
+                        onClick={() => openDetail(product.key)}
+                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDetail(product.key); } }}
+                        className="h-14 cursor-pointer border-t border-slate-100 outline-none transition-colors hover:bg-slate-50 focus-visible:bg-teal-50/60"
+                      >
+                        <td className="px-4 py-2">
+                          <p className="text-[13.5px] font-semibold text-slate-900">{product.name || "Sin nombre"}</p>
+                          <CodeChip code={product.code} />
+                        </td>
+                        <td className="px-4 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(product.sites)}</td>
+                        <td className="px-4 py-2 text-center"><CountChip value={product.expiredLots} tone="danger" /></td>
+                        <td className="px-4 py-2 text-center"><CountChip value={product.expiringLots} tone="warning" /></td>
+                        <td className="px-4 py-2 text-center text-[13px] font-semibold text-slate-800">{formatNumber(product.balance, 3)}</td>
+                        <td className="whitespace-nowrap px-4 py-2 text-center text-[13px] text-slate-700">{productTotal(product) > 0 ? money(productTotal(product)) : "—"}</td>
+                        <td className="px-4 py-2 text-center"><ExpiryCell date={product.first.expiry} days={product.first.days} status={product.first.status} /></td>
+                        <td className="px-2 py-2 text-slate-400"><ChevronRight className="h-4 w-4" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <TablePagination page={page} pageSize={pageSize} total={sorted.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="productos" />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {rows.map((product) => (
+                  <button
+                    key={product.key}
+                    type="button"
+                    onClick={() => openDetail(product.key)}
+                    className="flex w-full items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm active:bg-slate-50"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[14px] font-semibold text-slate-900">{product.name || "Sin nombre"}</p>
+                      <CodeChip code={product.code} />
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {product.expiredLots > 0 && <StatusChip tone="danger" label={plural(product.expiredLots, "vencido", "vencidos")} />}
+                        {product.expiringLots > 0 && <StatusChip tone="warning" label={plural(product.expiringLots, "por vencer", "por vencer")} />}
+                      </div>
+                      <p className="mt-1.5 text-xs text-slate-500">
+                        {plural(product.sites, "establecimiento", "establecimientos")} · Stock {formatNumber(product.balance, 3)}
+                        {productTotal(product) > 0 ? ` · ${money(productTotal(product))}` : ""}
+                      </p>
+                      <p className={`text-xs font-semibold ${daysTone(product.first.status, product.first.days)}`}>
+                        {describeExpiryDays(product.first.days)} · {day(product.first.expiry)}
+                      </p>
+                    </div>
+                    <ChevronRight className="mt-1 h-5 w-5 shrink-0 text-slate-400" />
+                  </button>
+                ))}
+                <LoadMoreSentinel hasMore={mobile.hasMore} onLoadMore={mobile.loadMore} shown={mobile.count} total={sorted.length} itemLabel="productos" />
+              </div>
+            )}
           </div>
         )}
       </div>

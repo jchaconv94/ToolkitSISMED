@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 
 /**
  * Ventana de formulario o de detalle (pedido del usuario, 2026-10-04: «los modals también se
@@ -13,6 +13,10 @@ import { X } from "lucide-react";
  *
  * `top` va fijo bajo el título (p. ej. el avance de un asistente). Con `onSubmit` la ventana es
  * un `<form>`: los botones del pie pueden ser `type="submit"`.
+ *
+ * Detalle dentro de la misma ventana (pedido del usuario, 2026-10-27: nada de filas que se
+ * despliegan ni de ventana sobre ventana): con `onBack` aparece la flecha «volver» antes del
+ * título, y `headerAside` va a la derecha del título (p. ej. «‹ 3 de 41 ›»).
  */
 export const ResponsiveDialog: React.FC<{
   open: boolean;
@@ -26,7 +30,12 @@ export const ResponsiveDialog: React.FC<{
   onSubmit?: (event: React.FormEvent) => void;
   /** Mientras guarda, la X, Escape y el fondo no cierran. */
   busy?: boolean;
-}> = ({ open, onClose, title, subtitle, children, footer, top, size = "md", onSubmit, busy = false }) => {
+  /** Detalle abierto dentro de la ventana: la flecha vuelve a la lista. */
+  onBack?: () => void;
+  backLabel?: string;
+  /** A la derecha del título, antes de la X (p. ej. «‹ 3 de 41 ›»). */
+  headerAside?: React.ReactNode;
+}> = ({ open, onClose, title, subtitle, children, footer, top, size = "md", onSubmit, busy = false, onBack, backLabel = "Volver", headerAside }) => {
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onClose(); };
@@ -45,13 +54,20 @@ export const ResponsiveDialog: React.FC<{
   const content = (
     <>
       <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 px-2 py-2 md:px-5 md:py-3.5">
-        <button type="button" onClick={onClose} disabled={busy} aria-label="Cerrar" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-40 md:order-last md:h-9 md:w-9 md:text-slate-400">
+        {/* Con la flecha «volver», la X pasa a la derecha también en el celular. */}
+        <button type="button" onClick={onClose} disabled={busy} aria-label="Cerrar" className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-40 md:h-9 md:w-9 md:text-slate-400 ${onBack ? "order-last" : "md:order-last"}`}>
           <X className="h-5 w-5" />
         </button>
+        {onBack && (
+          <button type="button" onClick={onBack} disabled={busy} aria-label={backLabel} title={backLabel} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-40 md:h-9 md:w-9">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+        )}
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-[17px] font-black text-slate-900">{title}</h3>
           {subtitle && <p className="truncate text-[12.5px] text-slate-500">{subtitle}</p>}
         </div>
+        {headerAside && <div className="flex shrink-0 items-center gap-1">{headerAside}</div>}
       </div>
       {top}
       <div className="flex-1 overflow-y-auto overscroll-contain bg-slate-50 px-4 py-4 md:px-6">{children}</div>
