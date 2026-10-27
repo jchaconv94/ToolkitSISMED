@@ -5,6 +5,7 @@ import {
   countsForExpiry,
   describeExpiryDays,
   filterNetworkExpiry,
+  groupExpiryByProduct,
   parseSheetExpiry,
   sheetExpirationStats,
 } from "./networkExpiry";
@@ -214,6 +215,46 @@ describe("buildNetworkExpiry", () => {
     expect(filterNetworkExpiry(data, "all", "insulína").sites[0].lots.map((l) => l.lot)).toEqual(["C33"]);
     expect(filterNetworkExpiry(data, "expiring", "insulina").sites).toHaveLength(0);
     expect(filterNetworkExpiry(data, "all", "").sitesWithoutData).toBe(1);
+  });
+});
+
+describe("groupExpiryByProduct", () => {
+  const data = buildNetworkExpiry(
+    [
+      {
+        id: "a", name: "P.S. Nueva Arica", code: "06528",
+        rows: [
+          row("31/10/2026", "60", { ID_Producto: "00200", Nombre: "ACIDO FOLICO 500 ug", Lote: "2105193", Precio_Det: "0,026" }),
+          row("20/10/2026", "40", { ID_Producto: "05555", Nombre: "INSULINA NPH", Lote: "C33", Precio_Det: "24.5" }),
+        ],
+      },
+      {
+        id: "b", name: "Hospital II-E", code: "06501",
+        rows: [
+          row("15/11/2026", "100", { ID_Producto: "00200", Nombre: "ACIDO FOLICO 500 ug", Lote: "2109001", Precio_Det: "0,026" }),
+          row("01/11/2026", "5", { Nombre: "SIN CODIGO", Lote: "X1", Precio_Det: "1" }),
+        ],
+      },
+    ],
+    90,
+  );
+
+  it("junta los lotes de cada producto de todos los establecimientos", () => {
+    const products = groupExpiryByProduct(data);
+    const folico = products.find((p) => p.code === "00200")!;
+    expect(folico.sites).toBe(2);
+    expect(folico.lots.map((l) => `${l.siteName} ${l.lot}`)).toEqual(["P.S. Nueva Arica 2105193", "Hospital II-E 2109001"]);
+    expect(folico.balance).toBe(160);
+    expect(folico.expiringLots).toBe(2);
+    expect(folico.expiringValue).toBeCloseTo(160 * 0.026);
+    expect(folico.first.lot).toBe("2105193");
+  });
+
+  it("lo más urgente primero, y sin código se agrupa por nombre", () => {
+    const products = groupExpiryByProduct(data);
+    expect(products.map((p) => p.name)).toEqual(["INSULINA NPH", "ACIDO FOLICO 500 ug", "SIN CODIGO"]);
+    expect(products[0].expiredLots).toBe(1);
+    expect(products[2].key).toBe("n:SIN CODIGO");
   });
 });
 

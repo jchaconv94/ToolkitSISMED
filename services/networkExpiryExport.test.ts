@@ -23,14 +23,24 @@ const data = buildNetworkExpiry(
 describe("buildNetworkExpiryWorkbook", () => {
   const workbook = buildNetworkExpiryWorkbook(data, { scope: "Bellavista", windowDays: 90, generatedAt: NOW });
 
+  it("trae primero el resumen por producto, lo más urgente arriba", () => {
+    expect(workbook.worksheets.map((w) => w.name)).toEqual(["Por producto", "Lotes", "Por establecimiento"]);
+    const sheet = workbook.getWorksheet("Por producto")!;
+    expect(sheet.getRow(5).getCell(2).value).toBe("INSULINA NPH");
+    expect(sheet.getRow(5).getCell(3).value).toBe(1);
+    expect(sheet.getRow(5).getCell(9).value).toEqual(new Date(Date.UTC(2026, 9, 20)));
+    expect(sheet.getRow(6).getCell(2).value).toBe("PARACETAMOL 500 mg");
+  });
+
   it("tiene la hoja de lotes con números y fechas de verdad", () => {
     const sheet = workbook.getWorksheet("Lotes")!;
     expect(sheet.getRow(4).values).toEqual([
-      undefined, "Establecimiento", "Código", "Farmacia", "Código producto", "Producto", "Lote", "Vence", "Días", "Situación", "Saldo", "Precio", "Valor",
+      undefined, "Código producto", "Producto", "Establecimiento", "Código", "Farmacia", "Lote", "Vence", "Días", "Situación", "Saldo", "Precio", "Valor",
     ]);
     const first = sheet.getRow(5);
-    expect(first.getCell(1).value).toBe("P.S. Challual");
-    expect(first.getCell(3).value).toBe("35635F02 PUESTO LA FLOR");
+    expect(first.getCell(2).value).toBe("INSULINA NPH");
+    expect(first.getCell(3).value).toBe("P.S. Challual");
+    expect(first.getCell(5).value).toBe("35635F02 PUESTO LA FLOR");
     expect(first.getCell(7).value).toEqual(new Date(Date.UTC(2026, 9, 20)));
     expect(first.getCell(8).value).toBe(-7);
     expect(first.getCell(9).value).toBe("Vencido");

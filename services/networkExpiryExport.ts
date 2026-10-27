@@ -1,10 +1,11 @@
 /**
  * Excel de la ventana «Vencimientos» de Consulta Stock: lo que la ventana muestra (con su filtro
- * y su búsqueda), una hoja con cada lote y otra con el resumen por establecimiento. Las
- * cantidades van como número, sin la «u» de unidades; las fechas, como fecha de Excel.
+ * y su búsqueda), con el resumen por producto, cada lote (por producto) y el resumen por
+ * establecimiento. Las cantidades van como número, sin la «u» de unidades; las fechas, como
+ * fecha de Excel.
  */
 import ExcelJS from "exceljs";
-import type { ExpiryLot, NetworkExpiry } from "./networkExpiry";
+import { groupExpiryByProduct, type ExpiryLot, type NetworkExpiry } from "./networkExpiry";
 
 export interface NetworkExpiryExportMeta {
   /** UNGET o red, para el título. */
@@ -62,17 +63,48 @@ export const buildNetworkExpiryWorkbook = (data: NetworkExpiry, meta: NetworkExp
   const when = meta.generatedAt.toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
   const subtitle = `${meta.scope} · ${data.sites.length} establecimientos · por vencer: próximos ${meta.windowDays} días · generado el ${when}`;
 
+  const products = groupExpiryByProduct(data);
+
+  addSheet(
+    workbook,
+    "Por producto",
+    "Vencimientos por producto",
+    subtitle,
+    [
+      { header: "Código producto", width: 14, center: true },
+      { header: "Producto", width: 48 },
+      { header: "Establecimientos", width: 15, center: true },
+      { header: "Lotes vencidos", width: 12, center: true },
+      { header: "Lotes por vencer", width: 12, center: true },
+      { header: "Saldo", width: 11, numFmt: QUANTITY, center: true },
+      { header: "Valor vencido", width: 14, numFmt: MONEY, center: true },
+      { header: "Valor por vencer", width: 14, numFmt: MONEY, center: true },
+      { header: "Vence primero", width: 13, numFmt: "dd/mm/yyyy", center: true },
+    ],
+    products.map((product) => [
+      product.code,
+      product.name,
+      product.sites,
+      product.expiredLots,
+      product.expiringLots,
+      product.balance,
+      product.expiredValue,
+      product.expiringValue,
+      excelDate(product.first.expiry),
+    ]),
+  );
+
   addSheet(
     workbook,
     "Lotes",
     "Lotes vencidos y por vencer",
     subtitle,
     [
+      { header: "Código producto", width: 14, center: true },
+      { header: "Producto", width: 48 },
       { header: "Establecimiento", width: 34 },
       { header: "Código", width: 11, center: true },
       { header: "Farmacia", width: 22, center: true },
-      { header: "Código producto", width: 14, center: true },
-      { header: "Producto", width: 48 },
       { header: "Lote", width: 16, center: true },
       { header: "Vence", width: 12, numFmt: "dd/mm/yyyy", center: true },
       { header: "Días", width: 8, center: true },
@@ -81,13 +113,13 @@ export const buildNetworkExpiryWorkbook = (data: NetworkExpiry, meta: NetworkExp
       { header: "Precio", width: 11, numFmt: MONEY, center: true },
       { header: "Valor", width: 13, numFmt: MONEY, center: true },
     ],
-    data.sites.flatMap((site) =>
-      site.lots.map((lot) => [
-        site.name,
-        site.code,
-        pharmacyLabel(lot),
+    products.flatMap((product) =>
+      product.lots.map((lot) => [
         lot.productCode,
         lot.productName,
+        lot.siteName,
+        lot.siteCode,
+        pharmacyLabel(lot),
         lot.lot,
         excelDate(lot.expiry),
         lot.days,

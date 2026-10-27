@@ -269,6 +269,66 @@ export const filterNetworkExpiry = (data: NetworkExpiry, filter: ExpiryFilter, q
   return totals(sites, data.sitesWithoutData);
 };
 
+export interface ExpiryProductLot extends ExpiryLot {
+  siteName: string;
+  siteCode: string;
+}
+
+export interface ExpiryProduct {
+  /** Código del producto o, si la hoja no lo trae, su nombre normalizado. */
+  key: string;
+  code: string;
+  name: string;
+  /** Sus lotes en toda la red, el que vence (o venció) primero arriba. */
+  lots: ExpiryProductLot[];
+  /** En cuántos establecimientos está. */
+  sites: number;
+  expiredLots: number;
+  expiringLots: number;
+  balance: number;
+  expiredValue: number;
+  expiringValue: number;
+  /** El lote que vence (o venció) primero. */
+  first: ExpiryProductLot;
+}
+
+/**
+ * Los mismos lotes, por producto: la vista de la ventana «Vencimientos» (pedido del usuario del
+ * 2026-10-27: «yo quiero por producto y que me abra el detalle por lote y en qué establecimiento
+ * está»). Ordenados por el lote que vence primero: lo más urgente arriba.
+ */
+export const groupExpiryByProduct = (data: NetworkExpiry): ExpiryProduct[] => {
+  const groups = new Map<string, ExpiryProductLot[]>();
+  for (const site of data.sites) {
+    for (const lot of site.lots) {
+      const key = lot.productCode ? `c:${lot.productCode}` : `n:${normalizeStockText(lot.productName)}`;
+      const list = groups.get(key) ?? [];
+      list.push({ ...lot, siteName: site.name, siteCode: site.code });
+      groups.set(key, list);
+    }
+  }
+  const products: ExpiryProduct[] = [];
+  for (const [key, lots] of groups) {
+    lots.sort((a, b) => a.expiry.getTime() - b.expiry.getTime() || a.siteName.localeCompare(b.siteName, "es"));
+    const expired = lots.filter((lot) => lot.status === "expired");
+    const expiring = lots.filter((lot) => lot.status === "expiring");
+    products.push({
+      key,
+      code: lots.find((lot) => lot.productCode)?.productCode ?? "",
+      name: lots.find((lot) => lot.productName)?.productName ?? "",
+      lots,
+      sites: new Set(lots.map((lot) => lot.siteId)).size,
+      expiredLots: expired.length,
+      expiringLots: expiring.length,
+      balance: lots.reduce((sum, lot) => sum + lot.balance, 0),
+      expiredValue: expired.reduce((sum, lot) => sum + lot.value, 0),
+      expiringValue: expiring.reduce((sum, lot) => sum + lot.value, 0),
+      first: lots[0],
+    });
+  }
+  return products.sort((a, b) => a.first.expiry.getTime() - b.first.expiry.getTime() || a.name.localeCompare(b.name, "es"));
+};
+
 /** «Venció hace 3 días», «Vence hoy», «Vence en 12 días». */
 export const describeExpiryDays = (days: number): string => {
   if (days < -1) return `Venció hace ${-days} días`;
