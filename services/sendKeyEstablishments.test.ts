@@ -4,7 +4,7 @@ vi.mock("./supabaseClient", () => ({ supabase: null }));
 vi.mock("./api", () => ({ getSessionToken: () => null }));
 
 import {
-  filterEstablishments, lastSendAt, mergeEstablishments, pendingAlerts, summarizeEstablishments,
+  filterEstablishments, hasRebindRisk, lastSendAt, mergeEstablishments, pendingAlerts, rebindWarnings, summarizeEstablishments,
 } from "./sendKeyEstablishments";
 import { SendKeyRow } from "./sendKeys";
 import { ToolkitDeviceRow } from "./toolkitDevices";
@@ -91,5 +91,51 @@ describe("lastSendAt y pendingAlerts", () => {
   });
   it("la campana lista los bloqueos del más reciente al más antiguo", () => {
     expect(pendingAlerts(claves).map((r) => r.code)).toEqual(["030S05", "06525"]);
+  });
+});
+
+describe("rebindWarnings", () => {
+  // Caso real (2026-10-27): el SISMED de Ledoy tenía por error stock del Almacén Bellavista.
+  const almacen = clave({
+    code: "030S05", name: "Almacén Bellavista", hasKey: true, deviceName: "ogm-digitacion", lastOkRows: 516,
+    alert: { id: 31, at: hace(0), deviceName: "LEDOY", rows: 14, result: "SIN_CLAVE" },
+  });
+  const ledoy = clave({ code: "06562", name: "P.S. Ledoy", hasKey: true, deviceName: "LEDOY" });
+  const conPc = (row: SendKeyRow, pc: string, dias = 0) => ({ ...row, devices: [{ deviceName: pc, version: "2.4.6", lastSeen: hace(dias) }] });
+  const lista = [conPc(almacen, "LEDOY"), conPc(ledoy, "LEDOY"), conPc(clave({ code: "06513", name: "P.S. Huacho" }), "HUACHO-PC")];
+
+  it("avisa que esa PC ya es la de otro establecimiento y que manda muchos menos lotes", () => {
+    const avisos = rebindWarnings(almacen, lista, ahora);
+    expect(avisos.otherEstablishments).toEqual([{ code: "06562", name: "P.S. Ledoy", bound: true }]);
+    expect(avisos.fewerRows).toEqual({ attempt: 14, current: 516 });
+    expect(hasRebindRisk(avisos)).toBe(true);
+  });
+
+  it("reconoce la PC sin importar mayúsculas ni espacios, y la que solo envía sin clave", () => {
+    const sinClave = conPc(clave({ code: "06562", name: "P.S. Ledoy", hasKey: false }), " ledoy ");
+    const avisos = rebindWarnings(almacen, [sinClave], ahora);
+    expect(avisos.otherEstablishments).toEqual([{ code: "06562", name: "P.S. Ledoy", bound: false }]);
+  });
+
+  it("no cuenta una PC que dejó de enviar hace más de 30 días", () => {
+    const vieja = conPc(clave({ code: "06562", name: "P.S. Ledoy" }), "LEDOY", 45);
+    expect(rebindWarnings(almacen, [vieja], ahora).otherEstablishments).toEqual([]);
+  });
+
+  it("no avisa en un cambio de PC normal", () => {
+    const cambio = clave({
+      code: "06519", name: "C.S. Bellavista", hasKey: true, deviceName: "FARMACIA-01", lastOkRows: 300,
+      alert: { id: 5, at: hace(0), deviceName: "FARMACIA-NUEVA", rows: 298, result: "OTRO_EQUIPO" },
+    });
+    const avisos = rebindWarnings(cambio, lista, ahora);
+    expect(avisos).toEqual({ otherEstablishments: [], fewerRows: null });
+    expect(hasRebindRisk(avisos)).toBe(false);
+  });
+
+  it("no compara lotes si falta un dato o el establecimiento manda pocos", () => {
+    const sinLotes = { ...almacen, alert: { ...almacen.alert!, rows: null } };
+    expect(rebindWarnings(sinLotes, [], ahora).fewerRows).toBeNull();
+    expect(rebindWarnings({ ...almacen, lastOkRows: 12, alert: { ...almacen.alert!, rows: 3 } }, [], ahora).fewerRows).toBeNull();
+    expect(rebindWarnings({ ...almacen, alert: { ...almacen.alert!, deviceName: null } }, lista, ahora).otherEstablishments).toEqual([]);
   });
 });
