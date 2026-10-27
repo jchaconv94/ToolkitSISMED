@@ -2,7 +2,8 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { AlertTriangle, CalendarClock, ChevronLeft, ChevronRight, Clock, Download, Package, Wallet } from "lucide-react";
 import { saveAs } from "file-saver";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
-import { EmptyState, KpiCard, StatusChip, TableHeaderCell, TableSearch, useTableSort } from "./ui/kit";
+import { EmptyState, KpiCard, SortButton, StatusChip, TableSearch, ariaSort, useTableSort } from "./ui/kit";
+import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type HeadAlign } from "./ui/FloatingTableHead";
 import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useIsDesktop } from "./ui/useIsDesktop";
@@ -47,6 +48,18 @@ const FILTERS: { value: ExpiryFilter; label: string }[] = [
   { value: "expiring", label: "Por vencer" },
 ];
 
+type ListSortKey = "name" | "sites" | "expired" | "expiring" | "balance" | "value" | "first";
+
+const LIST_COLUMNS: HeadColumn<ListSortKey>[] = [
+  { key: "name", label: "Producto" },
+  { key: "sites", label: "EESS", align: "center", fit: true, title: "Establecimientos de salud con el producto vencido o por vencer" },
+  { key: "expired", label: "Vencidos", align: "center", fit: true },
+  { key: "expiring", label: "Por vencer", align: "center", fit: true },
+  { key: "balance", label: "Stock", align: "center", fit: true },
+  { key: "value", label: "Valor", align: "center", fit: true },
+  { key: "first", label: "Vence primero", align: "center", fit: true },
+];
+
 const CodeChip: React.FC<{ code: string }> = ({ code }) =>
   code ? <span className="inline-block rounded bg-slate-100 px-1.5 font-mono text-[11px] text-slate-600">{code}</span> : null;
 
@@ -60,6 +73,55 @@ const ExpiryCell: React.FC<{ date: Date; days: number; status: "expired" | "expi
   </div>
 );
 
+/**
+ * Columna de las tablas de la ventana. `fit`: del ancho justo de su contenido, en una línea,
+ * para que el nombre (producto o establecimiento) se quede con el resto del ancho.
+ */
+type HeadColumn<K extends string> = { key: K; label: string; align?: HeadAlign; fit?: boolean; title?: string };
+
+/**
+ * Cabecera de una tabla de la ventana con su franja que se queda arriba al bajar
+ * (`FloatingTableHead`, como en las demás tablas: nada de `sticky` en el `<thead>`).
+ */
+const TableHead = <K extends string>({
+  columns,
+  headSort,
+  floating,
+  trailing,
+}: {
+  columns: HeadColumn<K>[];
+  headSort: (key: K) => { dir: "asc" | "desc" | null; onSort: () => void };
+  floating: ReturnType<typeof useFloatingTableHead>["floating"];
+  /** Columna final sin título (la flecha de la fila). */
+  trailing?: string;
+}) => {
+  const content = (column: HeadColumn<K>) => {
+    const sort = headSort(column.key);
+    return <SortButton label={column.label} dir={sort.dir} onClick={sort.onSort} />;
+  };
+  return (
+    <>
+      <FloatingTableHead state={floating} padding="px-3" cells={columns.map((column, index) => ({ key: column.key, index, align: column.align, content: content(column) }))} />
+      <thead>
+        <tr>
+          {columns.map((column) => (
+            <th
+              key={column.key}
+              scope="col"
+              title={column.title}
+              aria-sort={ariaSort(headSort(column.key).dir)}
+              className={`py-3 ${column.fit ? "w-px whitespace-nowrap px-3" : "px-4"} ${tableHeadCellClass} ${tableHeadTextClass} ${headAlignClass(column.align)}`}
+            >
+              {content(column)}
+            </th>
+          ))}
+          {trailing !== undefined && <th className={`w-10 ${tableHeadCellClass}`} aria-label={trailing} />}
+        </tr>
+      </thead>
+    </>
+  );
+};
+
 /** Detalle de un producto: sus lotes en toda la red y en qué establecimiento está cada uno. */
 const ProductDetail: React.FC<{ product: ExpiryProduct; isDesktop: boolean }> = ({ product, isDesktop }) => {
   const [page, setPage] = useState(1);
@@ -71,6 +133,7 @@ const ProductDetail: React.FC<{ product: ExpiryProduct; isDesktop: boolean }> = 
       pharmacy: (lot) => pharmacyLabel(lot),
       lot: (lot) => lot.lot,
       expiry: (lot) => lot.expiry.getTime(),
+      status: (lot) => (lot.status === "expired" ? 0 : 1),
       balance: (lot) => lot.balance,
       value: (lot) => lot.value,
     },
@@ -81,6 +144,16 @@ const ProductDetail: React.FC<{ product: ExpiryProduct; isDesktop: boolean }> = 
   // Farmacia solo si algún lote está en una farmacia o puesto distinto de su establecimiento.
   const showPharmacy = product.lots.some((lot) => pharmacyLabel(lot));
   const rows = isDesktop ? sorted.slice((page - 1) * pageSize, page * pageSize) : sorted.slice(0, mobile.count);
+  const { tableRef, floating } = useFloatingTableHead([product.key, page, pageSize, isDesktop, sorted]);
+  const columns: HeadColumn<"site" | "pharmacy" | "lot" | "expiry" | "status" | "balance" | "value">[] = [
+    { key: "site", label: "Establecimiento" },
+    ...(showPharmacy ? [{ key: "pharmacy" as const, label: "Farmacia" }] : []),
+    { key: "lot", label: "Lote", align: "center", fit: true },
+    { key: "expiry", label: "Vence", align: "center", fit: true },
+    { key: "status", label: "Situación", align: "center", fit: true },
+    { key: "balance", label: "Saldo", align: "center", fit: true },
+    { key: "value", label: "Valor", align: "center", fit: true },
+  ];
 
   return (
     <div className="space-y-4">
@@ -98,18 +171,8 @@ const ProductDetail: React.FC<{ product: ExpiryProduct; isDesktop: boolean }> = 
 
       {isDesktop ? (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <TableHeaderCell sort={headSort("site")}>Establecimiento</TableHeaderCell>
-                {showPharmacy && <TableHeaderCell align="center" sort={headSort("pharmacy")}>Farmacia</TableHeaderCell>}
-                <TableHeaderCell align="center" sort={headSort("lot")}>Lote</TableHeaderCell>
-                <TableHeaderCell align="center" sort={headSort("expiry")}>Vence</TableHeaderCell>
-                <TableHeaderCell align="center">Situación</TableHeaderCell>
-                <TableHeaderCell align="center" sort={headSort("balance")}>Saldo</TableHeaderCell>
-                <TableHeaderCell align="center" sort={headSort("value")}>Valor</TableHeaderCell>
-              </tr>
-            </thead>
+          <table ref={tableRef} className="w-full text-left text-sm">
+            <TableHead columns={columns} headSort={headSort} floating={floating} />
             <tbody>
               {rows.map((lot, index) => (
                 <tr key={`${lot.siteId}-${lot.lot}-${lot.pharmacy}-${index}`} className="h-14 border-t border-slate-100">
@@ -117,14 +180,14 @@ const ProductDetail: React.FC<{ product: ExpiryProduct; isDesktop: boolean }> = 
                     <p className="text-[13.5px] font-bold text-slate-900">{lot.siteName}</p>
                     {lot.siteCode && <p className="font-mono text-[11px] text-slate-500">{lot.siteCode}</p>}
                   </td>
-                  {showPharmacy && <td className="px-4 py-2 text-center text-xs text-slate-600">{pharmacyLabel(lot) || "—"}</td>}
-                  <td className="px-4 py-2 text-center font-mono text-xs text-slate-700">{lot.lot || "—"}</td>
-                  <td className="px-4 py-2 text-center"><ExpiryCell date={lot.expiry} days={lot.days} status={lot.status} /></td>
-                  <td className="px-4 py-2 text-center">
+                  {showPharmacy && <td className="px-4 py-2 text-xs text-slate-600">{pharmacyLabel(lot) || "—"}</td>}
+                  <td className="whitespace-nowrap px-3 py-2 text-center font-mono text-xs text-slate-700">{lot.lot || "—"}</td>
+                  <td className="px-3 py-2 text-center"><ExpiryCell date={lot.expiry} days={lot.days} status={lot.status} /></td>
+                  <td className="px-3 py-2 text-center">
                     <StatusChip tone={lot.status === "expired" ? "danger" : "warning"} label={lot.status === "expired" ? "Vencido" : "Por vencer"} />
                   </td>
-                  <td className="px-4 py-2 text-center text-[13px] font-semibold text-slate-800">{formatNumber(lot.balance, 3)}</td>
-                  <td className="whitespace-nowrap px-4 py-2 text-center text-[13px] text-slate-700">{lot.value > 0 ? money(lot.value) : "—"}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{formatNumber(lot.balance, 3)}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] text-slate-700">{lot.value > 0 ? money(lot.value) : "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -212,6 +275,7 @@ export const NetworkExpiryDialog: React.FC<{
   useEffect(() => setPage(1), [signature]);
   const mobile = useIncrementalCount(sorted.length, signature, 20);
   const rows = isDesktop ? sorted.slice((page - 1) * pageSize, page * pageSize) : sorted.slice(0, mobile.count);
+  const { tableRef, floating } = useFloatingTableHead([detailKey, page, pageSize, isDesktop, sorted]);
 
   const detail = detailKey ? allProducts.get(detailKey) ?? null : null;
   const position = detail ? sorted.findIndex((product) => product.key === detail.key) : -1;
@@ -264,7 +328,7 @@ export const NetworkExpiryDialog: React.FC<{
     <ResponsiveDialog
       open={open}
       onClose={onClose}
-      size="xl"
+      size="2xl"
       title={detail ? detail.name || "Producto sin nombre" : "Vencimientos"}
       subtitle={
         detail
@@ -369,19 +433,8 @@ export const NetworkExpiryDialog: React.FC<{
               </div>
             ) : isDesktop ? (
               <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <TableHeaderCell sort={headSort("name")}>Producto</TableHeaderCell>
-                      <TableHeaderCell align="center" sort={headSort("sites")}>Establecimientos</TableHeaderCell>
-                      <TableHeaderCell align="center" sort={headSort("expired")}>Vencidos</TableHeaderCell>
-                      <TableHeaderCell align="center" sort={headSort("expiring")}>Por vencer</TableHeaderCell>
-                      <TableHeaderCell align="center" sort={headSort("balance")}>Stock</TableHeaderCell>
-                      <TableHeaderCell align="center" sort={headSort("value")}>Valor</TableHeaderCell>
-                      <TableHeaderCell align="center" sort={headSort("first")}>Vence primero</TableHeaderCell>
-                      <th className="w-10" aria-label="Ver detalle" />
-                    </tr>
-                  </thead>
+                <table ref={tableRef} className="w-full text-left text-sm">
+                  <TableHead columns={LIST_COLUMNS} headSort={headSort} floating={floating} trailing="Ver detalle" />
                   <tbody>
                     {rows.map((product) => (
                       <tr
@@ -395,12 +448,12 @@ export const NetworkExpiryDialog: React.FC<{
                           <p className="text-[13.5px] font-semibold text-slate-900">{product.name || "Sin nombre"}</p>
                           <CodeChip code={product.code} />
                         </td>
-                        <td className="px-4 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(product.sites)}</td>
-                        <td className="px-4 py-2 text-center"><CountChip value={product.expiredLots} tone="danger" /></td>
-                        <td className="px-4 py-2 text-center"><CountChip value={product.expiringLots} tone="warning" /></td>
-                        <td className="px-4 py-2 text-center text-[13px] font-semibold text-slate-800">{formatNumber(product.balance, 3)}</td>
-                        <td className="whitespace-nowrap px-4 py-2 text-center text-[13px] text-slate-700">{productTotal(product) > 0 ? money(productTotal(product)) : "—"}</td>
-                        <td className="px-4 py-2 text-center"><ExpiryCell date={product.first.expiry} days={product.first.days} status={product.first.status} /></td>
+                        <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(product.sites)}</td>
+                        <td className="px-3 py-2 text-center"><CountChip value={product.expiredLots} tone="danger" /></td>
+                        <td className="px-3 py-2 text-center"><CountChip value={product.expiringLots} tone="warning" /></td>
+                        <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{formatNumber(product.balance, 3)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] text-slate-700">{productTotal(product) > 0 ? money(productTotal(product)) : "—"}</td>
+                        <td className="px-3 py-2 text-center"><ExpiryCell date={product.first.expiry} days={product.first.days} status={product.first.status} /></td>
                         <td className="px-2 py-2 text-slate-400"><ChevronRight className="h-4 w-4" /></td>
                       </tr>
                     ))}
