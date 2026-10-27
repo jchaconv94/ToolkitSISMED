@@ -642,18 +642,20 @@ const DeviceList: React.FC<{ devices: ToolkitDevice[]; latest: string | null; la
  * su SISMED tenía por error stock del Almacén Bellavista y su Toolkit intentaba enviarlo.
  */
 const RebindRiskNote: React.FC<{ row: SendKeyRow; warnings: RebindWarnings }> = ({ row, warnings }) => {
-  // Corto a propósito (pedido del usuario, 2026-10-27: «demasiado texto»): título y una línea.
-  const pc = row.alert?.deviceName || "Esa PC";
-  const [first] = warnings.otherEstablishments;
-  const more = warnings.otherEstablishments.length - 1;
-  const facts = [
-    first && `${pc} ${first.bound ? "ya es la PC de" : "también envía"} ${first.name}${more > 0 ? ` y ${more} más` : ""}`,
-    warnings.fewerRows && `${warnings.fewerRows.attempt} lotes en vez de ${warnings.fewerRows.current}`,
-  ].filter(Boolean);
+  // Dos frases que se entiendan solas: quién es esa PC y qué hacer (pedido del usuario,
+  // 2026-10-27: la lista larga era «demasiado texto» y la línea suelta «ni se entiende»).
+  const pc = row.alert?.deviceName || "Esta PC";
+  const [other] = warnings.otherEstablishments;
+  const title = other
+    ? `${pc} es la PC de ${other.name}`
+    : `${pc} envió solo ${warnings.fewerRows?.attempt} lotes (hoy llegan ${warnings.fewerRows?.current})`;
+  const body = other
+    ? `No es un cambio de PC: su SISMED tiene por error stock de ${row.name}. Use «Ignorar».`
+    : "No parece un cambio de PC. Use «Ignorar» salvo que sepa que cambiaron la PC.";
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">
-      <p className="flex items-center gap-1.5 font-black"><AlertTriangle className="h-4 w-4 shrink-0" />No parece un cambio de PC</p>
-      <p className="mt-0.5 pl-[22px]">{facts.join(" · ")}</p>
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12.5px] leading-snug text-amber-900">
+      <p className="flex items-start gap-1.5 font-black"><AlertTriangle className="mt-px h-4 w-4 shrink-0" />{title}</p>
+      <p className="mt-1 pl-[22px]">{body}</p>
     </div>
   );
 };
