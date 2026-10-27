@@ -14,8 +14,8 @@ import {
   sismedState, sismedVersionsInUse, toolkitDevicesApi,
 } from "../services/toolkitDevices";
 import {
-  ESTABLISHMENT_FILTER_LABEL, EstablishmentFilter, EstablishmentRow, filterEstablishments, lastSendAt, latestDevice,
-  mergeEstablishments, pendingAlerts, summarizeEstablishments, toolkitState,
+  ESTABLISHMENT_FILTER_LABEL, EstablishmentFilter, EstablishmentRow, RebindWarnings, filterEstablishments, hasRebindRisk,
+  lastSendAt, latestDevice, mergeEstablishments, pendingAlerts, rebindWarnings, summarizeEstablishments, toolkitState,
 } from "../services/sendKeyEstablishments";
 import {
   EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, TableHeaderCell, TableSearch, formatDate,
@@ -95,6 +95,9 @@ export const AdminSendKeysModule: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [newKey, setNewKey] = useState<{ row: SendKeyRow; key: string } | null>(null);
+  // «Cambiar a este equipo» con señales de error: hay que marcar la casilla para confirmar.
+  const [rebindChecked, setRebindChecked] = useState(false);
+  useEffect(() => { setRebindChecked(false); }, [pending]);
 
   const load = useCallback(async () => {
     try {
@@ -121,6 +124,11 @@ export const AdminSendKeysModule: React.FC = () => {
   useEffect(() => { void load(); }, [load]);
 
   const rows = useMemo(() => mergeEstablishments(keys, devices), [keys, devices]);
+  const rebindRisk = useMemo(
+    () => (pending?.kind === "rebind" ? rebindWarnings(pending.row, rows) : null),
+    [pending, rows],
+  );
+  const risky = hasRebindRisk(rebindRisk);
   const latestSismed = useMemo(() => latestSismedVersion(rows), [rows]);
   const alerts = useMemo(() => pendingAlerts(keys), [keys]);
 
@@ -217,7 +225,8 @@ export const AdminSendKeysModule: React.FC = () => {
       <ConfirmationDialog
         isOpen={Boolean(pending)}
         isConfirming={busy}
-        tone={pending?.kind === "rebind" ? "warning" : "danger"}
+        tone={pending?.kind === "rebind" && !risky ? "warning" : "danger"}
+        confirmDisabled={risky && !rebindChecked}
         title={
           pending?.kind === "rebind" ? "Cambiar a este equipo"
             : pending?.kind === "regenerate" ? "Regenerar clave"
@@ -235,7 +244,22 @@ export const AdminSendKeysModule: React.FC = () => {
         confirmLabel={pending?.kind === "rebind" ? "Cambiar equipo" : pending?.kind === "regenerate" ? "Regenerar" : "Retirar clave"}
         onConfirm={() => void confirmPending()}
         onCancel={() => setPending(null)}
-      />
+      >
+        {pending?.kind === "rebind" && risky && rebindRisk && (
+          <div className="space-y-3">
+            <RebindRiskNote row={pending.row} warnings={rebindRisk} />
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 p-3 text-[13px] font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={rebindChecked}
+                onChange={(e) => setRebindChecked(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-red-600"
+              />
+              Confirmé con {pending.row.name} que {pending.row.alert?.deviceName || "esa PC"} es su nueva PC.
+            </label>
+          </div>
+        )}
+      </ConfirmationDialog>
     </div>
   );
 };
@@ -306,6 +330,7 @@ const EstablishmentsPanel: React.FC<{
   // Con una UNGET elegida, repetir su nombre en cada fila no dice nada.
   const showUnget = useMemo(() => ungetFilter === "all" && new Set(rows.map((r) => r.ungetId || "")).size > 1, [rows, ungetFilter]);
   const selected = useMemo(() => rows.find((r) => r.code === selectedCode) || null, [rows, selectedCode]);
+  const selectedWarnings = useMemo(() => (selected?.alert ? rebindWarnings(selected, rows) : null), [selected, rows]);
 
   const loadHistory = useCallback(async (code: string) => {
     setHistoryLoading(true);
@@ -534,6 +559,7 @@ const EstablishmentsPanel: React.FC<{
           history={history}
           historyLoading={historyLoading}
           busy={busy}
+          warnings={selectedWarnings}
           onClose={() => setSelectedCode(null)}
           onIgnore={() => onIgnore(selected)}
           onRebind={() => onPending({ kind: "rebind", row: selected })}
@@ -611,6 +637,35 @@ const DeviceList: React.FC<{ devices: ToolkitDevice[]; latest: string | null; la
   </ul>
 );
 
+/**
+ * Por qué ese intento probablemente no es un cambio de PC. Caso real (P.S. Ledoy, 2026-10-27):
+ * su SISMED tenía por error stock del Almacén Bellavista y su Toolkit intentaba enviarlo.
+ */
+const RebindRiskNote: React.FC<{ row: SendKeyRow; warnings: RebindWarnings }> = ({ row, warnings }) => {
+  const pc = row.alert?.deviceName || "esa PC";
+  const shown = warnings.otherEstablishments.slice(0, 3);
+  const more = warnings.otherEstablishments.length - shown.length;
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] leading-relaxed text-amber-900">
+      <p className="flex items-center gap-1.5 font-black"><AlertTriangle className="h-4 w-4 shrink-0" />Probablemente no es la nueva PC de {row.name}</p>
+      <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
+        {shown.map((other) => (
+          <li key={other.code}>
+            Una PC llamada <b>{pc}</b> {other.bound ? "ya es la vinculada de" : "también envía el stock de"} <b>{other.name}</b> <span className="font-mono">({other.code})</span>.
+          </li>
+        ))}
+        {more > 0 && <li>Y {more} establecimiento{more === 1 ? "" : "s"} más.</li>}
+        {warnings.fewerRows && (
+          <li>
+            Intentó enviar <b>{warnings.fewerRows.attempt} lotes</b>; {row.deviceName || "el equipo actual"} envía <b>{warnings.fewerRows.current}</b>.
+          </li>
+        )}
+      </ul>
+      <p className="mt-1.5">Lo más común es que el SISMED de esa PC tenga, por error, stock de este establecimiento. Use «Ignorar» y revise ese SISMED.</p>
+    </div>
+  );
+};
+
 const DetailDrawer: React.FC<{
   row: EstablishmentRow;
   latest: string | null;
@@ -618,17 +673,19 @@ const DetailDrawer: React.FC<{
   history: SendAttempt[];
   historyLoading: boolean;
   busy: boolean;
+  warnings: RebindWarnings | null;
   onClose: () => void;
   onIgnore: () => void;
   onRebind: () => void;
   onRegenerate: () => void;
   onRevoke: () => void;
-}> = ({ row, latest, latestSismed, history, historyLoading, busy, onClose, onIgnore, onRebind, onRegenerate, onRevoke }) => {
+}> = ({ row, latest, latestSismed, history, historyLoading, busy, warnings, onClose, onIgnore, onRebind, onRegenerate, onRevoke }) => {
   const { can } = useAuth();
   const canIgnore = can("ADMIN_SEND_KEYS", "ignore");
   const canSwitch = can("ADMIN_SEND_KEYS", "switchDevice");
   const canRegenerate = can("ADMIN_SEND_KEYS", "regenerate");
   const devices = activeDevices(row);
+  const risky = hasRebindRisk(warnings);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -679,12 +736,23 @@ const DetailDrawer: React.FC<{
               <p className="mt-1 text-xs text-slate-500">
                 {relativeTime(row.alert.at)}{row.alert.rows != null && <> · {row.alert.rows} lotes</>} · {ATTEMPT_RESULT_LABEL[row.alert.result].replace("Bloqueado · ", "")}
               </p>
-              <div className="mt-3 grid grid-cols-[auto_1fr] gap-2">
-                {canIgnore && <button type="button" disabled={busy} onClick={onIgnore} className="h-10 rounded-xl border border-red-200 bg-white px-4 text-[13px] font-bold text-red-700 hover:bg-red-50 disabled:opacity-60">Ignorar</button>}
-                {canSwitch && <button type="button" disabled={busy} onClick={onRebind} className="flex h-10 items-center justify-center gap-2 rounded-xl bg-red-600 text-[13px] font-bold text-white hover:bg-red-700 disabled:opacity-60">
-                  <ArrowRightLeft className="h-4 w-4" /> Cambiar a este equipo
-                </button>}
-              </div>
+              {risky && warnings && <div className="mt-3"><RebindRiskNote row={row} warnings={warnings} /></div>}
+              {risky ? (
+                // Con señales de error, lo seguro es «Ignorar»: va como botón principal.
+                <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+                  {canIgnore && <button type="button" disabled={busy} onClick={onIgnore} className="h-10 rounded-xl bg-teal-600 px-4 text-[13px] font-bold text-white hover:bg-teal-700 disabled:opacity-60">Ignorar</button>}
+                  {canSwitch && <button type="button" disabled={busy} onClick={onRebind} className="flex h-10 items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3 text-[13px] font-bold text-red-700 hover:bg-red-50 disabled:opacity-60">
+                    <ArrowRightLeft className="h-4 w-4" /> Cambiar a este equipo
+                  </button>}
+                </div>
+              ) : (
+                <div className="mt-3 grid grid-cols-[auto_1fr] gap-2">
+                  {canIgnore && <button type="button" disabled={busy} onClick={onIgnore} className="h-10 rounded-xl border border-red-200 bg-white px-4 text-[13px] font-bold text-red-700 hover:bg-red-50 disabled:opacity-60">Ignorar</button>}
+                  {canSwitch && <button type="button" disabled={busy} onClick={onRebind} className="flex h-10 items-center justify-center gap-2 rounded-xl bg-red-600 text-[13px] font-bold text-white hover:bg-red-700 disabled:opacity-60">
+                    <ArrowRightLeft className="h-4 w-4" /> Cambiar a este equipo
+                  </button>}
+                </div>
+              )}
             </section>
           )}
 

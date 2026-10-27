@@ -10,6 +10,8 @@ interface ConfirmationDialogProps {
   cancelLabel?: string;
   tone?: "warning" | "danger" | "success";
   isConfirming?: boolean;
+  /** Deja el botón de confirmar apagado, p. ej. hasta marcar una casilla de «Entiendo». */
+  confirmDisabled?: boolean;
   children?: React.ReactNode;
   /** Ícono propio (por omisión, advertencia o visto bueno según el tono). */
   icon?: React.ReactNode;
@@ -46,6 +48,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   cancelLabel = "Cancelar",
   tone = "warning",
   isConfirming = false,
+  confirmDisabled = false,
   children,
   icon,
   onConfirm,
@@ -124,7 +127,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
             ref={confirmButtonRef}
             type="button"
             onClick={onConfirm}
-            disabled={isConfirming}
+            disabled={isConfirming || confirmDisabled}
             className={`inline-flex h-11 min-w-36 items-center justify-center gap-2 rounded-xl px-5 text-sm font-black text-white shadow-sm transition-colors focus:outline-none focus:ring-4 disabled:cursor-not-allowed disabled:opacity-60 ${styles.confirm}`}
           >
             {isConfirming && <Loader2 className="h-4 w-4 animate-spin" />}
