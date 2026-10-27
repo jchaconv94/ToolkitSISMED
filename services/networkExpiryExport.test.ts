@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildNetworkExpiry } from "./networkExpiry";
-import { buildNetworkExpiryWorkbook, networkExpiryFileName } from "./networkExpiryExport";
+import { buildNetworkExpiryWorkbook, networkExpiryFileName, quantityCell } from "./networkExpiryExport";
 
 const NOW = new Date(2026, 9, 27, 10, 30);
 
@@ -61,6 +61,34 @@ describe("buildNetworkExpiryWorkbook", () => {
   it("no escribe la «u» de unidades", () => {
     const sheet = workbook.getWorksheet("Lotes")!;
     sheet.eachRow((row) => row.eachCell((cell) => expect(String(cell.numFmt ?? "")).not.toMatch(/"u"|\bu\b/)));
+  });
+});
+
+describe("quantityCell", () => {
+  it("un entero no lleva el punto suelto («60.»)", () => {
+    expect(quantityCell(60)).toEqual({ value: 60, numFmt: "#,##0" });
+    expect(quantityCell(59.99999999)).toEqual({ value: 60, numFmt: "#,##0" });
+  });
+
+  it("un decimal conserva hasta tres decimales", () => {
+    expect(quantityCell(2.5)).toEqual({ value: 2.5, numFmt: "#,##0.###" });
+    expect(quantityCell(2773.125)).toEqual({ value: 2773.125, numFmt: "#,##0.###" });
+  });
+
+  it("en el Excel, el saldo entero sale sin punto y el decimal con sus decimales", () => {
+    const mixed = buildNetworkExpiry(
+      [{ id: "b", name: "C.S. Juan Guerra", code: "06530", rows: [
+        { Fec_Vencim: "20/10/2026", Saldo: "60", ID_Producto: "01", Nombre: "A", Lote: "L1", Precio_Det: "1" },
+        { Fec_Vencim: "21/10/2026", Saldo: "2.5", ID_Producto: "02", Nombre: "B", Lote: "L2", Precio_Det: "1" },
+      ] }],
+      90,
+      NOW,
+    );
+    const lots = buildNetworkExpiryWorkbook(mixed, { scope: "Bellavista", windowDays: 90, generatedAt: NOW }).getWorksheet("Lotes")!;
+    expect(lots.getRow(5).getCell(10).value).toBe(60);
+    expect(lots.getRow(5).getCell(10).numFmt).toBe("#,##0");
+    expect(lots.getRow(6).getCell(10).value).toBe(2.5);
+    expect(lots.getRow(6).getCell(10).numFmt).toBe("#,##0.###");
   });
 });
 
