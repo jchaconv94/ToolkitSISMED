@@ -255,7 +255,7 @@ export const AdminSendKeysModule: React.FC = () => {
                 onChange={(e) => setRebindChecked(e.target.checked)}
                 className="mt-0.5 h-4 w-4 shrink-0 accent-red-600"
               />
-              Confirmé con {pending.row.name} que {pending.row.alert?.deviceName || "esa PC"} es su nueva PC.
+              Confirmé que {pending.row.alert?.deviceName || "esa PC"} es la nueva PC.
             </label>
           </div>
         )}
@@ -642,26 +642,18 @@ const DeviceList: React.FC<{ devices: ToolkitDevice[]; latest: string | null; la
  * su SISMED tenía por error stock del Almacén Bellavista y su Toolkit intentaba enviarlo.
  */
 const RebindRiskNote: React.FC<{ row: SendKeyRow; warnings: RebindWarnings }> = ({ row, warnings }) => {
-  const pc = row.alert?.deviceName || "esa PC";
-  const shown = warnings.otherEstablishments.slice(0, 3);
-  const more = warnings.otherEstablishments.length - shown.length;
+  // Corto a propósito (pedido del usuario, 2026-10-27: «demasiado texto»): título y una línea.
+  const pc = row.alert?.deviceName || "Esa PC";
+  const [first] = warnings.otherEstablishments;
+  const more = warnings.otherEstablishments.length - 1;
+  const facts = [
+    first && `${pc} ${first.bound ? "ya es la PC de" : "también envía"} ${first.name}${more > 0 ? ` y ${more} más` : ""}`,
+    warnings.fewerRows && `${warnings.fewerRows.attempt} lotes en vez de ${warnings.fewerRows.current}`,
+  ].filter(Boolean);
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] leading-relaxed text-amber-900">
-      <p className="flex items-center gap-1.5 font-black"><AlertTriangle className="h-4 w-4 shrink-0" />Probablemente no es la nueva PC de {row.name}</p>
-      <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
-        {shown.map((other) => (
-          <li key={other.code}>
-            Una PC llamada <b>{pc}</b> {other.bound ? "ya es la vinculada de" : "también envía el stock de"} <b>{other.name}</b> <span className="font-mono">({other.code})</span>.
-          </li>
-        ))}
-        {more > 0 && <li>Y {more} establecimiento{more === 1 ? "" : "s"} más.</li>}
-        {warnings.fewerRows && (
-          <li>
-            Intentó enviar <b>{warnings.fewerRows.attempt} lotes</b>; {row.deviceName || "el equipo actual"} envía <b>{warnings.fewerRows.current}</b>.
-          </li>
-        )}
-      </ul>
-      <p className="mt-1.5">Lo más común es que el SISMED de esa PC tenga, por error, stock de este establecimiento. Use «Ignorar» y revise ese SISMED.</p>
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">
+      <p className="flex items-center gap-1.5 font-black"><AlertTriangle className="h-4 w-4 shrink-0" />No parece un cambio de PC</p>
+      <p className="mt-0.5 pl-[22px]">{facts.join(" · ")}</p>
     </div>
   );
 };
