@@ -121,6 +121,49 @@ export const filterEstablishments = (
     .sort((a, b) => order[sendKeyState(a)] - order[sendKeyState(b)] || a.name.localeCompare(b.name, "es", { numeric: true }));
 };
 
+/** Por qué «Cambiar a este equipo» puede ser un error. */
+export interface RebindWarnings {
+  /**
+   * Otros establecimientos que ya envía una PC con el mismo nombre que la del intento: vinculada
+   * (`bound`) o que los envió en los últimos 30 días. La web solo conoce el nombre de la PC, no su
+   * identificador, así que dos PC con el mismo nombre se confunden: es un aviso, no un bloqueo.
+   */
+  otherEstablishments: { code: string; name: string; bound: boolean }[];
+  /** El intento manda menos de la mitad de los lotes del último envío aceptado. */
+  fewerRows: { attempt: number; current: number } | null;
+}
+
+/** Con menos lotes que esto, la diferencia no dice nada (un puesto pequeño varía mucho). */
+const FEWER_ROWS_MIN = 20;
+
+/**
+ * Señales de que la PC del intento bloqueado no es la nueva PC del establecimiento. Caso real
+ * (P.S. Ledoy, 2026-10-27): su SISMED tenía por error stock del Almacén Bellavista y su Toolkit
+ * intentaba enviarlo; «Cambiar a este equipo» habría reemplazado 516 lotes del almacén por 14.
+ */
+export const rebindWarnings = (row: SendKeyRow, rows: EstablishmentRow[], now: Date = new Date()): RebindWarnings => {
+  const pc = normalize(row.alert?.deviceName || "");
+  const otherEstablishments = pc
+    ? rows
+      .filter((other) => other.code !== row.code)
+      .flatMap((other) => {
+        const bound = normalize(other.deviceName || "") === pc;
+        const sends = activeDevices(other, now).some((d) => normalize(d.deviceName || "") === pc);
+        return bound || sends ? [{ code: other.code, name: other.name, bound }] : [];
+      })
+      .sort((a, b) => Number(b.bound) - Number(a.bound) || a.name.localeCompare(b.name, "es", { numeric: true }))
+    : [];
+  const attempt = row.alert?.rows;
+  const current = row.lastOkRows;
+  const fewerRows = attempt != null && current != null && current >= FEWER_ROWS_MIN && attempt < current / 2
+    ? { attempt, current }
+    : null;
+  return { otherEstablishments, fewerRows };
+};
+
+export const hasRebindRisk = (warnings: RebindWarnings | null | undefined): boolean =>
+  Boolean(warnings && (warnings.otherEstablishments.length > 0 || warnings.fewerRows));
+
 /** Intentos bloqueados sin revisar, el más reciente primero (para la campana). */
 export const pendingAlerts = (rows: SendKeyRow[]): SendKeyRow[] =>
   rows.filter((row) => row.alert).sort((a, b) => String(b.alert!.at).localeCompare(String(a.alert!.at)));
