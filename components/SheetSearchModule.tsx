@@ -136,6 +136,8 @@ import {
 import { noticeSettingsApi } from "../services/noticeSettings";
 import { DAY_MS, DEFAULT_NOTICE_THRESHOLDS, noticeWhen } from "../services/notifications";
 import { getExpirationState, parseExpiryDate } from "../services/assignedIpressStock";
+import { buildNetworkExpiry, sheetExpirationStats } from "../services/networkExpiry";
+import { NetworkExpiryDialog } from "./NetworkExpiryDialog";
 import { KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, SortButton, StatusChip, ariaSort, useTableSort } from "./ui/kit";
 import { useStickyBar } from "./ui/useStickyBar";
 import { useModuleHeaderOverride } from "../contexts/ModuleHeaderContext";
@@ -905,104 +907,10 @@ let expiryWindowLoaded = false;
  * `expiringThisMonth` conserva su nombre por los muchos sitios que lo usan, pero desde el
  * 2026-10-03 es «vence dentro de la ventana» (90 días por omisión), no «este mes».
  * `expiringCalendarMonth` y `expiringNextMonth` siguen siendo por mes calendario: son las
- * columnas del reporte en Excel, que se titulan así.
+ * columnas del reporte en Excel, que se titulan así. La regla vive en services/networkExpiry.ts:
+ * la ventana «Vencimientos» usa la misma y suma lo mismo que esta tabla.
  */
-const getExpirationStats = (records: SIGData[]) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const windowEnd = new Date(today);
-  windowEnd.setDate(windowEnd.getDate() + expiryWindowDays);
-  windowEnd.setHours(23, 59, 59, 999);
-  const currentMonth = today.getMonth();
-  const currentYear = today.getFullYear();
-  const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
-  const nextMonthYear = currentMonth === 11 ? currentYear + 1 : currentYear;
-
-  const expired: SIGData[] = [];
-  const expiringThisMonth: SIGData[] = [];
-  const expiringCalendarMonth: SIGData[] = [];
-  const expiringNextMonth: SIGData[] = [];
-
-  records.forEach((r) => {
-    const stock = parseFloat(String(r.Saldo || "0").replace(/,/g, ""));
-    if (stock <= 0) return;
-    if (!r.Fec_Vencim) return;
-
-    const parts = r.Fec_Vencim.split(/[\/\-]/);
-    if (parts.length === 3) {
-      const p0 = parseInt(parts[0], 10);
-      const p1 = parseInt(parts[1], 10);
-      const p2 = parseInt(parts[2], 10);
-
-      let day = 1,
-        month = 0,
-        year = 2000;
-
-      if (p0 > 1000) {
-        // format YYYY-MM-DD
-        year = p0;
-        month = p1 - 1;
-        day = p2;
-      } else if (p2 > 1000 || p2 < 100) {
-        // format DD/MM/YYYY o MM/DD/YYYY
-        year = p2 < 100 ? p2 + 2000 : p2;
-        if (p0 > 12) {
-          day = p0;
-          month = p1 - 1;
-        } else if (p1 > 12) {
-          month = p0 - 1;
-          day = p1;
-        } else {
-          // Default to DD/MM/YYYY
-          day = p0;
-          month = p1 - 1;
-        }
-      }
-
-      if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
-        const expDate = new Date(year, month, day);
-        // Consider expired strictly if end of the day passed
-        expDate.setHours(23, 59, 59, 999);
-
-        if (expDate < today) {
-          expired.push(r);
-        } else {
-          if (expDate <= windowEnd) expiringThisMonth.push(r);
-          if (month === currentMonth && year === currentYear) expiringCalendarMonth.push(r);
-          else if (month === nextMonth && year === nextMonthYear) expiringNextMonth.push(r);
-        }
-      }
-    } else if (parts.length === 2) {
-      // MM/YYYY or MM/YY
-      const p0 = parseInt(parts[0], 10);
-      const p1 = parseInt(parts[1], 10);
-      if (!isNaN(p0) && !isNaN(p1)) {
-        const month = p0 - 1;
-        const year = p1 < 100 ? p1 + 2000 : p1;
-        // Expiry is end of the month
-        const expDate = new Date(year, month + 1, 0, 23, 59, 59, 999);
-        if (expDate < today) {
-          expired.push(r);
-        } else {
-          if (expDate <= windowEnd) expiringThisMonth.push(r);
-          if (month === currentMonth && year === currentYear) expiringCalendarMonth.push(r);
-          else if (month === nextMonth && year === nextMonthYear) expiringNextMonth.push(r);
-        }
-      }
-    }
-  });
-
-  return {
-    expired,
-    expiringThisMonth,
-    expiringCalendarMonth,
-    expiringNextMonth,
-    expiredCount: expired.length,
-    expiringThisMonthCount: expiringThisMonth.length,
-    expiringCalendarMonthCount: expiringCalendarMonth.length,
-    expiringNextMonthCount: expiringNextMonth.length,
-  };
-};
+const getExpirationStats = (records: SIGData[]) => sheetExpirationStats(records, expiryWindowDays);
 
 const SheetSearchModuleContent: React.FC = () => {
   const { user, hasPermission, can } = useAuth();
@@ -4730,6 +4638,33 @@ function processSheet(sheet) {
     [viewLevel, filteredAndSortedSources, rowsForSource, codeForSheet, supabaseSyncs, isCheckingLatestSyncs],
   );
 
+  // Vencimientos de la red: los establecimientos a la vista, con la misma regla de la tabla.
+  // Se calcula solo mientras la ventana está abierta.
+  const [expiryDialogOpen, setExpiryDialogOpen] = useState(false);
+  const networkExpiry = useMemo(
+    () =>
+      expiryDialogOpen && viewLevel === "sheets"
+        ? buildNetworkExpiry(
+            filteredAndSortedSources.map((sheet) => ({
+              id: sheet.id,
+              name: describeSheetName(sheet.name),
+              code: codeForSheet(sheet.id) || "",
+              rows: rowsForSource(sheet.id),
+            })),
+            expiryWindowDays,
+          )
+        : null,
+    [expiryDialogOpen, viewLevel, filteredAndSortedSources, rowsForSource, codeForSheet],
+  );
+  const networkExpiryCounts = useMemo(
+    () =>
+      establishmentTableRows.reduce(
+        (sum, row) => ({ expired: sum.expired + row.expiredCount, expiring: sum.expiring + row.expiringThisMonthCount }),
+        { expired: 0, expiring: 0 },
+      ),
+    [establishmentTableRows],
+  );
+
   // Cuántos establecimientos tiene la UNGET abierta, sin contar búsqueda ni filtros.
   const ungetSheetTotal = useMemo(
     () => (selectedUngetIndex === null ? 0 : sources.filter((s) => s.urlIndex === selectedUngetIndex).length),
@@ -4971,98 +4906,190 @@ function processSheet(sheet) {
       )}
       {/* Dentro de una UNGET: los reportes de sus establecimientos (Excel y foto de deficiencias). */}
       {viewLevel === "sheets" && (canSig.export || canSig.updateReport || canSig.photoReport) && (
-      <div className="relative z-30">
-        <button
-          onClick={() =>
-            setIsExportDropdownOpen(!isExportDropdownOpen)
-          }
-          aria-label="Exportar reportes"
-          className="group flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
-        >
-          <Download className="h-4 w-4 text-emerald-600 shrink-0 transition-transform group-hover:translate-y-0.5" />
-          Exportar reportes
-          <ChevronDown
-            className={`h-4 w-4 text-slate-400 shrink-0 transition-transform duration-200 ${isExportDropdownOpen ? "rotate-180" : ""}`}
-          />
-        </button>
-
-        {isExportDropdownOpen && (
-          <>
-            {/* Overlay screen to close dropdown on click outside */}
-            <div
-              className="fixed inset-0 z-40"
-              onClick={() => setIsExportDropdownOpen(false)}
-            />
-            {/* Dropdown Card */}
-            <div className="absolute right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-[0_10px_25px_-5px_rgba(0,0,0,0.1),0_8px_10px_-6px_rgba(0,0,0,0.05)] z-50 overflow-hidden w-72 divide-y divide-slate-100 py-1 animate-in fade-in slide-in-from-top-2 duration-150 text-left">
-              {canSig.photoReport && <button
-                onClick={() => {
-                  setIsExportDropdownOpen(false);
-                  setIsCaptureMode(true);
-                  if (selectedCaptureIds.size === 0) {
-                    handleAutoSelectDeficiencies();
-                  }
-                }}
-                className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-rose-50/50 transition-all text-slate-705 group cursor-pointer"
-              >
-                <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-100">
-                  <Camera className="w-4 h-4" />
-                </div>
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 leading-tight flex items-center gap-1.5">
-                    <span>Foto Reporte Deficiencias</span>
-                    <span className="bg-rose-100 text-rose-700 text-[8px] font-black px-1.5 py-0.2 rounded-full">
-                      NUEVO
-                    </span>
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-medium leading-normal">
-                    Seleccionar y descargar imagen para WhatsApp
-                  </span>
-                </div>
-              </button>}
-
-              {canSig.export && <button
-                onClick={() => {
-                  setIsExportDropdownOpen(false);
-                  exportAllEstablishmentsToExcel();
-                }}
-                className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-all text-slate-705 group cursor-pointer"
-              >
-                <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center shrink-0">
-                  <Download className="w-4 h-4" />
-                </div>
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 leading-tight">
-                    Exportar Stock
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-medium leading-normal">
-                    Saldos de todos los establecimientos
-                  </span>
-                </div>
-              </button>}
-
-              {canSig.updateReport && <button
-                onClick={() => {
-                  setIsExportDropdownOpen(false);
-                  exportReportToExcel();
-                }}
-                className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-all text-slate-705 group cursor-pointer"
-              >
-                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                  <FileSpreadsheet className="w-4 h-4" />
-                </div>
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 leading-tight">
-                    Reporte Actualización
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-medium leading-normal">
-                    Estado y fecha de cambios comprobados
-                  </span>
-                </div>
-              </button>}
-            </div>
-          </>
-        )}
+      <div className="relative z-30">
+
+        <button
+
+          onClick={() =>
+
+            setIsExportDropdownOpen(!isExportDropdownOpen)
+
+          }
+
+          aria-label="Exportar reportes"
+
+          className="group flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
+
+        >
+
+          <Download className="h-4 w-4 text-emerald-600 shrink-0 transition-transform group-hover:translate-y-0.5" />
+
+          Exportar reportes
+
+          <ChevronDown
+
+            className={`h-4 w-4 text-slate-400 shrink-0 transition-transform duration-200 ${isExportDropdownOpen ? "rotate-180" : ""}`}
+
+          />
+
+        </button>
+
+
+
+        {isExportDropdownOpen && (
+
+          <>
+
+            {/* Overlay screen to close dropdown on click outside */}
+
+            <div
+
+              className="fixed inset-0 z-40"
+
+              onClick={() => setIsExportDropdownOpen(false)}
+
+            />
+
+            {/* Dropdown Card */}
+
+            <div className="absolute right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-[0_10px_25px_-5px_rgba(0,0,0,0.1),0_8px_10px_-6px_rgba(0,0,0,0.05)] z-50 overflow-hidden w-72 divide-y divide-slate-100 py-1 animate-in fade-in slide-in-from-top-2 duration-150 text-left">
+
+              {canSig.photoReport && <button
+
+                onClick={() => {
+
+                  setIsExportDropdownOpen(false);
+
+                  setIsCaptureMode(true);
+
+                  if (selectedCaptureIds.size === 0) {
+
+                    handleAutoSelectDeficiencies();
+
+                  }
+
+                }}
+
+                className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-rose-50/50 transition-all text-slate-705 group cursor-pointer"
+
+              >
+
+                <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-100">
+
+                  <Camera className="w-4 h-4" />
+
+                </div>
+
+                <div className="flex flex-col gap-0.5 min-w-0">
+
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 leading-tight flex items-center gap-1.5">
+
+                    <span>Foto Reporte Deficiencias</span>
+
+                    <span className="bg-rose-100 text-rose-700 text-[8px] font-black px-1.5 py-0.2 rounded-full">
+
+                      NUEVO
+
+                    </span>
+
+                  </span>
+
+                  <span className="text-[10px] text-slate-400 font-medium leading-normal">
+
+                    Seleccionar y descargar imagen para WhatsApp
+
+                  </span>
+
+                </div>
+
+              </button>}
+
+
+
+              {canSig.export && <button
+
+                onClick={() => {
+
+                  setIsExportDropdownOpen(false);
+
+                  exportAllEstablishmentsToExcel();
+
+                }}
+
+                className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-all text-slate-705 group cursor-pointer"
+
+              >
+
+                <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center shrink-0">
+
+                  <Download className="w-4 h-4" />
+
+                </div>
+
+                <div className="flex flex-col gap-0.5 min-w-0">
+
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 leading-tight">
+
+                    Exportar Stock
+
+                  </span>
+
+                  <span className="text-[10px] text-slate-400 font-medium leading-normal">
+
+                    Saldos de todos los establecimientos
+
+                  </span>
+
+                </div>
+
+              </button>}
+
+
+
+              {canSig.updateReport && <button
+
+                onClick={() => {
+
+                  setIsExportDropdownOpen(false);
+
+                  exportReportToExcel();
+
+                }}
+
+                className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-all text-slate-705 group cursor-pointer"
+
+              >
+
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+
+                  <FileSpreadsheet className="w-4 h-4" />
+
+                </div>
+
+                <div className="flex flex-col gap-0.5 min-w-0">
+
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 leading-tight">
+
+                    Reporte Actualización
+
+                  </span>
+
+                  <span className="text-[10px] text-slate-400 font-medium leading-normal">
+
+                    Estado y fecha de cambios comprobados
+
+                  </span>
+
+                </div>
+
+              </button>}
+
+            </div>
+
+          </>
+
+        )}
+
       </div>
       )}
       <button
@@ -5771,6 +5798,20 @@ function processSheet(sheet) {
                   <div className="hidden items-center gap-2 shrink-0 md:flex">
                     <button
                       type="button"
+                      onClick={() => setExpiryDialogOpen(true)}
+                      className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+                      title="Vencidos y por vencer de todos los establecimientos"
+                    >
+                      <CalendarClock className="h-4 w-4 text-amber-600" />
+                      Vencimientos
+                      {networkExpiryCounts.expired + networkExpiryCounts.expiring > 0 && (
+                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-black ${networkExpiryCounts.expired > 0 ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>
+                          {(networkExpiryCounts.expired + networkExpiryCounts.expiring).toLocaleString("es-PE")}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setIsAdvancedFiltersSidebarOpen(true)}
                       className="relative flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
                     >
@@ -5924,6 +5965,17 @@ function processSheet(sheet) {
                         <button type="button" onClick={run(() => { if (user) setTempUrls([...scriptUrls]); setIsConfigOpen(true); })} className={item}>
                           <Settings className="h-5 w-5 text-slate-500" />
                           Configurar conexiones de stock
+                        </button>
+                      )}
+                      {viewLevel === "sheets" && (
+                        <button type="button" onClick={run(() => setExpiryDialogOpen(true))} className={item}>
+                          <CalendarClock className="h-5 w-5 text-amber-600" />
+                          <span className="min-w-0">
+                            <span className="block">Vencimientos</span>
+                            <span className="block text-xs font-medium text-slate-400">
+                              {networkExpiryCounts.expired.toLocaleString("es-PE")} vencidos · {networkExpiryCounts.expiring.toLocaleString("es-PE")} por vencer
+                            </span>
+                          </span>
                         </button>
                       )}
                       {descargas.length > 0 && (
@@ -8919,6 +8971,15 @@ function processSheet(sheet) {
         onClose={() => setIsCaptureModalOpen(false)}
         ungetName={activeCaptureUngetName}
         selectedItems={selectedCaptureItemsData}
+      />
+
+      <NetworkExpiryDialog
+        open={expiryDialogOpen && viewLevel === "sheets"}
+        onClose={() => setExpiryDialogOpen(false)}
+        scope={selectedUngetIndex !== null ? formatDisplayName(scriptUrls[selectedUngetIndex]?.name || "Documento") : "Red"}
+        data={networkExpiry}
+        windowDays={expiryWindowDays}
+        canExport={canSig.export}
       />
     </div>
   );

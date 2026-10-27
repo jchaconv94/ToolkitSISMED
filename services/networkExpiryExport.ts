@@ -1,0 +1,135 @@
+/**
+ * Excel de la ventana «Vencimientos» de Consulta Stock: lo que la ventana muestra (con su filtro
+ * y su búsqueda), una hoja con cada lote y otra con el resumen por establecimiento. Las
+ * cantidades van como número, sin la «u» de unidades; las fechas, como fecha de Excel.
+ */
+import ExcelJS from "exceljs";
+import type { ExpiryLot, NetworkExpiry } from "./networkExpiry";
+
+export interface NetworkExpiryExportMeta {
+  /** UNGET o red, para el título. */
+  scope: string;
+  windowDays: number;
+  generatedAt: Date;
+}
+
+const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F172A" } };
+const MONEY = '"S/" #,##0.00';
+const QUANTITY = "#,##0.###";
+
+/** Fecha de Excel del mismo día que se ve en pantalla (Excel no tiene zona horaria). */
+const excelDate = (date: Date) => new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+
+const pharmacyLabel = (lot: ExpiryLot) => (lot.pharmacyName && lot.pharmacyName !== lot.pharmacy ? `${lot.pharmacy} ${lot.pharmacyName}` : lot.pharmacy);
+
+const addSheet = (
+  workbook: ExcelJS.Workbook,
+  name: string,
+  title: string,
+  subtitle: string,
+  columns: { header: string; width: number; numFmt?: string; center?: boolean }[],
+  rows: (string | number | Date)[][],
+) => {
+  const sheet = workbook.addWorksheet(name, { views: [{ state: "frozen", ySplit: 4 }] });
+  sheet.columns = columns.map((column) => ({ width: column.width }));
+  sheet.getCell("A1").value = title;
+  sheet.getCell("A1").font = { bold: true, size: 14, color: { argb: "FF0F172A" } };
+  sheet.getCell("A2").value = subtitle;
+  sheet.getCell("A2").font = { size: 10, color: { argb: "FF64748B" } };
+  const header = sheet.getRow(4);
+  header.values = columns.map((column) => column.header);
+  header.height = 22;
+  header.eachCell((cell) => {
+    cell.fill = HEADER_FILL;
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+  });
+  rows.forEach((values) => {
+    const row = sheet.addRow(values);
+    columns.forEach((column, index) => {
+      const cell = row.getCell(index + 1);
+      if (column.numFmt) cell.numFmt = column.numFmt;
+      cell.alignment = { vertical: "middle", horizontal: column.center ? "center" : "left" };
+    });
+  });
+  if (rows.length > 0) sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + rows.length, column: columns.length } };
+  return sheet;
+};
+
+export const buildNetworkExpiryWorkbook = (data: NetworkExpiry, meta: NetworkExpiryExportMeta): ExcelJS.Workbook => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.created = meta.generatedAt;
+  const when = meta.generatedAt.toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  const subtitle = `${meta.scope} · ${data.sites.length} establecimientos · por vencer: próximos ${meta.windowDays} días · generado el ${when}`;
+
+  addSheet(
+    workbook,
+    "Lotes",
+    "Lotes vencidos y por vencer",
+    subtitle,
+    [
+      { header: "Establecimiento", width: 34 },
+      { header: "Código", width: 11, center: true },
+      { header: "Farmacia", width: 22, center: true },
+      { header: "Código producto", width: 14, center: true },
+      { header: "Producto", width: 48 },
+      { header: "Lote", width: 16, center: true },
+      { header: "Vence", width: 12, numFmt: "dd/mm/yyyy", center: true },
+      { header: "Días", width: 8, center: true },
+      { header: "Situación", width: 12, center: true },
+      { header: "Saldo", width: 11, numFmt: QUANTITY, center: true },
+      { header: "Precio", width: 11, numFmt: MONEY, center: true },
+      { header: "Valor", width: 13, numFmt: MONEY, center: true },
+    ],
+    data.sites.flatMap((site) =>
+      site.lots.map((lot) => [
+        site.name,
+        site.code,
+        pharmacyLabel(lot),
+        lot.productCode,
+        lot.productName,
+        lot.lot,
+        excelDate(lot.expiry),
+        lot.days,
+        lot.status === "expired" ? "Vencido" : "Por vencer",
+        lot.balance,
+        lot.price,
+        lot.value,
+      ]),
+    ),
+  );
+
+  addSheet(
+    workbook,
+    "Por establecimiento",
+    "Resumen por establecimiento",
+    subtitle,
+    [
+      { header: "Establecimiento", width: 34 },
+      { header: "Código", width: 11, center: true },
+      { header: "Lotes vencidos", width: 12, center: true },
+      { header: "Valor vencido", width: 14, numFmt: MONEY, center: true },
+      { header: "Lotes por vencer", width: 12, center: true },
+      { header: "Valor por vencer", width: 14, numFmt: MONEY, center: true },
+      { header: "Valor total", width: 14, numFmt: MONEY, center: true },
+    ],
+    data.sites.map((site) => [
+      site.name,
+      site.code,
+      site.expiredLots,
+      site.expiredValue,
+      site.expiringLots,
+      site.expiringValue,
+      site.expiredValue + site.expiringValue,
+    ]),
+  );
+
+  return workbook;
+};
+
+/** Nombre del archivo: «Vencimientos_Bellavista_2026-10-27.xlsx» (sin tildes ni espacios raros). */
+export const networkExpiryFileName = (scope: string, date: Date) => {
+  const clean = scope.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "") || "Red";
+  const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return `Vencimientos_${clean}_${day}.xlsx`;
+};
