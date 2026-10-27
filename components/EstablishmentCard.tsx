@@ -214,7 +214,7 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
 
   const cardContent = (
     <div
-      className={`group relative bg-white border p-4 sm:p-5 rounded-xl sm:rounded-2xl transition-all text-left flex flex-col items-start justify-between h-full overflow-hidden ${
+      className={`group relative isolate bg-white border p-4 sm:p-5 rounded-xl sm:rounded-2xl transition-all text-left flex flex-col items-start justify-between h-full overflow-hidden ${
         isCaptureMode && isSelected
           ? "border-rose-500 ring-4 ring-rose-400/30 bg-rose-50/20 shadow-md"
           : isCaptureMode
@@ -223,7 +223,8 @@ export const EstablishmentCard: React.FC<EstablishmentCardProps> = ({
       } ${className}`}
       style={{ boxSizing: "border-box" }}
     >
-      {/* Capture selection checkbox badge */}
+      {/* Capture selection checkbox badge. La tarjeta es `isolate`: sus capas (z-30) quedan dentro de ella y no
+          pasan por encima de la barra de búsqueda pegada arriba (también z-30) al bajar en el modo captura. */}
       {isCaptureMode && (
         <div className="absolute top-3 left-3 z-30 flex items-center gap-1.5 transition-all">
           {isSelected ? (
