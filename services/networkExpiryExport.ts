@@ -16,7 +16,16 @@ export interface NetworkExpiryExportMeta {
 
 const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F172A" } };
 const MONEY = '"S/" #,##0.00';
-const QUANTITY = "#,##0.###";
+
+/**
+ * Cantidad con hasta tres decimales y sin punto suelto: con «#,##0.###» Excel muestra «60.»
+ * en un entero (lo vio el usuario el 2026-10-27), así que el entero va con «#,##0». Se redondea
+ * a tres decimales para que una suma como 59,9999999 no quede como decimal.
+ */
+export const quantityCell = (value: number): { value: number; numFmt: string } => {
+  const rounded = Math.round(value * 1000) / 1000;
+  return { value: rounded, numFmt: Number.isInteger(rounded) ? "#,##0" : "#,##0.###" };
+};
 
 /** Fecha de Excel del mismo día que se ve en pantalla (Excel no tiene zona horaria). */
 const excelDate = (date: Date) => new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -28,7 +37,7 @@ const addSheet = (
   name: string,
   title: string,
   subtitle: string,
-  columns: { header: string; width: number; numFmt?: string; center?: boolean }[],
+  columns: { header: string; width: number; numFmt?: string; quantity?: boolean; center?: boolean }[],
   rows: (string | number | Date)[][],
 ) => {
   const sheet = workbook.addWorksheet(name, { views: [{ state: "frozen", ySplit: 4 }] });
@@ -49,7 +58,11 @@ const addSheet = (
     const row = sheet.addRow(values);
     columns.forEach((column, index) => {
       const cell = row.getCell(index + 1);
-      if (column.numFmt) cell.numFmt = column.numFmt;
+      if (column.quantity && typeof cell.value === "number") {
+        const quantity = quantityCell(cell.value);
+        cell.value = quantity.value;
+        cell.numFmt = quantity.numFmt;
+      } else if (column.numFmt) cell.numFmt = column.numFmt;
       cell.alignment = { vertical: "middle", horizontal: column.center ? "center" : "left" };
     });
   });
@@ -76,7 +89,7 @@ export const buildNetworkExpiryWorkbook = (data: NetworkExpiry, meta: NetworkExp
       { header: "Establecimientos", width: 15, center: true },
       { header: "Lotes vencidos", width: 12, center: true },
       { header: "Lotes por vencer", width: 12, center: true },
-      { header: "Saldo", width: 11, numFmt: QUANTITY, center: true },
+      { header: "Saldo", width: 11, quantity: true, center: true },
       { header: "Valor vencido", width: 14, numFmt: MONEY, center: true },
       { header: "Valor por vencer", width: 14, numFmt: MONEY, center: true },
       { header: "Vence primero", width: 13, numFmt: "dd/mm/yyyy", center: true },
@@ -109,7 +122,7 @@ export const buildNetworkExpiryWorkbook = (data: NetworkExpiry, meta: NetworkExp
       { header: "Vence", width: 12, numFmt: "dd/mm/yyyy", center: true },
       { header: "Días", width: 8, center: true },
       { header: "Situación", width: 12, center: true },
-      { header: "Saldo", width: 11, numFmt: QUANTITY, center: true },
+      { header: "Saldo", width: 11, quantity: true, center: true },
       { header: "Precio", width: 11, numFmt: MONEY, center: true },
       { header: "Valor", width: 13, numFmt: MONEY, center: true },
     ],
