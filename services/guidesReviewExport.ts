@@ -7,6 +7,7 @@
 import ExcelJS from "exceljs";
 import { addTableSheet, excelDate } from "./excelCells";
 import { GUIDE_STATE_LABEL, type GuideLine, type ReviewLot, type ReviewSite } from "./guidesReview";
+import { noteKey, type ReviewNotes } from "./guidesReviewNotes";
 import { formatNumber } from "./numberFormat";
 
 export interface GuidesReviewExportSite {
@@ -27,6 +28,8 @@ export interface GuidesReviewExportInput {
   productName: (code: string) => string;
   /** Un solo establecimiento, por su código de destino. */
   only?: string;
+  /** Observaciones por `destino|producto` (las de este equipo). */
+  notes?: ReviewNotes;
 }
 
 const dateOf = (iso: string) => {
@@ -43,6 +46,15 @@ const lotsText = (lots: ReviewLot[], noIci: boolean) =>
     return `${l.lot || "Sin lote"}: ${noIci || l.sent === l.received ? q(l.sent) : `env. ${q(l.sent)} · ing. ${q(l.received)}`}`;
   }).join("; ");
 
+/**
+ * «- PRODUCTO: cantidad; - …», como «Detalle faltante» (lo que falta ingresar) y «Detalle no
+ * ingresado» (lo que salió y no ingresó) de la hoja CONTROL.
+ */
+export const missingDetail = (site: ReviewSite, productName: (code: string) => string, kind: "short" | "notReceived") =>
+  site.iciCode
+    ? site.rows.filter((r) => r.state === kind).map((r) => `- ${productName(r.product)}: ${formatNumber(Math.round((r.sent - r.received) * 1000) / 1000, 3)}`).join("; ")
+    : "";
+
 export const siteReview = (site: ReviewSite) => (!site.iciCode ? "Sin ICI del mes" : site.differences ? "Con diferencias" : "Todo ingresó");
 
 export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): ExcelJS.Workbook => {
@@ -52,6 +64,7 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
   const names = new Map(sites.map((s) => [s.site.destination, s]));
   const when = input.generatedAt.toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
   const scope = input.only && sites[0] ? `${sites[0].name} (${siteCode(sites[0].site)})` : `${sites.length} establecimientos`;
+  const notes = input.notes ?? {};
   const subtitle = `${input.warehouseName} (${input.warehouseCode}) · ${input.monthLabel} · ${scope} · por producto · generado el ${when}`;
 
   addTableSheet(workbook, "Resumen", "Revisión de guías del almacén", subtitle, [
@@ -67,6 +80,9 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
     { header: "Falta", width: 8, center: true },
     { header: "No ingresó", width: 10, center: true },
     { header: "Revisión", width: 16, center: true },
+    { header: "Detalle faltante", width: 40 },
+    { header: "Detalle no ingresado", width: 40 },
+    { header: "Observados", width: 11, center: true },
   ], sites.map(({ site, name, microred }) => {
     const ici = Boolean(site.iciCode);
     return [
@@ -82,6 +98,9 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
       ici ? site.counts.short : null,
       ici ? site.counts.notReceived : null,
       siteReview(site),
+      missingDetail(site, input.productName, "short"),
+      missingDetail(site, input.productName, "notReceived"),
+      site.rows.filter((r) => notes[noteKey(site.destination, r.product)]).length,
     ];
   }));
 
@@ -98,6 +117,7 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
     { header: "Guías del mes", width: 18, center: true },
     { header: "Guía anterior", width: 12, center: true },
     { header: "Fecha guía anterior", width: 12, numFmt: "dd/mm/yyyy", center: true },
+    { header: "Observación", width: 36 },
   ], sites.flatMap(({ site, name }) => site.rows.map((row) => [
     siteCode(site),
     name,
@@ -111,6 +131,7 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
     row.guides.join(", "),
     row.previous?.guide ?? "",
     row.previous ? dateOf(row.previous.date) : null,
+    notes[noteKey(site.destination, row.product)] ?? "",
   ])));
 
   addTableSheet(workbook, "Lotes", "Por producto y lote", subtitle, [

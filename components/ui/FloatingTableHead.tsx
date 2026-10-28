@@ -185,22 +185,28 @@ export const SortableTableHead = <K extends string>({
   headSort,
   floating,
   trailing,
+  leading,
 }: {
   columns: SortableHeadColumn<K>[];
   headSort: (key: K) => { dir: SortDir | null; onSort: () => void };
   floating: FloatingHeadState | null;
   /** Columna final sin título (la flecha de la fila), con su nombre para lectores de pantalla. */
   trailing?: string;
+  /** Columna inicial angosta (la casilla para marcar todas), también en la franja fija. */
+  leading?: React.ReactNode;
 }) => {
   const content = (column: SortableHeadColumn<K>) => {
     const sort = headSort(column.key);
     return <SortHeadButton label={column.label} dir={sort.dir} onClick={sort.onSort} />;
   };
+  const shift = leading ? 1 : 0;
+  const cells = columns.map((column, index) => ({ key: column.key, index: index + shift, align: column.align, content: content(column) }));
   return (
     <>
-      <FloatingTableHead state={floating} padding="px-3" cells={columns.map((column, index) => ({ key: column.key, index, align: column.align, content: content(column) }))} />
+      <FloatingTableHead state={floating} padding="px-3" cells={leading ? [{ key: "__leading", index: 0, align: "center" as const, content: leading }, ...cells] : cells} />
       <thead>
         <tr>
+          {leading && <th scope="col" className={`w-10 px-3 py-3 text-center ${tableHeadCellClass}`}>{leading}</th>}
           {columns.map((column) => (
             <th
               key={column.key}
