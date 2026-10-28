@@ -24,9 +24,10 @@ import { useAuth } from "../contexts/AuthContext";
 import { api } from "../services/api";
 import { formatNumber } from "../services/numberFormat";
 import { monthFull } from "../services/availabilityExport";
-import { looksLikeWarehouse, reviewGuides, reviewMonths, type ReviewSite } from "../services/guidesReview";
+import { looksLikeWarehouse, reviewGuides, reviewMonths, type GuideLine, type GuideState, type ReviewSite } from "../services/guidesReview";
 import { buildGuidesReviewWorkbook, guidesReviewFileName, siteCode } from "../services/guidesReviewExport";
 import type { IciSource, WarehouseSource } from "../services/guidesReviewLoad";
+import { applyNote, loadNotes, loadRecentNotes, noteKey, rememberNote, saveNotes, saveRecentNotes, suggestedNotes, type ReviewNotes } from "../services/guidesReviewNotes";
 import { loadSource } from "../services/guidesReviewClient";
 import {
   SOURCE_FILES,
@@ -51,6 +52,7 @@ import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import { GuidesReviewDetail } from "./GuidesReviewDetail";
+import { GuidesReviewLines } from "./GuidesReviewLines";
 
 /**
  * Revisión de guías (2026-10-28): lo que el almacén de la UNGET envió a cada establecimiento en
@@ -102,16 +104,18 @@ const monthText = (key: string) => {
   return text.charAt(0).toUpperCase() + text.slice(1);
 };
 
+/** Nombre, tamaño y fecha de cada archivo: cambia cuando el SISMED los guarda. */
+const filesStamp = (files: SourceFiles) => Object.keys(files).sort().map((name) => `${name}:${files[name].size}:${files[name].lastModified}`).join("|");
+
 const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`;
 
 const NO_MICRORED = "__none__";
 
-type SortKey = "name" | "microred" | "guides" | "sentProducts" | "receivedProducts" | "complete" | "notSent" | "extra" | "short" | "notReceived";
+type SortKey = "name" | "guides" | "sentProducts" | "receivedProducts" | "complete" | "notSent" | "extra" | "short" | "notReceived" | "observed";
 
 /** Las columnas de la hoja CONTROL del Excel del usuario, en su mismo orden. */
 const COLUMNS: SortableHeadColumn<SortKey>[] = [
   { key: "name", label: "Establecimiento" },
-  { key: "microred", label: "Microred" },
   { key: "guides", label: "Nº guías", align: "center", fit: true, title: "Guías de salida del almacén en el mes" },
   { key: "sentProducts", label: "Salida med", align: "center", fit: true, title: "Productos que salieron del almacén en el mes" },
   { key: "receivedProducts", label: "Ingreso med", align: "center", fit: true, title: "Productos que el establecimiento ingresó en su ICI" },
@@ -120,6 +124,7 @@ const COLUMNS: SortableHeadColumn<SortKey>[] = [
   { key: "extra", label: "Sobra", align: "center", fit: true, title: "Ingresó más de lo que salió" },
   { key: "short", label: "Falta", align: "center", fit: true, title: "Ingresó menos de lo que salió" },
   { key: "notReceived", label: "No ingresó", align: "center", fit: true, title: "Salió del almacén y no lo ingresó" },
+  { key: "observed", label: "Observados", align: "center", fit: true, title: "Diferencias con observación" },
 ];
 
 const Count: React.FC<{ value: number; tone: Tone }> = ({ value, tone }) =>
@@ -129,8 +134,14 @@ const CodeChip: React.FC<{ code: string }> = ({ code }) => <span className="inli
 
 const ACTION_CLASS = "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[14px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40";
 
-/** Severidad para el orden de la lista: primero lo que tiene diferencias, luego sin ICI y al final lo completo. */
-const severity = (site: ReviewSite) => (!site.iciCode ? 1 : site.differences ? 0 : 2);
+/** Orden de las microredes: alfabético, «Sin microred» al final. */
+const microredOrder = (a: string, b: string) => (a === b ? 0 : !a ? 1 : !b ? -1 : a.localeCompare(b, "es"));
+
+/** Ordena dentro de cada microred, sin perder el orden que eligió la persona. */
+const byMicrored = (list: ReviewItem[]) => list.map((item, i) => ({ item, i })).sort((a, b) => microredOrder(a.item.microred, b.item.microred) || a.i - b.i).map((x) => x.item);
+
+/** Diferencias del establecimiento que ya tienen observación. */
+const observedCount = (site: ReviewSite, notes: ReviewNotes) => site.rows.filter((r) => r.state !== "complete" && notes[noteKey(site.destination, r.product)]).length;
 
 export const GuidesReviewModule: React.FC = () => {
   const { user, can } = useAuth();
@@ -149,6 +160,9 @@ export const GuidesReviewModule: React.FC = () => {
 
   /** La última carpeta de cada tarjeta, para notar si se eligió la misma para las dos. */
   const folders = useRef<Record<SourceKind, FolderHandle | null>>({ warehouse: null, ici: null });
+  /** Tamaño y fecha de los archivos leídos: si no cambiaron, no se vuelven a leer. */
+  const stamps = useRef<Record<SourceKind, string>>({ warehouse: "", ici: "" });
+  const [readAt, setReadAt] = useState<Date | null>(null);
 
   const setSlot = (kind: SourceKind, slot: Slot) => {
     folders.current[kind] = slot.folder;
@@ -175,6 +189,8 @@ export const GuidesReviewModule: React.FC = () => {
       const data = await loadSource({ kind, files });
       if (data.kind === "warehouse") setWarehouse({ data, folder });
       else setIci({ data, folder });
+      stamps.current[kind] = filesStamp(files);
+      setReadAt(new Date());
       setSlot(kind, { status: "empty", folder });
       return true;
     } catch (err) {
@@ -217,6 +233,53 @@ export const GuidesReviewModule: React.FC = () => {
     return () => { cancelled = true; };
   }, [username, readFolder]);
 
+  // Trabajo progresivo (pedido del usuario): se importa el ICI de un establecimiento en el SISMED
+  // y, al volver a esta ventana, se vuelven a leer las carpetas que cambiaron. Sin avisos de
+  // carga ni errores: si el SISMED está escribiendo, se queda lo leído y se intenta la próxima vez.
+  const warehouseFolder = warehouse?.folder ?? null;
+  const iciFolder = ici?.folder ?? null;
+  useEffect(() => {
+    if (!warehouseFolder && !iciFolder) return;
+    let busy = false;
+    let last = 0;
+    const refresh = async () => {
+      if (document.visibilityState !== "visible" || busy || Date.now() - last < 3000) return;
+      busy = true;
+      last = Date.now();
+      try {
+        for (const [kind, folder] of [["warehouse", warehouseFolder], ["ici", iciFolder]] as const) {
+          if (!folder || (await folderPermission(folder, false)) !== "granted") continue;
+          let files: SourceFiles;
+          try {
+            files = await filesFromFolder(folder, kind);
+          } catch {
+            continue;
+          }
+          const stamp = filesStamp(files);
+          if (missingFiles(kind, files).length || stamp === stamps.current[kind]) continue;
+          try {
+            const data = await loadSource({ kind, files });
+            if (data.kind === "warehouse") setWarehouse({ data, folder });
+            else setIci({ data, folder });
+            stamps.current[kind] = stamp;
+            setReadAt(new Date());
+          } catch {
+            /* se queda lo leído antes */
+          }
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    const onVisible = () => void refresh();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [warehouseFolder, iciFolder]);
+
   // Nombre y microred del registro de Establecimientos (con su copia sin internet).
   useEffect(() => {
     let cancelled = false;
@@ -251,8 +314,64 @@ export const GuidesReviewModule: React.FC = () => {
     return reviewGuides(warehouse.data.warehouse, ici.data.ici, month, isWarehouse).map((site) => {
       const info = registry.get(site.destination) || (site.iciCode ? registry.get(site.iciCode) : undefined);
       return { site, name: info?.name || places?.get(site.destination)?.name || site.destination, microred: info?.microred || "" };
-    }).sort((a, b) => severity(a.site) - severity(b.site) || b.site.differences - a.site.differences || a.name.localeCompare(b.name, "es"));
+    }).sort((a, b) => microredOrder(a.microred, b.microred) || a.name.localeCompare(b.name, "es"));
   }, [warehouse, ici, month, isWarehouse, registry, places]);
+
+  // Líneas de las guías del mes a los establecimientos revisados (no a otros almacenes).
+  const monthLines = useMemo(() => {
+    if (!warehouse || !month) return [];
+    const destinations = new Set(items.map((i) => i.site.destination));
+    return warehouse.data.warehouse.lines.filter((l) => l.month === month && destinations.has(l.destination));
+  }, [warehouse, month, items]);
+
+  /* ------------------------------------------------------------ Observaciones */
+
+  const [notes, setNotes] = useState<ReviewNotes>({});
+  const [recent, setRecent] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void loadRecentNotes(username).then((list) => { if (!cancelled) setRecent(list); });
+    return () => { cancelled = true; };
+  }, [username]);
+  const notesScope = warehouse && month ? `${warehouse.data.warehouse.code}|${month}` : "";
+  useEffect(() => {
+    setNotes({});
+    if (!notesScope) return;
+    let cancelled = false;
+    const [code, m] = notesScope.split("|");
+    void loadNotes(username, code, m).then((loaded) => { if (!cancelled) setNotes(loaded); });
+    return () => { cancelled = true; };
+  }, [username, notesScope]);
+  const changeNotes = useCallback((keys: string[], text: string) => {
+    if (!notesScope) return;
+    const [code, m] = notesScope.split("|");
+    setNotes((current) => {
+      const next = applyNote(current, keys, text);
+      void saveNotes(username, code, m, next).then((ok) => { if (!ok) toast.error("No se pudo guardar la observación en este equipo."); });
+      return next;
+    });
+    if (text.trim()) {
+      setRecent((current) => {
+        const next = rememberNote(current, text);
+        void saveRecentNotes(username, next);
+        return next;
+      });
+    }
+  }, [username, notesScope]);
+  const suggestions = useMemo(() => suggestedNotes(recent), [recent]);
+
+  // Al volver a leer, avisa qué establecimientos ya tienen su ICI del mes.
+  const iciSeen = useRef<{ month: string; codes: Set<string> } | null>(null);
+  useEffect(() => {
+    const codes = new Set(items.filter((i) => i.site.iciCode).map((i) => i.site.destination));
+    const previous = iciSeen.current;
+    if (previous && previous.month === month) {
+      const added = items.filter((i) => i.site.iciCode && !previous.codes.has(i.site.destination));
+      if (added.length === 1) toast.success(`${added[0].name}: su ICI ya está en el SISMED y se revisó.`);
+      else if (added.length > 1) toast.success(`${formatNumber(added.length)} establecimientos más ya tienen su ICI y se revisaron.`);
+    }
+    iciSeen.current = { month, codes };
+  }, [items, month]);
 
   const warehouseCode = warehouse?.data.warehouse.code || "";
   const warehouseName = places?.get(warehouseCode)?.name || registry.get(warehouseCode)?.name || "Almacén";
@@ -272,6 +391,7 @@ export const GuidesReviewModule: React.FC = () => {
         lines: warehouse.data.warehouse.lines.filter((l) => l.month === month),
         productName,
         only: only?.site.destination,
+        notes,
       });
       const buffer = await workbook.xlsx.writeBuffer();
       saveAs(
@@ -312,6 +432,11 @@ export const GuidesReviewModule: React.FC = () => {
           else setView("load");
         }}
         onChangeSources={() => setView("load")}
+        readAt={readAt}
+        lines={monthLines}
+        notes={notes}
+        onNote={changeNotes}
+        suggestions={suggestions}
       />
     );
   }
@@ -563,20 +688,27 @@ const ReviewResults: React.FC<{
   canReread: boolean;
   onReread: () => Promise<void>;
   onChangeSources: () => void;
-}> = ({ items, months, month, onMonth, monthLabel, warehouseName, warehouseCode, productName, isDesktop, canExport, onExport, canReread, onReread, onChangeSources }) => {
+  /** Hora de la última lectura del SISMED. */
+  readAt: Date | null;
+  lines: GuideLine[];
+  notes: ReviewNotes;
+  onNote: (keys: string[], text: string) => void;
+  suggestions: string[];
+}> = ({ items, months, month, onMonth, monthLabel, warehouseName, warehouseCode, productName, isDesktop, canExport, onExport, canReread, onReread, onChangeSources, readAt, lines, notes, onNote, suggestions }) => {
+  const [tab, setTab] = useState<"sites" | "lines">("sites");
   const [show, setShow] = useState<Show>("all");
   const [microred, setMicrored] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = usePageSize("revision-guias", 10);
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const [pageSize, setPageSize] = usePageSize("revision-guias", 20);
+  const [open, setOpen] = useState<{ list: ReviewItem[]; index: number } | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState<"export" | "reread" | null>(null);
   const toolbar = useStickyBar<HTMLDivElement>();
 
-  useEffect(() => setOpenIndex(null), [month]);
+  useEffect(() => setOpen(null), [month]);
 
   const withIci = items.filter((i) => i.site.iciCode);
   const totals = useMemo(() => {
@@ -610,11 +742,10 @@ const ReviewResults: React.FC<{
       && (!q || i.name.toLowerCase().includes(q) || i.site.destination.toLowerCase().includes(q) || (i.site.iciCode ?? "").toLowerCase().includes(q) || i.microred.toLowerCase().includes(q)));
   }, [items, show, microred, query]);
 
-  const { sorted, headSort } = useTableSort(
+  const { sorted: bySort, headSort } = useTableSort<ReviewItem, SortKey>(
     filtered,
     {
       name: (i) => i.name,
-      microred: (i) => i.microred,
       guides: (i) => i.site.guides.length,
       sentProducts: (i) => i.site.sentProducts,
       receivedProducts: (i) => (i.site.iciCode ? i.site.receivedProducts : null),
@@ -623,17 +754,47 @@ const ReviewResults: React.FC<{
       extra: (i) => (i.site.iciCode ? i.site.counts.extra : null),
       notReceived: (i) => (i.site.iciCode ? i.site.counts.notReceived : null),
       notSent: (i) => (i.site.iciCode ? i.site.counts.notSent : null),
+      observed: (i) => (i.site.iciCode && i.site.differences ? observedCount(i.site, notes) / i.site.differences : null),
     },
     { firstDir: { guides: "desc", sentProducts: "desc", receivedProducts: "desc", complete: "desc", short: "desc", extra: "desc", notReceived: "desc", notSent: "desc" } },
   );
-  const signature = `${month}|${show}|${microred}|${query}|${sorted.length}`;
+  // Siempre agrupado por microred, como la hoja CONTROL; el orden elegido rige dentro de cada una.
+  const sorted = useMemo(() => byMicrored(bySort), [bySort]);
+  const groupStats = useMemo(() => {
+    const stats = new Map<string, { sites: number; differences: number; noIci: number }>();
+    sorted.forEach(({ site, microred: m }) => {
+      const s = stats.get(m) ?? { sites: 0, differences: 0, noIci: 0 };
+      s.sites++;
+      if (!site.iciCode) s.noIci++;
+      else if (site.differences) s.differences++;
+      stats.set(m, s);
+    });
+    return stats;
+  }, [sorted]);
+  const signature = `${month}|${show}|${microred}|${query}|${sorted.length}|${tab}`;
   useEffect(() => setPage(1), [signature]);
   const mobile = useIncrementalCount(sorted.length, signature, 20);
   const rows = isDesktop ? sorted.slice((page - 1) * pageSize, page * pageSize) : sorted.slice(0, mobile.count);
   const { tableRef, floating } = useFloatingTableHead([signature, page, pageSize, isDesktop, sorted]);
 
-  const toggle = (value: Show) => setShow((current) => (current === value ? "all" : value));
+  const toggle = (value: Show) => { setTab("sites"); setShow((current) => (current === value ? "all" : value)); };
   const filterActive = show !== "all" || Boolean(microred);
+
+  const stateMaps = useMemo(() => new Map(items.filter((i) => i.site.iciCode).map((i) => [i.site.destination, new Map(i.site.rows.map((r) => [r.product, r.state]))])), [items]);
+  const stateOf = useCallback((destination: string, product: string): GuideState | undefined => stateMaps.get(destination)?.get(product), [stateMaps]);
+  const linesOf = useMemo(() => {
+    const map = new Map<string, GuideLine[]>();
+    lines.forEach((l) => {
+      if (!map.has(l.destination)) map.set(l.destination, []);
+      map.get(l.destination)!.push(l);
+    });
+    return map;
+  }, [lines]);
+  const siteList = useMemo(() => items.map((i) => ({ destination: i.site.destination, name: i.name, code: siteCode(i.site) })).sort((a, b) => a.name.localeCompare(b.name, "es")), [items]);
+  const openSite = (destination: string) => {
+    const index = items.findIndex((i) => i.site.destination === destination);
+    if (index >= 0) setOpen({ list: items, index });
+  };
 
   const runExport = async () => {
     setBusy("export");
@@ -653,6 +814,20 @@ const ReviewResults: React.FC<{
   };
 
   const showOptions = (Object.keys(SHOW_LABEL) as Show[]).filter((value) => value === "all" || value === show || showCount(value) > 0);
+  const readText = readAt ? `leído a las ${String(readAt.getHours()).padStart(2, "0")}:${String(readAt.getMinutes()).padStart(2, "0")}` : "";
+
+  const observedChip = (site: ReviewSite) => {
+    if (!site.iciCode || !site.differences) return <span className="text-[13px] text-slate-300">—</span>;
+    const done = observedCount(site, notes);
+    return <StatusChip tone={done === site.differences ? "success" : done ? "warning" : "neutral"} label={`${formatNumber(done)} de ${formatNumber(site.differences)}`} />;
+  };
+  const groupLabel = (m: string) => {
+    const stats = groupStats.get(m);
+    const parts = [plural(stats?.sites ?? 0, "establecimiento", "establecimientos")];
+    if (stats?.differences) parts.push(`${formatNumber(stats.differences)} con diferencias`);
+    if (stats?.noIci) parts.push(`${formatNumber(stats.noIci)} sin ICI`);
+    return parts.join(" · ");
+  };
 
   return (
     <div className="space-y-4 pb-24 md:pb-0">
@@ -661,7 +836,9 @@ const ReviewResults: React.FC<{
           <p className="text-[17px] font-black text-slate-900 md:truncate">
             {warehouseName} <span className="font-mono text-[13px] font-semibold text-slate-400">{warehouseCode}</span>
           </p>
-          <p className="text-[12.5px] text-slate-500">Guías de salida de {monthLabel.toLowerCase()} frente al ICI de cada establecimiento · por producto</p>
+          <p className="text-[12.5px] text-slate-500">
+            Guías de salida de {monthLabel.toLowerCase()} frente al ICI de cada establecimiento · por producto{readText ? ` · ${readText}` : ""}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <CustomSelect size="md" prefix="Mes" value={month} onChange={onMonth} options={months.map((m) => ({ value: m, label: monthText(m) }))} containerClassName="min-w-0 flex-1 md:w-56 md:flex-none" />
@@ -673,7 +850,7 @@ const ReviewResults: React.FC<{
           <div className="relative">
             <button
               type="button"
-              onClick={() => (isDesktop ? setMenuOpen((open) => !open) : setActionsOpen(true))}
+              onClick={() => (isDesktop ? setMenuOpen((value) => !value) : setActionsOpen(true))}
               aria-label="Más acciones"
               aria-expanded={isDesktop ? menuOpen : undefined}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -700,185 +877,232 @@ const ReviewResults: React.FC<{
       </div>
 
       <KpiStrip cols="md:grid-cols-5">
-        <KpiCard watermark tone="neutral" icon={<Truck />} label="Establecimientos" value={formatNumber(items.length)} hint={`${formatNumber(showCount("differences"))} con diferencias`} onClick={() => toggle("differences")} active={show === "differences"} />
-        <KpiCard watermark tone="success" icon={<PackageCheck />} label="Completos" value={formatNumber(totals.complete)} hint="productos" onClick={() => toggle("ok")} active={show === "ok"} />
-        <KpiCard watermark tone="info" icon={<CircleHelp />} label="No se dio salida" value={formatNumber(totals.notSent)} hint="ingresó sin guía del almacén" onClick={() => toggle("notSent")} active={show === "notSent"} />
-        <KpiCard watermark tone="warning" label="Sobran" value={formatNumber(totals.extra)} hint="el EESS ingresó más" onClick={() => toggle("extra")} active={show === "extra"} />
-        <KpiCard watermark tone="danger" icon={<PackageX />} label="Faltan / no ingresó" value={formatNumber(totals.short + totals.notReceived)} hint="el EESS ingresó menos" onClick={() => toggle("short")} active={show === "short"} />
+        <KpiCard watermark tone="neutral" icon={<Truck />} label="Establecimientos" value={formatNumber(items.length)} hint={`${formatNumber(showCount("differences"))} con diferencias · ${formatNumber(noIci)} sin ICI`} onClick={() => toggle("differences")} active={tab === "sites" && show === "differences"} />
+        <KpiCard watermark tone="success" icon={<PackageCheck />} label="Completos" value={formatNumber(totals.complete)} hint="productos" onClick={() => toggle("ok")} active={tab === "sites" && show === "ok"} />
+        <KpiCard watermark tone="info" icon={<CircleHelp />} label="No se dio salida" value={formatNumber(totals.notSent)} hint="ingresó sin guía del almacén" onClick={() => toggle("notSent")} active={tab === "sites" && show === "notSent"} />
+        <KpiCard watermark tone="warning" label="Sobran" value={formatNumber(totals.extra)} hint="el EESS ingresó más" onClick={() => toggle("extra")} active={tab === "sites" && show === "extra"} />
+        <KpiCard watermark tone="danger" icon={<PackageX />} label="Faltan / no ingresó" value={formatNumber(totals.short + totals.notReceived)} hint="el EESS ingresó menos" onClick={() => toggle("short")} active={tab === "sites" && show === "short"} />
       </KpiStrip>
 
-      {noIci > 0 && show !== "noIci" && (
-        <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
-          <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
-          <p className="min-w-0 flex-1">
-            {noIci === 1 ? "Un establecimiento no tiene" : `${formatNumber(noIci)} establecimientos no tienen`} el ICI de {monthLabel.toLowerCase()} en el SISMED del ICI: no se {noIci === 1 ? "puede" : "pueden"} comparar.
-          </p>
-          <button type="button" onClick={() => setShow("noIci")} className="shrink-0 text-xs font-bold text-teal-700 hover:underline">Ver</button>
-        </div>
-      )}
+      <div className="flex h-10 w-full items-center gap-0.5 rounded-xl border border-slate-200 bg-white p-1 shadow-sm md:w-fit" role="tablist" aria-label="Ver">
+        {([["sites", `Establecimientos (${formatNumber(items.length)})`], ["lines", `Guías de salida (${formatNumber(lines.length)})`]] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={tab === value}
+            onClick={() => setTab(value)}
+            className={`flex h-full flex-1 items-center justify-center whitespace-nowrap rounded-lg px-4 text-xs font-bold transition-colors md:flex-none ${tab === value ? "bg-teal-600 text-white" : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm md:overflow-hidden">
-        <div ref={toolbar.ref} style={toolbar.style} className={`${stickyBarClass} flex items-center gap-2 rounded-t-2xl border-b border-slate-100 bg-white p-3 md:static`}>
-          <TableSearch value={query} onChange={setQuery} placeholder="Buscar establecimiento o código" />
-          <MobileFilterButton onClick={() => setFiltersOpen(true)} active={filterActive} />
-          {isDesktop && (
-            <>
-              <CustomSelect
-                size="md"
-                prefix="Microred"
-                value={microred}
-                onChange={setMicrored}
-                options={[{ value: "", label: "Todas", count: items.length }, ...microreds.map(([m, count]) => ({ value: m, label: m === NO_MICRORED ? "Sin microred" : m, count }))]}
-                containerClassName="w-60 shrink-0"
-                menuMinWidth={260}
-              />
-              <CustomSelect
-                size="md"
-                prefix="Mostrar"
-                value={show}
-                onChange={(value) => setShow((value as Show) || "all")}
-                options={showOptions.map((value) => ({ value, label: SHOW_LABEL[value], count: value === "all" ? items.length : showCount(value) }))}
-                containerClassName="w-60 shrink-0"
-                menuMinWidth={240}
-              />
-            </>
+      {tab === "lines" ? (
+        <GuidesReviewLines lines={lines} sites={siteList} stateOf={stateOf} productName={productName} isDesktop={isDesktop} onOpenSite={openSite} monthLabel={monthLabel} />
+      ) : (
+        <>
+          {noIci > 0 && show !== "noIci" && (
+            <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+              <p className="min-w-0 flex-1">
+                {noIci === 1 ? "A un establecimiento le falta" : `A ${formatNumber(noIci)} establecimientos les falta`} importar el ICI de {monthLabel.toLowerCase()} en el SISMED del ICI.
+                {canReread ? " Al importarlo y volver a esta ventana, se revisa solo." : ""}
+              </p>
+              <button type="button" onClick={() => setShow("noIci")} className="shrink-0 text-xs font-bold text-teal-700 hover:underline">Ver</button>
+            </div>
           )}
-        </div>
 
-        <BottomSheet open={filtersOpen} title="Filtros" onClose={() => setFiltersOpen(false)}>
-          <SheetGroupTitle first>Mostrar</SheetGroupTitle>
-          <div className="space-y-1">
-            {showOptions.map((value) => (
-              <SheetOption key={value} active={show === value} label={SHOW_LABEL[value]} count={value === "all" ? items.length : showCount(value)} onClick={() => { setShow(value); setFiltersOpen(false); }} />
-            ))}
-          </div>
-          {microreds.length > 1 && (
-            <>
-              <SheetGroupTitle>Microred</SheetGroupTitle>
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm md:overflow-hidden">
+            <div ref={toolbar.ref} style={toolbar.style} className={`${stickyBarClass} flex items-center gap-2 rounded-t-2xl border-b border-slate-100 bg-white p-3 md:static`}>
+              <TableSearch value={query} onChange={setQuery} placeholder="Buscar establecimiento o código" />
+              <MobileFilterButton onClick={() => setFiltersOpen(true)} active={filterActive} />
+              {isDesktop && (
+                <>
+                  <CustomSelect
+                    size="md"
+                    prefix="Microred"
+                    value={microred}
+                    onChange={setMicrored}
+                    options={[{ value: "", label: "Todas", count: items.length }, ...microreds.map(([m, count]) => ({ value: m, label: m === NO_MICRORED ? "Sin microred" : m, count }))]}
+                    containerClassName="w-60 shrink-0"
+                    menuMinWidth={260}
+                  />
+                  <CustomSelect
+                    size="md"
+                    prefix="Mostrar"
+                    value={show}
+                    onChange={(value) => setShow((value as Show) || "all")}
+                    options={showOptions.map((value) => ({ value, label: SHOW_LABEL[value], count: value === "all" ? items.length : showCount(value) }))}
+                    containerClassName="w-60 shrink-0"
+                    menuMinWidth={240}
+                  />
+                </>
+              )}
+            </div>
+
+            <BottomSheet open={filtersOpen} title="Filtros" onClose={() => setFiltersOpen(false)}>
+              <SheetGroupTitle first>Mostrar</SheetGroupTitle>
               <div className="space-y-1">
-                <SheetOption active={!microred} label="Todas" count={items.length} onClick={() => { setMicrored(""); setFiltersOpen(false); }} />
-                {microreds.map(([m, count]) => (
-                  <SheetOption key={m} active={microred === m} label={m === NO_MICRORED ? "Sin microred" : m} count={count} onClick={() => { setMicrored(m); setFiltersOpen(false); }} />
+                {showOptions.map((value) => (
+                  <SheetOption key={value} active={show === value} label={SHOW_LABEL[value]} count={value === "all" ? items.length : showCount(value)} onClick={() => { setShow(value); setFiltersOpen(false); }} />
                 ))}
               </div>
-            </>
-          )}
-        </BottomSheet>
+              {microreds.length > 1 && (
+                <>
+                  <SheetGroupTitle>Microred</SheetGroupTitle>
+                  <div className="space-y-1">
+                    <SheetOption active={!microred} label="Todas" count={items.length} onClick={() => { setMicrored(""); setFiltersOpen(false); }} />
+                    {microreds.map(([m, count]) => (
+                      <SheetOption key={m} active={microred === m} label={m === NO_MICRORED ? "Sin microred" : m} count={count} onClick={() => { setMicrored(m); setFiltersOpen(false); }} />
+                    ))}
+                  </div>
+                </>
+              )}
+            </BottomSheet>
 
-        <BottomSheet open={actionsOpen} title="Acciones" onClose={() => setActionsOpen(false)}>
-          <div className="space-y-1">
-            {canExport && (
-              <button type="button" disabled={busy !== null || !sorted.length} onClick={() => { setActionsOpen(false); void runExport(); }} className={ACTION_CLASS}>
-                <Download className="h-5 w-5 text-teal-600" /> Descargar Excel
-              </button>
+            {filterActive && (
+              <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2 text-xs font-semibold text-slate-600">
+                <span>
+                  Mostrando <strong>{SHOW_LABEL[show].toLowerCase()}</strong>
+                  {microred && <> · microred <strong>{microred === NO_MICRORED ? "sin microred" : microred}</strong></>}
+                </span>
+                <button type="button" onClick={() => { setShow("all"); setMicrored(""); }} className="font-bold text-teal-700 hover:underline">Ver todos</button>
+              </div>
             )}
-            {canReread && (
-              <button type="button" disabled={busy !== null} onClick={() => { setActionsOpen(false); void runReread(); }} className={ACTION_CLASS}>
-                <RefreshCw className="h-5 w-5 text-teal-600" /> Volver a leer el SISMED
-              </button>
-            )}
-            <button type="button" onClick={() => { setActionsOpen(false); onChangeSources(); }} className={ACTION_CLASS}>
-              <FolderOpen className="h-5 w-5 text-teal-600" /> Cambiar las carpetas
-            </button>
-          </div>
-        </BottomSheet>
 
-        {filterActive && (
-          <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2 text-xs font-semibold text-slate-600">
-            <span>
-              Mostrando <strong>{SHOW_LABEL[show].toLowerCase()}</strong>
-              {microred && <> · microred <strong>{microred === NO_MICRORED ? "sin microred" : microred}</strong></>}
-            </span>
-            <button type="button" onClick={() => { setShow("all"); setMicrored(""); }} className="font-bold text-teal-700 hover:underline">Ver todos</button>
-          </div>
-        )}
-
-        {sorted.length === 0 ? (
-          <EmptyState
-            icon={<Search className="h-5 w-5" />}
-            title={items.length ? "Sin resultados" : `El almacén no envió guías a establecimientos en ${monthLabel.toLowerCase()}`}
-            description={items.length ? "No hay establecimientos que coincidan con la búsqueda o el filtro." : "Elija otro mes."}
-          />
-        ) : isDesktop ? (
-          <>
-            <table ref={tableRef} className="w-full text-left text-sm">
-              <SortableTableHead columns={COLUMNS} headSort={headSort} floating={floating} trailing="Abrir" />
-              <tbody>
-                {rows.map((item) => {
+            {sorted.length === 0 ? (
+              <EmptyState
+                icon={<Search className="h-5 w-5" />}
+                title={items.length ? "Sin resultados" : `El almacén no envió guías a establecimientos en ${monthLabel.toLowerCase()}`}
+                description={items.length ? "No hay establecimientos que coincidan con la búsqueda o el filtro." : "Elija otro mes."}
+              />
+            ) : isDesktop ? (
+              <>
+                <table ref={tableRef} className="w-full text-left text-sm">
+                  <SortableTableHead columns={COLUMNS} headSort={headSort} floating={floating} trailing="Abrir" />
+                  <tbody>
+                    {rows.map((item, i) => {
+                      const { site } = item;
+                      const newGroup = i === 0 || rows[i - 1].microred !== item.microred;
+                      return (
+                        <React.Fragment key={site.destination}>
+                          {newGroup && (
+                            <tr className="border-t border-slate-200 bg-slate-50/80">
+                              <td colSpan={COLUMNS.length + 1} className="px-4 py-2">
+                                <span className="text-[11px] font-black uppercase tracking-wider text-slate-700">{item.microred || "Sin microred"}</span>
+                                <span className="ml-2 text-[11.5px] text-slate-500">{groupLabel(item.microred)}</span>
+                              </td>
+                            </tr>
+                          )}
+                          <tr onClick={() => setOpen({ list: sorted, index: sorted.indexOf(item) })} className="h-14 cursor-pointer border-t border-slate-100 hover:bg-slate-50">
+                            <td className="px-4 py-2">
+                              <p className="text-[13.5px] font-semibold text-slate-900">{item.name}</p>
+                              <CodeChip code={siteCode(site)} />
+                            </td>
+                            <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.guides.length)}</td>
+                            <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.sentProducts)}</td>
+                            {site.iciCode ? (
+                              <>
+                                <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.receivedProducts)}</td>
+                                <td className="px-3 py-2 text-center"><Count value={site.counts.complete} tone="success" /></td>
+                                <td className="px-3 py-2 text-center"><Count value={site.counts.notSent} tone="info" /></td>
+                                <td className="px-3 py-2 text-center"><Count value={site.counts.extra} tone="warning" /></td>
+                                <td className="px-3 py-2 text-center"><Count value={site.counts.short} tone="danger" /></td>
+                                <td className="px-3 py-2 text-center"><Count value={site.counts.notReceived} tone="danger" /></td>
+                                <td className="px-3 py-2 text-center">{observedChip(site)}</td>
+                              </>
+                            ) : (
+                              <td colSpan={7} className="px-3 py-2 text-center"><StatusChip tone="warning" label={`Falta importar su ICI de ${monthLabel.toLowerCase()}`} /></td>
+                            )}
+                            <td className="px-2 text-slate-400"><ChevronRight className="h-4 w-4" /></td>
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <TablePagination page={page} pageSize={pageSize} total={sorted.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="establecimientos" />
+              </>
+            ) : (
+              <div className="space-y-2 bg-slate-50 p-2">
+                {rows.map((item, index) => {
                   const { site } = item;
+                  const newGroup = index === 0 || rows[index - 1].microred !== item.microred;
+                  const done = observedCount(site, notes);
                   return (
-                    <tr key={site.destination} onClick={() => setOpenIndex(sorted.indexOf(item))} className="h-14 cursor-pointer border-t border-slate-100 hover:bg-slate-50">
-                      <td className="px-4 py-2">
-                        <p className="text-[13.5px] font-semibold text-slate-900">{item.name}</p>
-                        <CodeChip code={siteCode(site)} />
-                      </td>
-                      <td className="px-4 py-2 text-[13px] text-slate-600">{item.microred || "—"}</td>
-                      <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.guides.length)}</td>
-                      <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.sentProducts)}</td>
-                      {site.iciCode ? (
-                        <>
-                          <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.receivedProducts)}</td>
-                          <td className="px-3 py-2 text-center"><Count value={site.counts.complete} tone="success" /></td>
-                          <td className="px-3 py-2 text-center"><Count value={site.counts.notSent} tone="info" /></td>
-                          <td className="px-3 py-2 text-center"><Count value={site.counts.extra} tone="warning" /></td>
-                          <td className="px-3 py-2 text-center"><Count value={site.counts.short} tone="danger" /></td>
-                          <td className="px-3 py-2 text-center"><Count value={site.counts.notReceived} tone="danger" /></td>
-                        </>
-                      ) : (
-                        <td colSpan={6} className="px-3 py-2 text-center"><StatusChip tone="warning" label={`Sin ICI de ${monthLabel.toLowerCase()}`} /></td>
+                    <React.Fragment key={site.destination}>
+                      {newGroup && (
+                        <p className="px-2 pb-0.5 pt-2 text-[11px] font-black uppercase tracking-wider text-slate-600">
+                          {item.microred || "Sin microred"} <span className="font-semibold normal-case tracking-normal text-slate-400">· {groupLabel(item.microred)}</span>
+                        </p>
                       )}
-                      <td className="px-2 text-slate-400"><ChevronRight className="h-4 w-4" /></td>
-                    </tr>
+                      <button type="button" onClick={() => setOpen({ list: sorted, index })} className="flex w-full items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[14px] font-semibold text-slate-900">{item.name}</p>
+                          <p className="text-xs text-slate-500">
+                            <span className="font-mono">{siteCode(site)}</span> · {plural(site.guides.length, "guía", "guías")} · salida {formatNumber(site.sentProducts)}{site.iciCode ? ` · ingreso ${formatNumber(site.receivedProducts)}` : ""}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {!site.iciCode ? (
+                              <StatusChip tone="warning" label={`Falta importar su ICI de ${monthLabel.toLowerCase()}`} />
+                            ) : site.differences === 0 ? (
+                              <StatusChip tone="success" label="Todo ingresó" />
+                            ) : (
+                              <>
+                                {site.counts.notSent > 0 && <StatusChip tone="info" label={`${formatNumber(site.counts.notSent)} no salida`} />}
+                                {site.counts.extra > 0 && <StatusChip tone="warning" label={`${formatNumber(site.counts.extra)} sobra`} />}
+                                {site.counts.short > 0 && <StatusChip tone="danger" label={`${formatNumber(site.counts.short)} falta`} />}
+                                {site.counts.notReceived > 0 && <StatusChip tone="danger" label={`${formatNumber(site.counts.notReceived)} no ingresó`} />}
+                                <StatusChip tone={done === site.differences ? "success" : "neutral"} label={`${formatNumber(done)} de ${formatNumber(site.differences)} observados`} />
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronRight className="mt-1 h-5 w-5 shrink-0 text-slate-400" />
+                      </button>
+                    </React.Fragment>
                   );
                 })}
-              </tbody>
-            </table>
-            <TablePagination page={page} pageSize={pageSize} total={sorted.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="establecimientos" />
-          </>
-        ) : (
-          <div className="space-y-2 bg-slate-50 p-2">
-            {rows.map((item, index) => {
-              const { site } = item;
-              return (
-                <button key={site.destination} type="button" onClick={() => setOpenIndex(index)} className="flex w-full items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[14px] font-semibold text-slate-900">{item.name}</p>
-                    <p className="text-xs text-slate-500">
-                      <span className="font-mono">{siteCode(site)}</span> · {item.microred || "Sin microred"} · {plural(site.guides.length, "guía", "guías")} · salida {formatNumber(site.sentProducts)}{site.iciCode ? ` · ingreso ${formatNumber(site.receivedProducts)}` : ""}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {!site.iciCode ? (
-                        <StatusChip tone="warning" label={`Sin ICI de ${monthLabel.toLowerCase()}`} />
-                      ) : site.differences === 0 ? (
-                        <StatusChip tone="success" label="Todo ingresó" />
-                      ) : (
-                        <>
-                          {site.counts.notSent > 0 && <StatusChip tone="info" label={`${formatNumber(site.counts.notSent)} no salida`} />}
-                          {site.counts.extra > 0 && <StatusChip tone="warning" label={`${formatNumber(site.counts.extra)} sobra`} />}
-                          {site.counts.short > 0 && <StatusChip tone="danger" label={`${formatNumber(site.counts.short)} falta`} />}
-                          {site.counts.notReceived > 0 && <StatusChip tone="danger" label={`${formatNumber(site.counts.notReceived)} no ingresó`} />}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <ChevronRight className="mt-1 h-5 w-5 shrink-0 text-slate-400" />
-                </button>
-              );
-            })}
-            <LoadMoreSentinel hasMore={mobile.hasMore} onLoadMore={mobile.loadMore} shown={mobile.count} total={sorted.length} itemLabel="establecimientos" />
-          </div>
-        )}
-      </section>
+                <LoadMoreSentinel hasMore={mobile.hasMore} onLoadMore={mobile.loadMore} shown={mobile.count} total={sorted.length} itemLabel="establecimientos" />
+              </div>
+            )}
+          </section>
+        </>
+      )}
 
-      {openIndex !== null && sorted[openIndex] && (
+      <BottomSheet open={actionsOpen} title="Acciones" onClose={() => setActionsOpen(false)}>
+        <div className="space-y-1">
+          {canExport && (
+            <button type="button" disabled={busy !== null || !sorted.length} onClick={() => { setActionsOpen(false); void runExport(); }} className={ACTION_CLASS}>
+              <Download className="h-5 w-5 text-teal-600" /> Descargar Excel
+            </button>
+          )}
+          {canReread && (
+            <button type="button" disabled={busy !== null} onClick={() => { setActionsOpen(false); void runReread(); }} className={ACTION_CLASS}>
+              <RefreshCw className="h-5 w-5 text-teal-600" /> Volver a leer el SISMED
+            </button>
+          )}
+          <button type="button" onClick={() => { setActionsOpen(false); onChangeSources(); }} className={ACTION_CLASS}>
+            <FolderOpen className="h-5 w-5 text-teal-600" /> Cambiar las carpetas
+          </button>
+        </div>
+      </BottomSheet>
+
+      {open && open.list[open.index] && (
         <GuidesReviewDetail
-          items={sorted}
-          index={openIndex}
-          onIndex={setOpenIndex}
-          onClose={() => setOpenIndex(null)}
+          items={open.list}
+          index={open.index}
+          onIndex={(index) => setOpen((current) => (current ? { ...current, index } : current))}
+          onClose={() => setOpen(null)}
           productName={productName}
           monthLabel={monthLabel}
           isDesktop={isDesktop}
+          lines={linesOf.get(open.list[open.index].site.destination) ?? []}
+          notes={notes}
+          onNote={onNote}
+          suggestions={suggestions}
           onExport={canExport ? (item) => onExport(item) : undefined}
         />
       )}
