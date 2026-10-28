@@ -1,11 +1,13 @@
 /**
  * Excel de Revisión de guías: el resumen por establecimiento (la hoja CONTROL del Excel del
- * usuario), el detalle por producto y lote y las guías de salida del mes, tal como salen del
- * SISMED del almacén. Con `only`, solo un establecimiento (el botón de su ventana).
+ * usuario, con sus columnas), el detalle por producto, sus lotes y las guías de salida del mes,
+ * tal como salen del SISMED del almacén. Con `only`, solo un establecimiento (el botón de su
+ * ventana).
  */
 import ExcelJS from "exceljs";
 import { addTableSheet, excelDate } from "./excelCells";
-import { GUIDE_STATE_LABEL, type GuideLine, type ReviewSite } from "./guidesReview";
+import { GUIDE_STATE_LABEL, type GuideLine, type ReviewLot, type ReviewSite } from "./guidesReview";
+import { formatNumber } from "./numberFormat";
 
 export interface GuidesReviewExportSite {
   site: ReviewSite;
@@ -34,6 +36,13 @@ const dateOf = (iso: string) => {
 
 export const siteCode = (site: ReviewSite) => site.iciCode ?? site.destination;
 
+/** «2027896: 50» o, si no coinciden, «2027896: env. 50 · ing. 51». */
+const lotsText = (lots: ReviewLot[], noIci: boolean) =>
+  lots.map((l) => {
+    const q = (n: number) => formatNumber(n, 3);
+    return `${l.lot || "Sin lote"}: ${noIci || l.sent === l.received ? q(l.sent) : `env. ${q(l.sent)} · ing. ${q(l.received)}`}`;
+  }).join("; ");
+
 export const siteReview = (site: ReviewSite) => (!site.iciCode ? "Sin ICI del mes" : site.differences ? "Con diferencias" : "Todo ingresó");
 
 export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): ExcelJS.Workbook => {
@@ -43,44 +52,49 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
   const names = new Map(sites.map((s) => [s.site.destination, s]));
   const when = input.generatedAt.toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
   const scope = input.only && sites[0] ? `${sites[0].name} (${siteCode(sites[0].site)})` : `${sites.length} establecimientos`;
-  const subtitle = `${input.warehouseName} (${input.warehouseCode}) · ${input.monthLabel} · ${scope} · por producto y lote · generado el ${when}`;
+  const subtitle = `${input.warehouseName} (${input.warehouseCode}) · ${input.monthLabel} · ${scope} · por producto · generado el ${when}`;
 
   addTableSheet(workbook, "Resumen", "Revisión de guías del almacén", subtitle, [
     { header: "Microred", width: 18 },
     { header: "Código", width: 11, center: true },
     { header: "Establecimiento", width: 34 },
-    { header: "Guías", width: 8, center: true },
-    { header: "Productos y lotes", width: 11, center: true },
-    { header: "Completos", width: 11, center: true },
-    { header: "Faltan", width: 9, center: true },
-    { header: "Sobran", width: 9, center: true },
-    { header: "No ingresó", width: 11, center: true },
-    { header: "No se dio salida", width: 12, center: true },
+    { header: "Nº guías", width: 8, center: true },
+    { header: "Salida med", width: 9, center: true },
+    { header: "Ingreso med", width: 9, center: true },
+    { header: "Completo", width: 10, center: true },
+    { header: "No salida", width: 9, center: true },
+    { header: "Sobra", width: 8, center: true },
+    { header: "Falta", width: 8, center: true },
+    { header: "No ingresó", width: 10, center: true },
     { header: "Revisión", width: 16, center: true },
-  ], sites.map(({ site, name, microred }) => [
-    microred || "",
-    siteCode(site),
-    name,
-    site.guides.length,
-    site.rows.length,
-    site.counts.complete,
-    site.counts.short,
-    site.counts.extra,
-    site.counts.notReceived,
-    site.counts.notSent,
-    siteReview(site),
-  ]));
+  ], sites.map(({ site, name, microred }) => {
+    const ici = Boolean(site.iciCode);
+    return [
+      microred || "",
+      siteCode(site),
+      name,
+      site.guides.length,
+      site.sentProducts,
+      ici ? site.receivedProducts : null,
+      ici ? site.counts.complete : null,
+      ici ? site.counts.notSent : null,
+      ici ? site.counts.extra : null,
+      ici ? site.counts.short : null,
+      ici ? site.counts.notReceived : null,
+      siteReview(site),
+    ];
+  }));
 
-  addTableSheet(workbook, "Detalle", "Por producto y lote", subtitle, [
+  addTableSheet(workbook, "Detalle", "Por producto", subtitle, [
     { header: "Código EESS", width: 11, center: true },
     { header: "Establecimiento", width: 30 },
     { header: "Código producto", width: 11, center: true },
     { header: "Producto", width: 46 },
-    { header: "Lote", width: 16, center: true },
     { header: "Enviado", width: 10, quantity: true, center: true },
     { header: "Ingresó", width: 10, quantity: true, center: true },
     { header: "Diferencia", width: 10, quantity: true, center: true },
     { header: "Estado", width: 16, center: true },
+    { header: "Lotes", width: 40 },
     { header: "Guías del mes", width: 18, center: true },
     { header: "Guía anterior", width: 12, center: true },
     { header: "Fecha guía anterior", width: 12, numFmt: "dd/mm/yyyy", center: true },
@@ -89,15 +103,37 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
     name,
     row.product,
     input.productName(row.product),
-    row.lot,
     row.sent,
     site.iciCode ? row.received : null,
     site.iciCode ? Math.round((row.received - row.sent) * 1000) / 1000 : null,
     site.iciCode ? GUIDE_STATE_LABEL[row.state] : "Sin ICI del mes",
+    lotsText(row.lots, !site.iciCode),
     row.guides.join(", "),
     row.previous?.guide ?? "",
     row.previous ? dateOf(row.previous.date) : null,
   ])));
+
+  addTableSheet(workbook, "Lotes", "Por producto y lote", subtitle, [
+    { header: "Código EESS", width: 11, center: true },
+    { header: "Establecimiento", width: 30 },
+    { header: "Código producto", width: 11, center: true },
+    { header: "Producto", width: 46 },
+    { header: "Lote", width: 16, center: true },
+    { header: "Enviado", width: 10, quantity: true, center: true },
+    { header: "Ingresó", width: 10, quantity: true, center: true },
+    { header: "Diferencia", width: 10, quantity: true, center: true },
+    { header: "Estado del producto", width: 18, center: true },
+  ], sites.flatMap(({ site, name }) => site.rows.flatMap((row) => row.lots.map((lot) => [
+    siteCode(site),
+    name,
+    row.product,
+    input.productName(row.product),
+    lot.lot,
+    lot.sent,
+    site.iciCode ? lot.received : null,
+    site.iciCode ? Math.round((lot.received - lot.sent) * 1000) / 1000 : null,
+    site.iciCode ? GUIDE_STATE_LABEL[row.state] : "Sin ICI del mes",
+  ]))));
 
   addTableSheet(workbook, "Guías de salida", "Guías de salida del almacén", subtitle, [
     { header: "Fecha registro", width: 12, numFmt: "dd/mm/yyyy", center: true },

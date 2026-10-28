@@ -4,20 +4,22 @@ Desde el 2026-10-28, pedido del usuario. Reemplaza su Excel con macros `REVISAR_
 
 ## Qué compara
 
-Para un mes, por establecimiento, **producto y lote**:
+Para un mes, por establecimiento y **producto** (sumando sus lotes), como la hoja CONTROL del Excel:
 
 - **Enviado**: lo que salió del almacén hacia ese establecimiento, según el SISMED del almacén.
 - **Ingresó**: `INGRE + REINGRE` del establecimiento en ese mes, según el TFORMDET del SISMED donde se importa el ICI (la «Total ingreso» del Excel).
+
+Los lotes de cada producto se ven en el detalle (y en la hoja «Lotes» del Excel), con lo que salió e ingresó con cada número de lote.
 
 | Estado | Cuándo |
 |---|---|
 | Falta | ingresó menos de lo enviado |
 | No ingresó | se envió y no ingresó nada |
 | Sobra | ingresó más de lo enviado |
-| No se dio salida | ingresó y el almacén no le envió ese producto y lote en el mes |
+| No se dio salida | ingresó un producto que el almacén no le envió en el mes |
 | Completo | enviado = ingresado |
 
-En «No se dio salida» se muestra la última guía de un mes anterior con ese producto y lote al mismo establecimiento («Antes: guía 0001259 del 17/07/2026»), o «Nunca lo envió el almacén». Suele ser una guía de fin de mes que el establecimiento ingresó al mes siguiente, o un ingreso de otro origen.
+En «No se dio salida» se muestra la última guía de un mes anterior con ese producto al mismo establecimiento («Antes: guía 0001259 del 17/07/2026»), o «Nunca lo envió el almacén». Suele ser una guía de fin de mes que el establecimiento ingresó al mes siguiente, o un ingreso de otro origen.
 
 ## De dónde sale
 
@@ -41,19 +43,21 @@ Reglas (`services/guidesReview.ts`, con pruebas):
 
 ## Decisiones del usuario
 
-- **Por producto y lote** (2026-10-28), no solo por producto como la hoja CONTROL del Excel. Por eso algunos conteos cambian: en La Libertad, setiembre 2026, por lote son 38 completos, 4 sobran y 24 «no se dio salida»; por producto, 37, 5 y 21. `productCounts` da el conteo por producto, para comparar con lo que ya se conocía.
+- **Por producto, como la hoja CONTROL** (2026-10-28). Primero se comparó por producto y lote, y el usuario no reconocía sus cifras («no sé qué estarás comparando tú… y peor ni coincide»): un producto enviado con el lote A e ingresado con A y B salía como «Completo» más «No se dio salida» en vez de «Sobra». Ahora la tabla lleva las columnas de la hoja CONTROL en su orden (Nº guías, Salida med, Ingreso med, Completo, No salida, Sobra, Falta, No ingresó) y los lotes quedan como detalle.
 - Lo usa **la UNGET, en la web**, leyendo la carpeta del SISMED directamente (Chrome y Edge, una carpeta de red también sirve) o subiendo los archivos.
 - Va en **Farmacia**.
 
 ## Comprobado
 
-Con setiembre 2026 del ALM. ANEXO BELLAVISTA (030S05): las 2 486 líneas del reporte de guías de salida del Excel y los 34 establecimientos de su hoja CONTROL dan lo mismo (contando por producto). Por lote: 2 143 completos, 21 sobran, 246 «no se dio salida» y 11 establecimientos con diferencias. Leer los cinco DBF tarda menos de 1 s.
+Con setiembre 2026 del ALM. ANEXO BELLAVISTA (030S05): las 2 486 líneas del reporte de guías de salida del Excel coinciden, y los 34 establecimientos de su hoja CONTROL dan lo mismo en sus 8 columnas (Nº guías, Salida med, Ingreso med, Completo, No salida, Sobra, Falta, No ingresó). Leer los cinco DBF tarda menos de 1 s.
+
+**Fechas (2026-10-28):** con el `TMOVIM.DBF` que el SISMED guardó a las 13:27 de ese día, ninguna salida tenía una fecha de registro legible y la revisión quedaba vacía (la copia de la mañana sí la tenía). Desde entonces se leen también las fechas con hora de Visual FoxPro (tipo `T`), una salida sin fecha de registro usa la de emisión (`MOVFECHEMI`), y si no hay ninguna el aviso dice de qué tipo es `MOVFECHREG`. Los avisos de una carpeta sin guías dicen qué trae el TMOVIM y el TMOVIMDET (entradas, salidas, números de ejemplo y fechas de guardado).
 
 ## Pantallas
 
 - **Carga**: dos tarjetas, «SISMED del almacén» y «SISMED del ICI», con «Elegir carpeta» (`showDirectoryPicker`); se puede elegir `DATOS` o la carpeta del SISMED, y se busca `DATOS` adentro. La carpeta se recuerda en el equipo por usuario (`services/guidesReviewSources.ts`, IndexedDB): al volver, si el navegador aún da permiso se lee sola y se entra directo al resultado; si no, la tarjeta pide un clic («Leer la carpeta»). Firefox, Safari y el celular no abren carpetas: se suben los archivos («Suba los archivos»). Los DBF se leen en un Web Worker (`services/guidesReview.worker.ts`) y no se suben a internet.
-- **Resultado**: almacén y mes arriba, Excel y ⋯ (volver a leer el SISMED, cambiar las carpetas). Cinco KPIs que filtran (establecimientos con diferencias, completos, faltan o no ingresó, sobran, no se dio salida), buscador, Microred y Mostrar, y la tabla por establecimiento (la hoja CONTROL). Los nombres y la microred salen del registro de Establecimientos; si no está registrado, el nombre de `MALMACEN`.
-- **Detalle** (`components/GuidesReviewDetail.tsx`): el establecimiento en una ventana, con ‹ › y las flechas del teclado para pasar al siguiente, «Con diferencia» / «Todos», buscador y la tabla por producto y lote con la guía del almacén.
-- **Excel** (`services/guidesReviewExport.ts`, con pruebas): hojas Resumen, Detalle y Guías de salida, de lo que muestra la tabla (búsqueda, filtro y orden); desde el detalle, solo ese establecimiento. Acción `GUIDES_REVIEW:export`.
+- **Resultado**: almacén y mes arriba, Excel y ⋯ (volver a leer el SISMED, cambiar las carpetas). Cinco KPIs que filtran (establecimientos con diferencias, completos, no se dio salida, sobran, faltan o no ingresó; productos), buscador, Microred y Mostrar, y la tabla por establecimiento con las columnas de la hoja CONTROL. Los nombres y la microred salen del registro de Establecimientos; si no está registrado, el nombre de `MALMACEN`.
+- **Detalle** (`components/GuidesReviewDetail.tsx`): el establecimiento en una ventana, con ‹ › y las flechas del teclado para pasar al siguiente, «Con diferencia» / «Todos», buscador y la tabla por producto con sus lotes («2027896 · env. 50 · ing. 51» si no coinciden) y la guía del almacén.
+- **Excel** (`services/guidesReviewExport.ts`, con pruebas): hojas Resumen (las columnas de la hoja CONTROL), Detalle (por producto), Lotes y Guías de salida, de lo que muestra la tabla (búsqueda, filtro y orden); desde el detalle, solo ese establecimiento. Acción `GUIDES_REVIEW:export`.
 
 No guarda nada en Supabase.

@@ -1,7 +1,9 @@
 /**
  * Revisión de guías (2026-10-28, pedido del usuario): lo que el almacén de la UNGET envió a cada
- * establecimiento en un mes frente a lo que el establecimiento ingresó en su ICI, por producto
- * y lote. Reemplaza el Excel con macros «REVISAR_GUIAS» del usuario y da sus mismas cifras.
+ * establecimiento en un mes frente a lo que el establecimiento ingresó en su ICI, **por
+ * producto**, como la hoja CONTROL del Excel con macros «REVISAR_GUIAS» del usuario, que
+ * reemplaza y cuyas cifras da. Los lotes de cada producto se guardan para verlos en el detalle
+ * (primero se comparó por producto y lote y el usuario no reconocía sus cifras).
  *
  * - **Lo enviado** sale del SISMED del almacén: cada salida vigente (`TMOVIM.MOVCODITIP='S'`,
  *   `MOVSITUA='1'`) con su detalle por producto y lote (`TMOVIMDET`), en el mes de su fecha de
@@ -13,8 +15,8 @@
  *   compara con el ICI de `06519F01` (las demás farmacias reciben de la F01, no del almacén).
  *
  * Comprobado con septiembre 2026 del ALM. ANEXO BELLAVISTA: las 2 486 líneas del reporte de
- * guías de salida del Excel y los 34 establecimientos de su hoja CONTROL (contando por
- * producto) dan lo mismo. Reglas y casos en docs/REVISION_GUIAS.md.
+ * guías de salida del Excel y los 34 establecimientos de su hoja CONTROL dan lo mismo. Reglas y
+ * casos en docs/REVISION_GUIAS.md.
  */
 import { dbfField, dbfRecords, type DbfTable } from "./dbfFile";
 
@@ -68,15 +70,24 @@ export interface Place {
   type: string;
 }
 
-export interface ReviewRow {
-  product: string;
+/** Un lote de un producto: lo que salió y lo que ingresó con ese número de lote. */
+export interface ReviewLot {
   lot: string;
   sent: number;
   received: number;
+}
+
+/** Un producto en un establecimiento: lo enviado y lo ingresado sumando todos sus lotes. */
+export interface ReviewRow {
+  product: string;
+  sent: number;
+  received: number;
   state: GuideState;
-  /** Guías del mes con este producto y lote. */
+  /** Lotes enviados o ingresados, ordenados por número de lote. */
+  lots: ReviewLot[];
+  /** Guías del mes con este producto. */
   guides: string[];
-  /** Última guía de un mes anterior con este producto y lote al mismo establecimiento. */
+  /** Última guía de un mes anterior con este producto al mismo establecimiento. */
   previous: { date: string; guide: string } | null;
 }
 
@@ -88,8 +99,12 @@ export interface ReviewSite {
   guides: string[];
   rows: ReviewRow[];
   counts: Record<GuideState, number>;
-  /** Filas con algo distinto de «Completo». */
+  /** Productos con algo distinto de «Completo». */
   differences: number;
+  /** Productos que salieron del almacén en el mes («Salida med» del Excel). */
+  sentProducts: number;
+  /** Productos que el establecimiento ingresó en el mes («Ingreso med» del Excel). */
+  receivedProducts: number;
 }
 
 export const lineKey = (product: string, lot: string) => `${product}|${lot}`;
@@ -246,8 +261,8 @@ const stateOf = (sent: number, received: number): GuideState => {
 const emptyCounts = (): Record<GuideState, number> => ({ short: 0, notReceived: 0, extra: 0, notSent: 0, complete: 0 });
 
 /**
- * Compara lo enviado y lo ingresado en el mes, por establecimiento, producto y lote. Solo
- * entran los destinos de las guías del mes que no son almacenes (`isWarehouse`).
+ * Compara lo enviado y lo ingresado en el mes, por establecimiento y producto (sumando sus
+ * lotes). Solo entran los destinos de las guías del mes que no son almacenes (`isWarehouse`).
  */
 export const reviewGuides = (
   warehouse: WarehouseData,
@@ -255,14 +270,14 @@ export const reviewGuides = (
   month: string,
   isWarehouse: (code: string) => boolean = looksLikeWarehouse,
 ): ReviewSite[] => {
-  const sent = new Map<string, Map<string, { quantity: number; guides: Set<string> }>>();
+  type Sent = { lots: Map<string, number>; guides: Set<string> };
+  const sent = new Map<string, Map<string, Sent>>();
   const previous = new Map<string, { date: string; guide: string }>();
   const guidesOf = new Map<string, Set<string>>();
   for (const line of warehouse.lines) {
     if (isWarehouse(line.destination)) continue;
-    const key = lineKey(line.product, line.lot);
     if (line.month < month) {
-      const id = `${line.destination}#${key}`;
+      const id = `${line.destination}#${line.product}`;
       const last = previous.get(id);
       if (!last || last.date < line.date || (last.date === line.date && last.guide < line.guide)) previous.set(id, { date: line.date, guide: line.guide });
       continue;
@@ -270,10 +285,10 @@ export const reviewGuides = (
     if (line.month !== month) continue;
     if (!sent.has(line.destination)) sent.set(line.destination, new Map());
     const site = sent.get(line.destination)!;
-    const entry = site.get(key) ?? { quantity: 0, guides: new Set<string>() };
-    entry.quantity += line.quantity;
+    const entry = site.get(line.product) ?? { lots: new Map<string, number>(), guides: new Set<string>() };
+    entry.lots.set(line.lot, (entry.lots.get(line.lot) ?? 0) + line.quantity);
     entry.guides.add(line.guide);
-    site.set(key, entry);
+    site.set(line.product, entry);
     if (!guidesOf.has(line.destination)) guidesOf.set(line.destination, new Set());
     guidesOf.get(line.destination)!.add(line.guide);
   }
@@ -282,34 +297,40 @@ export const reviewGuides = (
   const receivedByCode = ici.received.get(month) ?? new Map<string, Map<string, number>>();
   return [...sent.entries()].map(([destination, items]) => {
     const iciCode = codes.has(destination) ? destination : codes.has(`${destination}F01`) ? `${destination}F01` : null;
-    const received = (iciCode && receivedByCode.get(iciCode)) || new Map<string, number>();
-    const keys = [...new Set([...items.keys(), ...(iciCode ? received.keys() : [])])].sort();
+    // Lo ingresado, por producto y lote.
+    const received = new Map<string, Map<string, number>>();
+    if (iciCode) {
+      (receivedByCode.get(iciCode) ?? new Map<string, number>()).forEach((quantity, key) => {
+        const { product, lot } = splitKey(key);
+        if (!received.has(product)) received.set(product, new Map());
+        received.get(product)!.set(lot, quantity);
+      });
+    }
+    const products = [...new Set([...items.keys(), ...received.keys()])].sort();
     const counts = emptyCounts();
-    const rows = keys.map((key): ReviewRow => {
-      const { product, lot } = splitKey(key);
-      const s = qty(items.get(key)?.quantity ?? 0);
-      const r = qty(received.get(key) ?? 0);
+    let sentProducts = 0;
+    let receivedProducts = 0;
+    const rows = products.map((product): ReviewRow => {
+      const out = items.get(product)?.lots ?? new Map<string, number>();
+      const got = received.get(product) ?? new Map<string, number>();
+      const lots = [...new Set([...out.keys(), ...got.keys()])].sort().map((lot) => ({ lot, sent: qty(out.get(lot) ?? 0), received: qty(got.get(lot) ?? 0) }));
+      const s = qty(lots.reduce((sum, l) => sum + l.sent, 0));
+      const r = qty(lots.reduce((sum, l) => sum + l.received, 0));
+      if (s) sentProducts++;
+      if (r) receivedProducts++;
       const state = stateOf(s, r);
       counts[state]++;
-      return { product, lot, sent: s, received: r, state, guides: [...(items.get(key)?.guides ?? [])].sort(), previous: previous.get(`${destination}#${key}`) ?? null };
+      return { product, sent: s, received: r, state, lots, guides: [...(items.get(product)?.guides ?? [])].sort(), previous: previous.get(`${destination}#${product}`) ?? null };
     });
-    return { destination, iciCode, guides: [...(guidesOf.get(destination) ?? [])].sort(), rows, counts, differences: rows.length - counts.complete };
+    return {
+      destination,
+      iciCode,
+      guides: [...(guidesOf.get(destination) ?? [])].sort(),
+      rows,
+      counts,
+      differences: rows.length - counts.complete,
+      sentProducts,
+      receivedProducts,
+    };
   });
-};
-
-/**
- * Conteo por producto, como la hoja CONTROL del Excel (suma los lotes de cada producto):
- * sirve para comparar con lo que el usuario ya conocía.
- */
-export const productCounts = (site: ReviewSite): Record<GuideState, number> => {
-  const totals = new Map<string, { sent: number; received: number }>();
-  site.rows.forEach((row) => {
-    const t = totals.get(row.product) ?? { sent: 0, received: 0 };
-    t.sent += row.sent;
-    t.received += row.received;
-    totals.set(row.product, t);
-  });
-  const counts = emptyCounts();
-  totals.forEach((t) => counts[stateOf(qty(t.sent), qty(t.received))]++);
-  return counts;
 };

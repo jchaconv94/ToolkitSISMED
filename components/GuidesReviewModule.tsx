@@ -54,7 +54,8 @@ import { GuidesReviewDetail } from "./GuidesReviewDetail";
 
 /**
  * Revisión de guías (2026-10-28): lo que el almacén de la UNGET envió a cada establecimiento en
- * un mes frente a lo que el establecimiento ingresó en su ICI, por producto y lote. Lee los DBF
+ * un mes frente a lo que el establecimiento ingresó en su ICI, por producto (como la hoja CONTROL
+ * del Excel del usuario, con sus mismas columnas), con los lotes en el detalle. Lee los DBF
  * de dos SISMED (el del almacén y el donde se importa el ICI) desde su carpeta DATOS o subidos;
  * todo se calcula en este equipo y no se guarda nada en la base. Reglas en
  * `services/guidesReview.ts` y docs/REVISION_GUIAS.md.
@@ -105,18 +106,20 @@ const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n
 
 const NO_MICRORED = "__none__";
 
-type SortKey = "name" | "microred" | "guides" | "rows" | "complete" | "short" | "extra" | "notReceived" | "notSent";
+type SortKey = "name" | "microred" | "guides" | "sentProducts" | "receivedProducts" | "complete" | "notSent" | "extra" | "short" | "notReceived";
 
+/** Las columnas de la hoja CONTROL del Excel del usuario, en su mismo orden. */
 const COLUMNS: SortableHeadColumn<SortKey>[] = [
   { key: "name", label: "Establecimiento" },
   { key: "microred", label: "Microred" },
-  { key: "guides", label: "Guías", align: "center", fit: true, title: "Guías de salida del almacén en el mes" },
-  { key: "rows", label: "Prod. y lotes", align: "center", fit: true, title: "Productos y lotes enviados o ingresados" },
-  { key: "complete", label: "Completos", align: "center", fit: true },
-  { key: "short", label: "Faltan", align: "center", fit: true, title: "Ingresó menos de lo enviado" },
-  { key: "extra", label: "Sobran", align: "center", fit: true, title: "Ingresó más de lo enviado" },
-  { key: "notReceived", label: "No ingresó", align: "center", fit: true, title: "Se envió y no ingresó nada" },
-  { key: "notSent", label: "No se dio salida", align: "center", fit: true, title: "Ingresó sin guía del almacén en el mes" },
+  { key: "guides", label: "Nº guías", align: "center", fit: true, title: "Guías de salida del almacén en el mes" },
+  { key: "sentProducts", label: "Salida med", align: "center", fit: true, title: "Productos que salieron del almacén en el mes" },
+  { key: "receivedProducts", label: "Ingreso med", align: "center", fit: true, title: "Productos que el establecimiento ingresó en su ICI" },
+  { key: "complete", label: "Completo", align: "center", fit: true, title: "Ingresó lo mismo que salió" },
+  { key: "notSent", label: "No salida", align: "center", fit: true, title: "Ingresó un producto que el almacén no le dio salida en el mes" },
+  { key: "extra", label: "Sobra", align: "center", fit: true, title: "Ingresó más de lo que salió" },
+  { key: "short", label: "Falta", align: "center", fit: true, title: "Ingresó menos de lo que salió" },
+  { key: "notReceived", label: "No ingresó", align: "center", fit: true, title: "Salió del almacén y no lo ingresó" },
 ];
 
 const Count: React.FC<{ value: number; tone: Tone }> = ({ value, tone }) =>
@@ -386,7 +389,7 @@ const LoadScreen: React.FC<{
     <div className="mx-auto max-w-4xl space-y-4 pb-24 md:pb-0">
       <div>
         <h2 className="text-lg font-black text-slate-900">Revisar las guías del almacén</h2>
-        <p className="text-[13px] text-slate-500">Compara lo que el almacén envió a cada establecimiento con lo que el establecimiento ingresó en su ICI, por producto y lote.</p>
+        <p className="text-[13px] text-slate-500">Compara lo que el almacén envió a cada establecimiento con lo que el establecimiento ingresó en su ICI, por producto.</p>
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <SourceCard
@@ -613,14 +616,15 @@ const ReviewResults: React.FC<{
       name: (i) => i.name,
       microred: (i) => i.microred,
       guides: (i) => i.site.guides.length,
-      rows: (i) => i.site.rows.length,
+      sentProducts: (i) => i.site.sentProducts,
+      receivedProducts: (i) => (i.site.iciCode ? i.site.receivedProducts : null),
       complete: (i) => (i.site.iciCode ? i.site.counts.complete : null),
       short: (i) => (i.site.iciCode ? i.site.counts.short : null),
       extra: (i) => (i.site.iciCode ? i.site.counts.extra : null),
       notReceived: (i) => (i.site.iciCode ? i.site.counts.notReceived : null),
       notSent: (i) => (i.site.iciCode ? i.site.counts.notSent : null),
     },
-    { firstDir: { guides: "desc", rows: "desc", complete: "desc", short: "desc", extra: "desc", notReceived: "desc", notSent: "desc" } },
+    { firstDir: { guides: "desc", sentProducts: "desc", receivedProducts: "desc", complete: "desc", short: "desc", extra: "desc", notReceived: "desc", notSent: "desc" } },
   );
   const signature = `${month}|${show}|${microred}|${query}|${sorted.length}`;
   useEffect(() => setPage(1), [signature]);
@@ -657,7 +661,7 @@ const ReviewResults: React.FC<{
           <p className="text-[17px] font-black text-slate-900 md:truncate">
             {warehouseName} <span className="font-mono text-[13px] font-semibold text-slate-400">{warehouseCode}</span>
           </p>
-          <p className="text-[12.5px] text-slate-500">Guías de salida de {monthLabel.toLowerCase()} frente al ICI de cada establecimiento · por producto y lote</p>
+          <p className="text-[12.5px] text-slate-500">Guías de salida de {monthLabel.toLowerCase()} frente al ICI de cada establecimiento · por producto</p>
         </div>
         <div className="flex items-center gap-2">
           <CustomSelect size="md" prefix="Mes" value={month} onChange={onMonth} options={months.map((m) => ({ value: m, label: monthText(m) }))} containerClassName="min-w-0 flex-1 md:w-56 md:flex-none" />
@@ -697,10 +701,10 @@ const ReviewResults: React.FC<{
 
       <KpiStrip cols="md:grid-cols-5">
         <KpiCard watermark tone="neutral" icon={<Truck />} label="Establecimientos" value={formatNumber(items.length)} hint={`${formatNumber(showCount("differences"))} con diferencias`} onClick={() => toggle("differences")} active={show === "differences"} />
-        <KpiCard watermark tone="success" icon={<PackageCheck />} label="Completos" value={formatNumber(totals.complete)} hint="productos y lotes" onClick={() => toggle("ok")} active={show === "ok"} />
-        <KpiCard watermark tone="danger" icon={<PackageX />} label="Faltan / no ingresó" value={formatNumber(totals.short + totals.notReceived)} hint="el EESS ingresó menos" onClick={() => toggle("short")} active={show === "short"} />
-        <KpiCard watermark tone="warning" label="Sobran" value={formatNumber(totals.extra)} hint="el EESS ingresó más" onClick={() => toggle("extra")} active={show === "extra"} />
+        <KpiCard watermark tone="success" icon={<PackageCheck />} label="Completos" value={formatNumber(totals.complete)} hint="productos" onClick={() => toggle("ok")} active={show === "ok"} />
         <KpiCard watermark tone="info" icon={<CircleHelp />} label="No se dio salida" value={formatNumber(totals.notSent)} hint="ingresó sin guía del almacén" onClick={() => toggle("notSent")} active={show === "notSent"} />
+        <KpiCard watermark tone="warning" label="Sobran" value={formatNumber(totals.extra)} hint="el EESS ingresó más" onClick={() => toggle("extra")} active={show === "extra"} />
+        <KpiCard watermark tone="danger" icon={<PackageX />} label="Faltan / no ingresó" value={formatNumber(totals.short + totals.notReceived)} hint="el EESS ingresó menos" onClick={() => toggle("short")} active={show === "short"} />
       </KpiStrip>
 
       {noIci > 0 && show !== "noIci" && (
@@ -810,17 +814,18 @@ const ReviewResults: React.FC<{
                       </td>
                       <td className="px-4 py-2 text-[13px] text-slate-600">{item.microred || "—"}</td>
                       <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.guides.length)}</td>
-                      <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.rows.length)}</td>
+                      <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.sentProducts)}</td>
                       {site.iciCode ? (
                         <>
+                          <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.receivedProducts)}</td>
                           <td className="px-3 py-2 text-center"><Count value={site.counts.complete} tone="success" /></td>
-                          <td className="px-3 py-2 text-center"><Count value={site.counts.short} tone="danger" /></td>
-                          <td className="px-3 py-2 text-center"><Count value={site.counts.extra} tone="warning" /></td>
-                          <td className="px-3 py-2 text-center"><Count value={site.counts.notReceived} tone="danger" /></td>
                           <td className="px-3 py-2 text-center"><Count value={site.counts.notSent} tone="info" /></td>
+                          <td className="px-3 py-2 text-center"><Count value={site.counts.extra} tone="warning" /></td>
+                          <td className="px-3 py-2 text-center"><Count value={site.counts.short} tone="danger" /></td>
+                          <td className="px-3 py-2 text-center"><Count value={site.counts.notReceived} tone="danger" /></td>
                         </>
                       ) : (
-                        <td colSpan={5} className="px-3 py-2 text-center"><StatusChip tone="warning" label={`Sin ICI de ${monthLabel.toLowerCase()}`} /></td>
+                        <td colSpan={6} className="px-3 py-2 text-center"><StatusChip tone="warning" label={`Sin ICI de ${monthLabel.toLowerCase()}`} /></td>
                       )}
                       <td className="px-2 text-slate-400"><ChevronRight className="h-4 w-4" /></td>
                     </tr>
@@ -839,7 +844,7 @@ const ReviewResults: React.FC<{
                   <div className="min-w-0 flex-1">
                     <p className="text-[14px] font-semibold text-slate-900">{item.name}</p>
                     <p className="text-xs text-slate-500">
-                      <span className="font-mono">{siteCode(site)}</span> · {item.microred || "Sin microred"} · {plural(site.guides.length, "guía", "guías")}
+                      <span className="font-mono">{siteCode(site)}</span> · {item.microred || "Sin microred"} · {plural(site.guides.length, "guía", "guías")} · salida {formatNumber(site.sentProducts)}{site.iciCode ? ` · ingreso ${formatNumber(site.receivedProducts)}` : ""}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {!site.iciCode ? (
@@ -848,10 +853,10 @@ const ReviewResults: React.FC<{
                         <StatusChip tone="success" label="Todo ingresó" />
                       ) : (
                         <>
-                          {site.counts.short > 0 && <StatusChip tone="danger" label={`${formatNumber(site.counts.short)} faltan`} />}
+                          {site.counts.notSent > 0 && <StatusChip tone="info" label={`${formatNumber(site.counts.notSent)} no salida`} />}
+                          {site.counts.extra > 0 && <StatusChip tone="warning" label={`${formatNumber(site.counts.extra)} sobra`} />}
+                          {site.counts.short > 0 && <StatusChip tone="danger" label={`${formatNumber(site.counts.short)} falta`} />}
                           {site.counts.notReceived > 0 && <StatusChip tone="danger" label={`${formatNumber(site.counts.notReceived)} no ingresó`} />}
-                          {site.counts.extra > 0 && <StatusChip tone="warning" label={`${formatNumber(site.counts.extra)} sobran`} />}
-                          {site.counts.notSent > 0 && <StatusChip tone="info" label={`${formatNumber(site.counts.notSent)} no se dio salida`} />}
                         </>
                       )}
                     </div>

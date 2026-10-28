@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { openDbf } from "./dbfFile";
 import { buildDbf, type DbfFieldSpec } from "./dbfTestUtils";
 import { noGuidesMessage } from "./guidesReviewLoad";
-import { detailSummary, looksLikeWarehouse, movementSummary, productCounts, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths } from "./guidesReview";
+import { detailSummary, looksLikeWarehouse, movementSummary, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths } from "./guidesReview";
 
 // Mismo formato que el SISMED del almacén (030S05) y el TFORMDET del ICI: solo los campos que se leen.
 type Head = { tipo?: string; num: string; org?: string; dst: string; guia: string; cct?: string; fecha: string; situa?: string };
@@ -93,14 +93,14 @@ describe("readIci", () => {
 });
 
 describe("reviewGuides", () => {
-  it("compara por producto y lote", () => {
-    expect(row("06516", "19421")).toMatchObject({ sent: 20, received: 20, state: "complete", guides: ["0001552"] });
+  it("compara por producto, como la hoja CONTROL", () => {
+    expect(row("06516", "19421")).toMatchObject({ sent: 20, received: 20, state: "complete", guides: ["0001552"], lots: [{ lot: "2408029", sent: 20, received: 20 }] });
     expect(row("06516", "02891")).toMatchObject({ sent: 150, received: 162, state: "extra" });
     expect(row("06516", "04034")).toMatchObject({ sent: 300, received: 280, state: "short", guides: ["0001552", "0001554"] });
     expect(row("06516", "03519")).toMatchObject({ sent: 50, received: 0, state: "notReceived" });
   });
 
-  it("«No se dio salida» dice la última guía de un mes anterior con ese producto y lote", () => {
+  it("«No se dio salida» dice la última guía de un mes anterior con ese producto", () => {
     expect(row("06516", "01958")).toMatchObject({ sent: 0, received: 1, state: "notSent", guides: [], previous: { date: "2026-02-23", guide: "0000282" } });
   });
 
@@ -108,6 +108,8 @@ describe("reviewGuides", () => {
     expect(site("06516").guides).toEqual(["0001552", "0001554"]);
     expect(site("06516").counts).toEqual({ short: 1, notReceived: 1, extra: 1, notSent: 1, complete: 2 });
     expect(site("06516").differences).toBe(4);
+    // «Salida med» e «Ingreso med» del Excel: productos que salieron y que ingresaron.
+    expect(site("06516")).toMatchObject({ sentProducts: 5, receivedProducts: 5 });
   });
 
   it("un establecimiento con farmacias se compara con su F01, no con las demás", () => {
@@ -140,16 +142,20 @@ describe("reviewMonths", () => {
   });
 });
 
-describe("productCounts", () => {
-  it("cuenta por producto como la hoja CONTROL del Excel: suma los lotes", () => {
+describe("lotes de un producto", () => {
+  it("suma los lotes de cada producto y los guarda para el detalle", () => {
     const w = readWarehouse(
       tmovim([{ num: "1", dst: "06516", guia: "0001", fecha: "2026-09-14" }]),
       tmovimdet([{ num: "1", med: "19421", lote: "A", cant: 20 }]),
     );
     const i = readIci(tformdet([{ pre: "06516", med: "19421", lote: "A", ingre: 20 }, { pre: "06516", med: "19421", lote: "B", ingre: 1 }]));
     const [s] = reviewGuides(w, i, "202609");
-    expect(s.counts).toMatchObject({ complete: 1, notSent: 1 });
-    expect(productCounts(s)).toMatchObject({ extra: 1, complete: 0, notSent: 0 });
+    expect(s.rows).toEqual([{
+      product: "19421", sent: 20, received: 21, state: "extra", guides: ["0001"], previous: null,
+      lots: [{ lot: "A", sent: 20, received: 20 }, { lot: "B", sent: 0, received: 1 }],
+    }]);
+    expect(s.counts).toMatchObject({ extra: 1, complete: 0, notSent: 0 });
+    expect(s).toMatchObject({ sentProducts: 1, receivedProducts: 1 });
   });
 });
 
