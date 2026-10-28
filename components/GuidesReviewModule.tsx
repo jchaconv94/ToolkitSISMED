@@ -36,6 +36,7 @@ import {
   folderPickerSupported,
   missingFiles,
   pickFolder,
+  sameFolder,
   savedFolder,
   type FolderHandle,
   type SourceFiles,
@@ -143,7 +144,13 @@ export const GuidesReviewModule: React.FC = () => {
   const [month, setMonth] = useState("");
   const [registry, setRegistry] = useState<Map<string, { name: string; microred: string }>>(new Map());
 
-  const setSlot = (kind: SourceKind, slot: Slot) => setSlots((current) => ({ ...current, [kind]: slot }));
+  /** La última carpeta de cada tarjeta, para notar si se eligió la misma para las dos. */
+  const folders = useRef<Record<SourceKind, FolderHandle | null>>({ warehouse: null, ici: null });
+
+  const setSlot = (kind: SourceKind, slot: Slot) => {
+    folders.current[kind] = slot.folder;
+    setSlots((current) => ({ ...current, [kind]: slot }));
+  };
 
   /** Un error deja la tarjeta sin datos: no se revisa con lo leído antes de otra carpeta. */
   const fail = (kind: SourceKind, folder: FolderHandle | null, message: string) => {
@@ -180,7 +187,11 @@ export const GuidesReviewModule: React.FC = () => {
     } catch {
       return fail(kind, folder, `No se pudo abrir la carpeta «${folder.name}». Vuelva a elegirla.`);
     }
-    return read(kind, files, folder);
+    const ok = await read(kind, files, folder);
+    if (!ok && kind === "warehouse" && (await sameFolder(folder, folders.current.ici))) {
+      setSlots((current) => ({ ...current, warehouse: { ...current.warehouse, message: `${current.warehouse.message ?? ""} Es la misma carpeta que eligió para el SISMED del ICI.`.trim() } }));
+    }
+    return ok;
   }, [read]);
 
   // Las carpetas de la última vez: si el navegador aún da permiso, se leen solas y se pasa

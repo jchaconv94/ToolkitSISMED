@@ -33,4 +33,13 @@ describe("archivos de Revisión de guías", () => {
     expect(Object.keys(await filesFromFolder(sismed, "ici"))).toEqual(["TFORMDET.DBF"]);
     expect(missingFiles("ici", await filesFromFolder(folder("OTRA", [file("LEEME.TXT")]), "ici"))).toEqual(["TFORMDET.DBF"]);
   });
+
+  it("si la carpeta del SISMED trae copias arriba y los archivos en DATOS, manda DATOS", async () => {
+    const real = file("TMOVIM.DBF");
+    const sismed = folder("SISMED", [file("TMOVIM.DBF"), file("TMOVIMDET.DBF"), folder("DATOS", [real, file("TMOVIMDET.DBF")])]);
+    expect((await filesFromFolder(sismed, "warehouse"))["TMOVIM.DBF"]).toBe(real);
+    // Si DATOS está incompleta, se queda con la carpeta que tiene más.
+    const incompleta = folder("SISMED", [file("TMOVIM.DBF"), file("TMOVIMDET.DBF"), folder("DATOS", [real])]);
+    expect((await filesFromFolder(incompleta, "warehouse"))["TMOVIM.DBF"]).not.toBe(real);
+  });
 });

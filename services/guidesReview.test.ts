@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { openDbf } from "./dbfFile";
 import { buildDbf } from "./dbfTestUtils";
-import { looksLikeWarehouse, productCounts, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths } from "./guidesReview";
+import { noGuidesMessage } from "./guidesReviewLoad";
+import { looksLikeWarehouse, movementSummary, productCounts, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths } from "./guidesReview";
 
 // Mismo formato que el SISMED del almacén (030S05) y el TFORMDET del ICI: solo los campos que se leen.
 type Head = { tipo?: string; num: string; org?: string; dst: string; guia: string; cct?: string; fecha: string; situa?: string };
@@ -164,5 +165,17 @@ describe("catálogos", () => {
       [{ ALMCOD: "06516", ALMDES: "P.S. LA LIBERTAD", ALMTIPO: "P" }],
     )));
     expect(places.get("06516")).toEqual({ name: "P.S. LA LIBERTAD", type: "P" });
+  });
+
+  it("explica por qué una carpeta no da guías de salida", () => {
+    const ici = movementSummary(tmovim([
+      { tipo: "E", num: "1", org: "030S05", dst: "06516", guia: "A", fecha: "2026-03-02" },
+      { tipo: "E", num: "2", org: "030S05", dst: "06516", guia: "B", fecha: "2026-09-30" },
+      { num: "3", dst: "06516", guia: "C", fecha: "2026-05-01", situa: "0" },
+    ]));
+    expect(ici).toEqual({ total: 3, entries: 2, exits: 1, activeExits: 0, first: "2026-03-02", last: "2026-09-30" });
+    expect(noGuidesMessage(ici)).toBe("Esta carpeta no es la del SISMED del almacén: su TMOVIM.DBF tiene 2 entradas y ninguna salida vigente (movimientos del 02/03/2026 al 30/09/2026). Elija la carpeta DATOS del SISMED desde donde el almacén emite las guías a los establecimientos.");
+    expect(noGuidesMessage(movementSummary(tmovim([])))).toContain("está vacío");
+    expect(noGuidesMessage({ ...ici, activeExits: 5 })).toContain("no tienen su detalle en TMOVIMDET.DBF");
   });
 });
