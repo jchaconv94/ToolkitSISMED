@@ -43,7 +43,7 @@ import {
   type SourceFiles,
   type SourceKind,
 } from "../services/guidesReviewSources";
-import { EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, StatusChip, TableSearch, useTableSort, type Tone } from "./ui/kit";
+import { EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, StatusChip, TableSearch, UnderlineTabs, useTableSort, type Tone } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
 import { BottomSheet } from "./ui/BottomSheet";
 import { SortableTableHead, useFloatingTableHead, type SortableHeadColumn } from "./ui/FloatingTableHead";
@@ -884,20 +884,12 @@ const ReviewResults: React.FC<{
         <KpiCard watermark tone="danger" icon={<PackageX />} label="Faltan / no ingresó" value={formatNumber(totals.short + totals.notReceived)} hint="el EESS ingresó menos" onClick={() => toggle("short")} active={tab === "sites" && show === "short"} />
       </KpiStrip>
 
-      <div className="flex h-10 w-full items-center gap-0.5 rounded-xl border border-slate-200 bg-white p-1 shadow-sm md:w-fit" role="tablist" aria-label="Ver">
-        {([["sites", `Establecimientos (${formatNumber(items.length)})`], ["lines", `Guías de salida (${formatNumber(lines.length)})`]] as const).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            role="tab"
-            aria-selected={tab === value}
-            onClick={() => setTab(value)}
-            className={`flex h-full flex-1 items-center justify-center whitespace-nowrap rounded-lg px-4 text-xs font-bold transition-colors md:flex-none ${tab === value ? "bg-teal-600 text-white" : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <UnderlineTabs
+        label="Ver"
+        value={tab}
+        onChange={setTab}
+        tabs={[{ id: "sites", label: "Establecimientos", count: items.length }, { id: "lines", label: "Guías de salida", count: lines.length }]}
+      />
 
       {tab === "lines" ? (
         <GuidesReviewLines lines={lines} sites={siteList} stateOf={stateOf} productName={productName} isDesktop={isDesktop} onOpenSite={openSite} monthLabel={monthLabel} />

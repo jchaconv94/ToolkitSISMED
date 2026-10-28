@@ -437,3 +437,40 @@ export const EmptyState: React.FC<{
     {action}
   </div>
 );
+
+/**
+ * Pestañas subrayadas, las mismas de los reportes de Disponibilidad: el nombre en negrita y una
+ * línea teal bajo la pestaña abierta. Para cambiar de vista; un filtro va en `CustomSelect`.
+ */
+export const UnderlineTabs = <T extends string>({
+  tabs,
+  value,
+  onChange,
+  label,
+  className = "",
+}: {
+  tabs: Array<{ id: T; label: string; count?: number }>;
+  value: T;
+  onChange: (id: T) => void;
+  label: string;
+  className?: string;
+}) => (
+  <div role="tablist" aria-label={label} className={`hide-scrollbar flex gap-1 overflow-x-auto border-b border-slate-200 ${className}`}>
+    {tabs.map((tab) => (
+      <button
+        key={tab.id}
+        type="button"
+        role="tab"
+        aria-selected={value === tab.id}
+        onClick={() => onChange(tab.id)}
+        className={`relative flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap px-3 text-[13.5px] font-bold transition-colors ${value === tab.id ? "text-teal-700" : "text-slate-500 hover:text-slate-800"}`}
+      >
+        {tab.label}
+        {tab.count !== undefined && (
+          <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-bold ${value === tab.id ? "bg-teal-50 text-teal-700" : "bg-slate-100 text-slate-500"}`}>{tab.count.toLocaleString("es-PE").replace(/,/g, " ")}</span>
+        )}
+        {value === tab.id && <span className="absolute inset-x-2 bottom-0 h-[3px] rounded-t-full bg-teal-600" />}
+      </button>
+    ))}
+  </div>
+);
