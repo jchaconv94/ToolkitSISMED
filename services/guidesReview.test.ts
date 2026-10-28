@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { openDbf } from "./dbfFile";
 import { buildDbf } from "./dbfTestUtils";
 import { noGuidesMessage } from "./guidesReviewLoad";
-import { looksLikeWarehouse, movementSummary, productCounts, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths } from "./guidesReview";
+import { detailSummary, looksLikeWarehouse, movementSummary, productCounts, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths } from "./guidesReview";
 
 // Mismo formato que el SISMED del almacén (030S05) y el TFORMDET del ICI: solo los campos que se leen.
 type Head = { tipo?: string; num: string; org?: string; dst: string; guia: string; cct?: string; fecha: string; situa?: string };
@@ -177,5 +177,19 @@ describe("catálogos", () => {
     expect(noGuidesMessage(ici)).toBe("Esta carpeta no es la del SISMED del almacén: su TMOVIM.DBF tiene 2 entradas y ninguna salida vigente (movimientos del 02/03/2026 al 30/09/2026). Elija la carpeta DATOS del SISMED desde donde el almacén emite las guías a los establecimientos.");
     expect(noGuidesMessage(movementSummary(tmovim([])))).toContain("está vacío");
     expect(noGuidesMessage({ ...ici, activeExits: 5 })).toContain("no tienen su detalle en TMOVIMDET.DBF");
+  });
+
+  it("cuando las salidas no tienen detalle, dice qué trae el TMOVIMDET", () => {
+    const heads = tmovim([{ num: "260001552", dst: "06516", guia: "0001552", fecha: "2026-09-14" }]);
+    const dets = tmovimdet([
+      { num: "999000001", med: "19421", lote: "L1", cant: 5 },
+      { tipo: "E", num: "260001552", med: "19421", lote: "L1", cant: 5 },
+    ]);
+    const detail = detailSummary(heads, dets);
+    expect(detail).toEqual({ records: 2, live: 2, exits: 1, matched: 0, sampleHeader: "260001552", sampleDetail: "999000001" });
+    const message = noGuidesMessage(movementSummary(heads), detail, { tmovim: new Date(2026, 9, 28, 14, 25).getTime(), tmovimdet: new Date(2025, 11, 31, 18, 0).getTime() });
+    expect(message).toContain("TMOVIMDET tiene 2 registros, 1 de salidas y 0 con el número de una salida vigente.");
+    expect(message).toContain("Número de salida en TMOVIM: 260001552; en TMOVIMDET: 999000001.");
+    expect(message).toContain("Guardados el 28/10/2026 14:25 (TMOVIM) y el 31/12/2025 18:00 (TMOVIMDET).");
   });
 });

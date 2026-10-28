@@ -159,6 +159,31 @@ export const movementSummary = (tmovim: DbfTable) => {
   return summary;
 };
 
+/**
+ * Por qué las salidas de un TMOVIM no encuentran su detalle en el TMOVIMDET: cuántos registros
+ * trae (y cuántos están borrados), cuántos son de salidas y cuántos tienen el número de una
+ * salida vigente, con un número de ejemplo de cada archivo para compararlos.
+ */
+export const detailSummary = (tmovim: DbfTable, tmovimdet: DbfTable) => {
+  const numbers = new Set<string>();
+  let sampleHeader = "";
+  for (const r of dbfRecords(tmovim, ["MOVNUMERO"] as const, (t) => t("MOVCODITIP") === "S" && t("MOVSITUA") === "1")) {
+    const number = text(r.MOVNUMERO);
+    numbers.add(number);
+    if (!sampleHeader) sampleHeader = number;
+  }
+  const summary = { records: tmovimdet.recordCount, live: 0, exits: 0, matched: 0, sampleHeader, sampleDetail: "" };
+  for (const r of dbfRecords(tmovimdet, ["MOVCODITIP", "MOVNUMERO"] as const)) {
+    summary.live++;
+    if (text(r.MOVCODITIP) !== "S") continue;
+    summary.exits++;
+    const number = text(r.MOVNUMERO);
+    if (!summary.sampleDetail) summary.sampleDetail = number;
+    if (numbers.has(number)) summary.matched++;
+  }
+  return summary;
+};
+
 /** Ingreso + reingreso de cada establecimiento por mes, producto y lote, del TFORMDET. */
 export const readIci = (tformdet: DbfTable): IciData => {
   const codes = new Map<string, Set<string>>();
