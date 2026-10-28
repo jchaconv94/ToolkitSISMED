@@ -16,8 +16,8 @@
  * borran las copias viejas (se conserva la anterior, por si una pestaña abierta la usa).
  */
 
-const VERSION = "20261027171001-430d8b470a";
-const PRECACHE = ["apple-touch-icon.png","assets/NotoSans-Bold-D7La9DZe.ttf","assets/NotoSans-Regular-BJuaR_yQ.ttf","assets/availabilityExport.worker-BDo3IdgA.js","assets/html2canvas.esm-QH1iLAAe.js","assets/index-BVOj7FPf.js","assets/index-D2yHBsL2.css","assets/index.es-BlnXq5L0.js","assets/purify.es-C_uT9hQ1.js","assets/tformdetReader.worker-DbGLFKbR.js","favicon.svg","icon-192.png","icon-512.png","icon-maskable-512.png","index.html","manifest.webmanifest"];
+const VERSION = "20261028151844-66f43e5cb7";
+const PRECACHE = ["apple-touch-icon.png","assets/NotoSans-Bold-D7La9DZe.ttf","assets/NotoSans-Regular-BJuaR_yQ.ttf","assets/availabilityExport.worker-BDo3IdgA.js","assets/guidesReview.worker-DopPhwv0.js","assets/html2canvas.esm-QH1iLAAe.js","assets/index-CZhpmv1o.js","assets/index-Cti1m8Kg.css","assets/index.es-PJO3dRBm.js","assets/purify.es-C_uT9hQ1.js","assets/tformdetReader.worker-DbGLFKbR.js","favicon.svg","icon-192.png","icon-512.png","icon-maskable-512.png","index.html","manifest.webmanifest"];
 
 const APP_PREFIX = "toolkit-sismed-app-";
 const APP_CACHE = APP_PREFIX + VERSION;
