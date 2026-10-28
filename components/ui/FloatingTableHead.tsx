@@ -165,3 +165,56 @@ export const SortHeadButton: React.FC<{ label: string; dir: SortDir | null; onCl
 
 // La regla vive en services/tableSort.ts (con pruebas); se reexporta para quien ya la usaba aquí.
 export { nextSort } from "../../services/tableSort";
+
+/**
+ * Columna de una `SortableTableHead`. `fit`: del ancho justo de su contenido, en una línea,
+ * para que el nombre (producto o establecimiento) se quede con el resto del ancho.
+ */
+export type SortableHeadColumn<K extends string> = { key: K; label: string; align?: HeadAlign; fit?: boolean; title?: string };
+
+const ariaSortOf = (dir: SortDir | null) => (dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none");
+
+/**
+ * Cabecera de tabla que ordena al tocar cada título (`headSort` de `useTableSort`) con su franja
+ * que se queda arriba al bajar (`FloatingTableHead`; funciona también dentro de una ventana).
+ * Uso: `const { tableRef, floating } = useFloatingTableHead([deps])`, `ref={tableRef}` en la
+ * `<table>` y `<SortableTableHead columns={…} headSort={headSort} floating={floating} />` dentro.
+ */
+export const SortableTableHead = <K extends string>({
+  columns,
+  headSort,
+  floating,
+  trailing,
+}: {
+  columns: SortableHeadColumn<K>[];
+  headSort: (key: K) => { dir: SortDir | null; onSort: () => void };
+  floating: FloatingHeadState | null;
+  /** Columna final sin título (la flecha de la fila), con su nombre para lectores de pantalla. */
+  trailing?: string;
+}) => {
+  const content = (column: SortableHeadColumn<K>) => {
+    const sort = headSort(column.key);
+    return <SortHeadButton label={column.label} dir={sort.dir} onClick={sort.onSort} />;
+  };
+  return (
+    <>
+      <FloatingTableHead state={floating} padding="px-3" cells={columns.map((column, index) => ({ key: column.key, index, align: column.align, content: content(column) }))} />
+      <thead>
+        <tr>
+          {columns.map((column) => (
+            <th
+              key={column.key}
+              scope="col"
+              title={column.title}
+              aria-sort={ariaSortOf(headSort(column.key).dir)}
+              className={`py-3 ${column.fit ? "w-px whitespace-nowrap px-3" : "px-4"} ${tableHeadCellClass} ${tableHeadTextClass} ${headAlignClass(column.align)}`}
+            >
+              {content(column)}
+            </th>
+          ))}
+          {trailing !== undefined && <th className={`w-10 ${tableHeadCellClass}`} aria-label={trailing} />}
+        </tr>
+      </thead>
+    </>
+  );
+};

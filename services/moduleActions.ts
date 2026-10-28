@@ -46,6 +46,9 @@ export const MODULE_ACTIONS: Partial<Record<AppModule, ModuleAction[]>> = {
     { id: "saveHistory", label: "Guardar y quitar meses del historial", hint: "Solo en su jurisdicción, y nunca el responsable de un establecimiento" },
     { id: "sites", label: "Elegir los establecimientos del análisis", hint: "Solo DIRESA y UNGET, en su jurisdicción" },
   ],
+  GUIDES_REVIEW: [
+    { id: "export", label: "Exportar Excel", readOnly: true },
+  ],
   SIG_SEARCH: [
     { id: "connections", label: "Configurar conexiones de stock", hint: "Además, cada conexión solo la edita su responsable" },
     { id: "export", label: "Exportar stock", readOnly: true },

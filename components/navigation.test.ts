@@ -51,7 +51,7 @@ describe("mapa de navegación", () => {
 describe("herramientas sin internet", () => {
   it("funcionan sin internet las que trabajan con lo que se sube al navegador", () => {
     const offline = NAV_SECTIONS.flatMap(s => s.items).filter(i => i.offline).map(i => i.module);
-    expect(offline).toEqual(["DASHBOARD", "AVAILABILITY", "REDISTRIBUTION"]);
+    expect(offline).toEqual(["DASHBOARD", "AVAILABILITY", "GUIDES_REVIEW", "REDISTRIBUTION"]);
     expect(worksOffline("HOME")).toBe(true);
     expect(worksOffline("SIG_SEARCH")).toBe(false);
     expect(worksOffline("PROFILE")).toBe(false);

@@ -10,6 +10,7 @@ Desde el 2026-10-08. Pedido del usuario: los establecimientos se conectan más o
 | Análisis de Requerimiento | Lista de Exclusiones (para editarla; el análisis usa la última copia) |
 | Disponibilidad (subir TFORMDET, tablero, Excel; el historial con su última copia) | Backups SISMED, Claves de envío; guardar o quitar meses del historial de Disponibilidad |
 | Redistribución | Administración, Perfil |
+| Revisión de guías (lee las carpetas del SISMED o los DBF subidos; Excel) | |
 
 Se declara en `components/navigation.ts` con `offline: true`. De ahí salen la pastilla «Sin conexión» de la cabecera con su lista, la marca «Necesita internet» de Inicio y el aviso que reemplaza a una herramienta que necesita internet cuando se abre sin conexión (`components/OfflineIndicator.tsx`). Si la conexión se cae con una de esas herramientas abierta, no se cierra: lo que ya cargó sigue a la vista.
 
