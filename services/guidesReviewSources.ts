@@ -24,6 +24,7 @@ type DirHandle = {
   values: () => AsyncIterable<FileHandle | DirHandle>;
   queryPermission?: (options: { mode: "read" }) => Promise<PermissionState>;
   requestPermission?: (options: { mode: "read" }) => Promise<PermissionState>;
+  isSameEntry?: (other: DirHandle) => Promise<boolean>;
 };
 export type FolderHandle = DirHandle;
 
@@ -79,12 +80,22 @@ export const folderPermission = async (handle: FolderHandle, ask: boolean): Prom
 
 const wanted = (kind: SourceKind) => [...SOURCE_FILES[kind].required, ...SOURCE_FILES[kind].optional];
 
+/** ¿Son la misma carpeta? (por ejemplo, la del ICI elegida también para el almacén). */
+export const sameFolder = async (a: FolderHandle | null, b: FolderHandle | null) => {
+  if (!a || !b || !a.isSameEntry) return false;
+  try {
+    return await a.isSameEntry(b);
+  } catch {
+    return false;
+  }
+};
+
 /** Qué archivos obligatorios faltan. */
 export const missingFiles = (kind: SourceKind, files: SourceFiles) => SOURCE_FILES[kind].required.filter((name) => !files[name]);
 
 /**
- * Busca los archivos en la carpeta elegida y, si no están, en su subcarpeta DATOS (por si se
- * eligió la carpeta del SISMED en vez de DATOS). Sin distinguir mayúsculas.
+ * Busca los archivos en la carpeta elegida o, si tiene una subcarpeta DATOS con ellos, en DATOS
+ * (por si se eligió la carpeta del SISMED en vez de DATOS). Sin distinguir mayúsculas.
  */
 export const filesFromFolder = async (handle: FolderHandle, kind: SourceKind): Promise<SourceFiles> => {
   const names = new Set(wanted(kind));
@@ -99,8 +110,11 @@ export const filesFromFolder = async (handle: FolderHandle, kind: SourceKind): P
     return { found, datos };
   };
   const top = await collect(handle);
-  if (!missingFiles(kind, top.found).length || !top.datos) return top.found;
+  if (!top.datos) return top.found;
+  // DATOS es donde el SISMED guarda sus tablas: si tiene los archivos, manda ella, aunque la
+  // carpeta de arriba tenga otros con el mismo nombre (copias viejas o vacías).
   const inner = await collect(top.datos);
+  if (!missingFiles(kind, inner.found).length) return inner.found;
   return missingFiles(kind, inner.found).length < missingFiles(kind, top.found).length ? inner.found : top.found;
 };
 

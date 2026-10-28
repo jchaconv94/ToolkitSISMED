@@ -138,6 +138,27 @@ export const readWarehouse = (tmovim: DbfTable, tmovimdet: DbfTable): WarehouseD
   return { code, lines, months: [...new Set(lines.map((l) => l.month))].sort(byMonthDesc) };
 };
 
+/**
+ * Qué hay en un TMOVIM: sirve para explicar por qué una carpeta no tiene guías de salida (la del
+ * SISMED del ICI, o una copia vacía fuera de DATOS) en vez de solo decir que no las tiene.
+ */
+export const movementSummary = (tmovim: DbfTable) => {
+  const summary = { total: 0, entries: 0, exits: 0, activeExits: 0, first: "", last: "" };
+  for (const r of dbfRecords(tmovim, ["MOVCODITIP", "MOVSITUA", "MOVFECHREG"] as const)) {
+    summary.total++;
+    const type = text(r.MOVCODITIP);
+    if (type === "E") summary.entries++;
+    if (type === "S") {
+      summary.exits++;
+      if (text(r.MOVSITUA) === "1") summary.activeExits++;
+    }
+    const date = text(r.MOVFECHREG);
+    if (date && (!summary.first || date < summary.first)) summary.first = date;
+    if (date && date > summary.last) summary.last = date;
+  }
+  return summary;
+};
+
 /** Ingreso + reingreso de cada establecimiento por mes, producto y lote, del TFORMDET. */
 export const readIci = (tformdet: DbfTable): IciData => {
   const codes = new Map<string, Set<string>>();
