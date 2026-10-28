@@ -16,7 +16,7 @@
  * guías de salida del Excel y los 34 establecimientos de su hoja CONTROL (contando por
  * producto) dan lo mismo. Reglas y casos en docs/REVISION_GUIAS.md.
  */
-import { dbfRecords, type DbfTable } from "./dbfFile";
+import { dbfField, dbfRecords, type DbfTable } from "./dbfFile";
 
 export type GuideState = "short" | "notReceived" | "extra" | "notSent" | "complete";
 
@@ -111,9 +111,12 @@ export const looksLikeWarehouse = (code: string) => /^\d{3}[AS]\d/i.test(code);
 export const readWarehouse = (tmovim: DbfTable, tmovimdet: DbfTable): WarehouseData => {
   const headers = new Map<string, { origin: string; destination: string; guide: string; concept: string; date: string }>();
   const origins = new Map<string, number>();
-  for (const r of dbfRecords(tmovim, ["MOVNUMERO", "ALMCODIORG", "ALMCODIDST", "MOVNUMEDCO", "CCTCODIGO", "MOVFECHREG"] as const,
-    (t) => t("MOVCODITIP") === "S" && t("MOVSITUA") === "1")) {
-    const date = text(r.MOVFECHREG);
+  // El mes es el de la fecha de registro; si una salida no la tiene, el de su fecha de emisión.
+  const names: Array<"MOVNUMERO" | "ALMCODIORG" | "ALMCODIDST" | "MOVNUMEDCO" | "CCTCODIGO" | "MOVFECHREG" | "MOVFECHEMI"> =
+    ["MOVNUMERO", "ALMCODIORG", "ALMCODIDST", "MOVNUMEDCO", "CCTCODIGO", "MOVFECHREG"];
+  if (dbfField(tmovim, "MOVFECHEMI")) names.push("MOVFECHEMI");
+  for (const r of dbfRecords(tmovim, names, (t) => t("MOVCODITIP") === "S" && t("MOVSITUA") === "1")) {
+    const date = text(r.MOVFECHREG) || text(r.MOVFECHEMI);
     if (!date) continue;
     const origin = text(r.ALMCODIORG);
     origins.set(origin, (origins.get(origin) ?? 0) + 1);
@@ -143,16 +146,19 @@ export const readWarehouse = (tmovim: DbfTable, tmovimdet: DbfTable): WarehouseD
  * SISMED del ICI, o una copia vacía fuera de DATOS) en vez de solo decir que no las tiene.
  */
 export const movementSummary = (tmovim: DbfTable) => {
-  const summary = { total: 0, entries: 0, exits: 0, activeExits: 0, first: "", last: "" };
+  const summary = { total: 0, entries: 0, exits: 0, activeExits: 0, undated: 0, dateType: dbfField(tmovim, "MOVFECHREG")?.type ?? "", first: "", last: "" };
   for (const r of dbfRecords(tmovim, ["MOVCODITIP", "MOVSITUA", "MOVFECHREG"] as const)) {
     summary.total++;
     const type = text(r.MOVCODITIP);
+    const date = text(r.MOVFECHREG);
     if (type === "E") summary.entries++;
     if (type === "S") {
       summary.exits++;
-      if (text(r.MOVSITUA) === "1") summary.activeExits++;
+      if (text(r.MOVSITUA) === "1") {
+        summary.activeExits++;
+        if (!date) summary.undated++;
+      }
     }
-    const date = text(r.MOVFECHREG);
     if (date && (!summary.first || date < summary.first)) summary.first = date;
     if (date && date > summary.last) summary.last = date;
   }

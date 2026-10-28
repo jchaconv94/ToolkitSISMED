@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { openDbf } from "./dbfFile";
-import { buildDbf } from "./dbfTestUtils";
+import { buildDbf, type DbfFieldSpec } from "./dbfTestUtils";
 import { noGuidesMessage } from "./guidesReviewLoad";
 import { detailSummary, looksLikeWarehouse, movementSummary, productCounts, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths } from "./guidesReview";
 
@@ -173,7 +173,7 @@ describe("catálogos", () => {
       { tipo: "E", num: "2", org: "030S05", dst: "06516", guia: "B", fecha: "2026-09-30" },
       { num: "3", dst: "06516", guia: "C", fecha: "2026-05-01", situa: "0" },
     ]));
-    expect(ici).toEqual({ total: 3, entries: 2, exits: 1, activeExits: 0, first: "2026-03-02", last: "2026-09-30" });
+    expect(ici).toEqual({ total: 3, entries: 2, exits: 1, activeExits: 0, undated: 0, dateType: "D", first: "2026-03-02", last: "2026-09-30" });
     expect(noGuidesMessage(ici)).toBe("Esta carpeta no es la del SISMED del almacén: su TMOVIM.DBF tiene 2 entradas y ninguna salida vigente (movimientos del 02/03/2026 al 30/09/2026). Elija la carpeta DATOS del SISMED desde donde el almacén emite las guías a los establecimientos.");
     expect(noGuidesMessage(movementSummary(tmovim([])))).toContain("está vacío");
     expect(noGuidesMessage({ ...ici, activeExits: 5 })).toContain("no tienen su detalle en TMOVIMDET.DBF");
@@ -191,5 +191,27 @@ describe("catálogos", () => {
     expect(message).toContain("TMOVIMDET tiene 2 registros, 1 de salidas y 0 con el número de una salida vigente.");
     expect(message).toContain("Número de salida en TMOVIM: 260001552; en TMOVIMDET: 999000001.");
     expect(message).toContain("Guardados el 28/10/2026 14:25 (TMOVIM) y el 31/12/2025 18:00 (TMOVIMDET).");
+  });
+
+  it("sin fecha de registro usa la de emisión, y avisa si no hay ninguna", () => {
+    const fields: DbfFieldSpec[] = [["MOVCODITIP", "C", 1], ["MOVNUMERO", "C", 9], ["ALMCODIORG", "C", 12], ["ALMCODIDST", "C", 12], ["MOVNUMEDCO", "C", 15], ["CCTCODIGO", "C", 2], ["MOVFECHREG", "D", 8], ["MOVFECHEMI", "D", 8], ["MOVSITUA", "C", 1]];
+    const heads = (emi: string) => openDbf(buildDbf(fields, [
+      { MOVCODITIP: "S", MOVNUMERO: "260001552", ALMCODIORG: "030S05", ALMCODIDST: "06516", MOVNUMEDCO: "0001552", CCTCODIGO: "04", MOVFECHREG: "", MOVFECHEMI: emi, MOVSITUA: "1" },
+    ]));
+    const dets = tmovimdet([{ num: "260001552", med: "19421", lote: "L1", cant: 5 }]);
+    expect(readWarehouse(heads("2026-09-14"), dets).lines.map((l) => [l.month, l.guide])).toEqual([["202609", "0001552"]]);
+    const undated = heads("");
+    expect(readWarehouse(undated, dets).lines).toEqual([]);
+    const summary = movementSummary(undated);
+    expect(summary).toMatchObject({ activeExits: 1, undated: 1, dateType: "D" });
+    expect(noGuidesMessage(summary, detailSummary(undated, dets))).toMatch(/^Las 1 salidas de TMOVIM.DBF no tienen una fecha de registro que se pueda leer \(MOVFECHREG es de tipo D\)\. TMOVIMDET tiene 1 registro, 1 de salidas y 1 con el número de una salida vigente\./);
+  });
+
+  it("lee la fecha y hora de Visual FoxPro (tipo T)", () => {
+    const table = openDbf(buildDbf([["MOVCODITIP", "C", 1], ["MOVNUMERO", "C", 9], ["ALMCODIORG", "C", 12], ["ALMCODIDST", "C", 12], ["MOVNUMEDCO", "C", 15], ["CCTCODIGO", "C", 2], ["MOVFECHREG", "T", 8], ["MOVSITUA", "C", 1]], [
+      { MOVCODITIP: "S", MOVNUMERO: "260001552", ALMCODIORG: "030S05", ALMCODIDST: "06516", MOVNUMEDCO: "0001552", CCTCODIGO: "04", MOVFECHREG: "2026-09-14", MOVSITUA: "1" },
+    ]));
+    const lines = readWarehouse(table, tmovimdet([{ num: "260001552", med: "19421", lote: "L1", cant: 5 }])).lines;
+    expect(lines.map((l) => [l.date, l.month])).toEqual([["2026-09-14", "202609"]]);
   });
 });
