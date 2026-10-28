@@ -2,8 +2,8 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { AlertTriangle, CalendarClock, ChevronLeft, ChevronRight, Clock, Download, Package, Wallet } from "lucide-react";
 import { saveAs } from "file-saver";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
-import { EmptyState, KpiCard, SortButton, StatusChip, TableSearch, ariaSort, useTableSort } from "./ui/kit";
-import { FloatingTableHead, headAlignClass, tableHeadCellClass, tableHeadTextClass, useFloatingTableHead, type HeadAlign } from "./ui/FloatingTableHead";
+import { EmptyState, KpiCard, StatusChip, TableSearch, useTableSort } from "./ui/kit";
+import { SortableTableHead as TableHead, useFloatingTableHead, type SortableHeadColumn as HeadColumn } from "./ui/FloatingTableHead";
 import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { useIsDesktop } from "./ui/useIsDesktop";
@@ -72,55 +72,6 @@ const ExpiryCell: React.FC<{ date: Date; days: number; status: "expired" | "expi
     <p className={`text-[11px] font-semibold ${daysTone(status, days)}`}>{describeExpiryDays(days)}</p>
   </div>
 );
-
-/**
- * Columna de las tablas de la ventana. `fit`: del ancho justo de su contenido, en una línea,
- * para que el nombre (producto o establecimiento) se quede con el resto del ancho.
- */
-type HeadColumn<K extends string> = { key: K; label: string; align?: HeadAlign; fit?: boolean; title?: string };
-
-/**
- * Cabecera de una tabla de la ventana con su franja que se queda arriba al bajar
- * (`FloatingTableHead`, como en las demás tablas: nada de `sticky` en el `<thead>`).
- */
-const TableHead = <K extends string>({
-  columns,
-  headSort,
-  floating,
-  trailing,
-}: {
-  columns: HeadColumn<K>[];
-  headSort: (key: K) => { dir: "asc" | "desc" | null; onSort: () => void };
-  floating: ReturnType<typeof useFloatingTableHead>["floating"];
-  /** Columna final sin título (la flecha de la fila). */
-  trailing?: string;
-}) => {
-  const content = (column: HeadColumn<K>) => {
-    const sort = headSort(column.key);
-    return <SortButton label={column.label} dir={sort.dir} onClick={sort.onSort} />;
-  };
-  return (
-    <>
-      <FloatingTableHead state={floating} padding="px-3" cells={columns.map((column, index) => ({ key: column.key, index, align: column.align, content: content(column) }))} />
-      <thead>
-        <tr>
-          {columns.map((column) => (
-            <th
-              key={column.key}
-              scope="col"
-              title={column.title}
-              aria-sort={ariaSort(headSort(column.key).dir)}
-              className={`py-3 ${column.fit ? "w-px whitespace-nowrap px-3" : "px-4"} ${tableHeadCellClass} ${tableHeadTextClass} ${headAlignClass(column.align)}`}
-            >
-              {content(column)}
-            </th>
-          ))}
-          {trailing !== undefined && <th className={`w-10 ${tableHeadCellClass}`} aria-label={trailing} />}
-        </tr>
-      </thead>
-    </>
-  );
-};
 
 /** Detalle de un producto: sus lotes en toda la red y en qué establecimiento está cada uno. */
 const ProductDetail: React.FC<{ product: ExpiryProduct; isDesktop: boolean }> = ({ product, isDesktop }) => {
