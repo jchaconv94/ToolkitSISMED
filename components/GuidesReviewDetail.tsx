@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, CircleHelp, Download, PackageCheck, PackageX, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleHelp, Download, PackageCheck, PackageX } from "lucide-react";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
 import { EmptyState, KpiCard, StatusChip, TableSearch, UnderlineTabs, useTableSort, type Tone } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
@@ -490,21 +490,22 @@ export const GuidesReviewDetail: React.FC<{
           {tab === "products" ? (
             <>
               {selected.size > 0 ? (
-                // Barra de acciones en lote: reemplaza a la del buscador mientras haya productos marcados.
-                <div className="flex flex-col gap-2 rounded-xl bg-teal-700 p-2 md:flex-row md:items-center md:pl-4">
+                // Barra de acciones en lote: reemplaza a la del buscador mientras haya productos marcados,
+                // con su mismo aspecto (sin recuadro de color: el usuario lo rechazó).
+                <div className="flex flex-col gap-2 md:flex-row md:items-center">
                   <div className="flex items-center justify-between gap-2 md:contents">
-                    <p className="shrink-0 text-[13px] font-bold text-white">{selected.size === 1 ? "1 marcado" : `${formatNumber(selected.size)} marcados`}</p>
-                    <button type="button" onClick={cancelBatch} className="flex h-9 items-center gap-1 rounded-lg px-2 text-[13px] font-bold text-teal-50 hover:bg-teal-600 md:order-last">
-                      <X className="h-4 w-4" /> Cancelar
+                    <p className="shrink-0 whitespace-nowrap text-[13px] font-bold text-slate-700 md:pr-1">{selected.size === 1 ? "1 marcado" : `${formatNumber(selected.size)} marcados`}</p>
+                    <button type="button" onClick={cancelBatch} className="h-10 shrink-0 rounded-xl px-3 text-sm font-bold text-slate-500 hover:bg-slate-100 hover:text-slate-800 md:order-last">
+                      Cancelar
                     </button>
                   </div>
                   <div className="flex min-w-0 flex-1 gap-2">
                     <NoteCombobox value={draft} onChange={setDraft} onSubmit={applyBatch} suggestions={suggestions} inputRef={batchInput} onCancel={cancelBatch} placeholder="Observación para los marcados" />
-                    <button type="button" onClick={() => applyBatch(draft)} disabled={!draft.trim()} className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-white px-4 text-sm font-bold text-teal-800 hover:bg-teal-50 disabled:opacity-50">
+                    <button type="button" onClick={() => applyBatch(draft)} disabled={!draft.trim()} className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white hover:bg-teal-700 disabled:opacity-40">
                       <Check className="h-4 w-4" /> Poner
                     </button>
                     {selectedHaveNote && (
-                      <button type="button" onClick={() => applyBatch("")} className="h-10 shrink-0 rounded-xl border border-teal-400 px-3 text-sm font-bold text-white hover:bg-teal-600">Quitar</button>
+                      <button type="button" onClick={() => applyBatch("")} className="h-10 shrink-0 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-600 hover:bg-slate-50">Quitar</button>
                     )}
                   </div>
                 </div>
