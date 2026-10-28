@@ -106,6 +106,12 @@ const readValue = (table: DbfTable, start: number, field: DbfField): DbfValue =>
       const text = ascii(bytes, at, 8).trim();
       return /^\d{8}$/.test(text) && text !== "00000000" ? `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}` : null;
     }
+    case "T": {
+      // Fecha y hora de Visual FoxPro: día juliano y milisegundos. Se devuelve solo la fecha.
+      const julian = new DataView(bytes.buffer, bytes.byteOffset + at, 4).getInt32(0, true);
+      if (julian <= 0) return null;
+      return new Date((julian - 2440588) * 86_400_000).toISOString().slice(0, 10);
+    }
     case "L": {
       const c = String.fromCharCode(bytes[at]).toUpperCase();
       return c === "T" || c === "Y" ? true : c === "F" || c === "N" ? false : null;
@@ -117,7 +123,7 @@ const readValue = (table: DbfTable, start: number, field: DbfField): DbfValue =>
     case "Y":
       return Number(new DataView(bytes.buffer, bytes.byteOffset + at, 8).getBigInt64(0, true)) / 10000;
     default:
-      // Memos, imágenes y fechas con hora de Visual FoxPro: el SISMED no los usa en estas tablas.
+      // Memos e imágenes: el SISMED no los usa en estas tablas.
       return null;
   }
 };

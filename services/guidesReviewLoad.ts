@@ -51,6 +51,10 @@ export const noGuidesMessage = (summary: ReturnType<typeof movementSummary>, det
     return `Esta carpeta no es la del SISMED del almacén: su TMOVIM.DBF tiene ${count(summary.entries, "entrada", "entradas")} y ninguna salida vigente${range}. Elija la carpeta DATOS del SISMED desde donde el almacén emite las guías a los establecimientos.`;
   }
   const parts = [`Las ${formatNumber(summary.activeExits)} salidas de TMOVIM.DBF no tienen su detalle en TMOVIMDET.DBF.`];
+  if (summary.undated) {
+    const all = summary.undated === summary.activeExits;
+    parts[0] = `${all ? `Las ${formatNumber(summary.activeExits)}` : `${formatNumber(summary.undated)} de las ${formatNumber(summary.activeExits)}`} salidas de TMOVIM.DBF no tienen una fecha de registro que se pueda leer (MOVFECHREG es de tipo ${summary.dateType || "desconocido"}).`;
+  }
   if (detail) {
     const deleted = detail.records - detail.live;
     parts.push(`TMOVIMDET tiene ${count(detail.live, "registro", "registros")}${deleted ? ` (y ${formatNumber(deleted)} borrados)` : ""}, ${formatNumber(detail.exits)} de salidas y ${formatNumber(detail.matched)} con el número de una salida vigente.`);

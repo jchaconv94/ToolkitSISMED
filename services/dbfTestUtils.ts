@@ -2,7 +2,7 @@
  * Arma una tabla DBF (dBase III) en memoria para las pruebas, con el mismo formato que las del
  * SISMED: así se prueba el lector sin guardar archivos con datos de establecimientos.
  */
-export type DbfFieldSpec = [name: string, type: "C" | "N" | "D" | "L", length: number, decimals?: number];
+export type DbfFieldSpec = [name: string, type: "C" | "N" | "D" | "L" | "T", length: number, decimals?: number];
 
 const encodeLatin1 = (text: string) => Uint8Array.from([...text].map((c) => c.charCodeAt(0) & 0xff));
 
@@ -31,6 +31,17 @@ export const buildDbf = (fields: DbfFieldSpec[], rows: Array<Record<string, stri
     let offset = 1;
     fields.forEach(([name, type, length, decimals = 0]) => {
       const value = row[name];
+      if (type === "T") {
+        // Fecha y hora de Visual FoxPro: día juliano y milisegundos, en binario.
+        bytes.fill(0, start + offset, start + offset + length);
+        if (value) {
+          const view = new DataView(bytes.buffer, start + offset, 8);
+          view.setInt32(0, Math.round(Date.parse(`${value}T00:00:00Z`) / 86_400_000) + 2440588, true);
+          view.setInt32(4, 13 * 3_600_000, true);
+        }
+        offset += length;
+        return;
+      }
       let cell = "";
       if (value !== undefined && value !== "") {
         if (type === "N") cell = (typeof value === "number" ? value.toFixed(decimals) : value).padStart(length);
