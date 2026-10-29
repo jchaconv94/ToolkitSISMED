@@ -26,19 +26,25 @@ import { formatNumber } from "../services/numberFormat";
 import { monthFull } from "../services/availabilityExport";
 import { looksLikeWarehouse, reviewGuides, reviewMonths, type GuideLine, type GuideState, type ReviewSite } from "../services/guidesReview";
 import { buildGuidesReviewWorkbook, guidesReviewFileName, siteCode } from "../services/guidesReviewExport";
-import type { IciSource, WarehouseSource } from "../services/guidesReviewLoad";
+import type { IciSource, SourceData, WarehouseSource } from "../services/guidesReviewLoad";
 import { applyNote, loadNotes, loadRecentNotes, noteKey, rememberNote, saveNotes, saveRecentNotes, suggestedNotes, type ReviewNotes } from "../services/guidesReviewNotes";
 import { loadSource } from "../services/guidesReviewClient";
 import {
   SOURCE_FILES,
+  SOURCE_NAME,
   filesFromFolder,
   filesFromList,
   folderPermission,
   folderPickerSupported,
+  forgetFolder,
+  loadCopy,
   missingFiles,
   pickFolder,
+  rememberFolder,
   sameFolder,
+  saveCopy,
   savedFolder,
+  uploadProblem,
   type FolderHandle,
   type SourceFiles,
   type SourceKind,
@@ -70,7 +76,20 @@ export interface ReviewItem {
   microred: string;
 }
 
-type Loaded<T> = { data: T; folder: FolderHandle | null };
+type Origin = "folder" | "files";
+/** Por qué se revisa con la copia guardada y no con lo recién leído de la carpeta. */
+type CopyReason = "checking" | "permission" | "unreachable" | "unreadable";
+type Loaded<T> = {
+  data: T;
+  folder: FolderHandle | null;
+  origin: Origin;
+  /** Cuándo se leyó del SISMED (ms). */
+  readAt: number;
+  /** Última vez que se comprobó la carpeta y estaba igual (ms); null si aún no se comprueba. */
+  checkedAt: number | null;
+  stamp: string;
+  copy: CopyReason | null;
+};
 type Slot = { status: "empty" | "permission" | "loading" | "error"; folder: FolderHandle | null; message?: string };
 type Show = "all" | "differences" | "short" | "extra" | "notSent" | "ok" | "noIci";
 
@@ -108,6 +127,38 @@ const monthText = (key: string) => {
 const filesStamp = (files: SourceFiles) => Object.keys(files).sort().map((name) => `${name}:${files[name].size}:${files[name].lastModified}`).join("|");
 
 const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`;
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const hourOf = (ms: number) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+/** «hoy a las 15:20» o «el 28/10/2026 a las 15:20». */
+const when = (ms: number) => {
+  const d = new Date(ms);
+  if (d.toDateString() === new Date().toDateString()) return `hoy a las ${hourOf(ms)}`;
+  return `el ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} a las ${hourOf(ms)}`;
+};
+const SHORT_NAME: Record<SourceKind, string> = { warehouse: "almacén", ici: "ICI" };
+const SHOWN_REASONS = new Set<CopyReason>(["permission", "unreachable", "unreadable"]);
+
+/** Una fuente que se revisa con la copia guardada, para el aviso de arriba. */
+type CopyNotice = { kind: SourceKind; reason: CopyReason; readAt: number };
+
+/** Una frase por motivo: si las dos carpetas tienen el mismo, se dice una vez. */
+const noticeTexts = (notices: CopyNotice[]) => {
+  const reasons = [...new Set(notices.map((n) => n.reason))];
+  return reasons.map((reason) => {
+    const group = notices.filter((n) => n.reason === reason);
+    const both = group.length > 1;
+    const folder = both ? "las carpetas de los dos SISMED" : `la carpeta del ${SOURCE_NAME[group[0].kind]}`;
+    const times = [...new Set(group.map((n) => when(n.readAt)))];
+    const copy = times.length === 1
+      ? `${both ? "las copias guardadas" : "la copia guardada"} ${times[0]}`
+      : `las copias guardadas (${group.map((n) => `${SHORT_NAME[n.kind]} ${when(n.readAt)}`).join("; ")})`;
+    if (reason === "permission") return `El navegador pide permiso para volver a leer ${folder}; mientras tanto se revisa con ${copy}.`;
+    if (reason === "unreadable") return `No se pudo leer ahora ${folder} (el SISMED puede estar guardando); se revisa con ${copy}.`;
+    const subject = both ? "Las carpetas de los dos SISMED no responden" : `La carpeta del ${SOURCE_NAME[group[0].kind]} no responde`;
+    return `${subject}: la PC puede estar apagada o sin red. Se revisa con ${copy} y, cuando vuelva${both ? "n" : ""} a responder, se actualiza sola.`;
+  });
+};
 
 const NO_MICRORED = "__none__";
 
@@ -160,45 +211,66 @@ export const GuidesReviewModule: React.FC = () => {
 
   /** La última carpeta de cada tarjeta, para notar si se eligió la misma para las dos. */
   const folders = useRef<Record<SourceKind, FolderHandle | null>>({ warehouse: null, ici: null });
-  /** Tamaño y fecha de los archivos leídos: si no cambiaron, no se vuelven a leer. */
-  const stamps = useRef<Record<SourceKind, string>>({ warehouse: "", ici: "" });
-  const [readAt, setReadAt] = useState<Date | null>(null);
+  /** Lo último de cada fuente, para leerlo dentro de las lecturas sin esperar a que se pinte. */
+  const latest = useRef<{ warehouse: Loaded<WarehouseSource> | null; ici: Loaded<IciSource> | null }>({ warehouse: null, ici: null });
+  /** Lectura en curso de cada carpeta: al abrir y al volver a la ventana no se lee dos veces. */
+  const inflight = useRef<Record<SourceKind, Promise<boolean> | null>>({ warehouse: null, ici: null });
 
-  const setSlot = (kind: SourceKind, slot: Slot) => {
+  const setSlot = useCallback((kind: SourceKind, slot: Slot) => {
     folders.current[kind] = slot.folder;
     setSlots((current) => ({ ...current, [kind]: slot }));
-  };
+  }, []);
+
+  const put = useCallback((kind: SourceKind, value: Loaded<SourceData> | null) => {
+    if (kind === "warehouse") {
+      latest.current.warehouse = value as Loaded<WarehouseSource> | null;
+      setWarehouse(value as Loaded<WarehouseSource> | null);
+    } else {
+      latest.current.ici = value as Loaded<IciSource> | null;
+      setIci(value as Loaded<IciSource> | null);
+    }
+  }, []);
+
+  const patch = useCallback((kind: SourceKind, change: Partial<Loaded<SourceData>>) => {
+    const have = latest.current[kind];
+    if (have) put(kind, { ...have, ...change } as Loaded<SourceData>);
+  }, [put]);
 
   /** Un error deja la tarjeta sin datos: no se revisa con lo leído antes de otra carpeta. */
-  const fail = (kind: SourceKind, folder: FolderHandle | null, message: string) => {
-    if (kind === "warehouse") setWarehouse(null);
-    else setIci(null);
+  const fail = useCallback((kind: SourceKind, folder: FolderHandle | null, message: string) => {
+    put(kind, null);
     setSlot(kind, { status: "error", folder, message });
     return false;
-  };
+  }, [put, setSlot]);
 
-  /** Lee los archivos de una de las dos fuentes; devuelve si se pudo. */
-  const read = useCallback(async (kind: SourceKind, files: SourceFiles, folder: FolderHandle | null): Promise<boolean> => {
+  /** Lo leído va a la pantalla y, como copia, a este equipo (para cuando la carpeta no responda). */
+  const keep = useCallback((kind: SourceKind, data: SourceData, folder: FolderHandle | null, stamp: string) => {
+    const now = Date.now();
+    const origin: Origin = folder ? "folder" : "files";
+    put(kind, { data, folder, origin, readAt: now, checkedAt: now, stamp, copy: null });
+    setSlot(kind, { status: "empty", folder });
+    void saveCopy(username, kind, { data, readAt: now, stamp, origin });
+    if (folder) void rememberFolder(username, kind, folder);
+    else void forgetFolder(username, kind);
+  }, [put, setSlot, username]);
+
+  /** Lee una carpeta recién elegida o archivos subidos; devuelve si se pudo. */
+  const readNew = useCallback(async (kind: SourceKind, files: SourceFiles, folder: FolderHandle | null): Promise<boolean> => {
     const missing = missingFiles(kind, files);
     if (missing.length) {
       const where = folder ? `la carpeta «${folder.name}»` : "los archivos elegidos";
-      return fail(kind, folder, `No se encontró ${missing.join(" ni ")} en ${where}. Elija la carpeta DATOS del SISMED.`);
+      return fail(kind, folder, `No se encontró ${missing.join(" ni ")} en ${where}. Elija la carpeta DATOS del ${SOURCE_NAME[kind]}.`);
     }
     setSlot(kind, { status: "loading", folder });
     try {
-      const data = await loadSource({ kind, files });
-      if (data.kind === "warehouse") setWarehouse({ data, folder });
-      else setIci({ data, folder });
-      stamps.current[kind] = filesStamp(files);
-      setReadAt(new Date());
-      setSlot(kind, { status: "empty", folder });
+      keep(kind, await loadSource({ kind, files }), folder, filesStamp(files));
       return true;
     } catch (err) {
       return fail(kind, folder, (err as Error).message || "No se pudieron leer los archivos del SISMED.");
     }
-  }, []);
+  }, [fail, keep, setSlot]);
 
-  const readFolder = useCallback(async (kind: SourceKind, folder: FolderHandle) => {
+  const readPickedFolder = useCallback(async (kind: SourceKind, folder: FolderHandle) => {
     setSlot(kind, { status: "loading", folder });
     let files: SourceFiles;
     try {
@@ -206,36 +278,99 @@ export const GuidesReviewModule: React.FC = () => {
     } catch {
       return fail(kind, folder, `No se pudo abrir la carpeta «${folder.name}». Vuelva a elegirla.`);
     }
-    const ok = await read(kind, files, folder);
+    const ok = await readNew(kind, files, folder);
     if (!ok && kind === "warehouse" && (await sameFolder(folder, folders.current.ici))) {
       setSlots((current) => ({ ...current, warehouse: { ...current.warehouse, message: `${current.warehouse.message ?? ""} Es la misma carpeta que eligió para el SISMED del ICI.`.trim() } }));
     }
     return ok;
-  }, [read]);
+  }, [fail, readNew, setSlot]);
 
-  // Las carpetas de la última vez: si el navegador aún da permiso, se leen solas y se pasa
-  // directo al resultado; si no, cada tarjeta pide un clic para volver a leerla.
+  /**
+   * Vuelve a leer la carpeta que ya se usa: al abrir, al volver a la ventana o con un clic
+   * (`manual`, que avisa lo que pasó). Si los archivos no cambiaron no se vuelven a leer. Si la
+   * carpeta no responde (la PC del almacén apagada) o el SISMED está guardando, se sigue con lo
+   * leído antes; sin nada leído, la tarjeta muestra el error.
+   */
+  const refreshFolder = useCallback((kind: SourceKind, folder: FolderHandle, manual: boolean): Promise<boolean> => {
+    const running = inflight.current[kind];
+    if (running) return running;
+    const run = (async () => {
+      const have = latest.current[kind];
+      if (!have) setSlot(kind, { status: "loading", folder });
+      let files: SourceFiles | null;
+      try {
+        files = await filesFromFolder(folder, kind);
+      } catch {
+        files = null;
+      }
+      if (!files || missingFiles(kind, files).length) {
+        if (!have) return fail(kind, folder, `No se pudo abrir la carpeta «${folder.name}». Si está en otra PC de la red, revise que esté encendida; si cambió de lugar, vuelva a elegirla.`);
+        patch(kind, { copy: "unreachable" });
+        if (manual) toast.error(`La carpeta del ${SOURCE_NAME[kind]} no responde. Se sigue con la copia guardada ${when(have.readAt)}.`);
+        return false;
+      }
+      const stamp = filesStamp(files);
+      if (have && have.stamp === stamp) {
+        patch(kind, { copy: null, checkedAt: Date.now() });
+        return true;
+      }
+      try {
+        keep(kind, await loadSource({ kind, files }), folder, stamp);
+        return true;
+      } catch (err) {
+        const message = (err as Error).message || "No se pudieron leer los archivos del SISMED.";
+        if (!have) return fail(kind, folder, message);
+        patch(kind, { copy: "unreadable" });
+        if (manual) toast.error(message);
+        return false;
+      }
+    })();
+    inflight.current[kind] = run;
+    void run.finally(() => { inflight.current[kind] = null; });
+    return run;
+  }, [fail, keep, patch, setSlot]);
+
+  // Al abrir: primero la copia guardada (la revisión de un mes dura varios días y la PC del
+  // almacén puede estar apagada), y en seguida las carpetas de la última vez. Si el navegador
+  // aún da permiso, se leen solas; si no, se sigue con la copia hasta que se dé un clic.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const kinds: SourceKind[] = ["warehouse", "ici"];
-      const results = await Promise.all(kinds.map(async (kind) => {
-        const folder = await savedFolder(username, kind);
-        if (!folder || cancelled) return false;
+      const [copies, handles] = await Promise.all([
+        Promise.all(kinds.map((kind) => loadCopy(username, kind))),
+        Promise.all(kinds.map((kind) => savedFolder(username, kind))),
+      ]);
+      if (cancelled) return;
+      kinds.forEach((kind, i) => {
+        const copy = copies[i];
+        if (!copy) return;
+        const folder = copy.origin === "folder" ? handles[i] : null;
+        put(kind, { data: copy.data, folder, origin: copy.origin, readAt: copy.readAt, checkedAt: null, stamp: copy.stamp, copy: folder ? "checking" : null });
+        setSlot(kind, { status: "empty", folder });
+      });
+      const fromCopies = copies.every(Boolean);
+      if (fromCopies) setView("results");
+      await Promise.all(kinds.map(async (kind, i) => {
+        const folder = handles[i];
+        if (!folder || copies[i]?.origin === "files") return;
         if ((await folderPermission(folder, false)) !== "granted") {
-          if (!cancelled) setSlot(kind, { status: "permission", folder });
-          return false;
+          if (cancelled) return;
+          if (copies[i]) patch(kind, { copy: "permission" });
+          else setSlot(kind, { status: "permission", folder });
+          return;
         }
-        return cancelled ? false : readFolder(kind, folder);
+        if (!cancelled) await refreshFolder(kind, folder, false);
       }));
-      if (!cancelled && results.every(Boolean)) setView("results");
+      if (!cancelled && !fromCopies && latest.current.warehouse && latest.current.ici) setView("results");
     })();
     return () => { cancelled = true; };
-  }, [username, readFolder]);
+  }, [username, put, patch, setSlot, refreshFolder]);
 
   // Trabajo progresivo (pedido del usuario): se importa el ICI de un establecimiento en el SISMED
   // y, al volver a esta ventana, se vuelven a leer las carpetas que cambiaron. Sin avisos de
-  // carga ni errores: si el SISMED está escribiendo, se queda lo leído y se intenta la próxima vez.
+  // carga ni errores: si el SISMED está guardando o la PC no responde, se queda lo leído y se
+  // intenta la próxima vez (y cada minuto mientras alguna carpeta no responda).
   const warehouseFolder = warehouse?.folder ?? null;
   const iciFolder = ici?.folder ?? null;
   useEffect(() => {
@@ -249,36 +384,40 @@ export const GuidesReviewModule: React.FC = () => {
       try {
         for (const [kind, folder] of [["warehouse", warehouseFolder], ["ici", iciFolder]] as const) {
           if (!folder || (await folderPermission(folder, false)) !== "granted") continue;
-          let files: SourceFiles;
-          try {
-            files = await filesFromFolder(folder, kind);
-          } catch {
-            continue;
-          }
-          const stamp = filesStamp(files);
-          if (missingFiles(kind, files).length || stamp === stamps.current[kind]) continue;
-          try {
-            const data = await loadSource({ kind, files });
-            if (data.kind === "warehouse") setWarehouse({ data, folder });
-            else setIci({ data, folder });
-            stamps.current[kind] = stamp;
-            setReadAt(new Date());
-          } catch {
-            /* se queda lo leído antes */
-          }
+          await refreshFolder(kind, folder, false);
         }
       } finally {
         busy = false;
       }
     };
     const onVisible = () => void refresh();
+    const retry = window.setInterval(() => {
+      const waiting = [latest.current.warehouse, latest.current.ici].some((s) => s?.copy === "unreachable" || s?.copy === "unreadable");
+      if (waiting) void refresh();
+    }, 60_000);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
     return () => {
+      window.clearInterval(retry);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [warehouseFolder, iciFolder]);
+  }, [warehouseFolder, iciFolder, refreshFolder]);
+
+  /** Vuelve a leer las carpetas con un clic (el navegador puede pedir permiso). */
+  const rereadAll = useCallback(async () => {
+    const targets = (["warehouse", "ici"] as const).flatMap((kind) => {
+      const folder = latest.current[kind]?.folder;
+      return folder ? [{ kind, folder }] : [];
+    });
+    if (!targets.length) return;
+    // Los permisos se piden juntos: el clic solo vale para pedirlos al momento.
+    const allowed = await Promise.all(targets.map((t) => folderPermission(t.folder, true)));
+    const ok = await Promise.all(targets.map((t, i) => (allowed[i] === "granted" ? refreshFolder(t.kind, t.folder, true) : Promise.resolve(false))));
+    if (allowed.some((state) => state !== "granted")) toast.error("El navegador no dio permiso para leer la carpeta del SISMED.");
+    else if (ok.every(Boolean)) toast.success("Se volvió a leer el SISMED.");
+    if (!latest.current.warehouse || !latest.current.ici) setView("load");
+  }, [refreshFolder]);
 
   // Nombre y microred del registro de Establecimientos (con su copia sin internet).
   useEffect(() => {
@@ -294,9 +433,44 @@ export const GuidesReviewModule: React.FC = () => {
   }, []);
 
   const months = useMemo(() => (warehouse && ici ? reviewMonths(warehouse.data.warehouse, ici.data.ici) : []), [warehouse, ici]);
+  // El mes que se estaba revisando sigue elegido al volver otro día.
+  const monthKey = `revision-guias-mes:${username || "anon"}`;
   useEffect(() => {
-    if (!months.includes(month)) setMonth(months[0] ?? "");
-  }, [months, month]);
+    if (months.includes(month)) return;
+    let saved = "";
+    try {
+      saved = localStorage.getItem(monthKey) || "";
+    } catch {
+      /* sin almacenamiento: el más reciente */
+    }
+    setMonth(months.includes(saved) ? saved : months[0] ?? "");
+  }, [months, month, monthKey]);
+  const chooseMonth = useCallback((value: string) => {
+    setMonth(value);
+    try {
+      localStorage.setItem(monthKey, value);
+    } catch {
+      /* sin almacenamiento */
+    }
+  }, [monthKey]);
+
+  const notices = useMemo<CopyNotice[]>(() => (["warehouse", "ici"] as const).flatMap((kind) => {
+    const source = kind === "warehouse" ? warehouse : ici;
+    return source?.copy && SHOWN_REASONS.has(source.copy) ? [{ kind, reason: source.copy, readAt: source.readAt }] : [];
+  }), [warehouse, ici]);
+
+  /** Desde cuándo está lo que se revisa, para la cabecera. */
+  const freshness = useMemo(() => {
+    const sources = [["warehouse", warehouse], ["ici", ici]] as const;
+    const checked = sources.map(([, s]) => (s?.origin === "folder" && !s.copy ? s.checkedAt : null));
+    if (checked.every((at): at is number => at !== null)) return `leído a las ${hourOf(Math.min(...checked))}`;
+    return sources.flatMap(([kind, s]) => {
+      if (!s) return [];
+      if (s.origin === "files") return [`${SHORT_NAME[kind]}: archivos subidos ${when(s.readAt)}`];
+      if (s.copy) return [`${SHORT_NAME[kind]}: copia guardada ${when(s.readAt)}`];
+      return [`${SHORT_NAME[kind]}: leído a las ${hourOf(s.checkedAt ?? s.readAt)}`];
+    }).join(" · ");
+  }, [warehouse, ici]);
 
   const places = warehouse?.data.places;
   const products = warehouse?.data.products;
@@ -414,7 +588,7 @@ export const GuidesReviewModule: React.FC = () => {
         items={items}
         months={months}
         month={month}
-        onMonth={setMonth}
+        onMonth={chooseMonth}
         monthLabel={monthLabel}
         warehouseName={warehouseName}
         warehouseCode={warehouseCode}
@@ -422,17 +596,12 @@ export const GuidesReviewModule: React.FC = () => {
         isDesktop={isDesktop}
         canExport={canExport}
         onExport={exportExcel}
-        canReread={Boolean(warehouse?.folder && ici?.folder)}
-        onReread={async () => {
-          const ok = await Promise.all([
-            warehouse?.folder ? readFolder("warehouse", warehouse.folder) : Promise.resolve(false),
-            ici?.folder ? readFolder("ici", ici.folder) : Promise.resolve(false),
-          ]);
-          if (ok.every(Boolean)) toast.success("Se volvió a leer el SISMED.");
-          else setView("load");
-        }}
+        canReread={Boolean(warehouse?.folder || ici?.folder)}
+        onReread={rereadAll}
         onChangeSources={() => setView("load")}
-        readAt={readAt}
+        freshness={freshness}
+        notices={notices}
+        iciLive={Boolean(ici?.folder && !ici.copy)}
         lines={monthLines}
         notes={notes}
         onNote={changeNotes}
@@ -451,17 +620,23 @@ export const GuidesReviewModule: React.FC = () => {
       onUploadMode={setUploadMode}
       months={months}
       month={month}
-      onMonth={setMonth}
+      onMonth={chooseMonth}
       warehouseName={warehouseName}
       onPick={async (kind) => {
-        const folder = await pickFolder(username, kind);
-        if (folder) await readFolder(kind, folder);
+        const folder = await pickFolder(kind);
+        if (folder) await readPickedFolder(kind, folder);
       }}
       onAllow={async (kind, folder) => {
-        if ((await folderPermission(folder, true)) === "granted") await readFolder(kind, folder);
+        if ((await folderPermission(folder, true)) === "granted") await refreshFolder(kind, folder, true);
+        else if (latest.current[kind]) toast.error("El navegador no dio permiso para leer la carpeta.");
         else setSlot(kind, { status: "permission", folder, message: "El navegador no dio permiso para leer la carpeta." });
       }}
-      onFiles={(kind, list) => void read(kind, filesFromList(list, kind), null)}
+      onFiles={(kind, list) => {
+        const files = [...list];
+        const problem = uploadProblem(kind, files.map((f) => f.name));
+        if (problem) fail(kind, null, problem);
+        else void readNew(kind, filesFromList(files, kind), null);
+      }}
       onReview={() => setView("results")}
     />
   );
@@ -498,6 +673,19 @@ const LoadScreen: React.FC<{
     };
   })();
 
+  /** Copia guardada o archivos subidos: se dice en la tarjeta, con el clic para leer la carpeta. */
+  const statusOf = (kind: SourceKind, source: Loaded<SourceData> | null): CardStatus | null => {
+    if (!source) return null;
+    if (source.origin === "files") return { text: `Archivos subidos ${when(source.readAt)}.` };
+    const copy = `Copia guardada ${when(source.readAt)}.`;
+    const folder = source.folder;
+    const action = (label: string) => (folder ? { label, run: () => void onAllow(kind, folder) } : undefined);
+    if (source.copy === "permission") return { warn: true, text: `${copy} El navegador pide permiso para leer la carpeta.`, action: action("Leer la carpeta") };
+    if (source.copy === "unreachable") return { warn: true, text: `${copy} La carpeta no responde: la PC puede estar apagada o sin red.`, action: action("Reintentar") };
+    if (source.copy === "unreadable") return { warn: true, text: `${copy} No se pudo leer la carpeta ahora.`, action: action("Reintentar") };
+    return null;
+  };
+
   const iciSummary = ici && (() => {
     const data = ici.data.ici;
     const codes = new Set<string>();
@@ -524,6 +712,7 @@ const LoadScreen: React.FC<{
           description="Las guías de salida a los establecimientos"
           slot={slots.warehouse}
           loaded={warehouseSummary || null}
+          status={statusOf("warehouse", warehouse)}
           uploadMode={uploadMode}
           onPick={onPick}
           onAllow={onAllow}
@@ -536,6 +725,7 @@ const LoadScreen: React.FC<{
           description="Donde se importa el ICI de cada establecimiento"
           slot={slots.ici}
           loaded={iciSummary || null}
+          status={statusOf("ici", ici)}
           uploadMode={uploadMode}
           onPick={onPick}
           onAllow={onAllow}
@@ -564,7 +754,7 @@ const LoadScreen: React.FC<{
           options={months.map((m) => ({ value: m, label: monthText(m) }))}
           containerClassName="md:w-64"
         />
-        <p className="flex-1 text-[12px] text-slate-500">{both ? "Solo los meses que están en los dos SISMED." : "Elija primero las dos carpetas."}</p>
+        <p className="flex-1 text-[12px] text-slate-500">{both ? "Solo los meses que están en los dos SISMED." : "Elija primero los dos SISMED."}</p>
         <button
           type="button"
           onClick={onReview}
@@ -576,7 +766,7 @@ const LoadScreen: React.FC<{
       </div>
 
       <p className="text-center text-[12px] text-slate-400">
-        Los archivos se leen en este equipo: no se suben a internet.{" "}
+        Los archivos se leen en este equipo y no se suben a internet. Lo leído queda guardado aquí: si la PC del almacén se apaga, se sigue revisando con esa copia.{" "}
         {pickerSupported && (uploadMode ? (
           <button type="button" onClick={() => onUploadMode(false)} className="font-bold text-teal-700 hover:underline">Elegir las carpetas</button>
         ) : (
@@ -588,6 +778,13 @@ const LoadScreen: React.FC<{
   );
 };
 
+/** Lo que se dice bajo lo leído: de cuándo es la copia o los archivos subidos. */
+type CardStatus = { text: string; warn?: boolean; action?: { label: string; run: () => void } };
+
+const FileChip: React.FC<{ name: string; optional?: boolean }> = ({ name, optional }) => (
+  <span className={`rounded-md border px-1.5 py-0.5 font-mono text-[11px] font-semibold ${optional ? "border-dashed border-slate-300 text-slate-500" : "border-slate-300 bg-slate-50 text-slate-800"}`}>{name}</span>
+);
+
 const SourceCard: React.FC<{
   kind: SourceKind;
   icon: React.ReactNode;
@@ -595,11 +792,12 @@ const SourceCard: React.FC<{
   description: string;
   slot: Slot;
   loaded: { title: string; hint: string } | null;
+  status: CardStatus | null;
   uploadMode: boolean;
   onPick: (kind: SourceKind) => Promise<void>;
   onAllow: (kind: SourceKind, folder: FolderHandle) => Promise<void>;
   onFiles: (kind: SourceKind, files: FileList) => void;
-}> = ({ kind, icon, title, description, slot, loaded, uploadMode, onPick, onAllow, onFiles }) => {
+}> = ({ kind, icon, title, description, slot, loaded, status, uploadMode, onPick, onAllow, onFiles }) => {
   const input = useRef<HTMLInputElement>(null);
   const files = SOURCE_FILES[kind];
   const names = [...files.required, ...files.optional].map((name) => name.replace(/\.DBF$/, "")).join(", ").replace(/, ([^,]*)$/, " y $1");
@@ -634,13 +832,26 @@ const SourceCard: React.FC<{
           Leyendo {names}…
         </div>
       ) : loaded && slot.status !== "error" ? (
-        <div className="mt-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-          <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[13px] font-bold text-emerald-800" title={loaded.title}>{loaded.title}</p>
-            <p className="truncate text-[11.5px] text-emerald-700">{loaded.hint}</p>
+        <div className={`mt-4 rounded-xl border px-3 py-2.5 ${status?.warn ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+          <div className="flex items-center gap-3">
+            {status?.warn ? <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" /> : <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />}
+            <div className="min-w-0 flex-1">
+              <p className={`truncate text-[13px] font-bold ${status?.warn ? "text-amber-900" : "text-emerald-800"}`} title={loaded.title}>{loaded.title}</p>
+              <p className={`truncate text-[11.5px] ${status?.warn ? "text-amber-800" : "text-emerald-700"}`}>{loaded.hint}</p>
+            </div>
+            <button type="button" onClick={choose} className="shrink-0 text-xs font-bold text-teal-700 hover:underline">Cambiar</button>
           </div>
-          <button type="button" onClick={choose} className="shrink-0 text-xs font-bold text-teal-700 hover:underline">Cambiar</button>
+          {status && (
+            <p className={`mt-1.5 text-[11.5px] ${status.warn ? "text-amber-900" : "text-emerald-700"}`}>
+              {status.text}
+              {status.action && (
+                <>
+                  {" "}
+                  <button type="button" onClick={status.action.run} className="font-bold text-teal-700 hover:underline">{status.action.label}</button>
+                </>
+              )}
+            </p>
+          )}
         </div>
       ) : slot.status === "permission" && slot.folder ? (
         <>
@@ -655,12 +866,20 @@ const SourceCard: React.FC<{
         </>
       ) : (
         <>
-          {slot.status === "error" ? (
+          {slot.status === "error" && (
             <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] font-semibold text-red-700">{slot.message}</p>
-          ) : (
-            <p className="mt-4 text-[12px] text-slate-500">
-              {uploadMode ? <>Los archivos {names} de la carpeta <b className="font-mono">DATOS</b> del SISMED.</> : <>La carpeta <b className="font-mono">DATOS</b> del SISMED. Se leen {names}.</>}
-            </p>
+          )}
+          {uploadMode ? (
+            <div className="mt-4 text-[12px] text-slate-500">
+              <p>Elija estos archivos de la carpeta <b className="font-mono">DATOS</b> del {SOURCE_NAME[kind]}; se pueden marcar juntos.</p>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {files.required.map((name) => <FileChip key={name} name={name} />)}
+                {files.optional.map((name) => <FileChip key={name} name={name} optional />)}
+              </div>
+              {files.optional.length > 0 && <p className="mt-1.5 text-[11.5px] text-slate-400">Los de borde punteado son opcionales: dan los nombres de establecimientos y productos.</p>}
+            </div>
+          ) : slot.status !== "error" && (
+            <p className="mt-4 text-[12px] text-slate-500">La carpeta <b className="font-mono">DATOS</b> del SISMED. Se leen {names}.</p>
           )}
           <button type="button" onClick={choose} className="mt-3 flex h-11 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 text-sm font-bold text-white hover:bg-teal-700">
             <ChooseIcon className="h-4 w-4" /> {chooseLabel}
@@ -688,13 +907,17 @@ const ReviewResults: React.FC<{
   canReread: boolean;
   onReread: () => Promise<void>;
   onChangeSources: () => void;
-  /** Hora de la última lectura del SISMED. */
-  readAt: Date | null;
+  /** Desde cuándo está lo que se revisa («leído a las 15:20», «almacén: copia guardada…»). */
+  freshness: string;
+  /** Fuentes que se revisan con la copia guardada porque la carpeta no se pudo leer. */
+  notices: CopyNotice[];
+  /** ¿Se relee solo el SISMED del ICI al volver a la ventana? */
+  iciLive: boolean;
   lines: GuideLine[];
   notes: ReviewNotes;
   onNote: (keys: string[], text: string) => void;
   suggestions: string[];
-}> = ({ items, months, month, onMonth, monthLabel, warehouseName, warehouseCode, productName, isDesktop, canExport, onExport, canReread, onReread, onChangeSources, readAt, lines, notes, onNote, suggestions }) => {
+}> = ({ items, months, month, onMonth, monthLabel, warehouseName, warehouseCode, productName, isDesktop, canExport, onExport, canReread, onReread, onChangeSources, freshness, notices, iciLive, lines, notes, onNote, suggestions }) => {
   const [tab, setTab] = useState<"sites" | "lines">("sites");
   const [show, setShow] = useState<Show>("all");
   const [microred, setMicrored] = useState("");
@@ -814,7 +1037,6 @@ const ReviewResults: React.FC<{
   };
 
   const showOptions = (Object.keys(SHOW_LABEL) as Show[]).filter((value) => value === "all" || value === show || showCount(value) > 0);
-  const readText = readAt ? `leído a las ${String(readAt.getHours()).padStart(2, "0")}:${String(readAt.getMinutes()).padStart(2, "0")}` : "";
 
   const observedChip = (site: ReviewSite) => {
     if (!site.iciCode || !site.differences) return <span className="text-[13px] text-slate-300">—</span>;
@@ -837,7 +1059,7 @@ const ReviewResults: React.FC<{
             {warehouseName} <span className="font-mono text-[13px] font-semibold text-slate-400">{warehouseCode}</span>
           </p>
           <p className="text-[12.5px] text-slate-500">
-            Guías de salida de {monthLabel.toLowerCase()} frente al ICI de cada establecimiento · por producto{readText ? ` · ${readText}` : ""}
+            Guías de salida de {monthLabel.toLowerCase()} frente al ICI de cada establecimiento · por producto{freshness ? ` · ${freshness}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -876,6 +1098,28 @@ const ReviewResults: React.FC<{
         </div>
       </div>
 
+      {notices.length > 0 && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 md:flex-row md:items-center">
+          <div className="flex min-w-0 flex-1 gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+            <div className="min-w-0 space-y-0.5">
+              {noticeTexts(notices).map((text) => <p key={text}>{text}</p>)}
+            </div>
+          </div>
+          {canReread && (
+            <button
+              type="button"
+              onClick={() => void runReread()}
+              disabled={busy !== null}
+              className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white hover:bg-teal-700 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${busy === "reread" ? "animate-spin" : ""}`} />
+              {notices.some((n) => n.reason === "permission") ? "Leer el SISMED" : "Reintentar"}
+            </button>
+          )}
+        </div>
+      )}
+
       <KpiStrip cols="md:grid-cols-5">
         <KpiCard watermark tone="neutral" icon={<Truck />} label="Establecimientos" value={formatNumber(items.length)} hint={`${formatNumber(showCount("differences"))} con diferencias · ${formatNumber(noIci)} sin ICI`} onClick={() => toggle("differences")} active={tab === "sites" && show === "differences"} />
         <KpiCard watermark tone="success" icon={<PackageCheck />} label="Completos" value={formatNumber(totals.complete)} hint="productos" onClick={() => toggle("ok")} active={tab === "sites" && show === "ok"} />
@@ -900,7 +1144,7 @@ const ReviewResults: React.FC<{
               <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
               <p className="min-w-0 flex-1">
                 {noIci === 1 ? "A un establecimiento le falta" : `A ${formatNumber(noIci)} establecimientos les falta`} importar el ICI de {monthLabel.toLowerCase()} en el SISMED del ICI.
-                {canReread ? " Al importarlo y volver a esta ventana, se revisa solo." : ""}
+                {iciLive ? " Al importarlo y volver a esta ventana, se revisa solo." : ""}
               </p>
               <button type="button" onClick={() => setShow("noIci")} className="shrink-0 text-xs font-bold text-teal-700 hover:underline">Ver</button>
             </div>

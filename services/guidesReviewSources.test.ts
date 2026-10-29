@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filesFromFolder, filesFromList, missingFiles, type FolderHandle } from "./guidesReviewSources";
+import { filesFromFolder, filesFromList, missingFiles, uploadProblem, type FolderHandle } from "./guidesReviewSources";
 
 const file = (name: string) => new File(["x"], name);
 const folder = (name: string, entries: Array<File | FolderHandle>): FolderHandle => ({
@@ -41,5 +41,23 @@ describe("archivos de Revisión de guías", () => {
     // Si DATOS está incompleta, se queda con la carpeta que tiene más.
     const incompleta = folder("SISMED", [file("TMOVIM.DBF"), file("TMOVIMDET.DBF"), folder("DATOS", [real])]);
     expect((await filesFromFolder(incompleta, "warehouse"))["TMOVIM.DBF"]).not.toBe(real);
+  });
+
+  it("dice qué archivos subir: los de la otra tarjeta, otros archivos o el que falta", () => {
+    expect(uploadProblem("warehouse", ["tmovim.dbf", "TMOVIMDET.DBF", "MALMACEN.DBF"])).toBeNull();
+    expect(uploadProblem("ici", ["TFORMDET.DBF"])).toBeNull();
+    expect(uploadProblem("warehouse", ["TFORMDET.DBF"])).toBe(
+      "TFORMDET.DBF es del SISMED del ICI: súbalo en su tarjeta. Aquí van TMOVIM.DBF y TMOVIMDET.DBF del SISMED del almacén.",
+    );
+    expect(uploadProblem("ici", ["TMOVIM.DBF", "TMOVIMDET.DBF"])).toBe(
+      "TMOVIM.DBF y TMOVIMDET.DBF son del SISMED del almacén: súbalos en su tarjeta. Aquí va TFORMDET.DBF del SISMED del ICI.",
+    );
+    expect(uploadProblem("warehouse", ["Guias octubre.xlsx"])).toBe(
+      "Guias octubre.xlsx no es de los archivos que se leen. Elija TMOVIM.DBF y TMOVIMDET.DBF de la carpeta DATOS del SISMED del almacén.",
+    );
+    expect(uploadProblem("warehouse", ["TMOVIM.DBF", "MPRODUCTO.DBF"])).toBe(
+      "Falta TMOVIMDET.DBF: elíjalo junto con TMOVIM.DBF y MPRODUCTO.DBF (se pueden marcar varios archivos a la vez con Ctrl).",
+    );
+    expect(uploadProblem("warehouse", ["MALMACEN.DBF"])).toMatch(/^Faltan TMOVIM.DBF y TMOVIMDET.DBF: elíjalos junto con MALMACEN.DBF/);
   });
 });
