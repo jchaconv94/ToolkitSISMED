@@ -2,19 +2,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
   ArrowDownUp,
+  Check,
   CheckCircle2,
   ChevronRight,
-  CircleHelp,
   Download,
   FileSpreadsheet,
   FolderOpen,
   Loader2,
   MoreHorizontal,
-  PackageCheck,
-  PackageX,
   RefreshCw,
   Search,
-  Truck,
   Upload,
   Warehouse,
 } from "lucide-react";
@@ -24,7 +21,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { api } from "../services/api";
 import { formatNumber } from "../services/numberFormat";
 import { monthFull } from "../services/availabilityExport";
-import { looksLikeWarehouse, reviewGuides, reviewMonths, type GuideLine, type GuideState, type ReviewSite } from "../services/guidesReview";
+import { GUIDE_STATE_HINT, GUIDE_STATE_LABEL, GUIDE_STATE_ORDER, looksLikeWarehouse, reviewGuides, reviewMonths, type GuideLine, type GuideState, type ReviewSite } from "../services/guidesReview";
 import { buildGuidesReviewWorkbook, guidesReviewFileName, siteCode } from "../services/guidesReviewExport";
 import type { IciSource, SourceData, WarehouseSource } from "../services/guidesReviewLoad";
 import { applyNote, loadNotes, loadRecentNotes, noteKey, rememberNote, saveNotes, saveRecentNotes, suggestedNotes, type ReviewNotes } from "../services/guidesReviewNotes";
@@ -49,7 +46,7 @@ import {
   type SourceFiles,
   type SourceKind,
 } from "../services/guidesReviewSources";
-import { EmptyState, KpiCard, KpiStrip, MobileFilterButton, SheetGroupTitle, SheetOption, StatusChip, TableSearch, UnderlineTabs, useTableSort, type Tone } from "./ui/kit";
+import { EmptyState, MobileFilterButton, SheetGroupTitle, SheetOption, StatusChip, TableSearch, UnderlineTabs, toneDotClass, useTableSort, type Tone } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
 import { BottomSheet } from "./ui/BottomSheet";
 import { SortableTableHead, useFloatingTableHead, type SortableHeadColumn } from "./ui/FloatingTableHead";
@@ -57,7 +54,7 @@ import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { useIsDesktop } from "./ui/useIsDesktop";
-import { GuidesReviewDetail } from "./GuidesReviewDetail";
+import { GUIDE_STATE_TONE, GuideStateKpis, GuidesReviewDetail } from "./GuidesReviewDetail";
 import { GuidesReviewLines } from "./GuidesReviewLines";
 
 /**
@@ -91,27 +88,31 @@ type Loaded<T> = {
   copy: CopyReason | null;
 };
 type Slot = { status: "empty" | "permission" | "loading" | "error"; folder: FolderHandle | null; message?: string };
-type Show = "all" | "differences" | "short" | "extra" | "notSent" | "ok" | "noIci";
+/** Qué establecimientos se ven: todos, con diferencias, sin ICI o los que tienen un estado. */
+type Show = "all" | "differences" | "noIci" | GuideState;
 
 const SHOW_LABEL: Record<Show, string> = {
   all: "Todos",
   differences: "Con diferencias",
-  short: "Faltan o no ingresó",
-  extra: "Sobran",
-  notSent: "No se dio salida",
-  ok: "Todo ingresó",
+  complete: "Todo completo",
+  short: "Con incompletos",
+  notReceived: "Con productos que no ingresaron",
+  extra: "Con sobrantes",
+  notSent: "Con ingresos sin guía",
   noIci: "Sin ICI del mes",
 };
 
 const SHOW_TEST: Record<Show, (site: ReviewSite) => boolean> = {
   all: () => true,
   differences: (s) => Boolean(s.iciCode) && s.differences > 0,
-  short: (s) => Boolean(s.iciCode) && s.counts.short + s.counts.notReceived > 0,
+  complete: (s) => Boolean(s.iciCode) && s.differences === 0,
+  short: (s) => Boolean(s.iciCode) && s.counts.short > 0,
+  notReceived: (s) => Boolean(s.iciCode) && s.counts.notReceived > 0,
   extra: (s) => Boolean(s.iciCode) && s.counts.extra > 0,
   notSent: (s) => Boolean(s.iciCode) && s.counts.notSent > 0,
-  ok: (s) => Boolean(s.iciCode) && s.differences === 0,
   noIci: (s) => !s.iciCode,
 };
+const SHOW_ORDER: Show[] = ["all", "differences", ...GUIDE_STATE_ORDER, "noIci"];
 
 /** Tipos de MALMACEN que son almacenes (no tienen ICI): L logístico, A/S almacén y subalmacén, V virtual. */
 const WAREHOUSE_TYPES = new Set(["L", "A", "S", "V"]);
@@ -170,11 +171,8 @@ const COLUMNS: SortableHeadColumn<SortKey>[] = [
   { key: "guides", label: "Nº guías", align: "center", fit: true, title: "Guías de salida del almacén en el mes" },
   { key: "sentProducts", label: "Salida med", align: "center", fit: true, title: "Productos que salieron del almacén en el mes" },
   { key: "receivedProducts", label: "Ingreso med", align: "center", fit: true, title: "Productos que el establecimiento ingresó en su ICI" },
-  { key: "complete", label: "Completo", align: "center", fit: true, title: "Ingresó lo mismo que salió" },
-  { key: "notSent", label: "No salida", align: "center", fit: true, title: "Ingresó un producto que el almacén no le dio salida en el mes" },
-  { key: "extra", label: "Sobra", align: "center", fit: true, title: "Ingresó más de lo que salió" },
-  { key: "short", label: "Falta", align: "center", fit: true, title: "Ingresó menos de lo que salió" },
-  { key: "notReceived", label: "No ingresó", align: "center", fit: true, title: "Salió del almacén y no lo ingresó" },
+  // Un punto del color de cada estado antes de su título: la columna dice de qué color son sus cifras.
+  ...GUIDE_STATE_ORDER.map((state) => ({ key: state, label: GUIDE_STATE_LABEL[state], align: "center" as const, fit: true, title: GUIDE_STATE_HINT[state], marker: toneDotClass[GUIDE_STATE_TONE[state]] })),
   { key: "observed", label: "Observados", align: "center", fit: true, title: "Diferencias con observación" },
 ];
 
@@ -1036,12 +1034,16 @@ const ReviewResults: React.FC<{
     }
   };
 
-  const showOptions = (Object.keys(SHOW_LABEL) as Show[]).filter((value) => value === "all" || value === show || showCount(value) > 0);
+  const showOptions = SHOW_ORDER.filter((value) => value === "all" || value === show || showCount(value) > 0);
 
+  // Sin verde ni ámbar: esos colores son de los estados (solo «Completo» va en verde).
   const observedChip = (site: ReviewSite) => {
     if (!site.iciCode || !site.differences) return <span className="text-[13px] text-slate-300">—</span>;
     const done = observedCount(site, notes);
-    return <StatusChip tone={done === site.differences ? "success" : done ? "warning" : "neutral"} label={`${formatNumber(done)} de ${formatNumber(site.differences)}`} />;
+    const label = `${formatNumber(done)} de ${formatNumber(site.differences)}`;
+    return done === site.differences
+      ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-[12.5px] font-black text-slate-700"><Check className="h-3.5 w-3.5" />{label}</span>
+      : <StatusChip tone="neutral" label={label} />;
   };
   const groupLabel = (m: string) => {
     const stats = groupStats.get(m);
@@ -1120,13 +1122,7 @@ const ReviewResults: React.FC<{
         </div>
       )}
 
-      <KpiStrip cols="md:grid-cols-5">
-        <KpiCard watermark tone="neutral" icon={<Truck />} label="Establecimientos" value={formatNumber(items.length)} hint={`${formatNumber(showCount("differences"))} con diferencias · ${formatNumber(noIci)} sin ICI`} onClick={() => toggle("differences")} active={tab === "sites" && show === "differences"} />
-        <KpiCard watermark tone="success" icon={<PackageCheck />} label="Completos" value={formatNumber(totals.complete)} hint="productos" onClick={() => toggle("ok")} active={tab === "sites" && show === "ok"} />
-        <KpiCard watermark tone="info" icon={<CircleHelp />} label="No se dio salida" value={formatNumber(totals.notSent)} hint="ingresó sin guía del almacén" onClick={() => toggle("notSent")} active={tab === "sites" && show === "notSent"} />
-        <KpiCard watermark tone="warning" label="Sobran" value={formatNumber(totals.extra)} hint="el EESS ingresó más" onClick={() => toggle("extra")} active={tab === "sites" && show === "extra"} />
-        <KpiCard watermark tone="danger" icon={<PackageX />} label="Faltan / no ingresó" value={formatNumber(totals.short + totals.notReceived)} hint="el EESS ingresó menos" onClick={() => toggle("short")} active={tab === "sites" && show === "short"} />
-      </KpiStrip>
+      <GuideStateKpis counts={totals} active={tab === "sites" && (GUIDE_STATE_ORDER as string[]).includes(show) ? (show as GuideState) : null} onToggle={toggle} />
 
       <UnderlineTabs
         label="Ver"
@@ -1242,15 +1238,11 @@ const ReviewResults: React.FC<{
                             {site.iciCode ? (
                               <>
                                 <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.receivedProducts)}</td>
-                                <td className="px-3 py-2 text-center"><Count value={site.counts.complete} tone="success" /></td>
-                                <td className="px-3 py-2 text-center"><Count value={site.counts.notSent} tone="info" /></td>
-                                <td className="px-3 py-2 text-center"><Count value={site.counts.extra} tone="warning" /></td>
-                                <td className="px-3 py-2 text-center"><Count value={site.counts.short} tone="danger" /></td>
-                                <td className="px-3 py-2 text-center"><Count value={site.counts.notReceived} tone="danger" /></td>
+                                {GUIDE_STATE_ORDER.map((state) => <td key={state} className="px-3 py-2 text-center"><Count value={site.counts[state]} tone={GUIDE_STATE_TONE[state]} /></td>)}
                                 <td className="px-3 py-2 text-center">{observedChip(site)}</td>
                               </>
                             ) : (
-                              <td colSpan={7} className="px-3 py-2 text-center"><StatusChip tone="warning" label={`Falta importar su ICI de ${monthLabel.toLowerCase()}`} /></td>
+                              <td colSpan={7} className="px-3 py-2 text-center"><StatusChip tone="neutral" label={`Falta importar su ICI de ${monthLabel.toLowerCase()}`} /></td>
                             )}
                             <td className="px-2 text-slate-400"><ChevronRight className="h-4 w-4" /></td>
                           </tr>
@@ -1282,16 +1274,15 @@ const ReviewResults: React.FC<{
                           </p>
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             {!site.iciCode ? (
-                              <StatusChip tone="warning" label={`Falta importar su ICI de ${monthLabel.toLowerCase()}`} />
+                              <StatusChip tone="neutral" label={`Falta importar su ICI de ${monthLabel.toLowerCase()}`} />
                             ) : site.differences === 0 ? (
-                              <StatusChip tone="success" label="Todo ingresó" />
+                              <StatusChip tone="success" label="Todo completo" />
                             ) : (
                               <>
-                                {site.counts.notSent > 0 && <StatusChip tone="info" label={`${formatNumber(site.counts.notSent)} no salida`} />}
-                                {site.counts.extra > 0 && <StatusChip tone="warning" label={`${formatNumber(site.counts.extra)} sobra`} />}
-                                {site.counts.short > 0 && <StatusChip tone="danger" label={`${formatNumber(site.counts.short)} falta`} />}
-                                {site.counts.notReceived > 0 && <StatusChip tone="danger" label={`${formatNumber(site.counts.notReceived)} no ingresó`} />}
-                                <StatusChip tone={done === site.differences ? "success" : "neutral"} label={`${formatNumber(done)} de ${formatNumber(site.differences)} observados`} />
+                                {GUIDE_STATE_ORDER.filter((state) => state !== "complete" && site.counts[state] > 0).map((state) => (
+                                  <StatusChip key={state} tone={GUIDE_STATE_TONE[state]} label={`${GUIDE_STATE_LABEL[state]} ${formatNumber(site.counts[state])}`} />
+                                ))}
+                                <StatusChip tone="neutral" label={`${formatNumber(done)} de ${formatNumber(site.differences)} observados`} />
                               </>
                             )}
                           </div>

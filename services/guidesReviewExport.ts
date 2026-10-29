@@ -6,7 +6,7 @@
  */
 import ExcelJS from "exceljs";
 import { addTableSheet, excelDate } from "./excelCells";
-import { GUIDE_STATE_LABEL, type GuideLine, type ReviewLot, type ReviewSite } from "./guidesReview";
+import { GUIDE_STATE_LABEL, GUIDE_STATE_ORDER, guideStateOf, type GuideLine, type ReviewLot, type ReviewSite } from "./guidesReview";
 import { noteKey, type ReviewNotes } from "./guidesReviewNotes";
 import { formatNumber } from "./numberFormat";
 
@@ -39,11 +39,12 @@ const dateOf = (iso: string) => {
 
 export const siteCode = (site: ReviewSite) => site.iciCode ?? site.destination;
 
-/** «2027896: 50» o, si no coinciden, «2027896: env. 50 · ing. 51». */
+/** «2027896: 50», «2027896: salió 50, ingresó 51» o «2062965: sin guía, ingresó 10». */
 const lotsText = (lots: ReviewLot[], noIci: boolean) =>
   lots.map((l) => {
     const q = (n: number) => formatNumber(n, 3);
-    return `${l.lot || "Sin lote"}: ${noIci || l.sent === l.received ? q(l.sent) : `env. ${q(l.sent)} · ing. ${q(l.received)}`}`;
+    const text = noIci || l.sent === l.received ? q(l.sent) : l.sent ? `salió ${q(l.sent)}, ingresó ${q(l.received)}` : `sin guía, ingresó ${q(l.received)}`;
+    return `${l.lot || "Sin lote"}: ${text}`;
   }).join("; ");
 
 /**
@@ -74,11 +75,8 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
     { header: "Nº guías", width: 8, center: true },
     { header: "Salida med", width: 9, center: true },
     { header: "Ingreso med", width: 9, center: true },
-    { header: "Completo", width: 10, center: true },
-    { header: "No salida", width: 9, center: true },
-    { header: "Sobra", width: 8, center: true },
-    { header: "Falta", width: 8, center: true },
-    { header: "No ingresó", width: 10, center: true },
+    // Los estados con los nombres y en el orden de la pantalla.
+    ...GUIDE_STATE_ORDER.map((state) => ({ header: GUIDE_STATE_LABEL[state], width: 10, center: true })),
     { header: "Revisión", width: 16, center: true },
     { header: "Detalle faltante", width: 40 },
     { header: "Detalle no ingresado", width: 40 },
@@ -92,11 +90,7 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
       site.guides.length,
       site.sentProducts,
       ici ? site.receivedProducts : null,
-      ici ? site.counts.complete : null,
-      ici ? site.counts.notSent : null,
-      ici ? site.counts.extra : null,
-      ici ? site.counts.short : null,
-      ici ? site.counts.notReceived : null,
+      ...GUIDE_STATE_ORDER.map((state) => (ici ? site.counts[state] : null)),
       siteReview(site),
       missingDetail(site, input.productName, "short"),
       missingDetail(site, input.productName, "notReceived"),
@@ -109,7 +103,7 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
     { header: "Establecimiento", width: 30 },
     { header: "Código producto", width: 11, center: true },
     { header: "Producto", width: 46 },
-    { header: "Enviado", width: 10, quantity: true, center: true },
+    { header: "Salió", width: 10, quantity: true, center: true },
     { header: "Ingresó", width: 10, quantity: true, center: true },
     { header: "Diferencia", width: 10, quantity: true, center: true },
     { header: "Estado", width: 16, center: true },
@@ -140,9 +134,10 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
     { header: "Código producto", width: 11, center: true },
     { header: "Producto", width: 46 },
     { header: "Lote", width: 16, center: true },
-    { header: "Enviado", width: 10, quantity: true, center: true },
+    { header: "Salió", width: 10, quantity: true, center: true },
     { header: "Ingresó", width: 10, quantity: true, center: true },
     { header: "Diferencia", width: 10, quantity: true, center: true },
+    { header: "Estado del lote", width: 16, center: true },
     { header: "Estado del producto", width: 18, center: true },
   ], sites.flatMap(({ site, name }) => site.rows.flatMap((row) => row.lots.map((lot) => [
     siteCode(site),
@@ -153,6 +148,7 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
     lot.sent,
     site.iciCode ? lot.received : null,
     site.iciCode ? Math.round((lot.received - lot.sent) * 1000) / 1000 : null,
+    site.iciCode ? GUIDE_STATE_LABEL[guideStateOf(lot.sent, lot.received)] : "Sin ICI del mes",
     site.iciCode ? GUIDE_STATE_LABEL[row.state] : "Sin ICI del mes",
   ]))));
 

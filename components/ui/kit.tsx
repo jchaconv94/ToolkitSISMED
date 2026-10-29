@@ -25,33 +25,44 @@ export const filterInputClass =
  *
  * emerald: aplicado, vigente · amber: pendiente, advertencia · red: vencido, error
  * teal: información del módulo · slate: neutro · oscuro: periodo cerrado o bloqueado
+ * orange (`serious`): grave, entre advertencia y error · violet (`notice`): para revisar, sin
+ * ser pérdida ni error. Los dos nacieron en Revisión de guías (2026-10-29), donde cinco estados
+ * necesitaban colores que no se confundieran: solo «Completo» va en verde.
  */
-export type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "locked";
+export type Tone = "neutral" | "success" | "warning" | "serious" | "danger" | "notice" | "info" | "locked";
 
 /** Fondo y color del ícono de un tono (chips de ícono, avisos). */
 export const toneIconClass: Record<Tone, string> = {
   neutral: "bg-slate-100 text-slate-700 ring-1 ring-slate-200/80",
   success: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80",
   warning: "bg-amber-50 text-amber-700 ring-1 ring-amber-200/80",
+  serious: "bg-orange-50 text-orange-700 ring-1 ring-orange-200/80",
   danger: "bg-red-50 text-red-700 ring-1 ring-red-200/80",
+  notice: "bg-violet-50 text-violet-700 ring-1 ring-violet-200/80",
   info: "bg-teal-50 text-teal-700 ring-1 ring-teal-200/80",
   locked: "bg-slate-900 text-slate-100 ring-1 ring-slate-800"
 };
 
-const toneTopBar: Record<Tone, string> = {
+/** Color sólido del tono: la franja de un KPI o el punto de una leyenda. */
+export const toneDotClass: Record<Tone, string> = {
   neutral: "bg-slate-300",
   success: "bg-emerald-500",
   warning: "bg-amber-500",
+  serious: "bg-orange-600",
   danger: "bg-red-500",
+  notice: "bg-violet-500",
   info: "bg-teal-500",
   locked: "bg-slate-800"
 };
+const toneTopBar = toneDotClass;
 
 const toneFilled: Record<Tone, string> = {
   neutral: "border-slate-200 bg-white text-slate-800",
   success: "border-emerald-200 bg-emerald-50 text-emerald-800",
   warning: "border-amber-200 bg-amber-50 text-amber-800",
+  serious: "border-orange-200 bg-orange-50 text-orange-800",
   danger: "border-red-200 bg-red-50 text-red-800",
+  notice: "border-violet-200 bg-violet-50 text-violet-800",
   info: "border-teal-200 bg-teal-50 text-teal-800",
   locked: "border-slate-300 bg-slate-900 text-white"
 };
@@ -60,7 +71,9 @@ const toneChip: Record<Tone, string> = {
   neutral: "border-slate-200 bg-slate-50 text-slate-600",
   success: "border-emerald-200 bg-emerald-50 text-emerald-700",
   warning: "border-amber-200 bg-amber-50 text-amber-700",
+  serious: "border-orange-300 bg-orange-100 text-orange-800",
   danger: "border-red-200 bg-red-50 text-red-700",
+  notice: "border-violet-200 bg-violet-50 text-violet-700",
   info: "border-teal-200 bg-teal-50 text-teal-700",
   locked: "border-slate-300 bg-slate-900 text-white"
 };
@@ -69,7 +82,9 @@ const toneWatermark: Record<Tone, { gradient: string; icon: string; value: strin
   neutral: { gradient: "from-slate-100", icon: "text-slate-500", value: "text-slate-700" },
   success: { gradient: "from-emerald-50", icon: "text-emerald-600", value: "text-emerald-700" },
   warning: { gradient: "from-amber-50", icon: "text-amber-600", value: "text-amber-700" },
+  serious: { gradient: "from-orange-50", icon: "text-orange-600", value: "text-orange-600" },
   danger: { gradient: "from-red-50", icon: "text-red-600", value: "text-red-600" },
+  notice: { gradient: "from-violet-50", icon: "text-violet-600", value: "text-violet-700" },
   info: { gradient: "from-teal-50", icon: "text-teal-600", value: "text-teal-700" },
   locked: { gradient: "from-slate-200", icon: "text-slate-700", value: "text-slate-900" }
 };
@@ -78,7 +93,9 @@ const defaultToneIcons: Record<Tone, React.ReactNode> = {
   neutral: <Package className="h-5 w-5" />,
   success: <CheckCircle2 className="h-5 w-5" />,
   warning: <AlertTriangle className="h-5 w-5" />,
+  serious: <AlertTriangle className="h-5 w-5" />,
   danger: <XCircle className="h-5 w-5" />,
+  notice: <Activity className="h-5 w-5" />,
   info: <Activity className="h-5 w-5" />,
   locked: <Lock className="h-5 w-5" />
 };

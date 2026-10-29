@@ -168,9 +168,11 @@ export { nextSort } from "../../services/tableSort";
 
 /**
  * Columna de una `SortableTableHead`. `fit`: del ancho justo de su contenido, en una línea,
- * para que el nombre (producto o establecimiento) se quede con el resto del ancho.
+ * para que el nombre (producto o establecimiento) se quede con el resto del ancho. `marker`: un
+ * punto de color antes del título (la clase de fondo, como `toneDotClass` del kit), para que la
+ * columna diga de qué color son sus chips.
  */
-export type SortableHeadColumn<K extends string> = { key: K; label: string; align?: HeadAlign; fit?: boolean; title?: string };
+export type SortableHeadColumn<K extends string> = { key: K; label: string; align?: HeadAlign; fit?: boolean; title?: string; marker?: string };
 
 const ariaSortOf = (dir: SortDir | null) => (dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none");
 
@@ -197,7 +199,14 @@ export const SortableTableHead = <K extends string>({
 }) => {
   const content = (column: SortableHeadColumn<K>) => {
     const sort = headSort(column.key);
-    return <SortHeadButton label={column.label} dir={sort.dir} onClick={sort.onSort} />;
+    const button = <SortHeadButton label={column.label} dir={sort.dir} onClick={sort.onSort} />;
+    if (!column.marker) return button;
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${column.marker}`} />
+        {button}
+      </span>
+    );
   };
   const shift = leading ? 1 : 0;
   const cells = columns.map((column, index) => ({ key: column.key, index: index + shift, align: column.align, content: content(column) }));
