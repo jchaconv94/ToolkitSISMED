@@ -19,18 +19,39 @@
  * casos en docs/REVISION_GUIAS.md.
  */
 import { dbfField, dbfRecords, type DbfTable } from "./dbfFile";
+import { formatNumber } from "./numberFormat";
 
 export type GuideState = "short" | "notReceived" | "extra" | "notSent" | "complete";
 
 /** Orden de gravedad: primero lo que el establecimiento dejó de ingresar. */
 export const GUIDE_STATES: GuideState[] = ["short", "notReceived", "extra", "notSent", "complete"];
 
+/**
+ * Orden en pantalla (columnas, indicadores y filtros): lo completo, lo que falta ingresar
+ * (una parte o todo) y lo que entró sin estar en las guías (de más o sin guía).
+ */
+export const GUIDE_STATE_ORDER: GuideState[] = ["complete", "short", "notReceived", "extra", "notSent"];
+
+/**
+ * Nombres de los estados. El 2026-10-29 el usuario pidió hacerlos más entendibles: «Falta»
+ * pasó a «Incompleto» (ingresó una parte; «No ingresó» es nada) y «No se dio salida» a «Sin
+ * guía» (lo ingresó a mano, sin guía del almacén). «Sobra» se quedó: es como él lo dice.
+ */
 export const GUIDE_STATE_LABEL: Record<GuideState, string> = {
-  short: "Falta",
+  complete: "Completo",
+  short: "Incompleto",
   notReceived: "No ingresó",
   extra: "Sobra",
-  notSent: "No se dio salida",
-  complete: "Completo",
+  notSent: "Sin guía",
+};
+
+/** Qué quiere decir cada estado, en una línea. */
+export const GUIDE_STATE_HINT: Record<GuideState, string> = {
+  complete: "Ingresó lo mismo que salió del almacén",
+  short: "Ingresó menos de lo que salió del almacén",
+  notReceived: "Salió del almacén y no lo ingresó",
+  extra: "Ingresó más de lo que salió: además de la guía, un ingreso manual",
+  notSent: "Lo ingresó sin guía del almacén: un ingreso manual",
 };
 
 /** Una línea de una guía de salida del almacén. */
@@ -251,7 +272,8 @@ export const reviewMonths = (warehouse: WarehouseData, ici: IciData) => {
   return warehouse.months.filter((m) => inIci.has(m));
 };
 
-const stateOf = (sent: number, received: number): GuideState => {
+/** El estado de un producto (o de un lote) según lo que salió y lo que ingresó. */
+export const guideStateOf = (sent: number, received: number): GuideState => {
   if (sent && !received) return "notReceived";
   if (received && !sent) return "notSent";
   if (sent === received) return "complete";
@@ -318,7 +340,7 @@ export const reviewGuides = (
       const r = qty(lots.reduce((sum, l) => sum + l.received, 0));
       if (s) sentProducts++;
       if (r) receivedProducts++;
-      const state = stateOf(s, r);
+      const state = guideStateOf(s, r);
       counts[state]++;
       return { product, sent: s, received: r, state, lots, guides: [...(items.get(product)?.guides ?? [])].sort(), previous: previous.get(`${destination}#${product}`) ?? null };
     });
@@ -333,4 +355,41 @@ export const reviewGuides = (
       receivedProducts,
     };
   });
+};
+
+const list = (items: string[]) => items.join(", ").replace(/, ([^,]*)$/, " y $1");
+const amount = (value: number) => formatNumber(value, 3);
+const dayText = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+
+/**
+ * Qué pasó con un producto, en palabras (el detalle del producto; 2026-10-29, el usuario no
+ * entendía el detalle solo con las cifras). `month` va en minúsculas: «setiembre 2026».
+ */
+export const explainRow = (row: ReviewRow, month: string): string => {
+  const guides = row.guides.length === 1 ? `la guía ${row.guides[0]}` : `las guías ${list(row.guides)}`;
+  const sent = `${row.sent === 1 ? "Salió" : "Salieron"} ${amount(row.sent)} del almacén por ${guides}`;
+  const lots = (items: ReviewLot[]) => {
+    const names = items.map((l) => l.lot || "sin lote");
+    return names.length === 1 ? `el lote ${names[0]}` : `los lotes ${list(names)}`;
+  };
+  const missing = qty(row.sent - row.received);
+  const extra = qty(row.received - row.sent);
+  switch (row.state) {
+    case "complete": {
+      const mismatched = row.lots.filter((l) => qty(l.sent - l.received) !== 0);
+      return `${sent} y el establecimiento ingresó lo mismo.${mismatched.length ? ` Pero no con los mismos lotes: revise ${lots(mismatched)}.` : ""}`;
+    }
+    case "short":
+      return `${sent} y el establecimiento solo ingresó ${amount(row.received)}: ${missing === 1 ? "falta" : "faltan"} ${amount(missing)} por ingresar.`;
+    case "notReceived":
+      return `${sent} y el establecimiento no lo ingresó en su ICI de ${month}.`;
+    case "extra": {
+      const manual = row.lots.filter((l) => !l.sent && l.received);
+      return `${sent} y el establecimiento ingresó ${amount(row.received)}: ${amount(extra)} de más, que no vienen en las guías de ${month} (ingreso manual).${manual.length ? ` Sin guía: ${lots(manual)}.` : ""}`;
+    }
+    case "notSent": {
+      const before = row.previous ? ` La última guía con este producto fue la ${row.previous.guide} del ${dayText(row.previous.date)}.` : " No hay guías anteriores del almacén con este producto.";
+      return `El almacén no le dio salida en ${month}, pero el establecimiento ingresó ${amount(row.received)} (ingreso manual).${before}`;
+    }
+  }
 };

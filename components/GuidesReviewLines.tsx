@@ -8,7 +8,7 @@ import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { formatNumber } from "../services/numberFormat";
-import { GUIDE_STATES, GUIDE_STATE_LABEL, type GuideLine, type GuideState } from "../services/guidesReview";
+import { GUIDE_STATES, GUIDE_STATE_LABEL, GUIDE_STATE_ORDER, type GuideLine, type GuideState } from "../services/guidesReview";
 import { GUIDE_STATE_TONE } from "./GuidesReviewDetail";
 
 /**
@@ -19,15 +19,8 @@ import { GUIDE_STATE_TONE } from "./GuidesReviewDetail";
 
 type StateFilter = "all" | GuideState | "noIci";
 
-const STATE_FILTER_LABEL: Record<StateFilter, string> = {
-  all: "Todos",
-  notReceived: "No ingresó",
-  short: "Falta",
-  extra: "Sobra",
-  complete: "Completo",
-  notSent: "No se dio salida",
-  noIci: "Sin ICI del mes",
-};
+const STATE_FILTER_LABEL: Record<StateFilter, string> = { all: "Todos", ...GUIDE_STATE_LABEL, noIci: "Sin ICI del mes" };
+const STATE_FILTER_ORDER: StateFilter[] = ["all", ...GUIDE_STATE_ORDER, "noIci"];
 
 type SortKey = "date" | "guide" | "site" | "product" | "quantity" | "lot" | "state";
 
@@ -105,7 +98,7 @@ export const GuidesReviewLines: React.FC<{
     const s = stateOf(l.destination, l.product);
     return s ? <StatusChip tone={GUIDE_STATE_TONE[s]} label={GUIDE_STATE_LABEL[s]} /> : <StatusChip tone="neutral" label="Sin ICI" />;
   };
-  const stateOptions = (Object.keys(STATE_FILTER_LABEL) as StateFilter[]).filter((key) => key === "all" || key === state || (stateCounts.get(key) ?? 0) > 0);
+  const stateOptions = STATE_FILTER_ORDER.filter((key) => key === "all" || key === state || (stateCounts.get(key) ?? 0) > 0);
   const siteOptions = [{ value: "", label: "Todos", count: lines.length }, ...sites.map((s) => ({ value: s.destination, label: s.name, hint: s.code, count: lines.filter((l) => l.destination === s.destination).length }))];
 
   return (

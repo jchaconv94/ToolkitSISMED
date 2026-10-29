@@ -43,19 +43,19 @@ describe("Excel de Revisión de guías", () => {
     const workbook = buildGuidesReviewWorkbook(input);
     expect(workbook.worksheets.map((s) => s.name)).toEqual(["Resumen", "Detalle", "Lotes", "Guías de salida"]);
     const resumen = workbook.getWorksheet("Resumen")!;
-    expect(values(resumen, 4)).toEqual(["Microred", "Código", "Establecimiento", "Nº guías", "Salida med", "Ingreso med", "Completo", "No salida", "Sobra", "Falta", "No ingresó", "Revisión", "Detalle faltante", "Detalle no ingresado", "Observados"]);
-    expect(values(resumen, 5)).toEqual(["SAN RAFAEL", "06516", "P.S. LA LIBERTAD", 1, 2, 3, 1, 1, 1, 0, 0, "Con diferencias", "", "", 1]);
+    expect(values(resumen, 4)).toEqual(["Microred", "Código", "Establecimiento", "Nº guías", "Salida med", "Ingreso med", "Completo", "Incompleto", "No ingresó", "Sobra", "Sin guía", "Revisión", "Detalle faltante", "Detalle no ingresado", "Observados"]);
+    expect(values(resumen, 5)).toEqual(["SAN RAFAEL", "06516", "P.S. LA LIBERTAD", 1, 2, 3, 1, 0, 0, 1, 1, "Con diferencias", "", "", 1]);
     // Sin ICI solo se sabe lo que salió.
     expect(values(resumen, 6)).toEqual(["BAJO BIAVO", "06519", "C.S. NUEVO LIMA", 1, 1, undefined, undefined, undefined, undefined, undefined, undefined, "Sin ICI del mes", "", "", 0]);
     const detalle = workbook.getWorksheet("Detalle")!;
     expect(detalle.rowCount).toBe(4 + 4);
-    expect(values(detalle, 6).slice(0, 10)).toEqual(["06516", "P.S. LA LIBERTAD", "19422", "Producto 19422", 10, 11, 1, "Sobra", "L2: env. 10 · ing. 6; L9: env. 0 · ing. 5", "0001552"]);
-    expect(values(detalle, 7).slice(7, 11)).toEqual(["No se dio salida", "L3: env. 0 · ing. 5", "", "0001259"]);
+    expect(values(detalle, 6).slice(0, 10)).toEqual(["06516", "P.S. LA LIBERTAD", "19422", "Producto 19422", 10, 11, 1, "Sobra", "L2: salió 10, ingresó 6; L9: sin guía, ingresó 5", "0001552"]);
+    expect(values(detalle, 7).slice(7, 11)).toEqual(["Sin guía", "L3: sin guía, ingresó 5", "", "0001259"]);
     expect(values(detalle, 7).at(-1)).toBe("CORRECCIÓN DE LOTE");
     expect(values(detalle, 8).slice(5, 9)).toEqual([undefined, undefined, "Sin ICI del mes", "L1: 4"]);
     const lotes = workbook.getWorksheet("Lotes")!;
     expect(lotes.rowCount).toBe(4 + 5);
-    expect(values(lotes, 7)).toEqual(["06516", "P.S. LA LIBERTAD", "19422", "Producto 19422", "L9", 0, 5, 5, "Sobra"]);
+    expect(values(lotes, 7)).toEqual(["06516", "P.S. LA LIBERTAD", "19422", "Producto 19422", "L9", 0, 5, 5, "Sin guía", "Sobra"]);
     expect(workbook.getWorksheet("Guías de salida")!.rowCount).toBe(4 + 3);
   });
 

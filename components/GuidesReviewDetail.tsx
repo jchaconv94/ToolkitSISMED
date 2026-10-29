@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, CircleHelp, Download, PackageCheck, PackageX } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, PackageCheck, PackageMinus, PackagePlus, PackageX, PenLine } from "lucide-react";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
-import { EmptyState, KpiCard, StatusChip, TableSearch, UnderlineTabs, useTableSort, type Tone } from "./ui/kit";
+import { EmptyState, KpiCard, KpiStrip, StatusChip, TableSearch, UnderlineTabs, useTableSort, type Tone } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
 import { SortableTableHead, useFloatingTableHead, type SortableHeadColumn } from "./ui/FloatingTableHead";
 import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { formatNumber } from "../services/numberFormat";
-import { GUIDE_STATES, GUIDE_STATE_LABEL, type GuideLine, type GuideState, type ReviewRow } from "../services/guidesReview";
+import { GUIDE_STATES, GUIDE_STATE_HINT, GUIDE_STATE_LABEL, GUIDE_STATE_ORDER, explainRow, guideStateOf, type GuideLine, type GuideState, type ReviewRow } from "../services/guidesReview";
 import { siteCode } from "../services/guidesReviewExport";
 import { noteKey, type ReviewNotes } from "../services/guidesReviewNotes";
 import type { ReviewItem } from "./GuidesReviewModule";
@@ -29,7 +29,73 @@ import type { ReviewItem } from "./GuidesReviewModule";
  *   ventana sobre ventana (AGENTS.md §8).
  */
 
-export const GUIDE_STATE_TONE: Record<GuideState, Tone> = { short: "danger", notReceived: "danger", extra: "warning", notSent: "info", complete: "success" };
+/**
+ * Un color por estado y solo «Completo» en verde (pedido del usuario del 2026-10-29: «No salida»
+ * iba en verde azulado y se confundía con lo completo). Lo que falta ingresar va en naranja (una
+ * parte) y rojo (nada); lo que entró sin estar en las guías, en ámbar (sobra) y violeta (sin guía).
+ */
+export const GUIDE_STATE_TONE: Record<GuideState, Tone> = { complete: "success", short: "serious", notReceived: "danger", extra: "warning", notSent: "notice" };
+
+export const GUIDE_STATE_ICON: Record<GuideState, React.ReactNode> = {
+  complete: <PackageCheck />,
+  short: <PackageMinus />,
+  notReceived: <PackageX />,
+  extra: <PackagePlus />,
+  notSent: <PenLine />,
+};
+
+/** Pista corta de cada indicador (la larga, `GUIDE_STATE_HINT`, va en las explicaciones). */
+const KPI_HINT: Record<GuideState, string> = {
+  complete: "ingresó lo mismo que salió",
+  short: "ingresó menos de lo que salió",
+  notReceived: "salió y no lo ingresó",
+  extra: "ingresó más: ingreso manual",
+  notSent: "ingreso manual, sin guía",
+};
+
+/** Color de la diferencia, el mismo de su estado. */
+const STATE_TEXT: Record<GuideState, string> = {
+  complete: "text-slate-400",
+  short: "text-orange-600",
+  notReceived: "text-red-600",
+  extra: "text-amber-700",
+  notSent: "text-violet-700",
+};
+
+/** Recuadro con la explicación del producto, del color de su estado. */
+const STATE_BOX: Record<GuideState, string> = {
+  complete: "border-emerald-200 bg-emerald-50 text-emerald-900 [&>svg]:text-emerald-600",
+  short: "border-orange-200 bg-orange-50 text-orange-900 [&>svg]:text-orange-600",
+  notReceived: "border-red-200 bg-red-50 text-red-900 [&>svg]:text-red-600",
+  extra: "border-amber-200 bg-amber-50 text-amber-900 [&>svg]:text-amber-600",
+  notSent: "border-violet-200 bg-violet-50 text-violet-900 [&>svg]:text-violet-600",
+};
+
+/**
+ * Los cinco estados como indicadores, que filtran al tocarlos: los mismos en el resumen y en
+ * cada establecimiento, y hacen de leyenda (nombre, color y qué quiere decir).
+ */
+export const GuideStateKpis: React.FC<{
+  counts: Record<GuideState, number>;
+  active: GuideState | null;
+  onToggle: (state: GuideState) => void;
+}> = ({ counts, active, onToggle }) => (
+  <KpiStrip cols="md:grid-cols-5">
+    {GUIDE_STATE_ORDER.map((state) => (
+      <KpiCard
+        key={state}
+        watermark
+        tone={GUIDE_STATE_TONE[state]}
+        icon={GUIDE_STATE_ICON[state]}
+        label={GUIDE_STATE_LABEL[state]}
+        value={formatNumber(counts[state])}
+        hint={KPI_HINT[state]}
+        onClick={() => onToggle(state)}
+        active={active === state}
+      />
+    ))}
+  </KpiStrip>
+);
 
 const n = (value: number) => formatNumber(value, 3);
 const day = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
@@ -41,8 +107,8 @@ const CodeChip: React.FC<{ code: string }> = ({ code }) => <span className="inli
 export const guideText = (row: ReviewRow) =>
   row.guides.length ? `Guía ${row.guides.join(", ")}` : row.previous ? `Antes: guía ${row.previous.guide} del ${day(row.previous.date)}` : "Nunca lo envió el almacén";
 
-const Diff: React.FC<{ value: number; muted?: boolean }> = ({ value, muted }) => (
-  <span className={`font-bold ${muted || !value ? "text-slate-300" : value > 0 ? "text-amber-700" : "text-red-600"}`}>{muted ? "—" : `${value > 0 ? "+" : ""}${n(value)}`}</span>
+const Diff: React.FC<{ value: number; state: GuideState; muted?: boolean }> = ({ value, state, muted }) => (
+  <span className={`font-bold ${muted || !value ? "text-slate-300" : STATE_TEXT[state]}`}>{muted ? "—" : `${value > 0 ? "+" : ""}${n(value)}`}</span>
 );
 
 const Checkbox: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void; label: string }> = ({ checked, indeterminate = false, onChange, label }) => {
@@ -132,14 +198,16 @@ const NoteCombobox: React.FC<{
   );
 };
 
-type Show = "differences" | "pending" | "all";
+/** Qué productos se ven: con diferencia, sin observación, todos o los de un estado. */
+type Show = "differences" | "pending" | "all" | GuideState;
+const isState = (show: Show): show is GuideState => (GUIDE_STATE_ORDER as string[]).includes(show);
 type SortKey = "product" | "sent" | "received" | "diff" | "state" | "lots" | "note";
 
 const COLUMNS: SortableHeadColumn<SortKey>[] = [
   { key: "product", label: "Producto" },
-  { key: "sent", label: "Enviado", align: "center", fit: true },
-  { key: "received", label: "Ingresó", align: "center", fit: true },
-  { key: "diff", label: "Diferencia", align: "center", fit: true },
+  { key: "sent", label: "Salió", align: "center", fit: true, title: "Lo que salió del almacén en las guías del mes" },
+  { key: "received", label: "Ingresó", align: "center", fit: true, title: "Lo que el establecimiento ingresó en su ICI del mes" },
+  { key: "diff", label: "Diferencia", align: "center", fit: true, title: "Ingresó menos lo que salió" },
   { key: "state", label: "Estado", align: "center", fit: true },
   { key: "lots", label: "Lotes", align: "center", fit: true, title: "Toque el producto para ver cada lote" },
   { key: "note", label: "Observación" },
@@ -206,7 +274,9 @@ export const GuidesReviewDetail: React.FC<{
     const q = query.trim().toLowerCase();
     return site.rows.filter((row) => {
       const note = notes[noteKey(site.destination, row.product)] ?? "";
-      if (show !== "all" && row.state === "complete") return false;
+      if (isState(show)) {
+        if (row.state !== show) return false;
+      } else if (show !== "all" && row.state === "complete") return false;
       if (show === "pending" && note) return false;
       return !q || row.product.includes(q) || row.lots.some((l) => l.lot.toLowerCase().includes(q)) || productName(row.product).toLowerCase().includes(q) || note.toLowerCase().includes(q);
     });
@@ -262,7 +332,16 @@ export const GuidesReviewDetail: React.FC<{
   const productCode = product?.product;
   const savedNote = productCode ? noteOf(productCode) : "";
   useEffect(() => setProductNote(savedNote), [productCode, savedNote]);
-  const productLines = useMemo(() => (productCode ? lines.filter((l) => l.product === productCode).sort((a, b) => b.date.localeCompare(a.date) || b.guide.localeCompare(a.guide)) : []), [productCode, lines]);
+  /** Las guías del mes con este producto, por lote: de dónde vino cada lote. */
+  const lotGuides = useMemo(() => {
+    const map = new Map<string, GuideLine[]>();
+    if (!productCode) return map;
+    lines.filter((l) => l.product === productCode).sort((a, b) => a.date.localeCompare(b.date) || a.guide.localeCompare(b.guide)).forEach((l) => {
+      if (!map.has(l.lot)) map.set(l.lot, []);
+      map.get(l.lot)!.push(l);
+    });
+    return map;
+  }, [productCode, lines]);
   const openProduct = (row: ReviewRow) => setProductAt(sorted.indexOf(row));
   const saveProductNote = (text: string) => {
     if (!productCode) return;
@@ -340,6 +419,7 @@ export const GuidesReviewDetail: React.FC<{
     { value: "differences", label: "Con diferencia", count: site.differences },
     { value: "pending", label: "Sin observación", count: pendingCount },
     { value: "all", label: "Todos", count: site.rows.length },
+    ...GUIDE_STATE_ORDER.filter((state) => counts[state] > 0 || show === state).map((state) => ({ value: state as Show, label: GUIDE_STATE_LABEL[state], count: counts[state] })),
   ];
   const stat = "rounded-xl border border-slate-200 bg-white px-3 py-2.5";
   const statLabel = "text-[10px] font-black uppercase tracking-wider text-slate-400";
@@ -380,11 +460,20 @@ export const GuidesReviewDetail: React.FC<{
     >
       {product ? (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className={stat}><p className={statLabel}>Enviado</p><p className="mt-0.5 text-lg font-black text-slate-900">{product.sent ? n(product.sent) : "—"}</p></div>
-            <div className={stat}><p className={statLabel}>Ingresó</p><p className="mt-0.5 text-lg font-black text-slate-900">{noIci ? "—" : product.received ? n(product.received) : "—"}</p></div>
-            <div className={stat}><p className={statLabel}>Diferencia</p><p className="mt-0.5 text-lg"><Diff value={round(product.received - product.sent)} muted={noIci} /></p></div>
-            <div className={stat}><p className={statLabel}>Estado</p><div className="mt-1">{stateChip(product.state)}</div></div>
+          {!noIci && (
+            <div className={`flex gap-3 rounded-2xl border px-4 py-3 text-[13.5px] leading-relaxed [&>svg]:mt-0.5 [&>svg]:h-5 [&>svg]:w-5 [&>svg]:shrink-0 ${STATE_BOX[product.state]}`}>
+              {GUIDE_STATE_ICON[product.state]}
+              <div className="min-w-0">
+                <p className="font-black">{GUIDE_STATE_LABEL[product.state]}. <span className="font-semibold">{GUIDE_STATE_HINT[product.state]}.</span></p>
+                <p className="mt-0.5">{explainRow(product, monthLabel.toLowerCase())}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className={stat}><p className={statLabel}>Salió del almacén</p><p className="mt-0.5 text-lg font-black text-slate-900">{product.sent ? n(product.sent) : "—"}</p></div>
+            <div className={stat}><p className={statLabel}>Ingresó en el ICI</p><p className="mt-0.5 text-lg font-black text-slate-900">{noIci ? "—" : product.received ? n(product.received) : "—"}</p></div>
+            <div className={stat}><p className={statLabel}>Diferencia</p><p className="mt-0.5 text-lg"><Diff value={round(product.received - product.sent)} state={product.state} muted={noIci} /></p></div>
           </div>
 
           <section>
@@ -408,60 +497,61 @@ export const GuidesReviewDetail: React.FC<{
           </section>
 
           <section>
-            <p className={sectionTitle}>{product.lots.length === 1 ? "Lote" : `Lotes (${product.lots.length})`}</p>
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-              <table className="w-full text-left text-sm">
-                <thead className={smallHead}>
-                  <tr>
-                    <th className="px-4 py-2.5">Lote</th>
-                    <th className="px-3 py-2.5 text-center">Enviado</th>
-                    <th className="px-3 py-2.5 text-center">Ingresó</th>
-                    <th className="px-3 py-2.5 text-center">Diferencia</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {product.lots.map((lot) => (
-                    <tr key={lot.lot} className="h-12 border-t border-slate-100">
-                      <td className="px-4 py-2 font-mono text-[12.5px] text-slate-800">{lot.lot || "Sin lote"}</td>
-                      <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{lot.sent ? n(lot.sent) : "—"}</td>
-                      <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{noIci ? "—" : lot.received ? n(lot.received) : "—"}</td>
-                      <td className="px-3 py-2 text-center text-[13px]"><Diff value={round(lot.received - lot.sent)} muted={noIci} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section>
-            <p className={sectionTitle}>Guías del almacén en {monthLabel.toLowerCase()}</p>
-            {productLines.length ? (
+            <p className={sectionTitle}>{product.lots.length === 1 ? "Lote" : `Lotes (${product.lots.length})`}: de qué guía vino cada uno</p>
+            {isDesktop ? (
               <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                 <table className="w-full text-left text-sm">
                   <thead className={smallHead}>
                     <tr>
-                      <th className="px-4 py-2.5">Fecha registro</th>
-                      <th className="px-3 py-2.5 text-center">Guía</th>
-                      <th className="px-3 py-2.5 text-center">Cantidad</th>
-                      <th className="px-3 py-2.5 text-center">Lote</th>
+                      <th className="px-4 py-2.5">Lote</th>
+                      <th className="px-3 py-2.5">Guía del almacén</th>
+                      <th className="px-3 py-2.5 text-center">Salió</th>
+                      <th className="px-3 py-2.5 text-center">Ingresó</th>
+                      <th className="px-3 py-2.5 text-center">Diferencia</th>
+                      <th className="px-3 py-2.5 text-center">Estado del lote</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {productLines.map((l, i) => (
-                      <tr key={`${l.guide}|${l.lot}|${i}`} className="h-12 border-t border-slate-100">
-                        <td className="px-4 py-2 text-[13px] text-slate-700">{day(l.date)}</td>
-                        <td className="px-3 py-2 text-center font-mono text-[12.5px] text-slate-700">{l.guide}</td>
-                        <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{n(l.quantity)}</td>
-                        <td className="px-3 py-2 text-center font-mono text-xs text-slate-700">{l.lot || "—"}</td>
-                      </tr>
-                    ))}
+                    {product.lots.map((lot) => {
+                      const state = guideStateOf(lot.sent, lot.received);
+                      const from = lotGuides.get(lot.lot) ?? [];
+                      return (
+                        <tr key={lot.lot} className="h-12 border-t border-slate-100">
+                          <td className="px-4 py-2 font-mono text-[12.5px] text-slate-800">{lot.lot || "Sin lote"}</td>
+                          <td className="px-3 py-2 text-[12.5px] text-slate-700">
+                            {from.length ? from.map((l, i) => <p key={i}><span className="font-mono">{l.guide}</span> <span className="text-slate-400">del {day(l.date)}</span></p>) : <span className="font-semibold text-violet-700">Sin guía (ingreso manual)</span>}
+                          </td>
+                          <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{lot.sent ? n(lot.sent) : "—"}</td>
+                          <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{noIci ? "—" : lot.received ? n(lot.received) : "—"}</td>
+                          <td className="px-3 py-2 text-center text-[13px]"><Diff value={round(lot.received - lot.sent)} state={state} muted={noIci} /></td>
+                          <td className="px-3 py-2 text-center">{stateChip(state)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             ) : (
-              <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] text-slate-600">
-                El almacén no le dio salida este mes. {product.previous ? `La última fue la guía ${product.previous.guide} del ${day(product.previous.date)}.` : "No hay guías anteriores con este producto."}
-              </p>
+              <div className="space-y-2">
+                {product.lots.map((lot) => {
+                  const state = guideStateOf(lot.sent, lot.received);
+                  const from = lotGuides.get(lot.lot) ?? [];
+                  return (
+                    <div key={lot.lot} className="rounded-2xl border border-slate-200 bg-white p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-mono text-[13px] font-semibold text-slate-900">Lote {lot.lot || "sin número"}</p>
+                        {stateChip(state)}
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {from.length ? <>Guía {from.map((l) => `${l.guide} del ${day(l.date)}`).join(", ")}</> : <span className="font-semibold text-violet-700">Sin guía (ingreso manual)</span>}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        Salió <b className="text-slate-700">{lot.sent ? n(lot.sent) : "—"}</b> · Ingresó <b className="text-slate-700">{noIci || !lot.received ? "—" : n(lot.received)}</b> · Diferencia <Diff value={round(lot.received - lot.sent)} state={state} muted={noIci} />
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </section>
         </div>
@@ -472,12 +562,11 @@ export const GuidesReviewDetail: React.FC<{
               Falta importar el ICI de {monthLabel.toLowerCase()} de este establecimiento en el SISMED: no se puede comparar. Al importarlo y volver a esta ventana, se revisa solo.
             </p>
           ) : (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <KpiCard watermark tone="success" icon={<PackageCheck />} label="Completos" value={formatNumber(counts.complete)} hint="enviado = ingresado" />
-              <KpiCard watermark tone="info" icon={<CircleHelp />} label="No se dio salida" value={formatNumber(counts.notSent)} hint="sin guía del almacén este mes" />
-              <KpiCard watermark tone="warning" label="Sobran" value={formatNumber(counts.extra)} hint="ingresó más" />
-              <KpiCard watermark tone="danger" icon={<PackageX />} label="Faltan / no ingresó" value={formatNumber(counts.short + counts.notReceived)} hint="ingresó menos" />
-            </div>
+            <GuideStateKpis
+              counts={counts}
+              active={isState(show) ? show : null}
+              onToggle={(state) => { setTab("products"); setShow((current) => (current === state ? (site.differences ? "differences" : "all") : state)); }}
+            />
           )}
 
           <UnderlineTabs
@@ -530,8 +619,8 @@ export const GuidesReviewDetail: React.FC<{
                 <div className="rounded-2xl border border-slate-200 bg-white">
                   <EmptyState
                     icon={<PackageCheck className="h-6 w-6" />}
-                    title={query.trim() ? `Sin resultados para «${query.trim()}»` : show === "pending" ? "Todas las diferencias tienen observación" : "Todo lo que envió el almacén ingresó completo"}
-                    description={query.trim() ? "Prueba con otro producto, código o lote." : show === "pending" ? "Puede revisarlas en «Con diferencia»." : "Cada producto coincide con el ICI del establecimiento."}
+                    title={query.trim() ? `Sin resultados para «${query.trim()}»` : show === "pending" ? "Todas las diferencias tienen observación" : isState(show) ? `Ningún producto en «${GUIDE_STATE_LABEL[show]}»` : "Todo lo que envió el almacén ingresó completo"}
+                    description={query.trim() ? "Prueba con otro producto, código o lote." : show === "pending" ? "Puede revisarlas en «Con diferencia»." : isState(show) ? "Elija otro estado o «Todos»." : "Cada producto coincide con el ICI del establecimiento."}
                   />
                 </div>
               ) : isDesktop ? (
@@ -557,7 +646,7 @@ export const GuidesReviewDetail: React.FC<{
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{row.sent ? n(row.sent) : "—"}</td>
                             <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{noIci ? "—" : row.received ? n(row.received) : "—"}</td>
-                            <td className="whitespace-nowrap px-3 py-2 text-center text-[13px]"><Diff value={round(row.received - row.sent)} muted={noIci} /></td>
+                            <td className="whitespace-nowrap px-3 py-2 text-center text-[13px]"><Diff value={round(row.received - row.sent)} state={row.state} muted={noIci} /></td>
                             <td className="px-3 py-2 text-center">{stateChip(row.state)}</td>
                             <td className={`whitespace-nowrap px-3 py-2 text-center text-[12.5px] ${row.lots.length === 1 ? "font-mono text-slate-700" : "font-semibold text-teal-700"}`}>{lotSummary(row)}</td>
                             <td className="px-4 py-2">
@@ -591,7 +680,7 @@ export const GuidesReviewDetail: React.FC<{
                             {stateChip(row.state)}
                           </div>
                           <p className="mt-1.5 text-xs text-slate-500">
-                            Enviado <b className="text-slate-700">{row.sent ? n(row.sent) : "—"}</b> · Ingresó <b className="text-slate-700">{noIci || !row.received ? "—" : n(row.received)}</b> · {lotSummary(row)}
+                            Salió <b className="text-slate-700">{row.sent ? n(row.sent) : "—"}</b> · Ingresó <b className="text-slate-700">{noIci || !row.received ? "—" : n(row.received)}</b> · {lotSummary(row)}
                           </p>
                           {note && <p className="mt-1 text-[12.5px] font-semibold text-slate-800">{note}</p>}
                         </div>

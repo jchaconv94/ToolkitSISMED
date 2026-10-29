@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { openDbf } from "./dbfFile";
 import { buildDbf, type DbfFieldSpec } from "./dbfTestUtils";
 import { noGuidesMessage } from "./guidesReviewLoad";
-import { detailSummary, looksLikeWarehouse, movementSummary, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths } from "./guidesReview";
+import { detailSummary, explainRow, looksLikeWarehouse, movementSummary, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths, type ReviewRow } from "./guidesReview";
 
 // Mismo formato que el SISMED del almacén (030S05) y el TFORMDET del ICI: solo los campos que se leen.
 type Head = { tipo?: string; num: string; org?: string; dst: string; guia: string; cct?: string; fecha: string; situa?: string };
@@ -219,5 +219,35 @@ describe("catálogos", () => {
     ]));
     const lines = readWarehouse(table, tmovimdet([{ num: "260001552", med: "19421", lote: "L1", cant: 5 }])).lines;
     expect(lines.map((l) => [l.date, l.month])).toEqual([["2026-09-14", "202609"]]);
+  });
+});
+
+describe("explainRow", () => {
+  const row = (over: Partial<ReviewRow>): ReviewRow => ({ product: "00200", sent: 40, received: 40, state: "complete", lots: [{ lot: "A", sent: 40, received: 40 }], guides: ["0001544"], previous: null, ...over });
+
+  it("dice en palabras qué pasó con cada estado", () => {
+    expect(explainRow(row({}), "setiembre 2026")).toBe("Salieron 40 del almacén por la guía 0001544 y el establecimiento ingresó lo mismo.");
+    expect(explainRow(row({ received: 25, state: "short", lots: [{ lot: "A", sent: 40, received: 25 }] }), "setiembre 2026")).toBe(
+      "Salieron 40 del almacén por la guía 0001544 y el establecimiento solo ingresó 25: faltan 15 por ingresar.",
+    );
+    expect(explainRow(row({ received: 0, state: "notReceived", guides: ["0001544", "0001601"] }), "setiembre 2026")).toBe(
+      "Salieron 40 del almacén por las guías 0001544 y 0001601 y el establecimiento no lo ingresó en su ICI de setiembre 2026.",
+    );
+  });
+
+  it("en lo que sobra nombra los lotes que no vinieron en ninguna guía", () => {
+    const extra = row({ received: 70, state: "extra", lots: [{ lot: "A", sent: 40, received: 40 }, { lot: "B", sent: 0, received: 10 }, { lot: "C", sent: 0, received: 20 }] });
+    expect(explainRow(extra, "setiembre 2026")).toBe(
+      "Salieron 40 del almacén por la guía 0001544 y el establecimiento ingresó 70: 30 de más, que no vienen en las guías de setiembre 2026 (ingreso manual). Sin guía: los lotes B y C.",
+    );
+  });
+
+  it("sin guía dice la última guía anterior, y un completo con otros lotes pide revisarlos", () => {
+    const notSent = row({ sent: 0, received: 12, state: "notSent", guides: [], lots: [{ lot: "A", sent: 0, received: 12 }], previous: { date: "2026-07-17", guide: "0001259" } });
+    expect(explainRow(notSent, "setiembre 2026")).toBe(
+      "El almacén no le dio salida en setiembre 2026, pero el establecimiento ingresó 12 (ingreso manual). La última guía con este producto fue la 0001259 del 17/07/2026.",
+    );
+    const swapped = row({ lots: [{ lot: "A", sent: 40, received: 0 }, { lot: "A1", sent: 0, received: 40 }] });
+    expect(explainRow(swapped, "setiembre 2026")).toBe("Salieron 40 del almacén por la guía 0001544 y el establecimiento ingresó lo mismo. Pero no con los mismos lotes: revise los lotes A y A1.");
   });
 });
