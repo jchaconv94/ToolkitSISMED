@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Download, PackageCheck, PackageMinus, PackagePlus, PackageX, PenLine } from "lucide-react";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
-import { EmptyState, KpiCard, KpiStrip, StatusChip, TableSearch, UnderlineTabs, useTableSort, type Tone } from "./ui/kit";
+import { EmptyState, KpiCard, KpiStrip, StatusChip, TableSearch, UnderlineTabs, toneDotClass, useTableSort, type Tone } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
 import { SortableTableHead, useFloatingTableHead, type SortableHeadColumn } from "./ui/FloatingTableHead";
 import { TablePagination, usePageSize } from "./ui/TablePagination";
@@ -51,6 +51,52 @@ const KPI_HINT: Record<GuideState, string> = {
   notReceived: "salió y no lo ingresó",
   extra: "ingresó más: ingreso manual",
   notSent: "ingreso manual, sin guía",
+};
+
+/** «85 completos», «1 sobra», «2 no ingresaron»: la cifra con su palabra, para leerla sin la cabecera. */
+export const stateCountText = (state: GuideState, count: number) => {
+  const one = count === 1;
+  const word = {
+    complete: one ? "completo" : "completos",
+    short: one ? "incompleto" : "incompletos",
+    notReceived: one ? "no ingresó" : "no ingresaron",
+    extra: one ? "sobra" : "sobran",
+    notSent: "sin guía",
+  }[state];
+  return `${formatNumber(count)} ${word}`;
+};
+
+/**
+ * Cómo ingresó cada producto de un establecimiento, de un vistazo (2026-10-30, el usuario no
+ * entendía «Salida 96 · Ingreso 99 · Completo 85» en columnas sueltas): una barra que se reparte
+ * entre los estados (parte de un todo) y debajo cada estado con su cifra y su palabra, el texto en
+ * gris y el color solo en el punto, para que se lea sin mirar la cabecera.
+ */
+export const GuideResultBar: React.FC<{ counts: Record<GuideState, number> }> = ({ counts }) => {
+  const present = GUIDE_STATE_ORDER.filter((state) => counts[state] > 0);
+  const summary = present.map((state) => stateCountText(state, counts[state])).join(", ");
+  return (
+    <div className="min-w-0">
+      <div role="img" aria-label={summary} className="flex h-2 w-full gap-0.5 overflow-hidden rounded-full bg-slate-100">
+        {present.map((state) => (
+          <span
+            key={state}
+            title={`${GUIDE_STATE_LABEL[state]}: ${formatNumber(counts[state])}`}
+            className={`h-full ${toneDotClass[GUIDE_STATE_TONE[state]]}`}
+            style={{ flexGrow: counts[state], flexBasis: 0, minWidth: 4 }}
+          />
+        ))}
+      </div>
+      <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[12px] text-slate-600">
+        {present.map((state) => (
+          <span key={state} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${toneDotClass[GUIDE_STATE_TONE[state]]}`} />
+            {stateCountText(state, counts[state])}
+          </span>
+        ))}
+      </p>
+    </div>
+  );
 };
 
 /** Color de la diferencia, el mismo de su estado. */

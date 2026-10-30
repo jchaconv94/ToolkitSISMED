@@ -21,7 +21,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { api } from "../services/api";
 import { formatNumber } from "../services/numberFormat";
 import { monthFull } from "../services/availabilityExport";
-import { GUIDE_STATE_HINT, GUIDE_STATE_LABEL, GUIDE_STATE_ORDER, looksLikeWarehouse, reviewGuides, reviewMonths, type GuideLine, type GuideState, type ReviewSite } from "../services/guidesReview";
+import { GUIDE_STATE_ORDER, looksLikeWarehouse, reviewGuides, reviewMonths, type GuideLine, type GuideState, type ReviewSite } from "../services/guidesReview";
 import { buildGuidesReviewWorkbook, guidesReviewFileName, siteCode } from "../services/guidesReviewExport";
 import type { IciSource, SourceData, WarehouseSource } from "../services/guidesReviewLoad";
 import { applyNote, loadNotes, loadRecentNotes, noteKey, rememberNote, saveNotes, saveRecentNotes, suggestedNotes, type ReviewNotes } from "../services/guidesReviewNotes";
@@ -46,7 +46,7 @@ import {
   type SourceFiles,
   type SourceKind,
 } from "../services/guidesReviewSources";
-import { EmptyState, MobileFilterButton, SheetGroupTitle, SheetOption, StatusChip, TableSearch, UnderlineTabs, toneDotClass, useTableSort, type Tone } from "./ui/kit";
+import { EmptyState, MobileFilterButton, SheetGroupTitle, SheetOption, StatusChip, TableSearch, UnderlineTabs, useTableSort } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
 import { BottomSheet } from "./ui/BottomSheet";
 import { SortableTableHead, useFloatingTableHead, type SortableHeadColumn } from "./ui/FloatingTableHead";
@@ -54,7 +54,7 @@ import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { stickyBarClass, useStickyBar } from "./ui/useStickyBar";
 import { useIsDesktop } from "./ui/useIsDesktop";
-import { GUIDE_STATE_TONE, GuideStateKpis, GuidesReviewDetail } from "./GuidesReviewDetail";
+import { GuideResultBar, GuideStateKpis, GuidesReviewDetail } from "./GuidesReviewDetail";
 import { GuidesReviewLines } from "./GuidesReviewLines";
 
 /**
@@ -163,21 +163,21 @@ const noticeTexts = (notices: CopyNotice[]) => {
 
 const NO_MICRORED = "__none__";
 
-type SortKey = "name" | "guides" | "sentProducts" | "receivedProducts" | "complete" | "notSent" | "extra" | "short" | "notReceived" | "observed";
+type SortKey = "name" | "guides" | "products" | "result" | "review";
 
-/** Las columnas de la hoja CONTROL del Excel del usuario, en su mismo orden. */
+/**
+ * Columnas de la tabla de establecimientos (rehecha el 2026-10-30: con las diez columnas de la
+ * hoja CONTROL, «Salida 96 · Ingreso 99 · Completo 85» no se entendía a simple vista). Cada fila
+ * se lee como una frase: cuántas guías, cuántos productos salieron e ingresaron, cómo ingresó cada
+ * producto (`GuideResultBar`) y cuánto falta revisar. Las cifras por estado siguen en el Excel.
+ */
 const COLUMNS: SortableHeadColumn<SortKey>[] = [
   { key: "name", label: "Establecimiento" },
-  { key: "guides", label: "Nº guías", align: "center", fit: true, title: "Guías de salida del almacén en el mes" },
-  { key: "sentProducts", label: "Salida med", align: "center", fit: true, title: "Productos que salieron del almacén en el mes" },
-  { key: "receivedProducts", label: "Ingreso med", align: "center", fit: true, title: "Productos que el establecimiento ingresó en su ICI" },
-  // Un punto del color de cada estado antes de su título: la columna dice de qué color son sus cifras.
-  ...GUIDE_STATE_ORDER.map((state) => ({ key: state, label: GUIDE_STATE_LABEL[state], align: "center" as const, fit: true, title: GUIDE_STATE_HINT[state], marker: toneDotClass[GUIDE_STATE_TONE[state]] })),
-  { key: "observed", label: "Observados", align: "center", fit: true, title: "Diferencias con observación" },
+  { key: "guides", label: "Guías", align: "center", fit: true, title: "Guías de salida del almacén en el mes" },
+  { key: "products", label: "Productos", align: "center", fit: true, title: "Productos que salieron en las guías del mes y que el establecimiento ingresó en su ICI" },
+  { key: "result", label: "Cómo ingresó cada producto", title: "Ordena por la cantidad de productos con diferencias" },
+  { key: "review", label: "Revisión", fit: true, title: "Diferencias que faltan revisar: las que aún no tienen observación" },
 ];
-
-const Count: React.FC<{ value: number; tone: Tone }> = ({ value, tone }) =>
-  value > 0 ? <StatusChip tone={tone} label={formatNumber(value)} /> : <span className="text-[13px] text-slate-300">0</span>;
 
 const CodeChip: React.FC<{ code: string }> = ({ code }) => <span className="inline-block rounded bg-slate-100 px-1.5 font-mono text-[11px] text-slate-600">{code}</span>;
 
@@ -968,16 +968,11 @@ const ReviewResults: React.FC<{
     {
       name: (i) => i.name,
       guides: (i) => i.site.guides.length,
-      sentProducts: (i) => i.site.sentProducts,
-      receivedProducts: (i) => (i.site.iciCode ? i.site.receivedProducts : null),
-      complete: (i) => (i.site.iciCode ? i.site.counts.complete : null),
-      short: (i) => (i.site.iciCode ? i.site.counts.short : null),
-      extra: (i) => (i.site.iciCode ? i.site.counts.extra : null),
-      notReceived: (i) => (i.site.iciCode ? i.site.counts.notReceived : null),
-      notSent: (i) => (i.site.iciCode ? i.site.counts.notSent : null),
-      observed: (i) => (i.site.iciCode && i.site.differences ? observedCount(i.site, notes) / i.site.differences : null),
+      products: (i) => i.site.sentProducts,
+      result: (i) => (i.site.iciCode ? i.site.differences : null),
+      review: (i) => (i.site.iciCode ? i.site.differences - observedCount(i.site, notes) : null),
     },
-    { firstDir: { guides: "desc", sentProducts: "desc", receivedProducts: "desc", complete: "desc", short: "desc", extra: "desc", notReceived: "desc", notSent: "desc" } },
+    { firstDir: { guides: "desc", products: "desc", result: "desc", review: "desc" } },
   );
   // Siempre agrupado por microred, como la hoja CONTROL; el orden elegido rige dentro de cada una.
   const sorted = useMemo(() => byMicrored(bySort), [bySort]);
@@ -1036,15 +1031,39 @@ const ReviewResults: React.FC<{
 
   const showOptions = SHOW_ORDER.filter((value) => value === "all" || value === show || showCount(value) > 0);
 
-  // Sin verde ni ámbar: esos colores son de los estados (solo «Completo» va en verde).
-  const observedChip = (site: ReviewSite) => {
-    if (!site.iciCode || !site.differences) return <span className="text-[13px] text-slate-300">—</span>;
+  /**
+   * Cuánto falta revisar: «Todo bien» si todo ingresó completo; si hay diferencias, cuántas
+   * faltan observar, y «Revisado» cuando todas tienen observación. Sin ámbar ni violeta: esos
+   * colores son de los estados.
+   */
+  const reviewStatus = (site: ReviewSite) => {
+    if (!site.iciCode) return <span className="text-[13px] text-slate-300">—</span>;
+    if (!site.differences) {
+      return <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] font-bold text-emerald-700"><CheckCircle2 className="h-4 w-4" />Todo bien</span>;
+    }
     const done = observedCount(site, notes);
-    const label = `${formatNumber(done)} de ${formatNumber(site.differences)}`;
-    return done === site.differences
-      ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-[12.5px] font-black text-slate-700"><Check className="h-3.5 w-3.5" />{label}</span>
-      : <StatusChip tone="neutral" label={label} />;
+    const of = `${formatNumber(done)} de ${formatNumber(site.differences)} con observación`;
+    if (done === site.differences) {
+      return (
+        <div className="whitespace-nowrap">
+          <p className="inline-flex items-center gap-1.5 text-[13px] font-bold text-slate-700"><Check className="h-4 w-4" />Revisado</p>
+          <p className="text-[11.5px] text-slate-500">{of}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="whitespace-nowrap">
+        <p className="text-[13px] font-bold text-slate-800">{formatNumber(site.differences - done)} por revisar</p>
+        <p className="text-[11.5px] text-slate-500">{of}</p>
+      </div>
+    );
   };
+  const productsCell = (site: ReviewSite) => (
+    <div className="whitespace-nowrap text-[13px] text-slate-600">
+      <p><b className="font-bold text-slate-900">{formatNumber(site.sentProducts)}</b> enviados</p>
+      {site.iciCode && <p><b className="font-bold text-slate-900">{formatNumber(site.receivedProducts)}</b> ingresados</p>}
+    </div>
+  );
   const groupLabel = (m: string) => {
     const stats = groupStats.get(m);
     const parts = [plural(stats?.sites ?? 0, "establecimiento", "establecimientos")];
@@ -1228,22 +1247,17 @@ const ReviewResults: React.FC<{
                               </td>
                             </tr>
                           )}
-                          <tr onClick={() => setOpen({ list: sorted, index: sorted.indexOf(item) })} className="h-14 cursor-pointer border-t border-slate-100 hover:bg-slate-50">
-                            <td className="px-4 py-2">
+                          <tr onClick={() => setOpen({ list: sorted, index: sorted.indexOf(item) })} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50">
+                            <td className="px-4 py-3">
                               <p className="text-[13.5px] font-semibold text-slate-900">{item.name}</p>
                               <CodeChip code={siteCode(site)} />
                             </td>
-                            <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.guides.length)}</td>
-                            <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.sentProducts)}</td>
-                            {site.iciCode ? (
-                              <>
-                                <td className="px-3 py-2 text-center text-[13px] font-semibold text-slate-700">{formatNumber(site.receivedProducts)}</td>
-                                {GUIDE_STATE_ORDER.map((state) => <td key={state} className="px-3 py-2 text-center"><Count value={site.counts[state]} tone={GUIDE_STATE_TONE[state]} /></td>)}
-                                <td className="px-3 py-2 text-center">{observedChip(site)}</td>
-                              </>
-                            ) : (
-                              <td colSpan={7} className="px-3 py-2 text-center"><StatusChip tone="neutral" label={`Falta importar su ICI de ${monthLabel.toLowerCase()}`} /></td>
-                            )}
+                            <td className="px-3 py-3 text-center text-[13px] font-bold text-slate-900">{formatNumber(site.guides.length)}</td>
+                            <td className="px-3 py-3">{productsCell(site)}</td>
+                            <td className="w-[38%] px-4 py-3">
+                              {site.iciCode ? <GuideResultBar counts={site.counts} /> : <StatusChip tone="neutral" label={`Falta importar su ICI de ${monthLabel.toLowerCase()}`} />}
+                            </td>
+                            <td className="px-4 py-3">{reviewStatus(site)}</td>
                             <td className="px-2 text-slate-400"><ChevronRight className="h-4 w-4" /></td>
                           </tr>
                         </React.Fragment>
@@ -1258,7 +1272,6 @@ const ReviewResults: React.FC<{
                 {rows.map((item, index) => {
                   const { site } = item;
                   const newGroup = index === 0 || rows[index - 1].microred !== item.microred;
-                  const done = observedCount(site, notes);
                   return (
                     <React.Fragment key={site.destination}>
                       {newGroup && (
@@ -1270,22 +1283,14 @@ const ReviewResults: React.FC<{
                         <div className="min-w-0 flex-1">
                           <p className="text-[14px] font-semibold text-slate-900">{item.name}</p>
                           <p className="text-xs text-slate-500">
-                            <span className="font-mono">{siteCode(site)}</span> · {plural(site.guides.length, "guía", "guías")} · salida {formatNumber(site.sentProducts)}{site.iciCode ? ` · ingreso ${formatNumber(site.receivedProducts)}` : ""}
+                            <span className="font-mono">{siteCode(site)}</span> · {plural(site.guides.length, "guía", "guías")} · {formatNumber(site.sentProducts)} enviados{site.iciCode ? ` · ${formatNumber(site.receivedProducts)} ingresados` : ""}
                           </p>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {!site.iciCode ? (
-                              <StatusChip tone="neutral" label={`Falta importar su ICI de ${monthLabel.toLowerCase()}`} />
-                            ) : site.differences === 0 ? (
-                              <StatusChip tone="success" label="Todo completo" />
-                            ) : (
-                              <>
-                                {GUIDE_STATE_ORDER.filter((state) => state !== "complete" && site.counts[state] > 0).map((state) => (
-                                  <StatusChip key={state} tone={GUIDE_STATE_TONE[state]} label={`${GUIDE_STATE_LABEL[state]} ${formatNumber(site.counts[state])}`} />
-                                ))}
-                                <StatusChip tone="neutral" label={`${formatNumber(done)} de ${formatNumber(site.differences)} observados`} />
-                              </>
-                            )}
+                          <div className="mt-2.5">
+                            {site.iciCode ? <GuideResultBar counts={site.counts} /> : <StatusChip tone="neutral" label={`Falta importar su ICI de ${monthLabel.toLowerCase()}`} />}
                           </div>
+                          {site.iciCode && (
+                            <div className="mt-2 border-t border-slate-100 pt-2">{reviewStatus(site)}</div>
+                          )}
                         </div>
                         <ChevronRight className="mt-1 h-5 w-5 shrink-0 text-slate-400" />
                       </button>
