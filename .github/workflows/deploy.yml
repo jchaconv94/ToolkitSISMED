@@ -3,6 +3,9 @@ name: Desplegar a GitHub Pages
 on:
   push:
     branches: ["main"]
+  # Para volver a publicar a mano desde Actions → «Desplegar a GitHub Pages» → «Run workflow».
+  # El 2026-11-05 GitHub unió un PR con errores 500/502 y no disparó la publicación del push.
+  workflow_dispatch:
 
 permissions:
   contents: write

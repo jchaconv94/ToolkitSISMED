@@ -76,7 +76,7 @@ git commit-tree "HEAD^{tree}" -p origin/main -p HEAD -m "merge: ..."
 
 Conserva ambas historias y deja como contenido el proyecto vigente.
 
-El sitio se publica en la rama `gh-pages` con el `dist` compilado. `.github/workflows/deploy.yml` lo hace en cada cambio de `main`, inyectando las variables de Supabase desde los secretos del repositorio. A mano:
+El sitio se publica en la rama `gh-pages` con el `dist` compilado. `.github/workflows/deploy.yml` lo hace en cada cambio de `main`, inyectando las variables de Supabase desde los secretos del repositorio. Si un cambio de `main` no se publicó (el 2026-11-05 GitHub unió el PR #305 con errores 500/502 y no disparó la publicación), se lanza a mano desde Actions → «Desplegar a GitHub Pages» → «Run workflow» (`workflow_dispatch`). Sin GitHub Actions:
 
 ```bash
 npx gh-pages -d dist -r https://github.com/jchaconv94/ToolkitSISMED.git
