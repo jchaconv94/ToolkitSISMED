@@ -496,7 +496,10 @@ export const GuidesReviewModule: React.FC = () => {
 
   const places = warehouseData?.places;
   const products = warehouseData?.products;
-  const productName = useCallback((code: string) => products?.get(code) || code, [products]);
+  const iciProducts = iciData?.products;
+  // El catálogo del almacén solo trae lo que el almacén maneja; lo ingresado sin guía toma el
+  // nombre del catálogo del SISMED del ICI.
+  const productName = useCallback((code: string) => products?.get(code) || iciProducts?.get(code) || code, [products, iciProducts]);
 
   const isWarehouse = useCallback((code: string) => {
     const type = places?.get(code)?.type || "";
@@ -899,7 +902,7 @@ const SourceCard: React.FC<{
                 {files.required.map((name) => <FileChip key={name} name={name} />)}
                 {files.optional.map((name) => <FileChip key={name} name={name} optional />)}
               </div>
-              {files.optional.length > 0 && <p className="mt-1.5 text-[11.5px] text-slate-400">Los de borde punteado son opcionales: dan los nombres de establecimientos y productos.</p>}
+              {files.optional.length > 0 && <p className="mt-1.5 text-[11.5px] text-slate-400">Los de borde punteado son opcionales: dan los nombres de {kind === "warehouse" ? "establecimientos y productos" : "los productos que el almacén no maneja"}.</p>}
             </div>
           ) : slot.status !== "error" && (
             <p className="mt-4 text-[12px] text-slate-500">La carpeta <b className="font-mono">DATOS</b> del SISMED. Se leen {names}.</p>
