@@ -237,6 +237,9 @@ describe("groupExpiryByProduct", () => {
       },
     ],
     90,
+    // Se arma al leer el describe, antes de que beforeEach fije la fecha: sin NOW tomaba la del
+    // día y desde el 01/11/2026 el lote del 31/10/2026 salía vencido y la prueba fallaba.
+    NOW,
   );
 
   it("junta los lotes de cada producto de todos los establecimientos", () => {
