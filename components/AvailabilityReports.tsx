@@ -7,13 +7,14 @@ import { formatOneDecimal } from "../services/stockStatus";
 import { formatNumber } from "../services/numberFormat";
 import { STATUS_LABEL, buildTableWorkbook, monthLabel, type TableSheet } from "../services/availabilityExport";
 import { saveAs } from "file-saver";
+import { monthsCount } from "../services/availabilityHistory";
 import { CustomSelect } from "./ui/CustomSelect";
 import {
   TFORMDET_OUTFLOWS,
   DME_LEVEL_LABEL, averageConsumption, type AvailabilityItem, type AvailabilityReport, type StatusCounts, type EstablishmentSummary, type LevelThresholds, type MicroredSummary, type WarehouseItem,
 } from "../services/availabilityReport";
 import {
-  isStill,
+  isStill, PEAK_MIN_MONTHS,
   EXPIRY_BUCKETS, EXPIRY_BUCKET_LABEL, isSeparateSite, pharmacyKind, XYZ_LABEL, abcXyzReport, consumptionReport, lotRiskOf, lotRiskReport, overstockAtRisk, overstockReport, planUsage, productGapReport, redistributionPlan, siteGapReport, warehouseReport,
   type AbcProduct, type ClassifiedItem, type LotRiskRow, type OverstockRow, type PeakRow, type PlanRow, type PlanSource, type ProductGap, type SiteGapRow, type WarehouseRow,
 } from "../services/availabilityInsights";
@@ -1182,7 +1183,7 @@ const OutflowsSection: React.FC<{ ctx: ReportContext; item: AvailabilityItem }> 
       <div>
         {heading}
         <p className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] font-semibold text-amber-800">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />No tuvo consumo ni otras salidas en los {ctx.months.length} meses: el stock no se mueve.
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />No tuvo consumo ni otras salidas {ctx.months.length === 1 ? "en el mes" : `en los ${ctx.months.length} meses`}: el stock no se mueve.
         </p>
       </div>
     ) : null;
@@ -1193,7 +1194,7 @@ const OutflowsSection: React.FC<{ ctx: ReportContext; item: AvailabilityItem }> 
       {heading}
       {noUse && (
         <p className="mb-2 rounded-xl bg-teal-50 px-3 py-2.5 text-[13px] font-semibold text-teal-800">
-          Sin consumo, pero tuvo otras salidas: {formatNumber(total)} en los {ctx.months.length} meses.
+          Sin consumo, pero tuvo otras salidas: {formatNumber(total)} {ctx.months.length === 1 ? "en el mes" : `en los ${ctx.months.length} meses`}.
         </p>
       )}
       <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -1683,6 +1684,9 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
     { key: "xyz", label: "Tipo", sort: (r) => r.xyz, render: (r) => <span className="whitespace-nowrap rounded-md bg-slate-100 px-2 py-0.5 text-[11.5px] font-bold text-slate-600">{r.xyz} · {XYZ_LABEL[r.xyz]}</span> },
     { key: "value", label: "Valor del pico", align: "right", sort: (r) => r.value, firstDir: "desc", render: (r) => <span className="font-mono">{money(r.value)}</span> },
   ];
+  // Con menos de 3 meses no hay con qué comparar: todo saldría «X, estable» y sin picos, lo que
+  // da una idea equivocada (pedido del usuario, 2026-11-05, con un TFORMDET de un solo mes).
+  if (ctx.months.length < PEAK_MIN_MONTHS) return <ShortConsumption months={ctx.months.length} />;
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
@@ -1774,11 +1778,25 @@ export const ConsumptionReport: React.FC<{ ctx: ReportContext }> = ({ ctx }) => 
   );
 };
 
+/** Consumos irregulares con menos de 3 meses de consumo en el archivo. */
+const ShortConsumption: React.FC<{ months: number }> = ({ months }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <EmptyState
+      icon={<CalendarClock className="h-6 w-6" />}
+      title={`Hacen falta al menos ${PEAK_MIN_MONTHS} meses de consumo`}
+      description={`El archivo trae ${monthsCount(months)}. Un pico se reconoce comparando un mes con los otros meses con consumo, y qué tan parejo es el consumo, viendo cómo cambia de un mes a otro. Con 12 meses se ve mejor.`}
+    />
+  </div>
+);
+
 /* ---------------------------------------------------------------- ABC × XYZ */
 
 export const AbcReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap, list?: ProductGap[]) => void }> = ({ ctx, onProduct }) => {
   const { anchor, toTable } = useTableAnchor();
   const data = useMemo(() => abcXyzReport(ctx.report.items), [ctx.report.items]);
+  // Con menos de 3 meses, X · Y · Z no dicen nada (todo saldría «estable»): se clasifica solo por gasto.
+  const noXyz = ctx.months.length < PEAK_MIN_MONTHS;
+  const classOf = (r: AbcProduct) => (noXyz ? r.abc : `${r.abc}${r.xyz}`);
   // Al tocar una fila se abre el producto en toda la red, el mismo panel de «¿Dónde falta?».
   const gaps = useMemo(() => new Map(productGapReport(ctx.report.items, ctx.warehouse).map((g) => [g.medCode, g])), [ctx.report.items, ctx.warehouse]);
   const openRow = (r: AbcProduct, list: AbcProduct[]) => {
@@ -1815,7 +1833,7 @@ export const AbcReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap
   const cellName = (k: string) => `${ABC_ROW[k[0] as "A" | "B" | "C"].name.toLowerCase()}, consumo ${XYZ_LABEL[k[1] as "X" | "Y" | "Z"].toLowerCase()}`;
   const columns: Column<AbcProduct>[] = [
     { key: "description", label: "Producto", sort: (r) => r.description, render: (r) => <ProductCell code={r.medCode} description={r.description} /> },
-    { key: "class", label: "Clase", sort: (r) => `${r.abc}${r.xyz}`, render: (r) => <span className="rounded-md bg-teal-50 px-2 py-0.5 font-mono text-[12px] font-black text-teal-800">{r.abc}{r.xyz}</span> },
+    { key: "class", label: "Clase", sort: classOf, render: (r) => <span className="rounded-md bg-teal-50 px-2 py-0.5 font-mono text-[12px] font-black text-teal-800">{classOf(r)}</span> },
     { key: "trend", label: "Consumo de la red", render: (r) => <Sparkline values={r.consumption} width={140} /> },
     { key: "units", label: "Unidades", align: "right", sort: (r) => r.units, firstDir: "desc", render: (r) => <span className="font-mono">{formatNumber(r.units)}</span> },
     { key: "value", label: "Valor consumido", align: "right", sort: (r) => r.value, firstDir: "desc", render: (r) => <span className="font-mono font-bold text-slate-900">{money(r.value)}</span> },
@@ -1827,11 +1845,19 @@ export const AbcReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap
   return (
     <div className="space-y-4">
       <KpiStrip cols="md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard watermark tone="info" icon={<Boxes />} label="Valor consumido" value={money(data.total)} hint={`${formatNumber(data.products.length)} productos en ${ctx.months.length} meses`} onClick={() => { setCell(null); toTable(); }} active={!cell} />
+        <KpiCard watermark tone="info" icon={<Boxes />} label="Valor consumido" value={money(data.total)} hint={`${formatNumber(data.products.length)} productos en ${monthsCount(ctx.months.length)}`} onClick={() => { setCell(null); toTable(); }} active={!cell} />
         <KpiCard watermark tone="danger" label="Clase A" value={formatNumber(data.counts.A.products)} hint={`productos · ${pctText(share("A"))} del valor`} />
         <KpiCard watermark tone="warning" label="Clase B" value={formatNumber(data.counts.B.products)} hint={`productos · ${pctText(share("B"))} del valor`} />
         <KpiCard watermark tone="neutral" label="Clase C" value={formatNumber(data.counts.C.products)} hint={`productos · ${pctText(share("C"))} del valor`} />
       </KpiStrip>
+      {noXyz ? (
+        <ChartCard title="Matriz ABC × XYZ" info={INFO.abc}>
+          <p className="flex items-start gap-2.5 rounded-xl bg-slate-50 px-4 py-3 text-[13px] text-slate-600">
+            <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />
+            <span>La matriz cruza el gasto con qué tan parejo es el consumo (X, Y, Z), y eso necesita al menos {PEAK_MIN_MONTHS} meses de consumo; el archivo trae {monthsCount(ctx.months.length)}. Por ahora los productos se clasifican solo por gasto: clase A, B y C.</span>
+          </p>
+        </ChartCard>
+      ) : (
       <ChartCard title="Matriz ABC × XYZ" info={INFO.abc}>
         {tip.layer}
         {/* Sin desplazamiento: la matriz entra en el ancho, también en el celular (pedido del usuario, 2026-10-17). */}
@@ -1874,14 +1900,15 @@ export const AbcReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap
           ))}
         </div>
       </ChartCard>
+      )}
       <ReportTable
         anchorRef={anchor}
         title={cell ? `Productos ${cell} · ${cellName(cell)}` : "Productos por valor consumido"}
         info={INFO.abc}
         rows={rows}
         columns={columns}
-        excel={{ name: "Clasificación ABC", title: cell ? `Productos ${cell}` : "Productos por valor consumido (ABC × XYZ)", subtitle: ctx.reportTitle, columns: [
-          ...xProduct((r: AbcProduct) => r), { header: "Clase", width: 8, value: (r) => `${r.abc}${r.xyz}` }, { header: "Unidades", width: 11, fmt: "int", value: (r) => r.units },
+        excel={{ name: "Clasificación ABC", title: cell ? `Productos ${cell}` : noXyz ? "Productos por valor consumido (ABC)" : "Productos por valor consumido (ABC × XYZ)", subtitle: ctx.reportTitle, columns: [
+          ...xProduct((r: AbcProduct) => r), { header: "Clase", width: 8, value: classOf }, { header: "Unidades", width: 11, fmt: "int", value: (r) => r.units },
           { header: "Valor consumido", width: 14, fmt: "money", value: (r) => r.value }, { header: "% del valor", width: 11, fmt: "pct", value: (r) => r.share }, { header: "Acumulado", width: 11, fmt: "pct", value: (r) => r.cumulative },
           { header: "Establecimientos", width: 13, fmt: "int", value: (r) => r.establishments }, ...xMonths(ctx, (r: AbcProduct) => r.consumption),
         ] }}
@@ -1893,7 +1920,7 @@ export const AbcReport: React.FC<{ ctx: ReportContext; onProduct: (g: ProductGap
         minWidth={1050}
         card={(r) => (
           <>
-            <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><ProductCell code={r.medCode} description={r.description} /></div><span className="rounded-md bg-teal-50 px-2 py-0.5 font-mono text-[12px] font-black text-teal-800">{r.abc}{r.xyz}</span></div>
+            <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><ProductCell code={r.medCode} description={r.description} /></div><span className="rounded-md bg-teal-50 px-2 py-0.5 font-mono text-[12px] font-black text-teal-800">{classOf(r)}</span></div>
             <p className="mt-1.5 text-[12px] text-slate-600">{money(r.value)} · {shareText(r.share)} del valor · consumo {formatNumber(r.units)}</p>
           </>
         )}

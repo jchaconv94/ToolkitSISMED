@@ -5,7 +5,7 @@ import { CodeChip, LevelChip, pctText } from "./AvailabilityReports";
 import { dmeLevelOf } from "../services/availabilityReport";
 import { monthFull } from "../services/availabilityExport";
 import type { AvailabilityFormula } from "../services/availabilityConfig";
-import { EXCLUDED_LABEL, HISTORY_WINDOW, type HistorySavePlan } from "../services/availabilityHistory";
+import { EXCLUDED_LABEL, HISTORY_WINDOW, monthsCount, windowFor, type HistorySavePlan } from "../services/availabilityHistory";
 import { formatNumber } from "../services/numberFormat";
 
 const two = (n: number) => String(n).padStart(2, "0");
@@ -61,7 +61,7 @@ export const AvailabilityHistorySaveDialog: React.FC<{
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           {plan.blocked === "open-month"
             ? `${capital(month)} aún no termina: se puede guardar cuando cierre el mes.`
-            : `Hacen falta ${HISTORY_WINDOW} meses de consumo y el TFORMDET trae ${monthsInFile}. Descárguelo del Toolkit con 12 meses o más.`}
+            : `Para guardar ${month} hacen falta ${HISTORY_WINDOW} meses de consumo y el TFORMDET trae ${monthsCount(monthsInFile)}. Descargue del Toolkit el TFORMDET de ${monthFull(windowFor(plan.month).from)} a ${monthFull(plan.month)}, o con más meses.`}
         </p>
       )}
       {last && !plan.blocked && (

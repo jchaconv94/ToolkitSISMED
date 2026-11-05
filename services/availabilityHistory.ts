@@ -73,6 +73,26 @@ export const previousMonth = (month: string) => {
   return m === 1 ? `${y - 1}12` : `${y}${String(m - 1).padStart(2, "0")}`;
 };
 
+/**
+ * Los meses que debe traer el TFORMDET para calcular un corte con sus 12 meses de consumo:
+ * para `202610`, de `202511` a `202610`.
+ */
+export const windowFor = (cut: string, window = HISTORY_WINDOW): { from: string; to: string } => {
+  let from = cut;
+  for (let i = 1; i < window; i++) from = previousMonth(from);
+  return { from, to: cut };
+};
+
+/**
+ * ¿El archivo trae menos meses de consumo de los recomendables? Solo se avisa, no se bloquea
+ * (2026-11-05, pedido del usuario): una UNGET o un establecimiento que recién empieza a
+ * registrar en el SISMED tiene pocos meses. El historial sí exige los 12 (`planHistorySave`).
+ */
+export const isShortWindow = (months: readonly string[], window = HISTORY_WINDOW) => months.length > 0 && months.length < window;
+
+/** «1 mes», «6 meses». */
+export const monthsCount = (n: number) => (n === 1 ? "1 mes" : `${n} meses`);
+
 /** Mes actual en Lima, «YYYYMM»: ese mes y los siguientes no se guardan (están en curso). */
 export const currentMonthKey = (now: Date = new Date()): string => {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit" }).formatToParts(now);

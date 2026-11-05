@@ -11,7 +11,7 @@ import { getUserJurisdictionScope } from "../services/jurisdictionService";
 import { isOnline } from "../services/connectivity";
 import { useOnline } from "./ui/useOnline";
 import {
-  HISTORY_WINDOW, availabilityHistoryApi, backfillMonths, historySeries, indexHistory, lastMonthsOf, planHistorySave, rowsAtMonth,
+  HISTORY_WINDOW, availabilityHistoryApi, backfillMonths, historySeries, indexHistory, isShortWindow, lastMonthsOf, monthsCount, planHistorySave, rowsAtMonth, windowFor,
   type HistoryData, type HistorySavePlan,
 } from "../services/availabilityHistory";
 import { AvailabilityHistory, type HistoryStatus } from "./AvailabilityHistory";
@@ -32,6 +32,7 @@ import { formatNumber } from "../services/numberFormat";
 import { tformdetFromSheet, type TformdetFileResult } from "../services/tformdetFile";
 import { availabilityStore, fileSignature } from "../services/availabilityStore";
 import { BottomSheet } from "./ui/BottomSheet";
+import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { useIsDesktop } from "./ui/useIsDesktop";
 import {
   AbcReport, ConsumptionReport, drawerNav, EstablishmentDetail, EstablishmentsReport, ExpiryReport, GapsReport, OverstockReport, ProductDrawer, ProductGapDrawer, RedistributionReport, SummaryReport, WarehouseReport,
@@ -299,13 +300,22 @@ export const AvailabilityModule: React.FC = () => {
   const [preparing, setPreparing] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  /**
+   * Aviso al leer un TFORMDET con menos de 12 meses de consumo (2026-11-05, pedido del usuario: el
+   * archivo se cargaba sin decir nada y recién el historial se quejaba). Solo avisa: una UNGET o
+   * un establecimiento que recién empieza en el SISMED tiene pocos meses y debe poder ver su reporte.
+   */
+  const [shortNotice, setShortNotice] = useState<{ name: string; months: string[] } | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const handleDispFile = async (file: File) => {
     setReading("disp");
+    setShortNotice(null);
     try {
       // Solo la consulta TFORMDET del Toolkit (uno o varios meses): trae consumo, stock y lotes.
       const { data, last } = await readTformdetFile(file);
       applyFile(file.name, data, last);
       setCalculated(false);
+      if (isShortWindow(data.months)) setShortNotice({ name: file.name, months: data.months });
       const savedAt = new Date().toISOString();
       const ok = await availabilityStore.saveFile(storeUser, { name: file.name, savedAt, data, last });
       setStored(ok ? { name: file.name, savedAt } : null);
@@ -483,6 +493,9 @@ export const AvailabilityModule: React.FC = () => {
 
   const months = dispFile?.data.months ?? [];
   const cut = months[months.length - 1];
+  /** Menos de 12 meses de consumo: se puede calcular, pero se avisa en la carga y en el reporte. */
+  const short = isShortWindow(months);
+  const needed = cut ? windowFor(cut) : null;
 
   const historyOptions = useMemo(() => ({ rules: { all: config.formula.all, essential: config.formula.essential }, aggregate: config.formula.aggregate, levels: config.formula.levels }), [config.formula]);
   const planPcts = useMemo(() => {
@@ -799,6 +812,15 @@ export const AvailabilityModule: React.FC = () => {
               </span>
             </div>
           )}
+          {d && short && needed && (
+            <div className="mt-3 flex items-start gap-2.5 rounded-xl bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Este archivo solo trae <b>{monthsCount(months.length)} de consumo</b>. Lo recomendable son {HISTORY_WINDOW}: para el corte de {monthFull(needed.to)}, de {monthFull(needed.from)} a {monthFull(needed.to)}.
+                {" "}Se puede calcular igual, pero el consumo promedio sale de {months.length === 1 ? "ese mes" : "esos meses"} y el corte no se puede guardar en el historial.
+              </span>
+            </div>
+          )}
           <div className="mt-5 flex justify-end">
             <button type="button" disabled={!dispFile || !!reading} onClick={startResults} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-6 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto">
               <Activity className="h-4 w-4" />Calcular disponibilidad
@@ -806,6 +828,31 @@ export const AvailabilityModule: React.FC = () => {
           </div>
         </div>
         <AvailabilityConfigDialog open={configOpen} onClose={() => setConfigOpen(false)} config={config} onSaved={setConfig} previewRows={null} />
+        <input ref={picker} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDispFile(f); e.target.value = ""; }} />
+        {shortNotice && (() => {
+          const n = shortNotice.months.length;
+          const win = windowFor(shortNotice.months[n - 1]);
+          return (
+            <ConfirmationDialog
+              isOpen
+              tone="warning"
+              icon={<CalendarClock />}
+              title={`Este archivo solo trae ${monthsCount(n)} de consumo`}
+              description={`La disponibilidad se calcula con ${HISTORY_WINDOW} meses de consumo. Con menos, el consumo promedio sale de pocos meses, la situación de cada producto puede no ser la real y el corte no se puede guardar en el historial.`}
+              confirmLabel="Elegir otro archivo"
+              cancelLabel="Continuar con este archivo"
+              onConfirm={() => { setShortNotice(null); picker.current?.click(); }}
+              onCancel={() => setShortNotice(null)}
+            >
+              <dl className="space-y-1.5 rounded-xl bg-slate-50 px-4 py-3 text-[13px]">
+                <div className="flex items-center gap-2 font-semibold text-slate-800"><FileSpreadsheet className="h-4 w-4 shrink-0 text-teal-700" /><span className="truncate">{shortNotice.name}</span></div>
+                <div className="flex gap-2"><dt className="w-28 shrink-0 text-slate-500">Trae</dt><dd className="font-semibold text-slate-800">{n === 1 ? monthFull(win.to) : `${monthFull(shortNotice.months[0])} a ${monthFull(win.to)}`}</dd></div>
+                <div className="flex gap-2"><dt className="w-28 shrink-0 text-slate-500">Lo recomendable</dt><dd className="font-semibold text-slate-800">{monthFull(win.from)} a {monthFull(win.to)}, o más meses</dd></div>
+              </dl>
+              <p className="mt-3 text-[12.5px] leading-relaxed text-slate-500">Si la UNGET o el establecimiento recién empieza a registrar en el SISMED, se puede continuar con este archivo.</p>
+            </ConfirmationDialog>
+          );
+        })()}
       </div>
     );
   }
@@ -919,6 +966,15 @@ export const AvailabilityModule: React.FC = () => {
         </div>
       </div>
 
+      {short && (
+        <p className="mb-3 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[12.5px] text-amber-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Calculado con <b>{monthsCount(months.length)} de consumo</b>; lo recomendable son {HISTORY_WINDOW}. Las situaciones pueden no ser las reales y el corte no se guarda en el historial.
+            {" "}<button type="button" onClick={() => setCalculated(false)} className="font-bold text-amber-900 underline underline-offset-2 hover:text-amber-950">Cargar otro TFORMDET</button>
+          </span>
+        </p>
+      )}
       <div ref={scroller} />
       {openCode && <EstablishmentDetail ctx={openIsOut ? { ...ctx, report: outReport, pharmacy: outPharmacyReport, outside: undefined, outsideDetail: true } : ctx} code={openCode} onSwitch={(c) => { setProduct(null); setOpenCode(c); requestAnimationFrame(() => scrollMain(0)); }} />}
       {/* Los reportes siguen montados (ocultos) mientras el detalle está abierto: así conservan página, filtros y búsqueda. */}
