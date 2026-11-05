@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { buildItems, essentialRows, groupByIpress, parseTformdetHistory, summarize, type AvailabilityRow, type ParsedTformdet } from "./availabilityReport";
 import type { ScopeRule } from "./availabilityConfig";
 import {
-  availableOf, backfillMonths, currentMonthKey, evaluatedCounts, historyRecordsOf, historyRows, historySeries, indexHistory, lastMonthsOf, planHistorySave,
-  previousMonth, previousYearMonth, recordPct, rowsAtMonth, yearMonths,
+  availableOf, backfillMonths, currentMonthKey, evaluatedCounts, historyRecordsOf, historyRows, historySeries, indexHistory, isShortWindow, lastMonthsOf, monthsCount, planHistorySave,
+  previousMonth, previousYearMonth, recordPct, rowsAtMonth, windowFor, yearMonths,
   type HistoryData, type HistoryOptions,
 } from "./availabilityHistory";
 
@@ -101,6 +101,21 @@ describe("historial de disponibilidad: meses", () => {
     expect(previousYearMonth("202609")).toBe("202509");
     expect(previousMonth("202601")).toBe("202512");
     expect(previousMonth("202610")).toBe("202609");
+  });
+
+  it("los 12 meses que debe traer el TFORMDET para un corte", () => {
+    expect(windowFor("202610")).toEqual({ from: "202511", to: "202610" });
+    expect(windowFor("202612")).toEqual({ from: "202601", to: "202612" });
+    expect(windowFor("202601")).toEqual({ from: "202502", to: "202601" });
+  });
+
+  it("menos de 12 meses es un archivo corto (se avisa, no se bloquea)", () => {
+    expect(isShortWindow(["202610"])).toBe(true);
+    expect(isShortWindow(yearMonths(2026).slice(0, 11))).toBe(true);
+    expect(isShortWindow(yearMonths(2026))).toBe(false);
+    expect(isShortWindow([])).toBe(false);
+    expect(monthsCount(1)).toBe("1 mes");
+    expect(monthsCount(6)).toBe("6 meses");
   });
 
   it("el mes en curso es el de Lima, no el de la computadora", () => {

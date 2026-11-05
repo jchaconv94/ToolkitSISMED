@@ -23,6 +23,15 @@ de consumo, y el usuario pidió que el consumo sea siempre de 12 meses.
   atrás** desde la misma ventana: con 24 meses, salen 12 meses anteriores más el corte. Cada uno se
   calcula como si fuera el corte, con su stock al cierre (`stockByMonth`) y su ventana de 12 meses
   (`rowsAtMonth`). Una prueba comprueba que el corte calculado así da lo mismo que el tablero.
+- **TFORMDET con menos de 12 meses** (2026-11-05, pedido del usuario: subió uno de un solo mes, no
+  le avisó nada y recién el historial se quejó): apenas se lee el archivo, una ventana dice «Este
+  archivo solo trae N meses de consumo», qué meses trae y cuáles conviene descargar (`windowFor`:
+  para octubre 2026, de noviembre 2025 a octubre 2026), con «Elegir otro archivo» y «Continuar con
+  este archivo». **Solo avisa, no bloquea** (decisión del usuario: una UNGET o un establecimiento
+  que recién empieza en el SISMED tiene pocos meses y debe ver su reporte). La carga y el reporte
+  llevan un aviso ámbar (`isShortWindow`); el historial sigue exigiendo los 12. Con menos de 3
+  meses, «Consumos irregulares» dice que faltan meses (antes mostraba todo «X, estable» y ningún
+  pico) y la Clasificación ABC queda solo por gasto (A, B, C), sin la matriz × XYZ.
 
 - **Establecimientos fuera del análisis** (2026-10-09; por jurisdicción desde el 2026-10-10): la
   lista de «Establecimientos del análisis» (⋯), que definen la DIRESA y cada UNGET
@@ -64,7 +73,7 @@ botón.
 |---|---|
 | Un establecimiento no informó el mes de corte (con stock 0 saldría todo desabastecido) | No se guarda y se lista como «No informó ese mes» (`reportedMonths` del TFORMDET). Con el TFORMDET real del usuario no pasa: los 34 establecimientos tienen todos los meses. |
 | Mes en curso | No se guarda: lo bloquean la web y el servidor, con la hora de Lima. |
-| Menos de 12 meses de consumo | No se guarda; la ventana dice cuántos trae. |
+| Menos de 12 meses de consumo | No se guarda; la ventana dice cuántos trae y qué meses descargar. Al subir el archivo ya se avisa. |
 | TFORMDET sin clasificación (Toolkit anterior a 2.2.5) | Solo se guarda «todos los productos», con aviso. |
 | Establecimiento fuera del registro o de la jurisdicción | No se guarda y se lista con el motivo. El servidor lo vuelve a comprobar. |
 | El mismo mes dos veces | Reemplaza, no duplica (clave establecimiento + mes + vista). Antes de guardar, avisa cuántos estaban guardados, quién y cuándo. |
