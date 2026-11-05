@@ -138,6 +138,10 @@ const when = (ms: number) => {
   return `el ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} a las ${hourOf(ms)}`;
 };
 const SHORT_NAME: Record<SourceKind, string> = { warehouse: "almacén", ici: "ICI" };
+/** Cada cuánto se comprueba si los archivos de una carpeta cambiaron (solo con la página a la vista). */
+const FOLDER_CHECK_MS = 4000;
+/** Una carpeta que no responde (PC apagada) se vuelve a probar cada minuto. */
+const UNREACHABLE_RETRY_MS = 60_000;
 const SHOWN_REASONS = new Set<CopyReason>(["permission", "unreachable", "unreadable"]);
 
 /** Una fuente que se revisa con la copia guardada, para el aviso de arriba. */
@@ -213,6 +217,10 @@ export const GuidesReviewModule: React.FC = () => {
   const latest = useRef<{ warehouse: Loaded<WarehouseSource> | null; ici: Loaded<IciSource> | null }>({ warehouse: null, ici: null });
   /** Lectura en curso de cada carpeta: al abrir y al volver a la ventana no se lee dos veces. */
   const inflight = useRef<Record<SourceKind, Promise<boolean> | null>>({ warehouse: null, ici: null });
+  /** Lecturas automáticas seguidas que fallaron: el SISMED puede estar guardando a medias. */
+  const failures = useRef<Record<SourceKind, number>>({ warehouse: 0, ici: 0 });
+  /** Qué carpeta se está volviendo a leer porque cambió, para decirlo en la cabecera. */
+  const [reading, setReading] = useState<Record<SourceKind, boolean>>({ warehouse: false, ici: false });
 
   const setSlot = useCallback((kind: SourceKind, slot: Slot) => {
     folders.current[kind] = slot.folder;
@@ -309,18 +317,29 @@ export const GuidesReviewModule: React.FC = () => {
       }
       const stamp = filesStamp(files);
       if (have && have.stamp === stamp) {
-        patch(kind, { copy: null, checkedAt: Date.now() });
+        failures.current[kind] = 0;
+        // Sin cambios no se toca el estado (se comprueba cada pocos segundos): solo si salía como
+        // copia, o para que «leído a las…» no se quede atrás más de un minuto.
+        const now = Date.now();
+        if (have.copy || !have.checkedAt || now - have.checkedAt > 60_000) patch(kind, { copy: null, checkedAt: now });
         return true;
       }
+      if (have) setReading((current) => ({ ...current, [kind]: true }));
       try {
         keep(kind, await loadSource({ kind, files }), folder, stamp);
+        failures.current[kind] = 0;
         return true;
       } catch (err) {
         const message = (err as Error).message || "No se pudieron leer los archivos del SISMED.";
         if (!have) return fail(kind, folder, message);
-        patch(kind, { copy: "unreadable" });
+        // Leído mientras el SISMED guardaba la importación: la próxima comprobación lo vuelve a
+        // intentar. Solo se avisa si sigue fallando.
+        failures.current[kind]++;
+        if (manual || failures.current[kind] >= 3) patch(kind, { copy: "unreadable" });
         if (manual) toast.error(message);
         return false;
+      } finally {
+        if (have) setReading((current) => ({ ...current, [kind]: false }));
       }
     })();
     inflight.current[kind] = run;
@@ -366,37 +385,38 @@ export const GuidesReviewModule: React.FC = () => {
   }, [username, put, patch, setSlot, refreshFolder]);
 
   // Trabajo progresivo (pedido del usuario): se importa el ICI de un establecimiento en el SISMED
-  // y, al volver a esta ventana, se vuelven a leer las carpetas que cambiaron. Sin avisos de
-  // carga ni errores: si el SISMED está guardando o la PC no responde, se queda lo leído y se
-  // intenta la próxima vez (y cada minuto mientras alguna carpeta no responda).
+  // y aparece aquí solo. Mientras la página está a la vista, cada carpeta se comprueba cada pocos
+  // segundos (y al volver a la ventana); solo si sus archivos cambiaron se vuelve a leer
+  // (2026-11-05: antes solo al volver a la ventana, y si el SISMED aún guardaba, el
+  // establecimiento tardaba en aparecer). Sin avisos: si el SISMED está guardando, se intenta en
+  // la siguiente comprobación; una carpeta que no responde se prueba cada minuto.
   const warehouseFolder = warehouse?.folder ?? null;
   const iciFolder = ici?.folder ?? null;
   useEffect(() => {
     if (!warehouseFolder && !iciFolder) return;
     let busy = false;
-    let last = 0;
-    const refresh = async () => {
-      if (document.visibilityState !== "visible" || busy || Date.now() - last < 3000) return;
+    const lastTry: Record<SourceKind, number> = { warehouse: 0, ici: 0 };
+    const refresh = async (now: boolean) => {
+      if (document.visibilityState !== "visible" || busy) return;
       busy = true;
-      last = Date.now();
       try {
         for (const [kind, folder] of [["warehouse", warehouseFolder], ["ici", iciFolder]] as const) {
-          if (!folder || (await folderPermission(folder, false)) !== "granted") continue;
+          if (!folder) continue;
+          if (!now && latest.current[kind]?.copy === "unreachable" && Date.now() - lastTry[kind] < UNREACHABLE_RETRY_MS) continue;
+          lastTry[kind] = Date.now();
+          if ((await folderPermission(folder, false)) !== "granted") continue;
           await refreshFolder(kind, folder, false);
         }
       } finally {
         busy = false;
       }
     };
-    const onVisible = () => void refresh();
-    const retry = window.setInterval(() => {
-      const waiting = [latest.current.warehouse, latest.current.ici].some((s) => s?.copy === "unreachable" || s?.copy === "unreadable");
-      if (waiting) void refresh();
-    }, 60_000);
+    const onVisible = () => void refresh(true);
+    const poll = window.setInterval(() => void refresh(false), FOLDER_CHECK_MS);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
     return () => {
-      window.clearInterval(retry);
+      window.clearInterval(poll);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
@@ -430,7 +450,11 @@ export const GuidesReviewModule: React.FC = () => {
     return () => { cancelled = true; };
   }, []);
 
-  const months = useMemo(() => (warehouse && ici ? reviewMonths(warehouse.data.warehouse, ici.data.ici) : []), [warehouse, ici]);
+  // Lo que se calcula depende solo de los datos, no de la hora de la última comprobación: así
+  // revisar la carpeta cada pocos segundos no vuelve a calcular la revisión.
+  const warehouseData = warehouse?.data;
+  const iciData = ici?.data;
+  const months = useMemo(() => (warehouseData && iciData ? reviewMonths(warehouseData.warehouse, iciData.ici) : []), [warehouseData, iciData]);
   // El mes que se estaba revisando sigue elegido al volver otro día.
   const monthKey = `revision-guias-mes:${username || "anon"}`;
   useEffect(() => {
@@ -470,8 +494,8 @@ export const GuidesReviewModule: React.FC = () => {
     }).join(" · ");
   }, [warehouse, ici]);
 
-  const places = warehouse?.data.places;
-  const products = warehouse?.data.products;
+  const places = warehouseData?.places;
+  const products = warehouseData?.products;
   const productName = useCallback((code: string) => products?.get(code) || code, [products]);
 
   const isWarehouse = useCallback((code: string) => {
@@ -482,19 +506,19 @@ export const GuidesReviewModule: React.FC = () => {
   }, [places]);
 
   const items = useMemo<ReviewItem[]>(() => {
-    if (!warehouse || !ici || !month) return [];
-    return reviewGuides(warehouse.data.warehouse, ici.data.ici, month, isWarehouse).map((site) => {
+    if (!warehouseData || !iciData || !month) return [];
+    return reviewGuides(warehouseData.warehouse, iciData.ici, month, isWarehouse).map((site) => {
       const info = registry.get(site.destination) || (site.iciCode ? registry.get(site.iciCode) : undefined);
       return { site, name: info?.name || places?.get(site.destination)?.name || site.destination, microred: info?.microred || "" };
     }).sort((a, b) => microredOrder(a.microred, b.microred) || a.name.localeCompare(b.name, "es"));
-  }, [warehouse, ici, month, isWarehouse, registry, places]);
+  }, [warehouseData, iciData, month, isWarehouse, registry, places]);
 
   // Líneas de las guías del mes a los establecimientos revisados (no a otros almacenes).
   const monthLines = useMemo(() => {
-    if (!warehouse || !month) return [];
+    if (!warehouseData || !month) return [];
     const destinations = new Set(items.map((i) => i.site.destination));
-    return warehouse.data.warehouse.lines.filter((l) => l.month === month && destinations.has(l.destination));
-  }, [warehouse, month, items]);
+    return warehouseData.warehouse.lines.filter((l) => l.month === month && destinations.has(l.destination));
+  }, [warehouseData, month, items]);
 
   /* ------------------------------------------------------------ Observaciones */
 
@@ -598,6 +622,7 @@ export const GuidesReviewModule: React.FC = () => {
         onReread={rereadAll}
         onChangeSources={() => setView("load")}
         freshness={freshness}
+        readingNow={reading.ici ? "leyendo el ICI que se importó…" : reading.warehouse ? "leyendo las guías del almacén…" : ""}
         notices={notices}
         iciLive={Boolean(ici?.folder && !ici.copy)}
         lines={monthLines}
@@ -907,6 +932,8 @@ const ReviewResults: React.FC<{
   onChangeSources: () => void;
   /** Desde cuándo está lo que se revisa («leído a las 15:20», «almacén: copia guardada…»). */
   freshness: string;
+  /** Qué se está volviendo a leer ahora porque cambió en el SISMED. */
+  readingNow: string;
   /** Fuentes que se revisan con la copia guardada porque la carpeta no se pudo leer. */
   notices: CopyNotice[];
   /** ¿Se relee solo el SISMED del ICI al volver a la ventana? */
@@ -915,7 +942,7 @@ const ReviewResults: React.FC<{
   notes: ReviewNotes;
   onNote: (keys: string[], text: string) => void;
   suggestions: string[];
-}> = ({ items, months, month, onMonth, monthLabel, warehouseName, warehouseCode, productName, isDesktop, canExport, onExport, canReread, onReread, onChangeSources, freshness, notices, iciLive, lines, notes, onNote, suggestions }) => {
+}> = ({ items, months, month, onMonth, monthLabel, warehouseName, warehouseCode, productName, isDesktop, canExport, onExport, canReread, onReread, onChangeSources, freshness, readingNow, notices, iciLive, lines, notes, onNote, suggestions }) => {
   const [tab, setTab] = useState<"sites" | "lines">("sites");
   const [show, setShow] = useState<Show>("all");
   const [microred, setMicrored] = useState("");
@@ -1080,7 +1107,10 @@ const ReviewResults: React.FC<{
             {warehouseName} <span className="font-mono text-[13px] font-semibold text-slate-400">{warehouseCode}</span>
           </p>
           <p className="text-[12.5px] text-slate-500">
-            Guías de salida de {monthLabel.toLowerCase()} frente al ICI de cada establecimiento · por producto{freshness ? ` · ${freshness}` : ""}
+            Guías de salida de {monthLabel.toLowerCase()} frente al ICI de cada establecimiento · por producto
+            {readingNow ? (
+              <span className="font-semibold text-teal-700"> · <Loader2 className="mb-0.5 inline h-3.5 w-3.5 animate-spin" /> {readingNow}</span>
+            ) : freshness ? ` · ${freshness}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
