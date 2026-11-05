@@ -15,7 +15,9 @@ export type SourceKind = "warehouse" | "ici";
 
 export const SOURCE_FILES: Record<SourceKind, { required: string[]; optional: string[] }> = {
   warehouse: { required: ["TMOVIM.DBF", "TMOVIMDET.DBF"], optional: ["MALMACEN.DBF", "MPRODUCTO.DBF"] },
-  ici: { required: ["TFORMDET.DBF"], optional: [] },
+  // MPRODUCTO del SISMED del ICI: el catálogo del almacén solo trae lo que el almacén maneja, y
+  // un producto que el establecimiento ingresó sin guía salía sin nombre (2026-11-05).
+  ici: { required: ["TFORMDET.DBF"], optional: ["MPRODUCTO.DBF"] },
 };
 
 /** Archivos encontrados por nombre en mayúsculas («TMOVIM.DBF»). */

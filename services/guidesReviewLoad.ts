@@ -14,6 +14,11 @@ export interface WarehouseSource {
 export interface IciSource {
   kind: "ici";
   ici: IciData;
+  /**
+   * Nombres de productos del SISMED del ICI, para los que no están en el catálogo del almacén.
+   * Opcional: una copia guardada antes del 2026-11-05 no lo trae.
+   */
+  products?: Map<string, string>;
 }
 
 export type SourceData = WarehouseSource | IciSource;
@@ -78,9 +83,9 @@ export const loadSourceData = async ({ kind, files }: SourceRequest): Promise<So
     }
     return { kind, warehouse, places: malmacen ? readPlaces(malmacen) : new Map(), products: mproducto ? readProducts(mproducto) : new Map() };
   }
-  const tformdet = await table(files, "TFORMDET.DBF");
+  const [tformdet, mproducto] = await Promise.all(["TFORMDET.DBF", "MPRODUCTO.DBF"].map((n) => table(files, n)));
   if (!tformdet) throw new Error("Falta TFORMDET.DBF del SISMED donde se importa el ICI.");
   const ici = readIci(tformdet);
   if (!ici.months.length) throw new Error("El TFORMDET no tiene el ICI de ningún mes.");
-  return { kind, ici };
+  return { kind, ici, products: mproducto ? readProducts(mproducto) : new Map() };
 };

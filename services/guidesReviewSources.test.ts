@@ -19,6 +19,8 @@ describe("archivos de Revisión de guías", () => {
     expect(Object.keys(found).sort()).toEqual(["MALMACEN.DBF", "TMOVIM.DBF", "TMOVIMDET.DBF"]);
     expect(missingFiles("warehouse", found)).toEqual([]);
     expect(missingFiles("ici", found)).toEqual(["TFORMDET.DBF"]);
+    // MPRODUCTO va en las dos tarjetas: en la del ICI da los nombres de lo que el almacén no maneja.
+    expect(Object.keys(filesFromList([file("TFORMDET.DBF"), file("MPRODUCTO.DBF"), file("TMOVIM.DBF")], "ici")).sort()).toEqual(["MPRODUCTO.DBF", "TFORMDET.DBF"]);
   });
 
   it("dice qué obligatorio falta; los catálogos de nombres son opcionales", () => {

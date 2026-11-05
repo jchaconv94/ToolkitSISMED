@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { openDbf } from "./dbfFile";
 import { buildDbf, type DbfFieldSpec } from "./dbfTestUtils";
-import { noGuidesMessage } from "./guidesReviewLoad";
+import { loadSourceData, noGuidesMessage } from "./guidesReviewLoad";
 import { detailSummary, explainRow, looksLikeWarehouse, movementSummary, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths, type ReviewRow } from "./guidesReview";
 
 // Mismo formato que el SISMED del almacén (030S05) y el TFORMDET del ICI: solo los campos que se leen.
@@ -171,6 +171,24 @@ describe("catálogos", () => {
       [{ ALMCOD: "06516", ALMDES: "P.S. LA LIBERTAD", ALMTIPO: "P" }],
     )));
     expect(places.get("06516")).toEqual({ name: "P.S. LA LIBERTAD", type: "P" });
+  });
+
+  it("del SISMED del ICI también se leen los nombres de productos, para lo que el almacén no maneja", async () => {
+    const asFile = (name: string, bytes: Uint8Array) => new File([bytes as Uint8Array<ArrayBuffer>], name);
+    const ici = await loadSourceData({
+      kind: "ici",
+      files: {
+        "TFORMDET.DBF": asFile("TFORMDET.DBF", buildDbf(
+          [["CODIGO_PRE", "C", 12], ["ANNOMES", "C", 6], ["CODIGO_MED", "C", 7], ["MEDLOTE", "C", 20], ["INGRE", "N", 12], ["REINGRE", "N", 8]],
+          [{ CODIGO_PRE: "06502F01", ANNOMES: "202610", CODIGO_MED: "01853", MEDLOTE: "2100333", INGRE: 500, REINGRE: 0 }],
+        )),
+        "MPRODUCTO.DBF": asFile("MPRODUCTO.DBF", buildDbf(
+          [["MEDCOD", "C", 7], ["MEDNOM", "C", 100], ["MEDCNC", "C", 60], ["MEDFF", "C", 6], ["MEDPRES", "C", 78]],
+          [{ MEDCOD: "01853", MEDNOM: "CIPROFLOXACINO", MEDCNC: "200 mg/100 mL", MEDFF: "INYECT", MEDPRES: "100 mL" }],
+        )),
+      },
+    });
+    expect(ici.kind === "ici" && ici.products?.get("01853")).toBe("CIPROFLOXACINO - 200 mg/100 mL - INYECT - 100 mL");
   });
 
   it("explica por qué una carpeta no da guías de salida", () => {

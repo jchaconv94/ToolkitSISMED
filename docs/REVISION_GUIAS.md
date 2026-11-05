@@ -30,6 +30,9 @@ Se leen los DBF tal como están en la carpeta `DATOS` de cada SISMED (`services/
 | Almacén | `TMOVIM.DBF`, `TMOVIMDET.DBF` | Las guías de salida y su detalle (obligatorios) |
 | Almacén | `MALMACEN.DBF`, `MPRODUCTO.DBF` | Nombres y tipo de cada almacén o establecimiento, y de cada producto (opcionales) |
 | ICI | `TFORMDET.DBF` | El ICI de cada establecimiento por mes |
+| ICI | `MPRODUCTO.DBF` | Nombres de los productos que el almacén no maneja (opcional; desde el 2026-11-05) |
+
+El nombre de un producto sale primero del `MPRODUCTO` del almacén y, si no está, del `MPRODUCTO` del SISMED del ICI. El catálogo del almacén solo trae lo que el almacén maneja (820 productos en el de Bellavista), y un producto que un establecimiento ingresó sin guía salía en la web y en el Excel solo con su código (caso del 01853 en el Hospital II-E Bellavista, 2026-11-05). Una copia guardada antes de ese día no trae ese catálogo: se completa sola en la siguiente lectura de la carpeta (sus archivos ya no son los mismos); con archivos subidos, hay que volver a subirlos con `MPRODUCTO.DBF`.
 
 Reglas (`services/guidesReview.ts`, con pruebas):
 
