@@ -66,6 +66,11 @@ export interface GuideLine {
   product: string;
   lot: string;
   quantity: number;
+  /**
+   * Referencia de la guía (`MOVREFE` de TMOVIM): el pedido o ICI con que se atendió. Va en el
+   * reporte de guías, como el del Toolkit de escritorio. Una copia guardada antes no la trae.
+   */
+  reference?: string;
 }
 
 export interface WarehouseData {
@@ -145,18 +150,19 @@ export const looksLikeWarehouse = (code: string) => /^\d{3}[AS]\d/i.test(code);
 
 /** Guías de salida vigentes del almacén, con su detalle por producto y lote. */
 export const readWarehouse = (tmovim: DbfTable, tmovimdet: DbfTable): WarehouseData => {
-  const headers = new Map<string, { origin: string; destination: string; guide: string; concept: string; date: string }>();
+  const headers = new Map<string, { origin: string; destination: string; guide: string; concept: string; date: string; reference: string }>();
   const origins = new Map<string, number>();
   // El mes es el de la fecha de registro; si una salida no la tiene, el de su fecha de emisión.
-  const names: Array<"MOVNUMERO" | "ALMCODIORG" | "ALMCODIDST" | "MOVNUMEDCO" | "CCTCODIGO" | "MOVFECHREG" | "MOVFECHEMI"> =
+  const names: Array<"MOVNUMERO" | "ALMCODIORG" | "ALMCODIDST" | "MOVNUMEDCO" | "CCTCODIGO" | "MOVFECHREG" | "MOVFECHEMI" | "MOVREFE"> =
     ["MOVNUMERO", "ALMCODIORG", "ALMCODIDST", "MOVNUMEDCO", "CCTCODIGO", "MOVFECHREG"];
   if (dbfField(tmovim, "MOVFECHEMI")) names.push("MOVFECHEMI");
+  if (dbfField(tmovim, "MOVREFE")) names.push("MOVREFE");
   for (const r of dbfRecords(tmovim, names, (t) => t("MOVCODITIP") === "S" && t("MOVSITUA") === "1")) {
     const date = text(r.MOVFECHREG) || text(r.MOVFECHEMI);
     if (!date) continue;
     const origin = text(r.ALMCODIORG);
     origins.set(origin, (origins.get(origin) ?? 0) + 1);
-    headers.set(text(r.MOVNUMERO), { origin, destination: text(r.ALMCODIDST), guide: text(r.MOVNUMEDCO), concept: text(r.CCTCODIGO), date });
+    headers.set(text(r.MOVNUMERO), { origin, destination: text(r.ALMCODIDST), guide: text(r.MOVNUMEDCO), concept: text(r.CCTCODIGO), date, reference: text(r.MOVREFE) });
   }
   const code = [...origins.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
   const lines: GuideLine[] = [];
@@ -172,6 +178,7 @@ export const readWarehouse = (tmovim: DbfTable, tmovimdet: DbfTable): WarehouseD
       product: text(r.MEDCOD),
       lot: text(r.MEDLOTE),
       quantity: num(r.MOVCANTID),
+      ...(header.reference ? { reference: header.reference } : {}),
     });
   }
   return { code, lines, months: [...new Set(lines.map((l) => l.month))].sort(byMonthDesc) };

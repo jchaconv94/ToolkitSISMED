@@ -22,7 +22,7 @@ import { api } from "../services/api";
 import { formatNumber } from "../services/numberFormat";
 import { monthFull } from "../services/availabilityExport";
 import { GUIDE_STATE_ORDER, looksLikeWarehouse, reviewGuides, reviewMonths, type GuideLine, type GuideState, type ReviewSite } from "../services/guidesReview";
-import { buildGuidesReviewWorkbook, guidesReviewFileName, siteCode } from "../services/guidesReviewExport";
+import { buildGuidesReviewWorkbook, guidesReviewFileName, siteCode, buildGuideReportWorkbook, guideReportFileName } from "../services/guidesReviewExport";
 import type { IciSource, SourceData, WarehouseSource } from "../services/guidesReviewLoad";
 import { applyNote, loadNotes, loadRecentNotes, noteKey, rememberNote, saveNotes, saveRecentNotes, suggestedNotes, type ReviewNotes } from "../services/guidesReviewNotes";
 import { loadSource } from "../services/guidesReviewClient";
@@ -603,6 +603,30 @@ export const GuidesReviewModule: React.FC = () => {
     }
   };
 
+  /** Reporte de guías de salida de un establecimiento, detallado por lote, como el del Toolkit de escritorio. */
+  const exportGuides = async (item: ReviewItem, lines: GuideLine[]) => {
+    if (!month) return;
+    try {
+      const workbook = buildGuideReportWorkbook({
+        warehouseName,
+        warehouseCode,
+        monthLabel,
+        generatedAt: new Date(),
+        siteName: item.name,
+        lines,
+        productName,
+      });
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(
+        new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+        guideReportFileName(warehouseCode, month, `${siteCode(item.site)} ${item.name}`),
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo preparar el Excel.");
+    }
+  };
+
   /* ---------------------------------------------------------------- Pantallas */
 
   const ready = Boolean(warehouse && ici && month);
@@ -621,6 +645,7 @@ export const GuidesReviewModule: React.FC = () => {
         isDesktop={isDesktop}
         canExport={canExport}
         onExport={exportExcel}
+        onExportGuides={exportGuides}
         canReread={Boolean(warehouse?.folder || ici?.folder)}
         onReread={rereadAll}
         onChangeSources={() => setView("load")}
@@ -930,6 +955,8 @@ const ReviewResults: React.FC<{
   isDesktop: boolean;
   canExport: boolean;
   onExport: (only?: ReviewItem, list?: ReviewItem[]) => Promise<void>;
+  /** Reporte de guías de salida de un establecimiento (detallado por lote). */
+  onExportGuides: (item: ReviewItem, lines: GuideLine[]) => Promise<void>;
   canReread: boolean;
   onReread: () => Promise<void>;
   onChangeSources: () => void;
@@ -945,7 +972,7 @@ const ReviewResults: React.FC<{
   notes: ReviewNotes;
   onNote: (keys: string[], text: string) => void;
   suggestions: string[];
-}> = ({ items, months, month, onMonth, monthLabel, warehouseName, warehouseCode, productName, isDesktop, canExport, onExport, canReread, onReread, onChangeSources, freshness, readingNow, notices, iciLive, lines, notes, onNote, suggestions }) => {
+}> = ({ items, months, month, onMonth, monthLabel, warehouseName, warehouseCode, productName, isDesktop, canExport, onExport, onExportGuides, canReread, onReread, onChangeSources, freshness, readingNow, notices, iciLive, lines, notes, onNote, suggestions }) => {
   const [tab, setTab] = useState<"sites" | "lines">("sites");
   const [show, setShow] = useState<Show>("all");
   const [microred, setMicrored] = useState("");
@@ -1369,6 +1396,7 @@ const ReviewResults: React.FC<{
           onNote={onNote}
           suggestions={suggestions}
           onExport={canExport ? (item) => onExport(item) : undefined}
+          onExportGuides={canExport ? onExportGuides : undefined}
         />
       )}
     </div>

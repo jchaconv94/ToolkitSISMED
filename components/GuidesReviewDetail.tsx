@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Download, PackageCheck, PackageMinus, PackagePlus, PackageX, PenLine } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Loader2, PackageCheck, PackageMinus, PackagePlus, PackageX, PenLine } from "lucide-react";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
 import { EmptyState, KpiCard, KpiStrip, StatusChip, TableSearch, UnderlineTabs, toneDotClass, useTableSort, type Tone } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
@@ -287,7 +287,12 @@ export const GuidesReviewDetail: React.FC<{
   onNote: (keys: string[], text: string) => void;
   suggestions: string[];
   onExport?: (item: ReviewItem) => Promise<void>;
-}> = ({ items, index, onIndex, onClose, productName, monthLabel, isDesktop, lines, notes, onNote, suggestions, onExport }) => {
+  /**
+   * Reporte de guías de salida detallado por lote (las columnas del «Reporte de Guías» del Toolkit
+   * de escritorio), con las líneas que muestra la pestaña: su búsqueda y su orden.
+   */
+  onExportGuides?: (item: ReviewItem, lines: GuideLine[]) => Promise<void>;
+}> = ({ items, index, onIndex, onClose, productName, monthLabel, isDesktop, lines, notes, onNote, suggestions, onExport, onExportGuides }) => {
   const item = items[index];
   const site = item.site;
   const noIci = !site.iciCode;
@@ -443,6 +448,16 @@ export const GuidesReviewDetail: React.FC<{
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  const [exportingGuides, setExportingGuides] = useState(false);
+  const exportGuides = async () => {
+    if (!onExportGuides || exportingGuides) return;
+    setExportingGuides(true);
+    try {
+      await onExportGuides(item, guideSort.sorted);
+    } finally {
+      setExportingGuides(false);
+    }
+  };
   const exportExcel = async () => {
     if (!onExport) return;
     setExporting(true);
@@ -740,7 +755,21 @@ export const GuidesReviewDetail: React.FC<{
             </>
           ) : (
             <>
-              <TableSearch value={guideQuery} onChange={setGuideQuery} placeholder="Buscar guía, producto, código o lote" />
+              <div className="flex items-center gap-2">
+                <TableSearch value={guideQuery} onChange={setGuideQuery} placeholder="Buscar guía, producto, código o lote" className="min-w-0 flex-1" />
+                {onExportGuides && guideSort.sorted.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void exportGuides()}
+                    disabled={exportingGuides}
+                    title="Reporte de guías de salida detallado por lote, como el del Toolkit de escritorio"
+                    className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    {exportingGuides ? <Loader2 className="h-4 w-4 animate-spin text-teal-600" /> : <Download className="h-4 w-4 text-teal-600" />}
+                    <span className="hidden sm:inline">Reporte de guías</span><span className="sm:hidden">Guías</span>
+                  </button>
+                )}
+              </div>
               {guideSort.sorted.length === 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-white">
                   <EmptyState icon={<PackageCheck className="h-6 w-6" />} title={guideQuery.trim() ? `Sin resultados para «${guideQuery.trim()}»` : "El almacén no le envió guías este mes"} />

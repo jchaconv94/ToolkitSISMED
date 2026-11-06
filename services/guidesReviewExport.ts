@@ -177,6 +177,56 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
   return workbook;
 };
 
+/**
+ * Reporte de guías de salida de un establecimiento, detallado por lote (2026-11-06, pedido del
+ * usuario): las mismas columnas que «Reporte de Guías → Guías detallado por lotes» del Toolkit de
+ * escritorio (FECHA REGISTRO, GUIA, COD EESS, EESS, COD MED, MEDICAMENTO, LOTE, CANTIDAD, MOVREFE),
+ * con las guías vigentes del mes que muestra la ventana del establecimiento.
+ */
+export interface GuideReportInput {
+  warehouseName: string;
+  warehouseCode: string;
+  monthLabel: string;
+  generatedAt: Date;
+  siteName: string;
+  lines: GuideLine[];
+  productName: (code: string) => string;
+}
+
+export const buildGuideReportWorkbook = (input: GuideReportInput): ExcelJS.Workbook => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.created = input.generatedAt;
+  const when = input.generatedAt.toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  const guides = new Set(input.lines.map((l) => l.guide)).size;
+  addTableSheet(workbook, "Guías de salida", `Guías de salida · ${input.siteName}`,
+    `${input.warehouseName} (${input.warehouseCode}) · ${input.monthLabel} · ${guides} ${guides === 1 ? "guía vigente" : "guías vigentes"}, detallado por lotes · generado el ${when}`, [
+    { header: "Fecha registro", width: 12, numFmt: "dd/mm/yyyy", center: true },
+    { header: "Guía", width: 11, center: true },
+    { header: "Código EESS", width: 11, center: true },
+    { header: "Establecimiento", width: 30 },
+    { header: "Código producto", width: 11, center: true },
+    { header: "Medicamento", width: 50 },
+    { header: "Lote", width: 16, center: true },
+    { header: "Cantidad", width: 10, quantity: true, center: true },
+    { header: "Referencia", width: 34 },
+  ], input.lines.map((l) => [
+    dateOf(l.date),
+    l.guide,
+    l.destination,
+    input.siteName,
+    l.product,
+    input.productName(l.product),
+    l.lot,
+    l.quantity,
+    l.reference ?? "",
+  ]));
+  return workbook;
+};
+
+/** «Guias_salida_030S05_2026-10_06517_P_S_Panama.xlsx». */
+export const guideReportFileName = (warehouseCode: string, month: string, site: string) =>
+  guidesReviewFileName(warehouseCode, month, site).replace(/^Revision_guias_/, "Guias_salida_");
+
 /** «Revision_guias_030S05_2026-09.xlsx» o con el establecimiento, sin tildes. */
 export const guidesReviewFileName = (warehouseCode: string, month: string, site?: string) => {
   const clean = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "");
