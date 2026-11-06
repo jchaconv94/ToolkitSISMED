@@ -154,11 +154,11 @@ describe("Excel de una sola hoja", () => {
 });
 
 describe("nombre corto en los gráficos", () => {
-  it("el centro de salud mental queda como CSMC, con o sin puntos", () => {
-    expect(shortSiteName("C.S.M.C Bellavista")).toBe("CSMC Bellavista");
-    expect(shortSiteName("C.S.M.C. BELLAVISTA")).toBe("CSMC BELLAVISTA");
-    expect(shortSiteName("CSMC Bellavista")).toBe("CSMC Bellavista");
-    expect(shortSiteName("Centro de Salud Mental Comunitario Bellavista")).toBe("CSMC Bellavista");
+  it("el centro de salud mental queda como C.S.M.C, con o sin puntos", () => {
+    expect(shortSiteName("C.S.M.C Bellavista")).toBe("C.S.M.C Bellavista");
+    expect(shortSiteName("C.S.M.C. BELLAVISTA")).toBe("C.S.M.C BELLAVISTA");
+    expect(shortSiteName("CSMC Bellavista")).toBe("C.S.M.C Bellavista");
+    expect(shortSiteName("Centro de Salud Mental Comunitario Bellavista")).toBe("C.S.M.C Bellavista");
   });
   it("los demás pierden P.S., C.S. u Hospital", () => {
     expect(shortSiteName("P.S. Nueva Arica")).toBe("Nueva Arica");

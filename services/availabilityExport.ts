@@ -208,13 +208,13 @@ const colPx = (width: number | undefined) => Math.trunc((width ?? 9.14) * 7);
 const coverWidthPx = () => 12 * colPx(COVER_COL_WIDTH);
 /**
  * Nombre corto de un establecimiento para las etiquetas de los gráficos: sin «P.S.», «C.S.» ni
- * «Hospital II-E». Los centros de salud mental comunitario quedan como «CSMC …», con o sin
- * puntos: con «C.S.M.C Bellavista» (sin el punto final) se cortaba solo «C.S.» y quedaba
- * «M.C Bellavista» (2026-11-06, pedido del usuario).
+ * «Hospital II-E». Los centros de salud mental comunitario quedan como «C.S.M.C …», como se
+ * escriben (pedido del usuario, 2026-11-06), vengan con o sin puntos o con el nombre completo:
+ * con «C.S.M.C Bellavista» (sin el punto final) se cortaba solo «C.S.» y quedaba «M.C Bellavista».
  */
 export const shortSiteName = (n: string): string => {
   const csmc = /^(C\.?\s*S\.?\s*M\.?\s*C\b\.?|CENTRO\s+DE\s+SALUD\s+MENTAL\s+COMUNITARIO\b)\s*/i;
-  if (csmc.test(n)) return `CSMC ${n.replace(csmc, "").trim()}`.trim();
+  if (csmc.test(n)) return `C.S.M.C ${n.replace(csmc, "").trim()}`.trim();
   return n.replace(/^(P\.\s*S\.|C\.\s*S\.|HOSPITAL\s+[IVX]+(-[A-Z0-9]+)?)\s*/i, "").trim() || n;
 };
 
