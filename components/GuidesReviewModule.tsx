@@ -21,7 +21,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { api } from "../services/api";
 import { formatNumber } from "../services/numberFormat";
 import { monthFull } from "../services/availabilityExport";
-import { GUIDE_STATE_ORDER, looksLikeWarehouse, reviewGuides, reviewMonths, type GuideLine, type GuideState, type ReviewSite } from "../services/guidesReview";
+import { GUIDE_STATE_ORDER, looksLikeWarehouse, reviewGuides, reviewMonths, type GuideLine, type GuideState, type GuideSummary, type ReviewSite } from "../services/guidesReview";
 import { buildGuidesReviewWorkbook, guidesReviewFileName, siteCode, buildGuideReportWorkbook, guideReportFileName } from "../services/guidesReviewExport";
 import type { IciSource, SourceData, WarehouseSource } from "../services/guidesReviewLoad";
 import { applyNote, loadNotes, loadRecentNotes, noteKey, rememberNote, saveNotes, saveRecentNotes, suggestedNotes, type ReviewNotes } from "../services/guidesReviewNotes";
@@ -603,8 +603,11 @@ export const GuidesReviewModule: React.FC = () => {
     }
   };
 
-  /** Reporte de guías de salida de un establecimiento, detallado por lote, como el del Toolkit de escritorio. */
-  const exportGuides = async (item: ReviewItem, lines: GuideLine[]) => {
+  /**
+   * Reporte de guías de salida de un establecimiento, como el del Toolkit de escritorio: detallado
+   * por lotes (`lines`) o una fila por guía (`guides`), con lo que muestra la ventana.
+   */
+  const exportGuides = async (item: ReviewItem, lines: GuideLine[], guides?: GuideSummary[]) => {
     if (!month) return;
     try {
       const workbook = buildGuideReportWorkbook({
@@ -612,14 +615,16 @@ export const GuidesReviewModule: React.FC = () => {
         warehouseCode,
         monthLabel,
         generatedAt: new Date(),
+        siteCode: item.site.destination,
         siteName: item.name,
         lines,
+        guides,
         productName,
       });
       const buffer = await workbook.xlsx.writeBuffer();
       saveAs(
         new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-        guideReportFileName(warehouseCode, month, `${siteCode(item.site)} ${item.name}`),
+        guideReportFileName(warehouseCode, month, `${siteCode(item.site)} ${item.name}`, !guides),
       );
     } catch (err) {
       console.error(err);
@@ -955,8 +960,8 @@ const ReviewResults: React.FC<{
   isDesktop: boolean;
   canExport: boolean;
   onExport: (only?: ReviewItem, list?: ReviewItem[]) => Promise<void>;
-  /** Reporte de guías de salida de un establecimiento (detallado por lote). */
-  onExportGuides: (item: ReviewItem, lines: GuideLine[]) => Promise<void>;
+  /** Reporte de guías de salida de un establecimiento (detallado por lote o por guía). */
+  onExportGuides: (item: ReviewItem, lines: GuideLine[], guides?: GuideSummary[]) => Promise<void>;
   canReread: boolean;
   onReread: () => Promise<void>;
   onChangeSources: () => void;

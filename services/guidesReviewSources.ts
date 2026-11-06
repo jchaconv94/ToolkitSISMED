@@ -179,8 +179,9 @@ export const uploadProblem = (kind: SourceKind, names: string[]): string | null 
  * ya no sirve, subir también MIN_COPY_VERSION: las anteriores se descartan.
  *
  * 2: la referencia de cada guía (`MOVREFE`), para el reporte de guías (2026-11-06).
+ * 3: el valor de cada línea (`MOVTOTAL`), para el total de cada guía (2026-11-06).
  */
-export const COPY_VERSION = 2;
+export const COPY_VERSION = 3;
 const MIN_COPY_VERSION = 1;
 
 export interface SourceCopy {

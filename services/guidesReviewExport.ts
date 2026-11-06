@@ -6,7 +6,7 @@
  */
 import ExcelJS from "exceljs";
 import { addTableSheet, excelDate } from "./excelCells";
-import { GUIDE_STATE_LABEL, GUIDE_STATE_ORDER, guideStateOf, type GuideLine, type ReviewLot, type ReviewSite } from "./guidesReview";
+import { GUIDE_STATE_LABEL, GUIDE_STATE_ORDER, guideStateOf, type GuideLine, type GuideSummary, type ReviewLot, type ReviewSite } from "./guidesReview";
 import { noteKey, type ReviewNotes } from "./guidesReviewNotes";
 import { formatNumber } from "./numberFormat";
 
@@ -178,18 +178,23 @@ export const buildGuidesReviewWorkbook = (input: GuidesReviewExportInput): Excel
 };
 
 /**
- * Reporte de guías de salida de un establecimiento, detallado por lote (2026-11-06, pedido del
- * usuario): las mismas columnas que «Reporte de Guías → Guías detallado por lotes» del Toolkit de
- * escritorio (FECHA REGISTRO, GUIA, COD EESS, EESS, COD MED, MEDICAMENTO, LOTE, CANTIDAD, MOVREFE),
- * con las guías vigentes del mes que muestra la ventana del establecimiento.
+ * Reporte de guías de salida de un establecimiento (2026-11-06, pedido del usuario), como el
+ * «Reporte de Guías» del Toolkit de escritorio (`toolskit/guia_report.py`), con las guías vigentes
+ * del mes que muestra la ventana del establecimiento:
+ * - **detallado por lotes** (`lines`): FECHA REGISTRO, GUIA, COD EESS, EESS, COD MED, MEDICAMENTO,
+ *   LOTE, CANTIDAD, MOVREFE;
+ * - **por guía** (`guides`): FECHA REGISTRO, GUIA, COD EESS, EESS, TOTAL, MOVREFE.
  */
 export interface GuideReportInput {
   warehouseName: string;
   warehouseCode: string;
   monthLabel: string;
   generatedAt: Date;
+  siteCode: string;
   siteName: string;
   lines: GuideLine[];
+  /** Con las guías, el reporte va por guía en vez de detallado por lotes. */
+  guides?: GuideSummary[];
   productName: (code: string) => string;
 }
 
@@ -197,9 +202,23 @@ export const buildGuideReportWorkbook = (input: GuideReportInput): ExcelJS.Workb
   const workbook = new ExcelJS.Workbook();
   workbook.created = input.generatedAt;
   const when = input.generatedAt.toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
-  const guides = new Set(input.lines.map((l) => l.guide)).size;
-  addTableSheet(workbook, "Guías de salida", `Guías de salida · ${input.siteName}`,
-    `${input.warehouseName} (${input.warehouseCode}) · ${input.monthLabel} · ${guides} ${guides === 1 ? "guía vigente" : "guías vigentes"}, detallado por lotes · generado el ${when}`, [
+  const count = input.guides ? input.guides.length : new Set(input.lines.map((l) => l.guide)).size;
+  const how = input.guides ? "por guía" : "detallado por lotes";
+  const subtitle = `${input.warehouseName} (${input.warehouseCode}) · ${input.monthLabel} · ${count} ${count === 1 ? "guía vigente" : "guías vigentes"}, ${how} · generado el ${when}`;
+  const title = `Guías de salida · ${input.siteName}`;
+  if (input.guides) {
+    addTableSheet(workbook, "Guías de salida", title, subtitle, [
+      { header: "Fecha registro", width: 12, numFmt: "dd/mm/yyyy", center: true },
+      { header: "Guía", width: 11, center: true },
+      { header: "Código EESS", width: 11, center: true },
+      { header: "Establecimiento", width: 30 },
+      { header: "Productos", width: 10, quantity: true, center: true },
+      { header: "Total (S/)", width: 13, numFmt: "#,##0.00", center: true },
+      { header: "Referencia", width: 34 },
+    ], input.guides.map((g) => [dateOf(g.date), g.guide, input.siteCode, input.siteName, g.products, g.total ?? "", g.reference]));
+    return workbook;
+  }
+  addTableSheet(workbook, "Guías de salida", title, subtitle, [
     { header: "Fecha registro", width: 12, numFmt: "dd/mm/yyyy", center: true },
     { header: "Guía", width: 11, center: true },
     { header: "Código EESS", width: 11, center: true },
@@ -223,9 +242,9 @@ export const buildGuideReportWorkbook = (input: GuideReportInput): ExcelJS.Workb
   return workbook;
 };
 
-/** «Guias_salida_030S05_2026-10_06517_P_S_Panama.xlsx». */
-export const guideReportFileName = (warehouseCode: string, month: string, site: string) =>
-  guidesReviewFileName(warehouseCode, month, site).replace(/^Revision_guias_/, "Guias_salida_");
+/** «Guias_salida_030S05_2026-10_06517_P_S_Panama.xlsx» (por guía) o «Guias_salida_lotes_…» (detallado). */
+export const guideReportFileName = (warehouseCode: string, month: string, site: string, detailed = true) =>
+  guidesReviewFileName(warehouseCode, month, site).replace(/^Revision_guias_/, detailed ? "Guias_salida_lotes_" : "Guias_salida_");
 
 /** «Revision_guias_030S05_2026-09.xlsx» o con el establecimiento, sin tildes. */
 export const guidesReviewFileName = (warehouseCode: string, month: string, site?: string) => {

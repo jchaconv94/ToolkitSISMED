@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { openDbf } from "./dbfFile";
 import { buildDbf, type DbfFieldSpec } from "./dbfTestUtils";
 import { loadSourceData, noGuidesMessage } from "./guidesReviewLoad";
-import { detailSummary, explainRow, looksLikeWarehouse, movementSummary, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths, type ReviewRow } from "./guidesReview";
+import { detailSummary, explainRow, guideSummaries, looksLikeWarehouse, movementSummary, readIci, readPlaces, readProducts, readWarehouse, reviewGuides, reviewMonths, type ReviewRow } from "./guidesReview";
 
 // Mismo formato que el SISMED del almacén (030S05) y el TFORMDET del ICI: solo los campos que se leen.
 type Head = { tipo?: string; num: string; org?: string; dst: string; guia: string; cct?: string; fecha: string; situa?: string };
@@ -241,6 +241,30 @@ describe("catálogos", () => {
     expect(readWarehouse(heads, dets).lines.map((l) => [l.guide, l.reference])).toEqual([["0001552", "ICI AGOSTO 2026"], ["0001553", undefined]]);
     // Un SISMED sin el campo se lee igual, sin referencia.
     expect(warehouse.lines.every((l) => l.reference === undefined)).toBe(true);
+  });
+
+  it("lee el valor de cada línea (MOVTOTAL) y resume cada guía", () => {
+    const heads = tmovim([
+      { num: "260001552", dst: "06516", guia: "0001552", fecha: "2026-09-14" },
+      { num: "260001553", dst: "06516", guia: "0001553", fecha: "2026-09-20" },
+    ]);
+    const dets = openDbf(buildDbf(
+      [["MOVCODITIP", "C", 1], ["MOVNUMERO", "C", 9], ["MEDCOD", "C", 7], ["MEDLOTE", "C", 20], ["MOVCANTID", "N", 12, 2], ["MOVTOTAL", "N", 12, 6]],
+      [
+        { MOVCODITIP: "S", MOVNUMERO: "260001552", MEDCOD: "19421", MEDLOTE: "L1", MOVCANTID: 5, MOVTOTAL: 10.5 },
+        { MOVCODITIP: "S", MOVNUMERO: "260001552", MEDCOD: "19421", MEDLOTE: "L2", MOVCANTID: 3, MOVTOTAL: 6.3 },
+        { MOVCODITIP: "S", MOVNUMERO: "260001552", MEDCOD: "19422", MEDLOTE: "L3", MOVCANTID: 2, MOVTOTAL: 0.1 },
+        { MOVCODITIP: "S", MOVNUMERO: "260001553", MEDCOD: "19421", MEDLOTE: "L1", MOVCANTID: 1, MOVTOTAL: 2.1 },
+      ],
+    ));
+    const lines = readWarehouse(heads, dets).lines;
+    expect(lines.map((l) => l.total)).toEqual([10.5, 6.3, 0.1, 2.1]);
+    expect(guideSummaries(lines)).toEqual([
+      { guide: "0001552", date: "2026-09-14", reference: "", products: 2, lines: 3, total: 16.9 },
+      { guide: "0001553", date: "2026-09-20", reference: "", products: 1, lines: 1, total: 2.1 },
+    ]);
+    // Sin MOVTOTAL (o una copia guardada antes), el total no se inventa.
+    expect(guideSummaries(warehouse.lines).every((g) => g.total === null)).toBe(true);
   });
 
   it("lee la fecha y hora de Visual FoxPro (tipo T)", () => {

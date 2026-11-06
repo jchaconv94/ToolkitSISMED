@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { GuideLine, ReviewRow, ReviewSite } from "./guidesReview";
+import { guideSummaries, type GuideLine, type ReviewRow, type ReviewSite } from "./guidesReview";
 import { buildGuideReportWorkbook, buildGuidesReviewWorkbook, guideReportFileName, guidesReviewFileName, missingDetail, siteReview } from "./guidesReviewExport";
 
 const site = (destination: string, iciCode: string | null, rows: ReviewRow[]): ReviewSite => {
@@ -87,7 +87,7 @@ describe("Excel de Revisión de guías", () => {
 describe("Reporte de guías de un establecimiento", () => {
   it("detallado por lote, con las columnas del Toolkit de escritorio y la referencia", () => {
     const lines = [{ ...line("06516", "0001552", "19421", "L1", 20), reference: "ICI AGOSTO 2026" }, line("06516", "0001552", "19422", "L2", 10)];
-    const workbook = buildGuideReportWorkbook({ ...input, siteName: "P.S. LA LIBERTAD", lines });
+    const workbook = buildGuideReportWorkbook({ ...input, siteCode: "06516", siteName: "P.S. LA LIBERTAD", lines });
     expect(workbook.worksheets.map((s) => s.name)).toEqual(["Guías de salida"]);
     const sheet = workbook.getWorksheet("Guías de salida")!;
     expect(String(sheet.getCell("A1").value)).toBe("Guías de salida · P.S. LA LIBERTAD");
@@ -100,7 +100,23 @@ describe("Reporte de guías de un establecimiento", () => {
     expect(sheet.rowCount).toBe(6);
   });
 
+  it("por guía: una fila por guía con su total, como el reporte sin detallar del Toolkit", () => {
+    const lines = [
+      { ...line("06516", "0001552", "19421", "L1", 20), reference: "ESTRATEGIA", total: 12.5 },
+      { ...line("06516", "0001552", "19421", "L2", 5), reference: "ESTRATEGIA", total: 3.25 },
+      { ...line("06516", "0001552", "19422", "L3", 10), reference: "ESTRATEGIA", total: 100 },
+    ];
+    const guides = guideSummaries(lines);
+    const workbook = buildGuideReportWorkbook({ ...input, siteCode: "06516", siteName: "P.S. LA LIBERTAD", lines, guides });
+    const sheet = workbook.getWorksheet("Guías de salida")!;
+    expect(String(sheet.getCell("A2").value)).toContain("1 guía vigente, por guía");
+    expect(values(sheet, 4)).toEqual(["Fecha registro", "Guía", "Código EESS", "Establecimiento", "Productos", "Total (S/)", "Referencia"]);
+    expect(values(sheet, 5).slice(1)).toEqual(["0001552", "06516", "P.S. LA LIBERTAD", 2, 115.75, "ESTRATEGIA"]);
+    expect(sheet.rowCount).toBe(5);
+  });
+
   it("nombre del archivo", () => {
-    expect(guideReportFileName("030S05", "202610", "06517 P.S. Panamá")).toBe("Guias_salida_030S05_2026-10_06517_P_S_Panama.xlsx");
+    expect(guideReportFileName("030S05", "202610", "06517 P.S. Panamá")).toBe("Guias_salida_lotes_030S05_2026-10_06517_P_S_Panama.xlsx");
+    expect(guideReportFileName("030S05", "202610", "06517 P.S. Panamá", false)).toBe("Guias_salida_030S05_2026-10_06517_P_S_Panama.xlsx");
   });
 });
