@@ -173,10 +173,15 @@ export const uploadProblem = (kind: SourceKind, names: string[]): string | null 
  * almacén de un año ocupa unos 3,5 MB; el TFORMDET leído, mucho menos que el archivo). Al abrir
  * el módulo se revisa con ella y se intenta leer la carpeta; si no responde, se sigue con la copia.
  *
- * Si cambia lo que se lee de los DBF (`readWarehouse`, `readIci`), subir COPY_VERSION: la copia
- * vieja se descarta y se vuelve a leer la carpeta.
+ * Si cambia lo que se lee de los DBF (`readWarehouse`, `readIci`), subir COPY_VERSION: una copia
+ * anterior se sigue usando mientras la carpeta no responda, pero se vuelve a leer la carpeta en
+ * cuanto se pueda (`loadCopy` le borra la firma). Si lo leído cambia de forma que una copia vieja
+ * ya no sirve, subir también MIN_COPY_VERSION: las anteriores se descartan.
+ *
+ * 2: la referencia de cada guía (`MOVREFE`), para el reporte de guías (2026-11-06).
  */
-export const COPY_VERSION = 1;
+export const COPY_VERSION = 2;
+const MIN_COPY_VERSION = 1;
 
 export interface SourceCopy {
   version: number;
@@ -204,7 +209,9 @@ export const saveCopy = async (user: string, kind: SourceKind, copy: Omit<Source
 export const loadCopy = async (user: string, kind: SourceKind): Promise<SourceCopy | null> => {
   try {
     const copy = await store.getItem<SourceCopy>(copyKey(user, kind));
-    return copy && copy.version === COPY_VERSION && copy.data?.kind === kind ? copy : null;
+    if (!copy || copy.data?.kind !== kind || !(copy.version >= MIN_COPY_VERSION && copy.version <= COPY_VERSION)) return null;
+    // Una copia de una versión anterior sirve mientras tanto, pero sin firma: la carpeta se relee.
+    return copy.version === COPY_VERSION ? copy : { ...copy, stamp: "" };
   } catch {
     return null;
   }

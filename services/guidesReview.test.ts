@@ -231,6 +231,18 @@ describe("catálogos", () => {
     expect(noGuidesMessage(summary, detailSummary(undated, dets))).toMatch(/^Las 1 salidas de TMOVIM.DBF no tienen una fecha de registro que se pueda leer \(MOVFECHREG es de tipo D\)\. TMOVIMDET tiene 1 registro, 1 de salidas y 1 con el número de una salida vigente\./);
   });
 
+  it("lee la referencia de la guía (MOVREFE) si TMOVIM la trae", () => {
+    const fields: DbfFieldSpec[] = [["MOVCODITIP", "C", 1], ["MOVNUMERO", "C", 9], ["ALMCODIORG", "C", 12], ["ALMCODIDST", "C", 12], ["MOVNUMEDCO", "C", 15], ["CCTCODIGO", "C", 2], ["MOVFECHREG", "D", 8], ["MOVSITUA", "C", 1], ["MOVREFE", "C", 40]];
+    const heads = openDbf(buildDbf(fields, [
+      { MOVCODITIP: "S", MOVNUMERO: "260001552", ALMCODIORG: "030S05", ALMCODIDST: "06516", MOVNUMEDCO: "0001552", CCTCODIGO: "04", MOVFECHREG: "2026-09-14", MOVSITUA: "1", MOVREFE: "ICI AGOSTO 2026" },
+      { MOVCODITIP: "S", MOVNUMERO: "260001553", ALMCODIORG: "030S05", ALMCODIDST: "06516", MOVNUMEDCO: "0001553", CCTCODIGO: "04", MOVFECHREG: "2026-09-15", MOVSITUA: "1", MOVREFE: "" },
+    ]));
+    const dets = tmovimdet([{ num: "260001552", med: "19421", lote: "L1", cant: 5 }, { num: "260001553", med: "19421", lote: "L2", cant: 3 }]);
+    expect(readWarehouse(heads, dets).lines.map((l) => [l.guide, l.reference])).toEqual([["0001552", "ICI AGOSTO 2026"], ["0001553", undefined]]);
+    // Un SISMED sin el campo se lee igual, sin referencia.
+    expect(warehouse.lines.every((l) => l.reference === undefined)).toBe(true);
+  });
+
   it("lee la fecha y hora de Visual FoxPro (tipo T)", () => {
     const table = openDbf(buildDbf([["MOVCODITIP", "C", 1], ["MOVNUMERO", "C", 9], ["ALMCODIORG", "C", 12], ["ALMCODIDST", "C", 12], ["MOVNUMEDCO", "C", 15], ["CCTCODIGO", "C", 2], ["MOVFECHREG", "T", 8], ["MOVSITUA", "C", 1]], [
       { MOVCODITIP: "S", MOVNUMERO: "260001552", ALMCODIORG: "030S05", ALMCODIDST: "06516", MOVNUMEDCO: "0001552", CCTCODIGO: "04", MOVFECHREG: "2026-09-14", MOVSITUA: "1" },

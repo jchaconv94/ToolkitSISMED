@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GuideLine, ReviewRow, ReviewSite } from "./guidesReview";
-import { buildGuidesReviewWorkbook, guidesReviewFileName, missingDetail, siteReview } from "./guidesReviewExport";
+import { buildGuideReportWorkbook, buildGuidesReviewWorkbook, guideReportFileName, guidesReviewFileName, missingDetail, siteReview } from "./guidesReviewExport";
 
 const site = (destination: string, iciCode: string | null, rows: ReviewRow[]): ReviewSite => {
   const counts = { short: 0, notReceived: 0, extra: 0, notSent: 0, complete: 0 };
@@ -81,5 +81,26 @@ describe("Excel de Revisión de guías", () => {
     expect(missingDetail(s, (c) => `MED ${c}`, "short")).toBe("- MED 03519: 10");
     expect(missingDetail(s, (c) => `MED ${c}`, "notReceived")).toBe("- MED 33891: 12,5; - MED 05884: 4");
     expect(missingDetail({ ...s, iciCode: null }, (c) => c, "notReceived")).toBe("");
+  });
+});
+
+describe("Reporte de guías de un establecimiento", () => {
+  it("detallado por lote, con las columnas del Toolkit de escritorio y la referencia", () => {
+    const lines = [{ ...line("06516", "0001552", "19421", "L1", 20), reference: "ICI AGOSTO 2026" }, line("06516", "0001552", "19422", "L2", 10)];
+    const workbook = buildGuideReportWorkbook({ ...input, siteName: "P.S. LA LIBERTAD", lines });
+    expect(workbook.worksheets.map((s) => s.name)).toEqual(["Guías de salida"]);
+    const sheet = workbook.getWorksheet("Guías de salida")!;
+    expect(String(sheet.getCell("A1").value)).toBe("Guías de salida · P.S. LA LIBERTAD");
+    expect(String(sheet.getCell("A2").value)).toContain("ALM. ANEXO BELLAVISTA (030S05) · Setiembre 2026 · 1 guía vigente, detallado por lotes");
+    expect(values(sheet, 4)).toEqual(["Fecha registro", "Guía", "Código EESS", "Establecimiento", "Código producto", "Medicamento", "Lote", "Cantidad", "Referencia"]);
+    const [first, second] = [values(sheet, 5), values(sheet, 6)];
+    expect(first.slice(1)).toEqual(["0001552", "06516", "P.S. LA LIBERTAD", "19421", "Producto 19421", "L1", 20, "ICI AGOSTO 2026"]);
+    expect(first[0]).toBeInstanceOf(Date);
+    expect(second.slice(6)).toEqual(["L2", 10, ""]);
+    expect(sheet.rowCount).toBe(6);
+  });
+
+  it("nombre del archivo", () => {
+    expect(guideReportFileName("030S05", "202610", "06517 P.S. Panamá")).toBe("Guias_salida_030S05_2026-10_06517_P_S_Panama.xlsx");
   });
 });
