@@ -298,8 +298,11 @@ export const rankingCard = async (o: { title: string; items: Array<{ label: stri
   // Una ranura vacía separa a los de fuera del análisis.
   const n = inside.length + (outside.length ? outside.length + 1 : 0);
   const lo = Math.max(0, Math.min(40, Math.floor((Math.min(...o.items.map((i) => i.pct), o.levels.regular) - 10) / 10) * 10));
-  // A la derecha, fuera del área de barras, los nombres de las franjas.
-  const top = 56, bottom = n > 50 ? 80 : 118, left = 44, right = w - 64;
+  // A la derecha, fuera del área de barras, los nombres de las franjas. Abajo, el nombre completo
+  // de cada establecimiento («P.S. Nueva Arica», «C.S.M.C Bellavista»), como en la web: el
+  // usuario pidió no recortar el «P.S.» ni el «C.S.» (2026-11-06).
+  // Los nombres van inclinados hacia la izquierda: el margen deja entero el de la primera barra.
+  const top = 56, bottom = n > 50 ? 104 : 150, left = n > 50 ? 64 : 88, right = w - 64;
   const plotH = h - top - bottom, plotW = right - left;
   const py = (p: number) => top + plotH - ((p - lo) / (100 - lo)) * plotH;
   // Franjas de nivel de fondo.
