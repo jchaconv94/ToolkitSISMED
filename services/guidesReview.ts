@@ -71,6 +71,8 @@ export interface GuideLine {
    * reporte de guías, como el del Toolkit de escritorio. Una copia guardada antes no la trae.
    */
   reference?: string;
+  /** Valor de la línea en soles (`MOVTOTAL` de TMOVIMDET), para el total de cada guía. */
+  total?: number;
 }
 
 export interface WarehouseData {
@@ -166,7 +168,10 @@ export const readWarehouse = (tmovim: DbfTable, tmovimdet: DbfTable): WarehouseD
   }
   const code = [...origins.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
   const lines: GuideLine[] = [];
-  for (const r of dbfRecords(tmovimdet, ["MOVNUMERO", "MEDCOD", "MEDLOTE", "MOVCANTID"] as const, (t) => t("MOVCODITIP") === "S")) {
+  const detail: Array<"MOVNUMERO" | "MEDCOD" | "MEDLOTE" | "MOVCANTID" | "MOVTOTAL"> = ["MOVNUMERO", "MEDCOD", "MEDLOTE", "MOVCANTID"];
+  const withTotal = Boolean(dbfField(tmovimdet, "MOVTOTAL"));
+  if (withTotal) detail.push("MOVTOTAL");
+  for (const r of dbfRecords(tmovimdet, detail, (t) => t("MOVCODITIP") === "S")) {
     const header = headers.get(text(r.MOVNUMERO));
     if (!header || header.destination === header.origin) continue;
     lines.push({
@@ -179,9 +184,46 @@ export const readWarehouse = (tmovim: DbfTable, tmovimdet: DbfTable): WarehouseD
       lot: text(r.MEDLOTE),
       quantity: num(r.MOVCANTID),
       ...(header.reference ? { reference: header.reference } : {}),
+      ...(withTotal ? { total: num(r.MOVTOTAL) } : {}),
     });
   }
   return { code, lines, months: [...new Set(lines.map((l) => l.month))].sort(byMonthDesc) };
+};
+
+/** Una guía de salida con sus líneas sumadas: el «Reporte de Guías» del Toolkit sin detallar. */
+export interface GuideSummary {
+  guide: string;
+  date: string;
+  reference: string;
+  /** Productos distintos y líneas (producto y lote) de la guía. */
+  products: number;
+  lines: number;
+  /** Valor de la guía en soles (`MOVTOTAL` sumado); `null` si lo leído no lo trae. */
+  total: number | null;
+}
+
+/** Las guías de unas líneas, cada una con su fecha, referencia, productos y valor. */
+export const guideSummaries = (lines: GuideLine[]): GuideSummary[] => {
+  const byGuide = new Map<string, { first: GuideLine; products: Set<string>; lines: number; total: number | null }>();
+  for (const line of lines) {
+    const key = `${line.guide}|${line.date}`;
+    let entry = byGuide.get(key);
+    if (!entry) {
+      entry = { first: line, products: new Set(), lines: 0, total: 0 };
+      byGuide.set(key, entry);
+    }
+    entry.products.add(line.product);
+    entry.lines += 1;
+    entry.total = entry.total === null || line.total === undefined ? null : entry.total + line.total;
+  }
+  return [...byGuide.values()].map(({ first, products, lines: count, total }) => ({
+    guide: first.guide,
+    date: first.date,
+    reference: first.reference ?? "",
+    products: products.size,
+    lines: count,
+    total: total === null ? null : Math.round(total * 100) / 100,
+  }));
 };
 
 /**

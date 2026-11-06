@@ -7,7 +7,7 @@ import { SortableTableHead, useFloatingTableHead, type SortableHeadColumn } from
 import { TablePagination, usePageSize } from "./ui/TablePagination";
 import { LoadMoreSentinel, useIncrementalCount } from "./ui/IncrementalList";
 import { formatNumber } from "../services/numberFormat";
-import { GUIDE_STATES, GUIDE_STATE_HINT, GUIDE_STATE_LABEL, GUIDE_STATE_ORDER, explainRow, guideStateOf, type GuideLine, type GuideState, type ReviewRow } from "../services/guidesReview";
+import { GUIDE_STATES, GUIDE_STATE_HINT, GUIDE_STATE_LABEL, GUIDE_STATE_ORDER, explainRow, guideStateOf, guideSummaries, type GuideLine, type GuideState, type GuideSummary, type ReviewRow } from "../services/guidesReview";
 import { siteCode } from "../services/guidesReviewExport";
 import { noteKey, type ReviewNotes } from "../services/guidesReviewNotes";
 import type { ReviewItem } from "./GuidesReviewModule";
@@ -259,16 +259,49 @@ const COLUMNS: SortableHeadColumn<SortKey>[] = [
   { key: "note", label: "Observación" },
 ];
 
-type GuideSortKey = "date" | "guide" | "product" | "quantity" | "lot" | "state";
+type GuideSortKey = "date" | "guide" | "code" | "product" | "lot" | "quantity" | "total" | "reference" | "state";
 
+/** Detallado por lotes: las columnas del «Reporte de Guías» del Toolkit (sin el establecimiento, que es el de la ventana). */
 const GUIDE_COLUMNS: SortableHeadColumn<GuideSortKey>[] = [
   { key: "date", label: "Fecha registro", align: "center", fit: true },
   { key: "guide", label: "Guía", align: "center", fit: true },
-  { key: "product", label: "Producto" },
-  { key: "quantity", label: "Cantidad", align: "center", fit: true },
+  { key: "code", label: "Código", align: "center", fit: true },
+  { key: "product", label: "Medicamento" },
   { key: "lot", label: "Lote", align: "center", fit: true },
+  { key: "quantity", label: "Cantidad", align: "center", fit: true },
+  { key: "reference", label: "Referencia" },
   { key: "state", label: "Estado del producto", align: "center", fit: true },
 ];
+
+/** Una guía abierta: sus productos y lotes, con el valor de cada línea. */
+const OPEN_COLUMNS: SortableHeadColumn<GuideSortKey>[] = [
+  { key: "code", label: "Código", align: "center", fit: true },
+  { key: "product", label: "Medicamento" },
+  { key: "lot", label: "Lote", align: "center", fit: true },
+  { key: "quantity", label: "Cantidad", align: "center", fit: true },
+  { key: "total", label: "Valor (S/)", align: "center", fit: true },
+  { key: "state", label: "Estado del producto", align: "center", fit: true },
+];
+
+type SummarySortKey = "date" | "guide" | "reference" | "products" | "total";
+
+/** Por guía: el «Reporte de Guías» del Toolkit sin detallar, más cuántos productos lleva. */
+const SUMMARY_COLUMNS: SortableHeadColumn<SummarySortKey>[] = [
+  { key: "date", label: "Fecha registro", align: "center", fit: true },
+  { key: "guide", label: "Guía", align: "center", fit: true },
+  { key: "reference", label: "Referencia" },
+  { key: "products", label: "Productos", align: "center", fit: true, title: "Productos distintos de la guía" },
+  { key: "total", label: "Total (S/)", align: "center", fit: true, title: "Valor de la guía en soles" },
+];
+
+type GuideView = "lots" | "guides";
+
+/** Soles con sus dos decimales: «27,50», «1 462,14». */
+const soles = (value: number | null | undefined) => {
+  if (value === null || value === undefined) return "—";
+  const [whole, cents] = Math.abs(value).toFixed(2).split(".");
+  return `${value < 0 ? "-" : ""}${formatNumber(Number(whole))},${cents}`;
+};
 
 /** Resumen de los lotes en la fila: el número si es uno, «N lotes» si son varios. */
 const lotSummary = (row: ReviewRow) => (row.lots.length === 1 ? row.lots[0].lot || "Sin lote" : `${row.lots.length} lotes`);
@@ -291,7 +324,7 @@ export const GuidesReviewDetail: React.FC<{
    * Reporte de guías de salida detallado por lote (las columnas del «Reporte de Guías» del Toolkit
    * de escritorio), con las líneas que muestra la pestaña: su búsqueda y su orden.
    */
-  onExportGuides?: (item: ReviewItem, lines: GuideLine[]) => Promise<void>;
+  onExportGuides?: (item: ReviewItem, lines: GuideLine[], guides?: GuideSummary[]) => Promise<void>;
 }> = ({ items, index, onIndex, onClose, productName, monthLabel, isDesktop, lines, notes, onNote, suggestions, onExport, onExportGuides }) => {
   const item = items[index];
   const site = item.site;
@@ -400,35 +433,79 @@ export const GuidesReviewDetail: React.FC<{
     onNote([noteKey(site.destination, productCode)], text);
   };
 
-  // Guías del almacén a este establecimiento.
+  // Guías del almacén a este establecimiento: detallado por lotes o una fila por guía, como el
+  // «Reporte de Guías» del Toolkit de escritorio. Tocar una guía la muestra detallada.
+  const [guideView, setGuideView] = useState<GuideView>("lots");
   const [guideQuery, setGuideQuery] = useState("");
   const stateOf = useMemo(() => new Map(site.rows.map((r) => [r.product, r.state])), [site]);
   const guideRows = useMemo(() => {
     const q = guideQuery.trim().toLowerCase();
-    return lines.filter((l) => !q || l.guide.includes(q) || l.product.includes(q) || l.lot.toLowerCase().includes(q) || productName(l.product).toLowerCase().includes(q));
+    return lines.filter((l) => !q || l.guide.includes(q) || l.product.includes(q) || l.lot.toLowerCase().includes(q) || (l.reference ?? "").toLowerCase().includes(q) || productName(l.product).toLowerCase().includes(q));
   }, [lines, guideQuery, productName]);
-  const guideSort = useTableSort<GuideLine, GuideSortKey>(
-    guideRows,
-    {
-      date: (l) => l.date,
-      guide: (l) => l.guide,
-      product: (l) => productName(l.product),
-      quantity: (l) => l.quantity,
-      lot: (l) => l.lot,
-      state: (l) => GUIDE_STATES.indexOf(stateOf.get(l.product) ?? "complete"),
-    },
-    { initial: { key: "date", dir: "desc" }, firstDir: { date: "desc", quantity: "desc" } },
+  const lineKeys: Record<GuideSortKey, (l: GuideLine) => string | number> = {
+    date: (l) => l.date,
+    guide: (l) => l.guide,
+    code: (l) => l.product,
+    product: (l) => productName(l.product),
+    lot: (l) => l.lot,
+    quantity: (l) => l.quantity,
+    total: (l) => l.total ?? 0,
+    reference: (l) => l.reference ?? "",
+    state: (l) => GUIDE_STATES.indexOf(stateOf.get(l.product) ?? "complete"),
+  };
+  const guideSort = useTableSort<GuideLine, GuideSortKey>(guideRows, lineKeys, { initial: { key: "date", dir: "desc" }, firstDir: { date: "desc", quantity: "desc", total: "desc" } });
+  const allGuides = useMemo(() => guideSummaries(lines), [lines]);
+  // Por guía: las guías con alguna línea que coincide con la búsqueda, con todas sus líneas sumadas.
+  const summaryRows = useMemo(() => {
+    const matching = new Set(guideRows.map((l) => `${l.guide}|${l.date}`));
+    return allGuides.filter((g) => matching.has(`${g.guide}|${g.date}`));
+  }, [allGuides, guideRows]);
+  const summarySort = useTableSort<GuideSummary, SummarySortKey>(
+    summaryRows,
+    { date: (g) => g.date, guide: (g) => g.guide, reference: (g) => g.reference, products: (g) => g.products, total: (g) => g.total },
+    { initial: { key: "date", dir: "desc" }, firstDir: { date: "desc", products: "desc", total: "desc" } },
   );
-  const guideSignature = `${site.destination}|${guideQuery}|${guideSort.sorted.length}|${tab}`;
+  const byGuide = guideView === "guides";
+  const guideTotal = byGuide ? summarySort.sorted.length : guideSort.sorted.length;
+  const guideSignature = `${site.destination}|${guideQuery}|${guideView}|${guideTotal}|${tab}`;
   const [guidePage, setGuidePage] = useState(1);
   const [guidePageSize, setGuidePageSize] = usePageSize("revision-guias-detalle-guias", 10);
+  const [summaryPageSize, setSummaryPageSize] = usePageSize("revision-guias-detalle-por-guia", 10);
   useEffect(() => setGuidePage(1), [guideSignature]);
-  const guideMobile = useIncrementalCount(guideSort.sorted.length, guideSignature, 20);
-  const guideVisible = isDesktop ? guideSort.sorted.slice((guidePage - 1) * guidePageSize, guidePage * guidePageSize) : guideSort.sorted.slice(0, guideMobile.count);
-  const guideHead = useFloatingTableHead([guideSignature, guidePage, guidePageSize, isDesktop, guideSort.sorted, productAt]);
+  const guideMobile = useIncrementalCount(guideTotal, guideSignature, 20);
+  const pageSizeNow = byGuide ? summaryPageSize : guidePageSize;
+  const slice = <T,>(rows: T[]) => (isDesktop ? rows.slice((guidePage - 1) * pageSizeNow, guidePage * pageSizeNow) : rows.slice(0, guideMobile.count));
+  const guideVisible = slice(guideSort.sorted);
+  const summaryVisible = slice(summarySort.sorted);
+  /** Guía abierta (su posición en la lista «Por guía»), o null: se ve en la misma ventana, con ← y ‹ ›. */
+  const [guideAt, setGuideAt] = useState<number | null>(null);
+  useEffect(() => setGuideAt(null), [site]);
+  const openedGuide = guideAt !== null ? summarySort.sorted[guideAt] : undefined;
+  useEffect(() => {
+    if (guideAt !== null && !summarySort.sorted[guideAt]) setGuideAt(null);
+  }, [guideAt, summarySort.sorted]);
+  const openLines = useMemo(() => (openedGuide ? lines.filter((l) => l.guide === openedGuide.guide && l.date === openedGuide.date) : []), [openedGuide, lines]);
+  const openSort = useTableSort<GuideLine, GuideSortKey>(openLines, lineKeys, { initial: { key: "product", dir: "asc" }, firstDir: { quantity: "desc", total: "desc" } });
+  const openSignature = openedGuide ? `${openedGuide.guide}|${openedGuide.date}` : "";
+  const [openPage, setOpenPage] = useState(1);
+  useEffect(() => setOpenPage(1), [openSignature]);
+  const openMobile = useIncrementalCount(openSort.sorted.length, openSignature, 20);
+  const openVisible = isDesktop ? openSort.sorted.slice((openPage - 1) * guidePageSize, openPage * guidePageSize) : openSort.sorted.slice(0, openMobile.count);
+  const openGuide = (guide: GuideSummary) => setGuideAt(summarySort.sorted.indexOf(guide));
+  // Al abrir (o pasar a) un producto o una guía, la ventana muestra su inicio.
+  const topRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (productAt !== null || guideAt !== null) topRef.current?.scrollIntoView({ block: "start" });
+  }, [productAt, guideAt]);
+  const guideHead = useFloatingTableHead([guideSignature, guidePage, pageSizeNow, isDesktop, guideSort.sorted, summarySort.sorted, productAt, openSignature, openPage]);
 
-  // ‹ › y las flechas: entre productos si hay uno abierto, si no entre establecimientos.
+  // ‹ › y las flechas: entre productos o guías si hay una abierta, si no entre establecimientos.
   const go = (offset: number) => {
+    if (guideAt !== null) {
+      const next = guideAt + offset;
+      if (next >= 0 && next < summarySort.sorted.length) setGuideAt(next);
+      return;
+    }
     if (productAt !== null) {
       const next = productAt + offset;
       if (next >= 0 && next < sorted.length) setProductAt(next);
@@ -453,7 +530,8 @@ export const GuidesReviewDetail: React.FC<{
     if (!onExportGuides || exportingGuides) return;
     setExportingGuides(true);
     try {
-      await onExportGuides(item, guideSort.sorted);
+      if (byGuide) await onExportGuides(item, lines, summarySort.sorted);
+      else await onExportGuides(item, guideSort.sorted);
     } finally {
       setExportingGuides(false);
     }
@@ -472,9 +550,9 @@ export const GuidesReviewDetail: React.FC<{
   const counts = site.counts;
   const stateChip = (state: GuideState | undefined) =>
     noIci || !state ? <StatusChip tone="neutral" label="Sin ICI" /> : <StatusChip tone={GUIDE_STATE_TONE[state]} label={GUIDE_STATE_LABEL[state]} />;
-  const position = product ? productAt! : index;
-  const total = product ? sorted.length : items.length;
-  const unit = product ? "Producto" : "Establecimiento";
+  const position = product ? productAt! : openedGuide ? guideAt! : index;
+  const total = product ? sorted.length : openedGuide ? summarySort.sorted.length : items.length;
+  const unit = product ? "Producto" : openedGuide ? "Guía" : "Establecimiento";
 
   const showOptions: Array<{ value: Show; label: string; count: number }> = [
     { value: "differences", label: "Con diferencia", count: site.differences },
@@ -492,12 +570,14 @@ export const GuidesReviewDetail: React.FC<{
       open
       onClose={onClose}
       size="2xl"
-      title={product ? productName(product.product) : item.name}
+      title={product ? productName(product.product) : openedGuide ? `Guía ${openedGuide.guide}` : item.name}
       subtitle={product
         ? `${product.product} · ${item.name}`
+        : openedGuide
+        ? [day(openedGuide.date), openedGuide.reference, item.name].filter(Boolean).join(" · ")
         : `${siteCode(site)} · ${item.microred || "Sin microred"} · ${site.guides.length} ${site.guides.length === 1 ? "guía" : "guías"} del almacén en ${monthLabel.toLowerCase()}`}
-      onBack={product ? () => setProductAt(null) : undefined}
-      backLabel="Volver a los productos"
+      onBack={product ? () => setProductAt(null) : openedGuide ? () => setGuideAt(null) : undefined}
+      backLabel={product ? "Volver a los productos" : "Volver a las guías"}
       headerAside={
         <>
           <button type="button" onClick={() => go(-1)} disabled={position <= 0} aria-label={`${unit} anterior`} className={arrow}><ChevronLeft className="h-5 w-5" /></button>
@@ -507,6 +587,8 @@ export const GuidesReviewDetail: React.FC<{
       }
       footer={product ? (
         <button type="button" onClick={() => setProductAt(null)} className={dialogSecondaryButton}>Volver a los productos</button>
+      ) : openedGuide ? (
+        <button type="button" onClick={() => setGuideAt(null)} className={dialogSecondaryButton}>Volver a las guías</button>
       ) : (
         <>
           <button type="button" onClick={onClose} className={dialogSecondaryButton}>Cerrar</button>
@@ -519,6 +601,7 @@ export const GuidesReviewDetail: React.FC<{
         </>
       )}
     >
+      <div ref={topRef} aria-hidden className="h-0 scroll-mt-6" />
       {product ? (
         <div className="space-y-5">
           {!noIci && (
@@ -615,6 +698,49 @@ export const GuidesReviewDetail: React.FC<{
               </div>
             )}
           </section>
+        </div>
+      ) : openedGuide ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <div className={stat}><p className={statLabel}>Productos</p><p className="mt-0.5 text-lg font-black text-slate-900">{n(openedGuide.products)}</p></div>
+            <div className={stat}><p className={statLabel}>Lotes</p><p className="mt-0.5 text-lg font-black text-slate-900">{n(openedGuide.lines)}</p></div>
+            <div className={stat}><p className={statLabel}>Total (S/)</p><p className="mt-0.5 text-lg font-black text-slate-900">{soles(openedGuide.total)}</p></div>
+          </div>
+          {isDesktop ? (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <table ref={guideHead.tableRef} className="w-full text-left text-sm">
+                <SortableTableHead columns={OPEN_COLUMNS} headSort={openSort.headSort} floating={guideHead.floating} />
+                <tbody>
+                  {openVisible.map((l, i) => (
+                    <tr key={`${l.product}|${l.lot}|${i}`} className="h-14 border-t border-slate-100">
+                      <td className="px-3 py-2 text-center"><CodeChip code={l.product} /></td>
+                      <td className="px-4 py-2 text-[13.5px] font-semibold text-slate-900">{productName(l.product)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-center font-mono text-xs text-slate-700">{l.lot || "—"}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{n(l.quantity)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] text-slate-700">{soles(l.total)}</td>
+                      <td className="px-3 py-2 text-center">{stateChip(stateOf.get(l.product))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <TablePagination page={openPage} pageSize={guidePageSize} total={openSort.sorted.length} onPageChange={setOpenPage} onPageSizeChange={setGuidePageSize} itemLabel="lotes" />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {openVisible.map((l, i) => (
+                <div key={`${l.product}|${l.lot}|${i}`} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="min-w-0 text-[14px] font-semibold text-slate-900">{productName(l.product)}</p>
+                    {stateChip(stateOf.get(l.product))}
+                  </div>
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    <span className="font-mono">{l.product}</span> · Lote <b className="font-mono text-slate-700">{l.lot || "—"}</b> · Cantidad <b className="text-slate-700">{n(l.quantity)}</b>{l.total !== undefined && <> · S/ <b className="text-slate-700">{soles(l.total)}</b></>}
+                  </p>
+                </div>
+              ))}
+              <LoadMoreSentinel hasMore={openMobile.hasMore} onLoadMore={openMobile.loadMore} shown={openMobile.count} total={openSort.sorted.length} itemLabel="lotes" />
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -756,24 +882,74 @@ export const GuidesReviewDetail: React.FC<{
           ) : (
             <>
               <div className="flex items-center gap-2">
-                <TableSearch value={guideQuery} onChange={setGuideQuery} placeholder="Buscar guía, producto, código o lote" className="min-w-0 flex-1" />
-                {onExportGuides && guideSort.sorted.length > 0 && (
+                <TableSearch value={guideQuery} onChange={setGuideQuery} placeholder={isDesktop ? "Buscar guía, producto, código, lote o referencia" : "Buscar"} className="min-w-0 flex-1" />
+                <CustomSelect
+                  size="md"
+                  prefix={isDesktop ? "Ver" : undefined}
+                  value={guideView}
+                  onChange={(v) => setGuideView((v as GuideView) || "lots")}
+                  options={[
+                    { value: "lots", label: isDesktop ? "Detallado por lotes" : "Por lote", count: isDesktop ? lines.length : undefined },
+                    { value: "guides", label: "Por guía", count: isDesktop ? allGuides.length : undefined },
+                  ]}
+                  containerClassName={isDesktop ? "w-64 shrink-0" : "w-[124px] shrink-0"}
+                  menuMinWidth={220}
+                />
+                {onExportGuides && guideTotal > 0 && (
                   <button
                     type="button"
                     onClick={() => void exportGuides()}
                     disabled={exportingGuides}
-                    title="Reporte de guías de salida detallado por lote, como el del Toolkit de escritorio"
+                    aria-label="Descargar en Excel lo que se ve"
+                    title="Descargar en Excel lo que se ve"
                     className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
                   >
                     {exportingGuides ? <Loader2 className="h-4 w-4 animate-spin text-teal-600" /> : <Download className="h-4 w-4 text-teal-600" />}
-                    <span className="hidden sm:inline">Reporte de guías</span><span className="sm:hidden">Guías</span>
+                    <span className="hidden sm:inline">Excel</span>
                   </button>
                 )}
               </div>
-              {guideSort.sorted.length === 0 ? (
+              {guideTotal === 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-white">
                   <EmptyState icon={<PackageCheck className="h-6 w-6" />} title={guideQuery.trim() ? `Sin resultados para «${guideQuery.trim()}»` : "El almacén no le envió guías este mes"} />
                 </div>
+              ) : byGuide ? (
+                isDesktop ? (
+                  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                    <table ref={guideHead.tableRef} className="w-full text-left text-sm">
+                      <SortableTableHead columns={SUMMARY_COLUMNS} headSort={summarySort.headSort} floating={guideHead.floating} trailing="Ver sus lotes" />
+                      <tbody>
+                        {summaryVisible.map((g) => (
+                          <tr key={`${g.guide}|${g.date}`} onClick={() => openGuide(g)} title="Ver la guía" className="h-14 cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50">
+                            <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] text-slate-700">{day(g.date)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-center font-mono text-[12.5px] font-semibold text-slate-800">{g.guide}</td>
+                            <td className="px-4 py-2 text-[13px] text-slate-700">{g.reference || <span className="text-slate-400">—</span>}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{n(g.products)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{soles(g.total)}</td>
+                            <td className="w-10 pr-3 text-right"><ChevronRight className="ml-auto h-4 w-4 text-slate-300" /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <TablePagination page={guidePage} pageSize={summaryPageSize} total={summarySort.sorted.length} onPageChange={setGuidePage} onPageSizeChange={setSummaryPageSize} itemLabel="guías" />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {summaryVisible.map((g) => (
+                      <button key={`${g.guide}|${g.date}`} type="button" onClick={() => openGuide(g)} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[14px] font-semibold text-slate-900">Guía <span className="font-mono">{g.guide}</span> <span className="font-normal text-slate-500">· {day(g.date)}</span></p>
+                          {g.reference && <p className="mt-0.5 text-[12.5px] text-slate-600">{g.reference}</p>}
+                          <p className="mt-1 text-xs text-slate-500">
+                            <b className="text-slate-700">{n(g.products)}</b> {g.products === 1 ? "producto" : "productos"} · Total <b className="text-slate-700">{g.total === null ? "—" : `S/ ${soles(g.total)}`}</b>
+                          </p>
+                        </div>
+                        <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
+                      </button>
+                    ))}
+                    <LoadMoreSentinel hasMore={guideMobile.hasMore} onLoadMore={guideMobile.loadMore} shown={guideMobile.count} total={summarySort.sorted.length} itemLabel="guías" />
+                  </div>
+                )
               ) : isDesktop ? (
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                   <table ref={guideHead.tableRef} className="w-full text-left text-sm">
@@ -783,12 +959,11 @@ export const GuidesReviewDetail: React.FC<{
                         <tr key={`${l.guide}|${l.product}|${l.lot}|${i}`} className="h-14 border-t border-slate-100">
                           <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] text-slate-700">{day(l.date)}</td>
                           <td className="whitespace-nowrap px-3 py-2 text-center font-mono text-[12.5px] text-slate-700">{l.guide}</td>
-                          <td className="px-4 py-2">
-                            <p className="text-[13.5px] font-semibold text-slate-900">{productName(l.product)}</p>
-                            <CodeChip code={l.product} />
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{n(l.quantity)}</td>
+                          <td className="px-3 py-2 text-center"><CodeChip code={l.product} /></td>
+                          <td className="px-4 py-2 text-[13.5px] font-semibold text-slate-900">{productName(l.product)}</td>
                           <td className="whitespace-nowrap px-3 py-2 text-center font-mono text-xs text-slate-700">{l.lot || "—"}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-center text-[13px] font-semibold text-slate-800">{n(l.quantity)}</td>
+                          <td className="max-w-[210px] px-3 py-2 text-[12.5px] text-slate-600">{l.reference || <span className="text-slate-400">—</span>}</td>
                           <td className="px-3 py-2 text-center">{stateChip(stateOf.get(l.product))}</td>
                         </tr>
                       ))}
@@ -807,6 +982,7 @@ export const GuidesReviewDetail: React.FC<{
                       <p className="mt-1.5 text-xs text-slate-500">
                         {day(l.date)} · Guía <b className="font-mono text-slate-700">{l.guide}</b> · Cantidad <b className="text-slate-700">{n(l.quantity)}</b> · Lote <b className="font-mono text-slate-700">{l.lot || "—"}</b>
                       </p>
+                      {l.reference && <p className="mt-0.5 text-xs text-slate-500">Referencia: <span className="font-semibold text-slate-700">{l.reference}</span></p>}
                     </div>
                   ))}
                   <LoadMoreSentinel hasMore={guideMobile.hasMore} onLoadMore={guideMobile.loadMore} shown={guideMobile.count} total={guideSort.sorted.length} itemLabel="líneas" />
