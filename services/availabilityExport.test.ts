@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import { buildItems, networkItems, parseAvailabilitySheet, summarize } from "./availabilityReport";
-import { buildAvailabilityWorkbook, buildProductsWorkbook, productsFileName, shortSiteName } from "./availabilityExport";
+import { buildAvailabilityWorkbook, buildProductsWorkbook, productsFileName } from "./availabilityExport";
 
 const HEADER = ["RED", "MICRORED", "COD EESS", "ESTABLECIMIENTO", "CAT", "MED COD", "DESCRIPCION DEL PRODUCTO", "MEDFF", "PRECIO", "MEDTIP", "MEDPET", "MEDEST", 202608, 202609, "STOCK_FIN"];
 
@@ -153,17 +153,3 @@ describe("Excel de una sola hoja", () => {
   });
 });
 
-describe("nombre corto en los gráficos", () => {
-  it("el centro de salud mental queda como C.S.M.C, con o sin puntos", () => {
-    expect(shortSiteName("C.S.M.C Bellavista")).toBe("C.S.M.C Bellavista");
-    expect(shortSiteName("C.S.M.C. BELLAVISTA")).toBe("C.S.M.C BELLAVISTA");
-    expect(shortSiteName("CSMC Bellavista")).toBe("C.S.M.C Bellavista");
-    expect(shortSiteName("Centro de Salud Mental Comunitario Bellavista")).toBe("C.S.M.C Bellavista");
-  });
-  it("los demás pierden P.S., C.S. u Hospital", () => {
-    expect(shortSiteName("P.S. Nueva Arica")).toBe("Nueva Arica");
-    expect(shortSiteName("C.S. Nuevo Lima")).toBe("Nuevo Lima");
-    expect(shortSiteName("HOSPITAL II-E BELLAVISTA")).toBe("BELLAVISTA");
-    expect(shortSiteName("Consuelo")).toBe("Consuelo");
-  });
-});

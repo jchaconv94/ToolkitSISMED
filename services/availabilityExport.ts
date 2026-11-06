@@ -206,18 +206,6 @@ const EMU_PER_PX = 9525;
 /** Ancho en píxeles de una columna de Excel (el ancho guardado ya incluye el margen). */
 const colPx = (width: number | undefined) => Math.trunc((width ?? 9.14) * 7);
 const coverWidthPx = () => 12 * colPx(COVER_COL_WIDTH);
-/**
- * Nombre corto de un establecimiento para las etiquetas de los gráficos: sin «P.S.», «C.S.» ni
- * «Hospital II-E». Los centros de salud mental comunitario quedan como «C.S.M.C …», como se
- * escriben (pedido del usuario, 2026-11-06), vengan con o sin puntos o con el nombre completo:
- * con «C.S.M.C Bellavista» (sin el punto final) se cortaba solo «C.S.» y quedaba «M.C Bellavista».
- */
-export const shortSiteName = (n: string): string => {
-  const csmc = /^(C\.?\s*S\.?\s*M\.?\s*C\b\.?|CENTRO\s+DE\s+SALUD\s+MENTAL\s+COMUNITARIO\b)\s*/i;
-  if (csmc.test(n)) return `C.S.M.C ${n.replace(csmc, "").trim()}`.trim();
-  return n.replace(/^(P\.\s*S\.|C\.\s*S\.|HOSPITAL\s+[IVX]+(-[A-Z0-9]+)?)\s*/i, "").trim() || n;
-};
-
 const titleCase = (s: string) => s.toLocaleLowerCase("es-PE").replace(/(^|[\s\-(])(\p{L})/gu, (_, sep: string, l: string) => sep + l.toLocaleUpperCase("es-PE"));
 
 /**
@@ -466,7 +454,6 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   const level = report.level;
   const mrsSorted = report.microredes.slice().sort((a, b) => b.pct - a.pct);
   const byPct = report.establishments.slice().sort((a, b) => b.pct - a.pct);
-  const shortName = shortSiteName;
   const kpiW = (W - 3 * GAP) / 4;
   const rowB = 152, gaugeW = 400, h2 = 330;
   const mrH = Math.max(300, 92 + mrsSorted.length * 40);
@@ -498,8 +485,8 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
       { label: "Sin rotación", value: c.sinRotacion, color: "#94A3B8" }, { label: "Desabastecido", value: c.desabastecido, color: "#EF4444" },
     ] }, 500, mrH), 0, rowC);
     await place(hBarsCard({ title: "Disponibilidad por microred", items: mrsSorted.map((m) => ({ label: titleCase(m.microred), pct: m.pct, level: m.level })), levels: lv }, W - 500 - GAP, mrH), 500 + GAP, rowC);
-    const outsideItems = (p.outside ?? []).slice().sort((a, b) => b.pct - a.pct).map((e) => ({ label: shortName(e.name), pct: e.pct, level: e.level ?? dmeLevelOf(e.pct, lv), outside: true }));
-    await place(rankingCard({ title: "Ranking de establecimientos (%)", items: [...byPct.map((e) => ({ label: shortName(e.name), pct: e.pct, level: e.level })), ...outsideItems], levels: lv }, W, rankH), 0, rowD);
+    const outsideItems = (p.outside ?? []).slice().sort((a, b) => b.pct - a.pct).map((e) => ({ label: e.name.trim(), pct: e.pct, level: e.level ?? dmeLevelOf(e.pct, lv), outside: true }));
+    await place(rankingCard({ title: "Ranking de establecimientos (%)", items: [...byPct.map((e) => ({ label: e.name.trim(), pct: e.pct, level: e.level })), ...outsideItems], levels: lv }, W, rankH), 0, rowD);
   } else {
     // Sin lienzo (pruebas o navegador antiguo): el indicador principal en celdas.
     rs.getCell(imagesStart + 1, 1).value = scope === "essential" ? "Disponibilidad DME de la UNGET" : "Disponibilidad de la UNGET";
