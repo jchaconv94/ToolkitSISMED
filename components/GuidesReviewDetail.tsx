@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Download, Loader2, PackageCheck, PackageMinus, PackagePlus, PackageX, PenLine } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Download, Loader2, PackageCheck, PackageMinus, PackagePlus, PackageX, PenLine, RefreshCw } from "lucide-react";
 import { ResponsiveDialog, dialogPrimaryButton, dialogSecondaryButton } from "./ui/ResponsiveDialog";
 import { EmptyState, KpiCard, KpiStrip, StatusChip, TableSearch, UnderlineTabs, toneDotClass, useTableSort, type Tone } from "./ui/kit";
 import { CustomSelect } from "./ui/CustomSelect";
@@ -325,7 +325,14 @@ export const GuidesReviewDetail: React.FC<{
    * de escritorio), con las líneas que muestra la pestaña: su búsqueda y su orden.
    */
   onExportGuides?: (item: ReviewItem, lines: GuideLine[], guides?: GuideSummary[]) => Promise<void>;
-}> = ({ items, index, onIndex, onClose, productName, monthLabel, isDesktop, lines, notes, onNote, suggestions, onExport, onExportGuides }) => {
+  /**
+   * Lo leído del almacén es de antes del 2026-11-06 y no trae la referencia ni el valor de las
+   * guías: «folder» se arregla volviendo a leer la carpeta, «files» subiendo otra vez los archivos.
+   */
+  guideDetailsOutdated?: "folder" | "files" | null;
+  onRereadWarehouse?: () => Promise<void>;
+  onChangeSources?: () => void;
+}> = ({ items, index, onIndex, onClose, productName, monthLabel, isDesktop, lines, notes, onNote, suggestions, onExport, onExportGuides, guideDetailsOutdated, onRereadWarehouse, onChangeSources }) => {
   const item = items[index];
   const site = item.site;
   const noIci = !site.iciCode;
@@ -525,6 +532,39 @@ export const GuidesReviewDetail: React.FC<{
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  const [rereading, setRereading] = useState(false);
+  const rereadWarehouse = async () => {
+    if (!onRereadWarehouse || rereading) return;
+    setRereading(true);
+    try {
+      await onRereadWarehouse();
+    } finally {
+      setRereading(false);
+    }
+  };
+  // Aviso de la pestaña de guías y de una guía abierta: sin la referencia y el valor, con el clic
+  // para traerlos (el aviso de arriba del módulo queda detrás de esta ventana).
+  const outdatedNotice = guideDetailsOutdated ? (
+    <div className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] font-medium text-amber-800 sm:flex-row sm:items-center">
+      <p className="flex min-w-0 flex-1 gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+        <span>
+          La referencia y el total de cada guía se leen desde el 06/11/2026 y lo que se revisa es de una lectura anterior.{" "}
+          {guideDetailsOutdated === "folder" ? "Lea otra vez el SISMED del almacén para verlos." : "Suba otra vez los archivos del almacén (TMOVIM y TMOVIMDET) para verlos."}
+        </span>
+      </p>
+      {guideDetailsOutdated === "folder" && onRereadWarehouse ? (
+        <button type="button" onClick={() => void rereadWarehouse()} disabled={rereading} className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-xl bg-teal-600 px-3 text-[13px] font-bold text-white hover:bg-teal-700 disabled:opacity-60">
+          <RefreshCw className={`h-4 w-4 ${rereading ? "animate-spin" : ""}`} /> Leer el SISMED
+        </button>
+      ) : guideDetailsOutdated === "files" && onChangeSources ? (
+        <button type="button" onClick={onChangeSources} className="flex h-9 shrink-0 items-center justify-center rounded-xl bg-teal-600 px-3 text-[13px] font-bold text-white hover:bg-teal-700">
+          Subir archivos
+        </button>
+      ) : null}
+    </div>
+  ) : null;
+
   const [exportingGuides, setExportingGuides] = useState(false);
   const exportGuides = async () => {
     if (!onExportGuides || exportingGuides) return;
@@ -701,6 +741,7 @@ export const GuidesReviewDetail: React.FC<{
         </div>
       ) : openedGuide ? (
         <div className="space-y-4">
+          {outdatedNotice}
           <div className="grid grid-cols-3 gap-3">
             <div className={stat}><p className={statLabel}>Productos</p><p className="mt-0.5 text-lg font-black text-slate-900">{n(openedGuide.products)}</p></div>
             <div className={stat}><p className={statLabel}>Lotes</p><p className="mt-0.5 text-lg font-black text-slate-900">{n(openedGuide.lines)}</p></div>
@@ -881,6 +922,7 @@ export const GuidesReviewDetail: React.FC<{
             </>
           ) : (
             <>
+              {outdatedNotice}
               <div className="flex items-center gap-2">
                 <TableSearch value={guideQuery} onChange={setGuideQuery} placeholder={isDesktop ? "Buscar guía, producto, código, lote o referencia" : "Buscar"} className="min-w-0 flex-1" />
                 <CustomSelect

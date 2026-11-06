@@ -454,6 +454,9 @@ export const GuidesReviewModule: React.FC = () => {
   // revisar la carpeta cada pocos segundos no vuelve a calcular la revisión.
   const warehouseData = warehouse?.data;
   const iciData = ici?.data;
+  // Lo leído antes del 2026-11-06 no trae la referencia ni el valor de las guías: la ventana del
+  // establecimiento lo dice y ofrece volver a leer el almacén (o subir otra vez sus archivos).
+  const guideDetailsOutdated = warehouse && warehouseData?.kind === "warehouse" && !warehouseData.warehouse.details ? warehouse.origin : null;
   const months = useMemo(() => (warehouseData && iciData ? reviewMonths(warehouseData.warehouse, iciData.ici) : []), [warehouseData, iciData]);
   // El mes que se estaba revisando sigue elegido al volver otro día.
   const monthKey = `revision-guias-mes:${username || "anon"}`;
@@ -654,6 +657,7 @@ export const GuidesReviewModule: React.FC = () => {
         canReread={Boolean(warehouse?.folder || ici?.folder)}
         onReread={rereadAll}
         onChangeSources={() => setView("load")}
+        guideDetailsOutdated={guideDetailsOutdated}
         freshness={freshness}
         readingNow={reading.ici ? "leyendo el ICI que se importó…" : reading.warehouse ? "leyendo las guías del almacén…" : ""}
         notices={notices}
@@ -965,6 +969,8 @@ const ReviewResults: React.FC<{
   canReread: boolean;
   onReread: () => Promise<void>;
   onChangeSources: () => void;
+  /** La copia guardada del almacén no trae la referencia ni el valor de las guías: cómo traerlos. */
+  guideDetailsOutdated: "folder" | "files" | null;
   /** Desde cuándo está lo que se revisa («leído a las 15:20», «almacén: copia guardada…»). */
   freshness: string;
   /** Qué se está volviendo a leer ahora porque cambió en el SISMED. */
@@ -977,7 +983,7 @@ const ReviewResults: React.FC<{
   notes: ReviewNotes;
   onNote: (keys: string[], text: string) => void;
   suggestions: string[];
-}> = ({ items, months, month, onMonth, monthLabel, warehouseName, warehouseCode, productName, isDesktop, canExport, onExport, onExportGuides, canReread, onReread, onChangeSources, freshness, readingNow, notices, iciLive, lines, notes, onNote, suggestions }) => {
+}> = ({ items, months, month, onMonth, monthLabel, warehouseName, warehouseCode, productName, isDesktop, canExport, onExport, onExportGuides, canReread, onReread, onChangeSources, guideDetailsOutdated, freshness, readingNow, notices, iciLive, lines, notes, onNote, suggestions }) => {
   const [tab, setTab] = useState<"sites" | "lines">("sites");
   const [show, setShow] = useState<Show>("all");
   const [microred, setMicrored] = useState("");
@@ -1402,6 +1408,9 @@ const ReviewResults: React.FC<{
           suggestions={suggestions}
           onExport={canExport ? (item) => onExport(item) : undefined}
           onExportGuides={canExport ? onExportGuides : undefined}
+          guideDetailsOutdated={guideDetailsOutdated}
+          onRereadWarehouse={canReread ? onReread : undefined}
+          onChangeSources={onChangeSources}
         />
       )}
     </div>

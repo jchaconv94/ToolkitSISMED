@@ -81,6 +81,12 @@ export interface WarehouseData {
   lines: GuideLine[];
   /** Meses con guías, del más reciente al más antiguo. */
   months: string[];
+  /**
+   * Qué se leyó además de las guías (2026-11-06): la referencia (`MOVREFE`) y el valor
+   * (`MOVTOTAL`), si los DBF los traen. Falta en lo leído antes de ese día (una copia guardada):
+   * la ventana del establecimiento pide volver a leer el almacén.
+   */
+  details?: { reference: boolean; total: boolean };
 }
 
 export interface IciData {
@@ -187,7 +193,12 @@ export const readWarehouse = (tmovim: DbfTable, tmovimdet: DbfTable): WarehouseD
       ...(withTotal ? { total: num(r.MOVTOTAL) } : {}),
     });
   }
-  return { code, lines, months: [...new Set(lines.map((l) => l.month))].sort(byMonthDesc) };
+  return {
+    code,
+    lines,
+    months: [...new Set(lines.map((l) => l.month))].sort(byMonthDesc),
+    details: { reference: Boolean(dbfField(tmovim, "MOVREFE")), total: withTotal },
+  };
 };
 
 /** Una guía de salida con sus líneas sumadas: el «Reporte de Guías» del Toolkit sin detallar. */

@@ -238,9 +238,13 @@ describe("catálogos", () => {
       { MOVCODITIP: "S", MOVNUMERO: "260001553", ALMCODIORG: "030S05", ALMCODIDST: "06516", MOVNUMEDCO: "0001553", CCTCODIGO: "04", MOVFECHREG: "2026-09-15", MOVSITUA: "1", MOVREFE: "" },
     ]));
     const dets = tmovimdet([{ num: "260001552", med: "19421", lote: "L1", cant: 5 }, { num: "260001553", med: "19421", lote: "L2", cant: 3 }]);
-    expect(readWarehouse(heads, dets).lines.map((l) => [l.guide, l.reference])).toEqual([["0001552", "ICI AGOSTO 2026"], ["0001553", undefined]]);
+    const read = readWarehouse(heads, dets);
+    expect(read.lines.map((l) => [l.guide, l.reference])).toEqual([["0001552", "ICI AGOSTO 2026"], ["0001553", undefined]]);
+    // Dice qué trajo: una copia guardada sin `details` es de antes y la ventana pide releer.
+    expect(read.details).toEqual({ reference: true, total: false });
     // Un SISMED sin el campo se lee igual, sin referencia.
     expect(warehouse.lines.every((l) => l.reference === undefined)).toBe(true);
+    expect(warehouse.details).toEqual({ reference: false, total: false });
   });
 
   it("lee el valor de cada línea (MOVTOTAL) y resume cada guía", () => {
