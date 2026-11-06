@@ -1,8 +1,11 @@
 import { saveAs } from "file-saver";
-import { availabilityFileName, availabilityWorkbookBuffer, type AvailabilityExportParams } from "./availabilityExport";
+import {
+  availabilityFileName, availabilityWorkbookBuffer, productsFileName, productsWorkbookBuffer,
+  type AvailabilityExportParams, type ProductsExportParams,
+} from "./availabilityExport";
 
 /** Genera el Excel en un Worker para no paralizar la página; sin Worker, en la página. */
-const buildBuffer = async (params: AvailabilityExportParams): Promise<ArrayBuffer> => {
+const buildBuffer = async (message: unknown, fallback: () => Promise<ArrayBuffer>): Promise<ArrayBuffer> => {
   if (typeof Worker !== "undefined") {
     const reply = await new Promise<{ ok: boolean; buffer?: ArrayBuffer; message?: string } | null>((resolve) => {
       let worker: Worker;
@@ -15,7 +18,7 @@ const buildBuffer = async (params: AvailabilityExportParams): Promise<ArrayBuffe
       worker.onmessage = (e) => { resolve(e.data); worker.terminate(); };
       worker.onerror = () => { resolve(null); worker.terminate(); };
       try {
-        worker.postMessage(params);
+        worker.postMessage(message);
       } catch {
         resolve(null);
         worker.terminate();
@@ -24,10 +27,18 @@ const buildBuffer = async (params: AvailabilityExportParams): Promise<ArrayBuffe
     if (reply?.ok && reply.buffer) return reply.buffer;
     if (reply && !reply.ok) throw new Error(reply.message || "No se pudo generar el Excel.");
   }
-  return availabilityWorkbookBuffer(params);
+  return fallback();
 };
 
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
 export const exportAvailabilityExcel = async (params: AvailabilityExportParams) => {
-  const buffer = await buildBuffer(params);
-  saveAs(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), availabilityFileName(params));
+  const buffer = await buildBuffer(params, () => availabilityWorkbookBuffer(params));
+  saveAs(new Blob([buffer], { type: XLSX_TYPE }), availabilityFileName(params));
+};
+
+/** Una sola hoja de productos: por establecimiento, por farmacia o consolidada por red. */
+export const exportProductsExcel = async (params: ProductsExportParams) => {
+  const buffer = await buildBuffer({ products: params }, () => productsWorkbookBuffer(params));
+  saveAs(new Blob([buffer], { type: XLSX_TYPE }), productsFileName(params));
 };

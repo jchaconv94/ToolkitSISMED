@@ -463,6 +463,76 @@ export const buildItems = (rows: AvailabilityRow[], lots?: Map<string, Lot[]>, t
   });
 };
 
+/**
+ * Consolidado por red (2026-11-06, pedido del usuario: el Toolkit de escritorio da «Por Red» solo
+ * con el consumo y el stock final). Un producto por red con lo de sus establecimientos sumado
+ * —consumo de cada mes, otras salidas, stock y lotes— y su situación calculada sobre la red en
+ * conjunto, con la misma regla de cada establecimiento. Los lotes iguales (mismo número y
+ * vencimiento) en varios establecimientos se suman en uno. Quien llama decide qué
+ * establecimientos entran: los que el usuario quitó ya no vienen en `items`.
+ */
+export const networkItems = (items: AvailabilityItem[], today = new Date(), opts: ClassifyOptions = DEFAULT_CLASSIFY): AvailabilityItem[] => {
+  const groups = new Map<string, AvailabilityItem[]>();
+  for (const it of items) {
+    const key = `${it.red}|${it.medCode}`;
+    const list = groups.get(key);
+    if (list) list.push(it); else groups.set(key, [it]);
+  }
+  const out: AvailabilityItem[] = [];
+  for (const list of groups.values()) {
+    const first = list[0];
+    const n = first.consumption.length;
+    const sumOf = (get: (it: AvailabilityItem) => number[] | undefined) =>
+      Array.from({ length: n }, (_, i) => list.reduce((a, it) => a + (get(it)?.[i] || 0), 0));
+    const fused = [...new Set(list.flatMap((it) => it.fusedFrom ?? []))];
+    const outflows: Record<string, number[]> = {};
+    for (const it of list) {
+      for (const [k, v] of Object.entries(it.outflows ?? {})) {
+        const acc = outflows[k] || (outflows[k] = Array(n).fill(0));
+        v.forEach((x, i) => (acc[i] += x || 0));
+      }
+    }
+    // El precio que más se repite (los establecimientos suelen tener el mismo).
+    const prices = new Map<number, number>();
+    for (const it of list) if (it.price > 0) prices.set(it.price, (prices.get(it.price) || 0) + 1);
+    const price = [...prices].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? 0;
+    const row: AvailabilityRow = {
+      red: first.red,
+      microred: "",
+      code: first.red,
+      ipressCode: first.red,
+      name: first.red,
+      category: "",
+      medCode: first.medCode,
+      description: first.description,
+      form: first.form,
+      price,
+      medtip: first.medtip,
+      medpet: first.medpet,
+      medest: first.medest,
+      consumption: sumOf((it) => it.consumption),
+      stock: list.reduce((a, it) => a + it.stock, 0),
+      ...(list.every((it) => it.stockByMonth) ? { stockByMonth: sumOf((it) => it.stockByMonth) } : {}),
+      ...(list.some((it) => it.otherOut) ? { otherOut: sumOf((it) => it.otherOut) } : {}),
+      ...(Object.keys(outflows).length ? { outflows } : {}),
+      ...(fused.length ? { fusedFrom: fused } : {}),
+    };
+    const [item] = buildItems([row], undefined, today, opts);
+    const lots = new Map<string, Lot>();
+    for (const l of list.flatMap((it) => it.lots)) {
+      const key = `${l.lot}|${l.expiry?.getTime() ?? ""}`;
+      const e = lots.get(key);
+      if (e) e.balance += l.balance; else lots.set(key, { lot: l.lot, expiry: l.expiry, balance: l.balance });
+    }
+    const merged = [...lots.values()].sort(byExpiry);
+    const nearestExpiry = merged.find((l) => l.expiry)?.expiry ?? null;
+    const monthsToExpiry = nearestExpiry ? wholeMonthsBetween(today, nearestExpiry) : null;
+    const expiryRisk = monthsToExpiry !== null && Number.isFinite(item.months) && item.stock > 0 && item.months > monthsToExpiry;
+    out.push({ ...item, lots: merged, nearestExpiry, monthsToExpiry, expiryRisk });
+  }
+  return out.sort((a, b) => a.red.localeCompare(b.red) || a.medCode.localeCompare(b.medCode));
+};
+
 export interface LevelThresholds { optimo: number; alto: number; regular: number }
 export const DEFAULT_LEVELS: LevelThresholds = { optimo: 90, alto: 80, regular: 70 };
 
@@ -752,6 +822,13 @@ export const tformdetLastMonth = (sheet: unknown[][]): TformdetMonthSheet | null
     header: keep.map((i) => rawHeader[i]),
     rows: rows.map((r) => keep.map((i) => (i === cPre || i === cMed ? padCode(r[i]) : r[i] ?? null))),
   };
+};
+
+/** Registros del mes de corte sin los establecimientos (IPRESS) quitados al exportar. */
+export const tformdetWithout = (sheet: TformdetMonthSheet, excluded: ReadonlySet<string>): TformdetMonthSheet => {
+  const cPre = sheet.header.map(normHeader).indexOf("CODIGO PRE");
+  if (cPre < 0 || !excluded.size) return sheet;
+  return { ...sheet, rows: sheet.rows.filter((r) => !excluded.has(ipressCodeOf(text(r[cPre])))) };
 };
 
 /**

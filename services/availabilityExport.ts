@@ -255,6 +255,75 @@ const sheetWidthPx = (ws: ExcelJS.Worksheet, n: number) => Array.from({ length: 
 const dateText = (d: Date | null) => (d ? `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}` : "");
 const monthsValue = (m: number) => (Number.isFinite(m) ? Math.round(m * 10) / 10 : null);
 
+/* ------------------------------------------------------------------ Hoja de productos */
+
+interface ProductsSheet {
+  name: string;
+  title: string;
+  subtitle: string;
+  who?: { name?: string; role?: string };
+  months: string[];
+  items: AvailabilityItem[];
+  /** Unidades y valor que vencerían sin usarse (FEFO), si el producto tiene riesgo. */
+  riskOf: (i: AvailabilityItem) => { units: number; value: number } | undefined;
+  /** Consolidado por red: sin las columnas del establecimiento (microred, código, nombre, categoría). */
+  network?: boolean;
+}
+
+/**
+ * Detalle de productos: una fila por establecimiento (o farmacia) y producto, o por red y
+ * producto en el consolidado, con el consumo mensual (plegable), el stock, el CPA, la situación
+ * y los lotes. La usan el reporte completo y las descargas de una sola hoja.
+ */
+const writeProductsSheet = (wb: ExcelJS.Workbook, x: ProductsSheet) => {
+  const { months, items, riskOf } = x;
+  const cut = months[months.length - 1] || "";
+  const ws = wb.addWorksheet(x.name);
+  const fixed: Col[] = x.network
+    ? [
+      { header: "Red", width: 16 }, { header: "Código", width: 8, align: "center" }, { header: "Producto", width: 46 }, { header: "F.F.", width: 9 },
+      { header: "Precio", width: 9, fmt: FMT.money }, { header: "Tipo", width: 5, align: "center" }, { header: "Pet.", width: 5, align: "center" }, { header: "Est.", width: 5, align: "center" },
+    ]
+    : [
+      { header: "Red", width: 14 }, { header: "Microred", width: 18 }, { header: "Código EESS", width: 10, align: "center" }, { header: "Establecimiento", width: 28 },
+      { header: "Cat.", width: 6, align: "center" }, { header: "Código", width: 8, align: "center" }, { header: "Producto", width: 46 }, { header: "F.F.", width: 9 },
+      { header: "Precio", width: 9, fmt: FMT.money }, { header: "Tipo", width: 5, align: "center" }, { header: "Pet.", width: 5, align: "center" }, { header: "Est.", width: 5, align: "center" },
+    ];
+  const monthCols: Col[] = months.map((m) => ({ header: monthLabel(m), width: 9, fmt: FMT.int }));
+  const tail: Col[] = [
+    { header: "Stock", width: 10, fmt: FMT.int }, { header: "CPA", width: 9, fmt: FMT.dec1 }, { header: "Meses de provisión", width: 10, fmt: FMT.dec1 },
+    { header: "Situación", width: 13, align: "center" }, { header: "Valor del stock (S/)", width: 12, fmt: FMT.money }, { header: "Vence primero", width: 12, align: "center" },
+    { header: "Lotes", width: 7, fmt: FMT.int }, { header: "Detalle de lotes (lote · vence · saldo)", width: 48 }, { header: "Meses para vencer", width: 10, fmt: FMT.int },
+    { header: "Vencen sin usarse", width: 12, fmt: FMT.int }, { header: "Fusiona", width: 18 },
+  ];
+  const cols = [...fixed, ...monthCols, ...tail];
+  sheetTitle(ws, x.title, x.subtitle, cols.length, x.who);
+  const head = (i: AvailabilityItem) => x.network
+    ? [i.red, i.medCode, i.description, i.form, i.price, i.medtip, i.medpet, i.medest]
+    : [i.red, i.microred, i.code, i.name, i.category, i.medCode, i.description, i.form, i.price, i.medtip, i.medpet, i.medest];
+  const t = writeTable(ws, 5, cols, items.map((i) => [
+    ...head(i),
+    ...i.consumption, i.stock, i.cpa, monthsValue(i.months), STATUS_LABEL[i.status], i.stock * (i.price || 0), dateText(i.nearestExpiry),
+    i.lots.length, i.lots.map((l) => `${l.lot} · ${dateText(l.expiry)} · ${l.balance}`).join("  |  "), i.monthsToExpiry, riskOf(i)?.units ?? "",
+    (i.fusedFrom?.length ?? 0) > 1 ? i.fusedFrom!.join(", ") : "",
+  ]), { freezeCols: x.network ? 3 : 7 });
+  const statusCol = fixed.length + monthCols.length + 4;
+  const riskCol = statusCol + 6;
+  items.forEach((i, n) => {
+    paintStatus(ws.getCell(t.head + 1 + n, statusCol), i.status);
+    if (riskOf(i)) {
+      const cell = ws.getCell(t.head + 1 + n, riskCol);
+      restyle(cell, { fill: fill("FFFEE2E2"), font: { name: FONT, size: 10, bold: true, color: { argb: "FF991B1B" } } });
+    }
+  });
+  // El consumo mensual se puede plegar para leer solo el resultado.
+  for (let i = 0; i < monthCols.length; i++) ws.getColumn(fixed.length + 1 + i).outlineLevel = 1;
+  ws.properties.outlineProperties = { summaryBelow: true, summaryRight: true };
+  ws.getRow(4).getCell(fixed.length + 1).value = monthCols.length ? `Consumo mensual (${monthLabel(months[0])} – ${monthLabel(cut)}) · pliegue con el botón «−» de arriba` : "";
+  ws.getRow(4).getCell(fixed.length + 1).font = { name: FONT, size: 9, italic: true, color: { argb: C.muted } };
+  return ws;
+};
+
 /* ------------------------------------------------------------------ Libro */
 
 export interface AvailabilityExportParams {
@@ -298,7 +367,13 @@ export interface AvailabilityExportParams {
    * el criterio simple del ítem (`expiryRisk`).
    */
   expiryRisk?: Record<string, { units: number; value: number }>;
+  /** Establecimientos quitados en la ventana de exportación: se nombran bajo el título de cada hoja. */
+  excluded?: string[];
 }
+
+/** « · sin P.S. Cuzco» o « · sin 3 establecimientos: …», para el subtítulo de las hojas. */
+const withoutText = (excluded?: string[]) =>
+  excluded?.length ? ` · sin ${excluded.length === 1 ? excluded[0] : `${excluded.length} establecimientos: ${excluded.join(", ")}`}` : "";
 
 export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Promise<ExcelJS.Workbook> => {
   const { report, months, scope } = p;
@@ -329,7 +404,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   const scopeLabel = scope === "essential" ? "Medicamentos esenciales (DME)" : "Todos los productos";
   const cut = months[months.length - 1] || "";
   const period = months.length ? `${monthFull(months[0])} a ${monthFull(cut)} (${months.length} ${months.length === 1 ? "mes" : "meses"})` : "";
-  const subtitle = `${p.title.toUpperCase()} · corte ${cut ? monthFull(cut) : "—"} · ${scopeLabel}`;
+  const subtitle = `${p.title.toUpperCase()} · corte ${cut ? monthFull(cut) : "—"} · ${scopeLabel}${withoutText(p.excluded)}`;
   const lv = p.levels;
   const levelRange: Record<DmeLevel, string> = {
     OPTIMO: `≥ ${lv.optimo} %`, ALTO: `${lv.alto} – ${lv.optimo} %`, REGULAR: `${lv.regular} – ${lv.alto} %`, BAJO: `< ${lv.regular} %`,
@@ -600,46 +675,9 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   }
 
   /* ---------------- Detalle de productos ---------------- */
-  const detail = (name: string, title: string, items: AvailabilityItem[]) => {
-    const ws = wb.addWorksheet(name);
-    const fixed: Col[] = [
-      { header: "Red", width: 14 }, { header: "Microred", width: 18 }, { header: "Código EESS", width: 10, align: "center" }, { header: "Establecimiento", width: 28 },
-      { header: "Cat.", width: 6, align: "center" }, { header: "Código", width: 8, align: "center" }, { header: "Producto", width: 46 }, { header: "F.F.", width: 9 },
-      { header: "Precio", width: 9, fmt: FMT.money }, { header: "Tipo", width: 5, align: "center" }, { header: "Pet.", width: 5, align: "center" }, { header: "Est.", width: 5, align: "center" },
-    ];
-    const monthCols: Col[] = months.map((m) => ({ header: monthLabel(m), width: 9, fmt: FMT.int }));
-    const tail: Col[] = [
-      { header: "Stock", width: 10, fmt: FMT.int }, { header: "CPA", width: 9, fmt: FMT.dec1 }, { header: "Meses de provisión", width: 10, fmt: FMT.dec1 },
-      { header: "Situación", width: 13, align: "center" }, { header: "Valor del stock (S/)", width: 12, fmt: FMT.money }, { header: "Vence primero", width: 12, align: "center" },
-      { header: "Lotes", width: 7, fmt: FMT.int }, { header: "Detalle de lotes (lote · vence · saldo)", width: 48 }, { header: "Meses para vencer", width: 10, fmt: FMT.int },
-      { header: "Vencen sin usarse", width: 12, fmt: FMT.int }, { header: "Fusiona", width: 18 },
-    ];
-    const cols = [...fixed, ...monthCols, ...tail];
-    sheetTitle(ws, title, subtitle, cols.length, who);
-    const t = writeTable(ws, 5, cols, items.map((i) => [
-      i.red, i.microred, i.code, i.name, i.category, i.medCode, i.description, i.form, i.price, i.medtip, i.medpet, i.medest,
-      ...i.consumption, i.stock, i.cpa, monthsValue(i.months), STATUS_LABEL[i.status], i.stock * (i.price || 0), dateText(i.nearestExpiry),
-      i.lots.length, i.lots.map((l) => `${l.lot} · ${dateText(l.expiry)} · ${l.balance}`).join("  |  "), i.monthsToExpiry, riskOf(i)?.units ?? "",
-      (i.fusedFrom?.length ?? 0) > 1 ? i.fusedFrom!.join(", ") : "",
-    ]), { freezeCols: 7 });
-    const statusCol = fixed.length + monthCols.length + 4;
-    const riskCol = statusCol + 6;
-    items.forEach((i, n) => {
-      paintStatus(ws.getCell(t.head + 1 + n, statusCol), i.status);
-      if (atRisk(i)) {
-        const cell = ws.getCell(t.head + 1 + n, riskCol);
-        restyle(cell, { fill: fill("FFFEE2E2"), font: { name: FONT, size: 10, bold: true, color: { argb: "FF991B1B" } } });
-      }
-    });
-    // El consumo mensual se puede plegar para leer solo el resultado.
-    for (let i = 0; i < monthCols.length; i++) ws.getColumn(fixed.length + 1 + i).outlineLevel = 1;
-    ws.properties.outlineProperties = { summaryBelow: true, summaryRight: true };
-    ws.getRow(4).getCell(fixed.length + 1).value = monthCols.length ? `Consumo mensual (${monthLabel(months[0])} – ${monthLabel(cut)}) · pliegue con el botón «−» de arriba` : "";
-    ws.getRow(4).getCell(fixed.length + 1).font = { name: FONT, size: 9, italic: true, color: { argb: C.muted } };
-    void colLetter;
-  };
-  detail("Productos por establecimiento", "Detalle de productos por establecimiento", report.items);
-  if (p.pharmacyItems) detail("Productos por farmacia", "Detalle de productos por farmacia", p.pharmacyItems);
+  const sheetBase = { subtitle, who, months, riskOf };
+  writeProductsSheet(wb, { ...sheetBase, name: "Productos por establecimiento", title: "Detalle de productos por establecimiento", items: report.items });
+  if (p.pharmacyItems) writeProductsSheet(wb, { ...sheetBase, name: "Productos por farmacia", title: "Detalle de productos por farmacia", items: p.pharmacyItems });
 
   /* ---------------- TFORMDET del mes de corte ---------------- */
   // Los registros tal como salen del SISMED (lotes, registro sanitario, ingresos, consumo por
@@ -736,6 +774,9 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
     ...(p.outside?.length
       ? [["", "Fuera del análisis", `Establecimientos fuera del análisis, definidos por la DIRESA y cada UNGET (no cuentan en la disponibilidad de la UNGET ni de su microred; sí aparecen en las demás hojas, y al final de Establecimientos y del ranking, en gris): ${p.outside.map((o) => `${o.name} (${o.code}, ${pctText(o.pct)})`).join("; ")}. Los centros de salud mental comunitario van fuera por omisión.`]]
       : []),
+    ...(p.excluded?.length
+      ? [["", "Quitados al exportar", `Establecimientos que quien generó el Excel quitó: no aparecen en ninguna hoja ni cuentan en la disponibilidad de su microred ni de la UNGET: ${p.excluded.join("; ")}.`]]
+      : []),
     ...(p.largeVolumeMonths !== undefined
       ? [["", "Soluciones de gran volumen", `Las de la lista de Configuración (soluciones e inyectables de 1 L o más del catálogo SISMED) son Normostock desde ${n(Math.min(lim.subMax, p.largeVolumeMonths))} ${p.largeVolumeMonths === 1 ? "mes" : "meses"} de provisión: «la disponibilidad se considera con un mes de existencia disponible» (ficha 28, consideración a).${p.largeVolumeList?.length ? ` En este reporte: ${p.largeVolumeList.map((e) => `${e.code} ${e.name}`).join("; ")}.` : ""}`]]
       : []),
@@ -798,10 +839,68 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
 /** El libro ya serializado (.xlsx). Lo usan el Worker y, si no hay Worker, la propia página. */
 export const availabilityWorkbookBuffer = async (params: AvailabilityExportParams): Promise<ArrayBuffer> => {
   // ExcelJS devuelve un Uint8Array (Buffer); el Worker necesita un ArrayBuffer para transferirlo.
-  const out = (await (await buildAvailabilityWorkbook(params)).xlsx.writeBuffer()) as ArrayBuffer | Uint8Array;
-  if (out instanceof ArrayBuffer) return out;
-  return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
+  return toArrayBuffer((await (await buildAvailabilityWorkbook(params)).xlsx.writeBuffer()) as ArrayBuffer | Uint8Array);
 };
+
+/* ------------------------------------------------------------------ Descargas de una hoja */
+
+/**
+ * Descargas de una sola hoja (2026-11-06, pedido del usuario): la hoja de productos del reporte
+ * completo, por establecimiento, por farmacia o consolidada por red, sin los establecimientos
+ * que se quitaron en la ventana de exportación.
+ */
+export type ProductsExportKind = "establishments" | "pharmacies" | "network";
+
+export interface ProductsExportParams {
+  kind: ProductsExportKind;
+  /** Las filas ya armadas: por establecimiento, por farmacia o una por red y producto (`networkItems`). */
+  items: AvailabilityItem[];
+  months: string[];
+  scope: "all" | "essential";
+  title: string;
+  preparedBy?: string;
+  preparedByRole?: string;
+  /** Riesgo de vencimiento por «código|producto» (FEFO, como en la web); sin él, el criterio simple. */
+  expiryRisk?: Record<string, { units: number; value: number }>;
+  /** Establecimientos que se quitaron: se nombran bajo el título. */
+  excluded?: string[];
+}
+
+export const PRODUCTS_SHEET: Record<ProductsExportKind, { name: string; title: string; file: string }> = {
+  establishments: { name: "Productos por establecimiento", title: "Detalle de productos por establecimiento", file: "POR_ESTABLECIMIENTO" },
+  pharmacies: { name: "Productos por farmacia", title: "Detalle de productos por farmacia", file: "POR_FARMACIA" },
+  network: { name: "Consolidado por red", title: "Productos consolidados por red", file: "POR_RED" },
+};
+
+export const buildProductsWorkbook = async (p: ProductsExportParams): Promise<ExcelJS.Workbook> => {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Toolkit SISMED";
+  wb.created = new Date();
+  const cut = p.months[p.months.length - 1] || "";
+  const scopeLabel = p.scope === "essential" ? "Medicamentos esenciales (DME)" : "Todos los productos";
+  const sheet = PRODUCTS_SHEET[p.kind];
+  writeProductsSheet(wb, {
+    name: sheet.name,
+    title: sheet.title,
+    subtitle: `${p.title.toUpperCase()} · corte ${cut ? monthFull(cut) : "—"} · ${scopeLabel}${withoutText(p.excluded)}`,
+    who: { name: p.preparedBy, role: p.preparedByRole },
+    months: p.months,
+    items: p.items,
+    riskOf: (i) => (p.expiryRisk ? p.expiryRisk[`${i.code}|${i.medCode}`] : i.expiryRisk ? { units: i.stock, value: i.stock * (i.price || 0) } : undefined),
+    network: p.kind === "network",
+  });
+  return wb;
+};
+
+const toArrayBuffer = (out: ArrayBuffer | Uint8Array): ArrayBuffer =>
+  out instanceof ArrayBuffer ? out : (out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer);
+
+export const productsWorkbookBuffer = async (params: ProductsExportParams): Promise<ArrayBuffer> =>
+  toArrayBuffer((await (await buildProductsWorkbook(params)).xlsx.writeBuffer()) as ArrayBuffer | Uint8Array);
+
+/** `DISPONIBILIDAD_PRODUCTOS_POR_RED_UNGET_BELLAVISTA_202610.xlsx`. */
+export const productsFileName = (params: Pick<ProductsExportParams, "kind" | "months" | "title" | "scope">) =>
+  availabilityFileName(params).replace(/^DISPONIBILIDAD_(DME|PRODUCTOS)_/, `DISPONIBILIDAD_$1_${PRODUCTS_SHEET[params.kind].file}_`);
 
 /** Nombre del archivo: `DISPONIBILIDAD_PRODUCTOS_UNGET_BELLAVISTA_202609.xlsx`. */
 export const availabilityFileName = (params: Pick<AvailabilityExportParams, "months" | "title" | "scope">) => {

@@ -19,13 +19,14 @@ import { AvailabilityHistorySaveDialog } from "./AvailabilityHistorySaveDialog";
 import { userFullName } from "../services/sessionDisplay";
 import { api } from "../services/api";
 import {
-  averageConsumption, buildItems, cutDateOf, essentialRows, groupByIpress, summarize,
+  averageConsumption, buildItems, cutDateOf, essentialRows, groupByIpress, networkItems, summarize, tformdetWithout,
   type EstablishmentInfo, type AvailabilityItem, type AvailabilityReport, type AvailabilityScope, type Lot, type TformdetMonthSheet, type WarehouseItem, type ParsedAvailability, type ParsedTformdet,
 } from "../services/availabilityReport";
 import { monthFull, monthLabel } from "../services/availabilityExport";
-import { exportAvailabilityExcel } from "../services/availabilityExportClient";
+import { exportAvailabilityExcel, exportProductsExcel } from "../services/availabilityExportClient";
+import { AvailabilityExportDialog, type AvailabilityExportKind, type ExportSite } from "./AvailabilityExportDialog";
 import type { DmeLevel } from "../services/stockStatus";
-import { asSupplier, isSeparateSite, lotRiskReport, type ProductGap } from "../services/availabilityInsights";
+import { asSupplier, isSeparateSite, lotRiskOf, lotRiskReport, type ProductGap } from "../services/availabilityInsights";
 import { availabilityConfigApi, classifyOptionsOf, describeFormula, dmeExcludedCodes, factoryConfig, summaryOptionsOf, vitalCodeSet, type AvailabilityConfig } from "../services/availabilityConfig";
 import { AvailabilityConfigDialog } from "./AvailabilityConfigDialog";
 import { formatNumber } from "../services/numberFormat";
@@ -658,13 +659,82 @@ export const AvailabilityModule: React.FC = () => {
     return list.find((x) => x.id === p.professionId)?.name;
   };
 
+  /**
+   * Exportar (2026-11-06, pedido del usuario): el reporte completo o una sola hoja de productos
+   * —por establecimiento, por farmacia o consolidada por red—, sin los establecimientos que se
+   * quitaron en la ventana. Los quitados no salen ni cuentan: todo se recalcula sin ellos.
+   */
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportKind, setExportKind] = useState<AvailabilityExportKind>("full");
+  const [exportExcluded, setExportExcluded] = useState<Set<string>>(() => new Set());
+  const exportSites = useMemo<ExportSite[]>(() => {
+    const multi = new Set([...report.establishments, ...outReport.establishments].map((e) => e.red)).size > 1;
+    const of = (e: { code: string; name: string; microred: string; red: string }, outside: boolean): ExportSite => ({
+      code: e.code,
+      name: e.name,
+      group: multi ? `${e.red || "Sin UNGET"} · ${e.microred || "Sin microred"}` : e.microred || "Sin microred",
+      outside,
+    });
+    return [...report.establishments.map((e) => of(e, false)), ...outReport.establishments.map((e) => of(e, true))].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }, [report, outReport]);
+  // Sin farmacias en el archivo, «por farmacia» no se puede: vuelve al reporte completo.
+  const hasPharmacyRows = !!pharmacyItems?.some((i) => i.code !== i.ipressCode);
+  const kindNow: AvailabilityExportKind = exportKind === "pharmacies" && !hasPharmacyRows ? "full" : exportKind;
+  const runExport = async () => {
+    if (kindNow === "full") await handleExport();
+    else await handleProductsExport(kindNow);
+  };
+  const excludedNames = () => exportSites.filter((s) => exportExcluded.has(s.code)).map((s) => s.name);
+  const keepSite = (i: { ipressCode: string }) => !exportExcluded.has(i.ipressCode);
+  const handleProductsExport = async (kind: Exclude<AvailabilityExportKind, "full">) => {
+    if (exporting) return;
+    setExporting(true);
+    const notice = toast.loading("Generando el Excel…");
+    try {
+      let items: AvailabilityItem[];
+      let expiryRisk: Record<string, { units: number; value: number }>;
+      if (kind === "network") {
+        // La red suma a todos los que quedan marcados, también a los de fuera del análisis.
+        items = networkItems([...ipressItems, ...outItems].filter(keepSite), asOf, classifyOptionsOf(config.formula, scope));
+        expiryRisk = {};
+        for (const it of items) {
+          const rows = lotRiskOf(it, asOf);
+          if (rows.length) expiryRisk[`${it.code}|${it.medCode}`] = { units: rows.reduce((a, r) => a + r.atRisk, 0), value: rows.reduce((a, r) => a + r.value, 0) };
+        }
+      } else {
+        items = (kind === "pharmacies" ? [...(pharmacyItems ?? []), ...(outPharmacyItems ?? [])] : opsReport.items).filter(keepSite);
+        expiryRisk = expiryRiskMap();
+      }
+      await exportProductsExcel({
+        kind, items, months, scope, title, expiryRisk, excluded: excludedNames(),
+        preparedBy: user ? userFullName(user) : undefined,
+        preparedByRole: await professionOf(),
+      });
+      setExportOpen(false);
+    } catch (e: any) {
+      toast.error(e?.message || "No se pudo generar el Excel.");
+    } finally {
+      toast.dismiss(notice);
+      setExporting(false);
+    }
+  };
+
   const handleExport = async () => {
     if (exporting) return;
     setExporting(true);
     const notice = toast.loading("Generando el Excel…");
     try {
+      // Sin los establecimientos quitados en la ventana: se recalcula todo sin ellos.
+      const trimmed = exportExcluded.size > 0;
+      const opts = summaryOptionsOf(config.formula, scope, vitalCodes);
+      const inRep = trimmed ? summarize(ipressItems.filter(keepSite), opts) : report;
+      const outRep = trimmed ? summarize(outItems.filter(keepSite), opts) : outReport;
+      const opsRep = trimmed ? (outRep.items.length ? { ...inRep, items: [...inRep.items, ...outRep.items] } : inRep) : opsReport;
+      const otherItems = computed && (otherScope === "all" || source?.classified !== false) ? (otherScope === "all" ? computed.all : computed.essential).filter(keepSite) : null;
+      const otherScopePct = trimmed ? (otherItems?.length ? summarize(otherItems, summaryOptionsOf(config.formula, otherScope, vitalCodes)).pct : null) : otherPct;
+      const pharmacies = pharmacyItems && outPharmacyItems?.length ? [...pharmacyItems, ...outPharmacyItems] : pharmacyItems;
       await exportAvailabilityExcel({
-        report: opsReport, otherScopePct: otherPct, pharmacyItems: pharmacyItems && outPharmacyItems?.length ? [...pharmacyItems, ...outPharmacyItems] : pharmacyItems, months, scope, title,
+        report: opsRep, otherScopePct, pharmacyItems: trimmed && pharmacies ? pharmacies.filter(keepSite) : pharmacies, months, scope, title,
         formulaText: describeFormula(config.formula, scope),
         levels: config.formula.levels,
         fusedVersion: config.fused.version,
@@ -675,14 +745,16 @@ export const AvailabilityModule: React.FC = () => {
         limits: { subMax: config.formula.subMax, sobreMin: config.formula.sobreMin },
         largeVolumeMonths: classifyOptionsOf(config.formula, scope).largeVolumeMonths,
         // Solo los de la lista que están en este reporte (la lista entera son más de 200).
-        largeVolumeList: config.formula.largeVolumeList.filter((e) => opsReport.items.some((i) => i.largeVolume && i.medCode === e.code)),
+        largeVolumeList: config.formula.largeVolumeList.filter((e) => opsRep.items.some((i) => i.largeVolume && i.medCode === e.code)),
         dmeExcluded: scope === "essential" ? config.formula.dmeExcluded : undefined,
-        outside: outReport.establishments,
+        outside: outRep.establishments,
         aggregate: config.formula.aggregate,
-        tformdet: tformdetSheet,
+        tformdet: trimmed && tformdetSheet ? tformdetWithout(tformdetSheet, exportExcluded) : tformdetSheet,
+        excluded: trimmed ? excludedNames() : undefined,
         warehouse,
         expiryRisk: expiryRiskMap(),
       });
+      setExportOpen(false);
     } catch (e: any) {
       toast.error(e?.message || "No se pudo generar el Excel.");
     } finally {
@@ -910,7 +982,7 @@ export const AvailabilityModule: React.FC = () => {
         </button>
       )}
       {can("AVAILABILITY", "export") && (
-        <button type="button" onClick={() => { setActionsOpen(false); handleExport(); }} disabled={exporting} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-teal-700 hover:bg-teal-50 disabled:opacity-60">
+        <button type="button" onClick={() => { setActionsOpen(false); setExportOpen(true); }} disabled={exporting} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-bold text-teal-700 hover:bg-teal-50 disabled:opacity-60">
           {exporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}{exporting ? "Generando el Excel…" : "Exportar Excel"}
         </button>
       )}
@@ -1029,6 +1101,19 @@ export const AvailabilityModule: React.FC = () => {
         lots={lotsFile?.data}
       />
       {sitesDialog}
+      <AvailabilityExportDialog
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        sites={exportSites}
+        hasPharmacies={hasPharmacyRows}
+        scopeLabel={scope === "all" ? "Todos los productos" : "Medicamentos esenciales (DME)"}
+        kind={kindNow}
+        onKind={setExportKind}
+        excluded={exportExcluded}
+        onExcluded={setExportExcluded}
+        busy={exporting}
+        onExport={runExport}
+      />
       <AvailabilityHistorySaveDialog
         open={!!savePlan}
         onClose={() => { setSavePlan(null); setBackfill([]); }}
