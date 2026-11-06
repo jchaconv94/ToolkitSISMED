@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import { buildItems, networkItems, parseAvailabilitySheet, summarize } from "./availabilityReport";
-import { buildAvailabilityWorkbook, buildProductsWorkbook, productsFileName } from "./availabilityExport";
+import { buildAvailabilityWorkbook, buildProductsWorkbook, productsFileName, shortSiteName } from "./availabilityExport";
 
 const HEADER = ["RED", "MICRORED", "COD EESS", "ESTABLECIMIENTO", "CAT", "MED COD", "DESCRIPCION DEL PRODUCTO", "MEDFF", "PRECIO", "MEDTIP", "MEDPET", "MEDEST", 202608, 202609, "STOCK_FIN"];
 
@@ -150,5 +150,20 @@ describe("Excel de una sola hoja", () => {
   it("nombre del archivo según lo que se descarga", () => {
     expect(productsFileName({ ...base, kind: "network" })).toBe("DISPONIBILIDAD_PRODUCTOS_POR_RED_UNGET_X_202609.xlsx");
     expect(productsFileName({ ...base, scope: "essential", kind: "pharmacies" })).toBe("DISPONIBILIDAD_DME_POR_FARMACIA_UNGET_X_202609.xlsx");
+  });
+});
+
+describe("nombre corto en los gráficos", () => {
+  it("el centro de salud mental queda como CSMC, con o sin puntos", () => {
+    expect(shortSiteName("C.S.M.C Bellavista")).toBe("CSMC Bellavista");
+    expect(shortSiteName("C.S.M.C. BELLAVISTA")).toBe("CSMC BELLAVISTA");
+    expect(shortSiteName("CSMC Bellavista")).toBe("CSMC Bellavista");
+    expect(shortSiteName("Centro de Salud Mental Comunitario Bellavista")).toBe("CSMC Bellavista");
+  });
+  it("los demás pierden P.S., C.S. u Hospital", () => {
+    expect(shortSiteName("P.S. Nueva Arica")).toBe("Nueva Arica");
+    expect(shortSiteName("C.S. Nuevo Lima")).toBe("Nuevo Lima");
+    expect(shortSiteName("HOSPITAL II-E BELLAVISTA")).toBe("BELLAVISTA");
+    expect(shortSiteName("Consuelo")).toBe("Consuelo");
   });
 });

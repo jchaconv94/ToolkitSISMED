@@ -206,6 +206,18 @@ const EMU_PER_PX = 9525;
 /** Ancho en píxeles de una columna de Excel (el ancho guardado ya incluye el margen). */
 const colPx = (width: number | undefined) => Math.trunc((width ?? 9.14) * 7);
 const coverWidthPx = () => 12 * colPx(COVER_COL_WIDTH);
+/**
+ * Nombre corto de un establecimiento para las etiquetas de los gráficos: sin «P.S.», «C.S.» ni
+ * «Hospital II-E». Los centros de salud mental comunitario quedan como «CSMC …», con o sin
+ * puntos: con «C.S.M.C Bellavista» (sin el punto final) se cortaba solo «C.S.» y quedaba
+ * «M.C Bellavista» (2026-11-06, pedido del usuario).
+ */
+export const shortSiteName = (n: string): string => {
+  const csmc = /^(C\.?\s*S\.?\s*M\.?\s*C\b\.?|CENTRO\s+DE\s+SALUD\s+MENTAL\s+COMUNITARIO\b)\s*/i;
+  if (csmc.test(n)) return `CSMC ${n.replace(csmc, "").trim()}`.trim();
+  return n.replace(/^(P\.\s*S\.|C\.\s*S\.|HOSPITAL\s+[IVX]+(-[A-Z0-9]+)?)\s*/i, "").trim() || n;
+};
+
 const titleCase = (s: string) => s.toLocaleLowerCase("es-PE").replace(/(^|[\s\-(])(\p{L})/gu, (_, sep: string, l: string) => sep + l.toLocaleUpperCase("es-PE"));
 
 /**
@@ -454,7 +466,7 @@ export const buildAvailabilityWorkbook = async (p: AvailabilityExportParams): Pr
   const level = report.level;
   const mrsSorted = report.microredes.slice().sort((a, b) => b.pct - a.pct);
   const byPct = report.establishments.slice().sort((a, b) => b.pct - a.pct);
-  const shortName = (n: string) => n.replace(/^(P\.S\.|C\.S\.M\.C\.|C\.S\.|HOSPITAL\s+[IVX]+(-[A-Z])?)\s*/i, "").trim() || n;
+  const shortName = shortSiteName;
   const kpiW = (W - 3 * GAP) / 4;
   const rowB = 152, gaugeW = 400, h2 = 330;
   const mrH = Math.max(300, 92 + mrsSorted.length * 40);
