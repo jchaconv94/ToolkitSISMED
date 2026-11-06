@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
 import {
-  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, cutDateOf, essentialRows, groupByIpress, isEstablishmentCode, isLargeVolume, presentationLiters, parseTformdetHistory, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, tformdetLastMonth, wholeMonthsBetween,
+  DEFAULT_SUMMARY, averageConsumption, buildItems, classifyAvailability, cutDateOf, essentialRows, groupByIpress, isEstablishmentCode, isLargeVolume, networkItems, presentationLiters, parseTformdetHistory, ipressCodeOf, parseAvailabilitySheet, parseLotsSheet, summarize, tformdetLastMonth, tformdetWithout, wholeMonthsBetween,
 } from "./availabilityReport";
 
 const HEADER = ["RED", "MICRORED", "COD EESS", "ESTABLECIMIENTO", "CAT", "MED COD", "DESCRIPCION DEL PRODUCTO", "MEDFF", "PRECIO", "MEDTIP", "MEDPET", "MEDEST",
@@ -322,5 +322,56 @@ describe("soluciones de gran volumen (ficha 28, consideración a)", () => {
       ["03789", StockStatus.NORMOSTOCK, true],
       ["04567", StockStatus.SUBSTOCK, false],
     ]);
+  });
+});
+
+describe("consolidado por red", () => {
+  const month = Array(12).fill(10);
+  const at = new Date(2026, 8, 30);
+  const lots = new Map([
+    ["06503|00001", [{ lot: "L1", expiry: new Date(2027, 5, 30), balance: 20 }, { lot: "L2", expiry: new Date(2026, 11, 31), balance: 5 }]],
+    ["06504|00001", [{ lot: "L1", expiry: new Date(2027, 5, 30), balance: 15 }]],
+  ]);
+  const { rows } = parseAvailabilitySheet([HEADER,
+    row("06503", "P.S. A", "00001", month, 0),
+    row("06504", "P.S. B", "00001", Array(12).fill(5), 40),
+    row("06504", "P.S. B", "00002", zeros, 8),
+  ]);
+  const items = buildItems(rows, lots, at);
+
+  it("suma consumo y stock de los establecimientos y calcula la situación de la red", () => {
+    const net = networkItems(items, at);
+    expect(net.map((i) => i.medCode)).toEqual(["00001", "00002"]);
+    const [one, two] = net;
+    // A está desabastecido y B en sobrestock (8 meses); la red tiene 40 para un CPA de 15.
+    expect(items.filter((i) => i.medCode === "00001").map((i) => i.status)).toEqual([StockStatus.DESABASTECIDO, StockStatus.SOBRESTOCK]);
+    expect(one.consumption).toEqual(Array(12).fill(15));
+    expect(one.stock).toBe(40);
+    expect(one.cpa).toBe(15);
+    expect(one.status).toBe(StockStatus.NORMOSTOCK);
+    expect(one.red).toBe("BELLAVISTA");
+    expect(one.name).toBe("BELLAVISTA");
+    expect(two.status).toBe(StockStatus.SIN_ROTACION);
+  });
+
+  it("el mismo lote en varios establecimientos se suma en uno, ordenado por vencimiento", () => {
+    const [one] = networkItems(items, at);
+    expect(one.lots.map((l) => [l.lot, l.balance])).toEqual([["L2", 5], ["L1", 35]]);
+    expect(one.nearestExpiry).toEqual(new Date(2026, 11, 31));
+    expect(one.monthsToExpiry).toBe(3);
+  });
+
+  it("los establecimientos que se quitan no suman", () => {
+    const [one] = networkItems(items.filter((i) => i.ipressCode !== "06504"), at);
+    expect(one.stock).toBe(0);
+    expect(one.status).toBe(StockStatus.DESABASTECIDO);
+  });
+});
+
+describe("TFORMDET del mes sin los establecimientos quitados", () => {
+  it("quita las filas de la IPRESS y de sus farmacias", () => {
+    const sheet = { month: "202610", header: ["CODIGO_PRE", "CODIGO_MED", "STOCK_FIN"], rows: [["06503", "00001", 1], ["06504F01", "00001", 2], ["06504F02", "00002", 3]] };
+    expect(tformdetWithout(sheet, new Set(["06504"])).rows).toEqual([["06503", "00001", 1]]);
+    expect(tformdetWithout(sheet, new Set())).toBe(sheet);
   });
 });

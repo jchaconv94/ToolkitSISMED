@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { StockStatus } from "../types";
-import { buildItems, parseAvailabilitySheet, summarize } from "./availabilityReport";
-import { buildAvailabilityWorkbook } from "./availabilityExport";
+import { buildItems, networkItems, parseAvailabilitySheet, summarize } from "./availabilityReport";
+import { buildAvailabilityWorkbook, buildProductsWorkbook, productsFileName } from "./availabilityExport";
 
 const HEADER = ["RED", "MICRORED", "COD EESS", "ESTABLECIMIENTO", "CAT", "MED COD", "DESCRIPCION DEL PRODUCTO", "MEDFF", "PRECIO", "MEDTIP", "MEDPET", "MEDEST", 202608, 202609, "STOCK_FIN"];
 
@@ -115,3 +115,40 @@ describe("Excel de disponibilidad", () => {
   });
 });
 
+
+describe("Excel de una sola hoja", () => {
+  const { rows } = parseAvailabilitySheet([HEADER,
+    ["R", "MR", "06503", "P.S. A", "I-1", "00001", "UNO", "TAB", 1, "M", "P", "S", 10, 10, 0],
+    ["R", "MR", "06504", "P.S. B", "I-1", "00001", "UNO", "TAB", 1, "M", "P", "S", 5, 5, 40]]);
+  const items = buildItems(rows);
+  const base = { months: ["202608", "202609"], scope: "all" as const, title: "UNGET X", preparedBy: "Ana Pérez" };
+
+  it("el consolidado por red trae las columnas de la hoja de productos, sin las del establecimiento", async () => {
+    const wb = await buildProductsWorkbook({ ...base, kind: "network", items: networkItems(items), excluded: ["P.S. C"] });
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Consolidado por red"]);
+    const ws = wb.worksheets[0];
+    const header = (ws.getRow(5).values as unknown[]).slice(1).map(String);
+    expect(header.slice(0, 8)).toEqual(["Red", "Código", "Producto", "F.F.", "Precio", "Tipo", "Pet.", "Est."]);
+    expect(header).toContain("Situación");
+    expect(header).toContain("Detalle de lotes (lote · vence · saldo)");
+    expect(header).not.toContain("Establecimiento");
+    // Una fila por producto con la red sumada: consumo 15 al mes y stock 40.
+    const row = (ws.getRow(6).values as unknown[]).slice(1);
+    expect(row.slice(0, 3)).toEqual(["R", "00001", "UNO"]);
+    expect(row[header.indexOf("Stock")]).toBe(40);
+    expect(row[header.indexOf("CPA")]).toBe(15);
+    expect(String(ws.getCell(2, 1).value)).toContain("sin P.S. C");
+  });
+
+  it("por establecimiento es la misma hoja del reporte completo, sola", async () => {
+    const wb = await buildProductsWorkbook({ ...base, kind: "establishments", items });
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Productos por establecimiento"]);
+    expect((wb.worksheets[0].getRow(5).values as unknown[]).slice(1, 5).map(String)).toEqual(["Red", "Microred", "Código EESS", "Establecimiento"]);
+    expect(wb.worksheets[0].rowCount).toBe(7);
+  });
+
+  it("nombre del archivo según lo que se descarga", () => {
+    expect(productsFileName({ ...base, kind: "network" })).toBe("DISPONIBILIDAD_PRODUCTOS_POR_RED_UNGET_X_202609.xlsx");
+    expect(productsFileName({ ...base, scope: "essential", kind: "pharmacies" })).toBe("DISPONIBILIDAD_DME_POR_FARMACIA_UNGET_X_202609.xlsx");
+  });
+});
