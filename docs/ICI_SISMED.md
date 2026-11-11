@@ -15,7 +15,7 @@ Del INFOSISMED v4.1 (58 módulos VBA, ~11 600 líneas) el usuario usa y quiere m
 | **Generar ICI** (`GENERAR_ICI_V2_5.GENERARICI`) | Toma el ICI `.xls` que descarga el SISMED, borra dos columnas (fecha de vencimiento repetida y «Requerimiento mes sgte»), agrega un panel (montos en soles, lotes con stock, por vencer, vencidos, sin precio) y un recuadro de guías **que se llena a mano** | Sacarlo del TFORMDET, con mejor diseño, recetas correctas, vencimientos y guías automáticas |
 | **Consolidar ICI** (`UNIR_ICIS.unir_icis1`) | Une los ICI de cada farmacia de una carpeta sumando por código + lote | Sacarlo del TFORMDET en un paso, sin descargar ICI por ICI, y descontando lo que se movió entre farmacias del mismo establecimiento |
 | **Formato ICI para puestos comunales** (`Formato_PPCC.dar_formato_PPCC`) | Plantilla en blanco desde el «ICI - Saldo por lotes» para que el puesto llene a mano | Pendiente: falta un formato llenado de ejemplo y saber de dónde sale el saldo inicial |
-| **IME** (Informe de Movimiento Económico, hojas IME / IME-CONSULTAR) | Formulario manual con depósitos T6, guías y saldos 90 % / 10 %, guardado en hojas ocultas | Plan aparte, después del ICI |
+| **IME** (Informe de Movimiento Económico, hojas IME / IME-CONSULTAR) | Formulario manual con depósitos T6, guías y saldos 90 % / 10 %, guardado en hojas ocultas | En la web, en `docs/IME_FARMACIA.md` (decisiones del 2026-11-11) |
 
 Herramienta aparte, después: **revisión de guías de ingreso** (el usuario tiene otro Excel que compara lo que envió el almacén con lo que ingresó el establecimiento).
 
